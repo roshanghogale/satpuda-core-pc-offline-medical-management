@@ -17,6 +17,7 @@ a = Analysis(
         ('config/backup_config.dat',   'config'),
         ('config/backup_slots.dat',    'config'),
         ('config/expiry.dat',          'config'),
+        ('config/activation.dat',      'config'),
         # ── Assets (images, fonts, icons, Excel master) ────────────────────
         ('assets',                     'assets'),
         # ── Web app ────────────────────────────────────────────────────────
