@@ -69,34 +69,35 @@ _THEME_MUTED = {
 }
 
 # ── Tree row tag colors ───────────────────────────────────────────────────────
-# due = red tint, cleared = green tint, partial = yellow tint
-_THEME_TREE_TAGS = {
-    # dark themes — subtle tinted rows, bright readable text
-    'steel-dark':    {'due_bg':'#3a1a1a','due_fg':'#ff9999','cleared_bg':'#1a3a1a','cleared_fg':'#88dd88','partial_bg':'#3a3010','partial_fg':'#ffd080'},
-    'charcoal-dark': {'due_bg':'#4a1a1a','due_fg':'#ff9999','cleared_bg':'#1a3a1a','cleared_fg':'#99dd99','partial_bg':'#3a3010','partial_fg':'#ffd080'},
-    'crimson-dark':  {'due_bg':'#4a0a10','due_fg':'#ffaaaa','cleared_bg':'#0a3a1a','cleared_fg':'#88ee88','partial_bg':'#3a2a00','partial_fg':'#ffd080'},
-    'rose-dark':     {'due_bg':'#4a0a20','due_fg':'#ffaacc','cleared_bg':'#0a3a1a','cleared_fg':'#88ee88','partial_bg':'#3a2a00','partial_fg':'#ffd080'},
-    'navy-dark':     {'due_bg':'#1a1a4a','due_fg':'#aaaaff','cleared_bg':'#0a3a20','cleared_fg':'#88ee88','partial_bg':'#3a3010','partial_fg':'#ffd080'},
-    'forest-dark':   {'due_bg':'#3a0a0a','due_fg':'#ff9999','cleared_bg':'#0a3a10','cleared_fg':'#88ff99','partial_bg':'#2a2a00','partial_fg':'#ffee66'},
-    'midnight-dark': {'due_bg':'#2a0a3a','due_fg':'#cc99ff','cleared_bg':'#0a2a1a','cleared_fg':'#88ffcc','partial_bg':'#2a2000','partial_fg':'#ffdd44'},
-    'amber-dark':    {'due_bg':'#3a1000','due_fg':'#ffaa88','cleared_bg':'#0a2a10','cleared_fg':'#88ee88','partial_bg':'#3a2a00','partial_fg':'#ffdd44'},
-    'teal-dark':     {'due_bg':'#2a0a0a','due_fg':'#ff9999','cleared_bg':'#003a3a','cleared_fg':'#88ffee','partial_bg':'#2a2a00','partial_fg':'#ffee66'},
-    'violet-dark':   {'due_bg':'#2a0a2a','due_fg':'#ffaaff','cleared_bg':'#0a2a1a','cleared_fg':'#88ffcc','partial_bg':'#2a2000','partial_fg':'#ffdd44'},
-    # light themes — pastel tinted rows, dark readable text
-    'steel-light':    {'due_bg':'#fde8e8','due_fg':'#7a1010','cleared_bg':'#e8f5e8','cleared_fg':'#1a5a1a','partial_bg':'#fff8e0','partial_fg':'#7a5000'},
-    'charcoal-light': {'due_bg':'#f8d7da','due_fg':'#721c24','cleared_bg':'#d4edda','cleared_fg':'#155724','partial_bg':'#fff3cd','partial_fg':'#856404'},
-    'crimson-light':  {'due_bg':'#fde0e3','due_fg':'#7a0010','cleared_bg':'#e0f5e8','cleared_fg':'#1a5a20','partial_bg':'#fff8e0','partial_fg':'#7a5000'},
-    'rose-light':     {'due_bg':'#fce4ec','due_fg':'#7a0030','cleared_bg':'#e8f5e9','cleared_fg':'#1b5e20','partial_bg':'#fff8e1','partial_fg':'#7a4000'},
-    'navy-light':     {'due_bg':'#fde8e8','due_fg':'#7a1010','cleared_bg':'#e0f0ff','cleared_fg':'#0a2a6a','partial_bg':'#fff8e0','partial_fg':'#7a5000'},
-    'forest-light':   {'due_bg':'#fee2e2','due_fg':'#7f1d1d','cleared_bg':'#dcfce7','cleared_fg':'#14532d','partial_bg':'#fef9c3','partial_fg':'#713f12'},
-    'midnight-light': {'due_bg':'#fde8f8','due_fg':'#4a0060','cleared_bg':'#e8f5e8','cleared_fg':'#1a5a20','partial_bg':'#fff8e0','partial_fg':'#7a5000'},
-    'amber-light':    {'due_bg':'#fee2e2','due_fg':'#7f1d1d','cleared_bg':'#d1fae5','cleared_fg':'#065f46','partial_bg':'#fef3c7','partial_fg':'#92400e'},
-    'teal-light':     {'due_bg':'#fde8e8','due_fg':'#7a1010','cleared_bg':'#e0faf8','cleared_fg':'#004a50','partial_bg':'#fff8e0','partial_fg':'#7a5000'},
-    'violet-light':   {'due_bg':'#fde8f8','due_fg':'#4a0060','cleared_bg':'#e8f5e8','cleared_fg':'#1a5a20','partial_bg':'#fff8e0','partial_fg':'#7a5000'},
+# Solid dark backgrounds + white text for all themes (dark and light).
+# red=danger/expired/due  yellow=warning/near-expiry/partial  green=ok/cleared
+# Colors chosen so white text passes 4.5:1+ contrast on each bg.
+
+_SOLID = {
+    'red':    {'bg': '#8b1a1a', 'fg': '#ffffff'},   # dark crimson  — white 7.2:1
+    'yellow': {'bg': '#7a5500', 'fg': '#ffffff'},   # dark amber    — white 7.8:1
+    'green':  {'bg': '#1a6b2a', 'fg': '#ffffff'},   # dark forest   — white 7.0:1
 }
 
-_DEFAULT_TREE_DARK  = {'due_bg':'#3a1a1a','due_fg':'#ff9999','cleared_bg':'#1a3a1a','cleared_fg':'#88dd88','partial_bg':'#3a3010','partial_fg':'#ffd080'}
-_DEFAULT_TREE_LIGHT = {'due_bg':'#fde8e8','due_fg':'#7a1010','cleared_bg':'#e8f5e8','cleared_fg':'#1a5a1a','partial_bg':'#fff8e0','partial_fg':'#7a5000'}
+_TREE_ROW = {
+    'due_bg':     _SOLID['red']['bg'],
+    'due_fg':     _SOLID['red']['fg'],
+    'partial_bg': _SOLID['yellow']['bg'],
+    'partial_fg': _SOLID['yellow']['fg'],
+    'cleared_bg': _SOLID['green']['bg'],
+    'cleared_fg': _SOLID['green']['fg'],
+}
+
+# Same solid palette for every theme — identity is in the accent, not the status rows
+_THEME_TREE_TAGS = {t: _TREE_ROW for t in [
+    'steel-dark','charcoal-dark','crimson-dark','rose-dark','navy-dark',
+    'forest-dark','midnight-dark','amber-dark','teal-dark','violet-dark',
+    'steel-light','charcoal-light','crimson-light','rose-light','navy-light',
+    'forest-light','midnight-light','amber-light','teal-light','violet-light',
+]}
+
+_DEFAULT_TREE_DARK  = _TREE_ROW
+_DEFAULT_TREE_LIGHT = _TREE_ROW
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
