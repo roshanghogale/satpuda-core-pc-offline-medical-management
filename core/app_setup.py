@@ -29,7 +29,6 @@ AVAILABLE_THEMES = {
     'cyborg':     'Dark Cyan',
     'solar':      'Dark Orange',
     'vapor':      'Dark Purple',
-    'slate':      'Dark Slate',
     # ── Light themes ──────────────────────────────────────────────────────
     'cosmo':      'Light Blue',
     'minty':      'Light Green',
@@ -41,6 +40,9 @@ AVAILABLE_THEMES = {
     'pulse':      'Light Purple',
     'united':     'Light United',
     'yeti':       'Light Yeti',
+    'morph':      'Light Morph',
+    'simplex':    'Light Simplex',
+    'cerculean':  'Light Cerculean',
 }
 
 
@@ -171,12 +173,15 @@ def restart_app(root=None):
         args = [sys.executable]
     else:
         args = [sys.executable, os.path.abspath(sys.argv[0])] + sys.argv[1:]
-    if root is not None:
-        try: root.quit()
-        except Exception: pass
-        try: root.destroy()
-        except Exception: pass
     try:
         subprocess.Popen(args)
     except Exception:
         pass
+    if root is not None:
+        # Patch out ttkbootstrap's destroy hook to avoid _style AttributeError
+        try: root._style = type('_S', (), {'instance': None})()
+        except Exception: pass
+        try: root.destroy()
+        except Exception: pass
+        try: root.quit()
+        except Exception: pass
