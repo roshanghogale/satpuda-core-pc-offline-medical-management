@@ -1,0 +1,25 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+env/
+.env
+
+# Node modules (web app)
+node_modules/
+
+# PyInstaller build output
+dist/
+build/
+*.exe
+
+# Runtime logs
+startup_log.txt
+
+# Database files (live data - exclude)
+veterinary.db
+veterinary_backup_*.db

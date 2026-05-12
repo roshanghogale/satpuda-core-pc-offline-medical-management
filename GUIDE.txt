@@ -1,0 +1,242 @@
+============================================
+ VETERINARY MANAGEMENT SYSTEM - QUICK GUIDE
+============================================
+
+--------------------------------------------
+ GOOGLE DRIVE BACKUP - FILE NAMING & RETENTION
+--------------------------------------------
+
+Backup File Name Format:
+  SatpudaCore_YYYY-MM-DD_HH-MM.db.gz
+
+  Example:
+    SatpudaCore_2026-04-24_10-30.db.gz
+                │           │
+                │           └── Time: HH-MM (24-hour, e.g. 10-30 = 10:30 AM)
+                └── Date: YYYY-MM-DD (e.g. 2026-04-24 = 24 April 2026)
+
+How to Read the File Name:
+  - "SatpudaCore" = fixed prefix, always present, identifies this app
+  - "2026-04-24"  = date the backup was taken  (Year - Month - Day)
+  - "10-30"       = time the backup was taken  (Hour - Minute, 24-hour clock)
+  - ".db.gz"      = gzip-compressed SQLite database file
+
+  So  SatpudaCore_2026-04-24_10-30.db.gz
+      = backup taken on 24 April 2026 at 10:30 AM
+
+Retention Rules (automatic, runs every backup cycle):
+  1. Files older than 3 YEARS are permanently deleted from Drive
+  2. Within a single day, if more than 4 backups exist:
+       → Keep the FIRST 2 and LAST 2 of that day
+       → Delete everything in between
+  3. Backups run every 1 hour while the app is open
+
+--------------------------------------------
+ HOW TO DOWNLOAD, EXTRACT & RESTORE A BACKUP
+--------------------------------------------
+
+STEP 1 - Download from Google Drive:
+  1. Open https://drive.google.com in your browser
+  2. Navigate to the folder you set during setup
+     (look for a subfolder named  Store_<YourStoreName>)
+  3. Find the backup file you want, e.g.
+       SatpudaCore_2026-04-24_10-30.db.gz
+     (pick the most recent one, or a specific date if needed)
+  4. Right-click the file → Download
+     The file saves to your Downloads folder
+
+STEP 2 - Extract the .db.gz file:
+  The file is gzip-compressed. You need to extract it to get veterinary.db
+
+  Option A - Using 7-Zip (recommended, free):
+    1. Install 7-Zip from https://www.7-zip.org if not already installed
+    2. Right-click the downloaded .db.gz file
+    3. Choose  7-Zip → Extract Here
+    4. You will get a file named  veterinary.db
+
+  Option B - Using Windows built-in (Windows 11 only):
+    1. Right-click the .db.gz file → Extract All
+    2. You will get  veterinary.db
+
+  Option C - Using Python (if installed):
+    Open Command Prompt and run:
+      python -c "import gzip,shutil; shutil.copyfileobj(gzip.open('SatpudaCore_2026-04-24_10-30.db.gz','rb'), open('veterinary.db','wb'))"
+    (replace the filename with your actual downloaded file name)
+
+STEP 3 - Replace the database:
+  1. Close the app completely (make sure it is NOT running)
+  2. Go to the folder where VeterinaryManagementSystem.exe is located
+  3. You will see the current  veterinary.db  file there
+  4. RENAME the current file first as a safety copy:
+       veterinary.db  →  veterinary_old_backup.db
+  5. Copy the extracted  veterinary.db  into that same folder
+  6. Double-click VeterinaryManagementSystem.exe to start the app
+  7. Verify your data is restored correctly
+  8. Once confirmed, you can delete  veterinary_old_backup.db
+
+  ⚠ IMPORTANT: Always rename the old file before replacing, never delete it
+     directly. This lets you go back if something goes wrong.
+
+--------------------------------------------
+ PENDRIVE (USB) BACKUP
+--------------------------------------------
+
+The app automatically detects if a pendrive (USB drive) is connected
+and copies the backup to it as well — no setup needed.
+
+How it works:
+  - Every time a backup runs (every 1 hour), the app checks all
+    removable drives (D:, E:, F: ... Z:) on Windows
+  - If a pendrive is found, it creates this folder on it:
+      <DriveLetter>:\SatpudaCore_Backup\Store_<StoreName>\
+    Example:  E:\SatpudaCore_Backup\Store_MyVetClinic\
+  - The same .db.gz file is copied there
+  - Same retention rules apply locally on the pendrive:
+      → Files older than 3 years are deleted
+      → Per day: keep first 2 and last 2, delete middle ones
+  - Pendrive backup runs even if there is NO internet
+
+What you will see on the pendrive:
+  E:\SatpudaCore_Backup\
+  └── Store_MyVetClinic\
+      ├── SatpudaCore_2026-04-24_08-00.db.gz
+      ├── SatpudaCore_2026-04-24_10-30.db.gz
+      └── SatpudaCore_2026-04-25_09-00.db.gz
+
+To restore from pendrive:
+  Same as Google Drive restore above (STEP 2 and STEP 3).
+  Just pick the .db.gz file directly from the pendrive instead of
+  downloading from Drive.
+
+Notes:
+  - If no pendrive is connected, this step is silently skipped
+  - If multiple pendrives are connected, the first detected one is used
+  - The pendrive must have enough free space (veterinary.db is usually
+    a few MB, compressed to under 1 MB per backup file)
+  - Pendrive backup is logged in config\backup_log.txt
+
+--------------------------------------------
+ BAT FILES - WHAT EACH ONE DOES
+--------------------------------------------
+
+run.bat
+  - Use this to run the app in development mode (python main.py)
+  - Automatically rebuilds the web app (silently) before starting
+  - Requires: Python + ttkbootstrap installed
+  - Usage: Double-click run.bat
+
+run_web.bat
+  - Builds the web purchase entry app from source
+  - Installs npm dependencies if missing (first time only)
+  - Copies the built index.html to web_app/ folder
+  - Usage:
+      Double-click          = verbose output + pauses at end
+      call run_web.bat silent = silent (used by run.bat and build_exe.bat)
+  - Requires: Node.js installed
+
+build_exe.bat
+  - Builds the final standalone EXE
+  - Step 1: Rebuilds web app (silent) and copies to web_app/
+  - Step 2: Runs PyInstaller to bundle everything into one EXE
+  - Output: dist\VeterinaryManagementSystem.exe
+  - Requires: Python + PyInstaller + Node.js installed
+  - Usage: Double-click build_exe.bat
+
+--------------------------------------------
+ FULL WORKFLOW
+--------------------------------------------
+
+  DEV MODE (run without building exe):
+    1. Edit Python source in ui/ core/ widgets/
+    2. Edit web app source in purchase-entry-web/src/
+    3. Double-click run.bat
+       → web app auto-rebuilt → python app starts
+
+  BUILD EXE (for distribution):
+    1. Edit any source files
+    2. Double-click build_exe.bat
+       → web app auto-rebuilt → bundled into exe
+    3. Share dist\VeterinaryManagementSystem.exe
+
+  UPDATE WEB APP ONLY:
+    1. Edit files in purchase-entry-web/src/
+    2. Double-click run_web.bat
+       → builds + copies to web_app/index.html
+    3. Then run build_exe.bat to rebundle into exe
+
+--------------------------------------------
+ HOW TO CHANGE FIELD POSITIONS IN WEB APP
+ (per supplier - medicine table column order)
+--------------------------------------------
+
+METHOD 1 - Using the Settings page in the web app:
+  1. Open the web app (run.bat or click "Open Web Purchase Entry")
+  2. Click "Settings" tab in the top navigation
+  3. In the left sidebar, click the supplier you want to configure
+     (or click "+ New" to add a new supplier first)
+  4. Scroll down to "Medicine Field Order" section
+  5. Drag rows up/down using the handle (⠿) on the left
+     OR use the ↑ ↓ arrow buttons on the right
+  6. Click "Save Field Order"
+  7. Now go back to "Purchase Entry" tab
+  8. Type or select that supplier name in the Supplier Name field
+  9. The medicine table columns will instantly rearrange to your saved order
+  10. Enter key navigation also follows the new order
+
+METHOD 2 - Drag and drop:
+  Same as above but drag the field rows directly
+
+NOTES:
+  - Each supplier can have a completely different field order
+  - The JSON output format never changes regardless of field order
+    (only the visual column positions and Enter key flow change)
+  - Field order is saved in the browser's localStorage
+    (persists across sessions on the same browser/PC)
+  - If you clear browser data, field orders will reset to default
+
+--------------------------------------------
+ FIRST TIME SETUP ON A NEW PC
+--------------------------------------------
+
+  1. Install Python 3.9+
+     https://www.python.org/downloads/
+
+  2. Install dependencies:
+     pip install ttkbootstrap pyinstaller
+
+  3. Install Node.js (for web app rebuilding):
+     https://nodejs.org/
+
+  4. Run the app:
+     Double-click run.bat
+
+  5. Or just use the pre-built exe:
+     Double-click dist\VeterinaryManagementSystem.exe
+     (No Python or Node.js needed for the exe)
+
+--------------------------------------------
+ FILE STRUCTURE
+--------------------------------------------
+
+  mac2/
+  ├── run.bat                  Start app (dev mode)
+  ├── run_web.bat              Build web app only
+  ├── build_exe.bat            Build final exe
+  ├── main.py                  Desktop app entry point
+  ├── ui/                      UI pages (billing, purchase, etc.)
+  ├── core/                    Core logic (fonts, layout, etc.)
+  ├── widgets/                 Custom widgets
+  ├── config/                  Default config files
+  ├── assets/                  Fonts
+  ├── web_app/
+  │   └── index.html           Built web app (single file)
+  ├── purchase-entry-web/      Web app source code
+  │   ├── src/                 React source files
+  │   ├── package.json         npm config
+  │   └── vite.config.js       Build config
+  ├── VeterinaryApp.spec       PyInstaller spec (main)
+  ├── VeterinaryApp_Win7.spec  PyInstaller spec (Win7)
+  └── dist/
+      └── VeterinaryManagementSystem.exe
+
+============================================

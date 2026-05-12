@@ -1,0 +1,299 @@
+2026-04-24 00:33:47  INFO  backup_config.dat written for store: Satpuda Vet Nagpur
+2026-04-24 00:35:03  INFO  backup_config.dat written for store: Satpuda Test
+2026-04-24 00:35:23  INFO  Backup skipped — no internet.
+2026-04-24 00:36:33  INFO  backup_config.dat written for store: satpuda medical
+2026-04-24 00:37:06  INFO  Backup skipped — no internet.
+2026-04-24 00:40:06  ERROR  Backup failed: <HttpError 403 when requesting https://www.googleapis.com/upload/drive/v3/files?fields=id&alt=json&uploadType=multipart returned "Service Accounts do not have storage quota. Leverage shared drives (https://developers.google.com/workspace/drive/api/guides/about-shareddrives), or use OAuth delegation (http://support.google.com/a/answer/7281227) instead.". Details: "[{'message': 'Service Accounts do not have storage quota. Leverage shared drives (https://developers.google.com/workspace/drive/api/guides/about-shareddrives), or use OAuth delegation (http://support.google.com/a/answer/7281227) instead.', 'domain': 'usageLimits', 'reason': 'storageQuotaExceeded'}]">
+2026-04-24 00:42:46  INFO  Backup skipped — no internet.
+2026-04-24 00:47:33  INFO  Backup skipped - backup_creds.dat missing or invalid.
+2026-04-24 00:47:38  INFO  Backup skipped - backup_creds.dat missing or invalid.
+2026-04-24 00:47:41  INFO  Backup skipped - backup_creds.dat missing or invalid.
+2026-04-24 01:00:41  INFO  Backup OK - SatpudaCore_2026-04-24_01-00.db.gz -> satpuda medical
+2026-04-24 01:01:38  INFO  Backup OK - SatpudaCore_2026-04-24_01-01.db.gz -> satpuda medical
+2026-04-24 01:02:01  INFO  Backup OK - SatpudaCore_2026-04-24_01-01.db.gz -> satpuda medical
+2026-04-24 01:42:59  INFO  Backup OK - SatpudaCore_2026-04-24_01-42.db.gz -> satpuda medical
+2026-04-24 01:44:06  INFO  Backup OK - SatpudaCore_2026-04-24_01-44.db.gz -> satpuda medical
+2026-04-24 09:15:55  INFO  Backup OK - SatpudaCore_2026-04-24_09-15.db.gz -> satpuda medical
+2026-04-24 09:24:23  INFO  Backup OK - SatpudaCore_2026-04-24_09-24.db.gz -> satpuda medical
+2026-04-24 09:31:03  INFO  Backup OK - SatpudaCore_2026-04-24_09-30.db.gz -> satpuda medical
+2026-04-24 09:51:53  INFO  Backup OK - SatpudaCore_2026-04-24_09-51.db.gz -> satpuda medical
+2026-04-24 09:52:25  INFO  Backup OK - SatpudaCore_2026-04-24_09-52.db.gz -> satpuda medical
+2026-04-24 09:55:51  INFO  Backup OK - SatpudaCore_2026-04-24_09-55.db.gz -> satpuda medical
+2026-04-24 09:57:30  INFO  Backup skipped - last backup was 1.8 min ago (dedup window: 5 min).
+2026-04-24 09:57:44  INFO  Cleanup: deleted middle backup SatpudaCore_2026-04-24_09-52.db.gz
+2026-04-24 09:57:44  INFO  Backup OK - SatpudaCore_2026-04-24_09-57.db.gz -> satpuda medical
+2026-04-24 09:59:05  INFO  Backup skipped - last backup was 1.5 min ago (dedup window: 5 min).
+2026-04-24 10:00:20  INFO  Cleanup: deleted middle backup SatpudaCore_2026-04-24_09-55.db.gz
+2026-04-24 10:00:20  INFO  Backup OK - SatpudaCore_2026-04-24_10-00.db.gz -> satpuda medical
+2026-04-24 10:00:32  INFO  Backup skipped - last backup was 0.3 min ago (dedup window: 5 min).
+2026-04-24 10:03:18  INFO  Backup OK - SatpudaCore_2026-04-24_10-03.db.gz -> satpuda medical
+2026-04-24 10:04:20  INFO  Backup OK - SatpudaCore_2026-04-24_10-04.db.gz -> satpuda medical
+2026-04-24 10:04:52  INFO  Cleanup: deleted middle backup SatpudaCore_2026-04-24_10-03.db.gz
+2026-04-24 10:04:52  INFO  Backup OK - SatpudaCore_2026-04-24_10-04.db.gz -> satpuda medical
+2026-04-24 10:05:12  INFO  Cleanup: deleted middle backup SatpudaCore_2026-04-24_10-04.db.gz
+2026-04-24 10:05:12  INFO  Backup OK - SatpudaCore_2026-04-24_10-05.db.gz -> satpuda medical
+2026-04-24 15:06:06  INFO  Slot open1 = SatpudaCore_2026-04-24_15-06.db.gz
+2026-04-24 15:07:35  ERROR  Backup Drive error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-24 15:32:23  INFO  Slot close_last = SatpudaCore_2026-04-24_15-32.db.gz
+2026-04-24 15:32:23  INFO  Drive backup skipped - no internet.
+2026-04-24 15:34:09  INFO  Cleanup: deleted today middle backup SatpudaCore_2026-04-24_10-04.db.gz
+2026-04-24 15:34:09  INFO  Backup OK [open] - SatpudaCore_2026-04-24_15-34.db.gz -> satpuda medical
+2026-04-24 15:44:05  INFO  Slot close_last = SatpudaCore_2026-04-24_15-44.db.gz
+2026-04-24 15:44:11  INFO  Cleanup: deleted today middle backup SatpudaCore_2026-04-24_10-05.db.gz
+2026-04-24 15:44:11  INFO  Backup OK [close] - SatpudaCore_2026-04-24_15-44.db.gz -> satpuda medical
+2026-04-28 17:35:51  INFO  Slot open1 = SatpudaCore_2026-04-28_17-35.db.gz
+2026-04-28 17:35:59  INFO  Backup OK [open] - SatpudaCore_2026-04-28_17-35.db.gz -> satpuda medical
+2026-04-28 17:56:08  INFO  Slot close_last = SatpudaCore_2026-04-28_17-56.db.gz
+2026-04-28 17:56:14  INFO  Backup OK [close] - SatpudaCore_2026-04-28_17-56.db.gz -> satpuda medical
+2026-04-28 17:56:31  INFO  Backup OK [open] - SatpudaCore_2026-04-28_17-56.db.gz -> satpuda medical
+2026-04-28 18:35:30  INFO  Slot close_last = SatpudaCore_2026-04-28_18-35.db.gz
+2026-04-28 18:35:36  INFO  Backup OK [close] - SatpudaCore_2026-04-28_18-35.db.gz -> satpuda medical
+2026-04-28 18:35:50  INFO  Cleanup: deleted today middle backup SatpudaCore_2026-04-28_17-56.db.gz
+2026-04-28 18:35:50  INFO  Backup OK [open] - SatpudaCore_2026-04-28_18-35.db.gz -> satpuda medical
+2026-04-28 18:36:09  INFO  Slot close_last = SatpudaCore_2026-04-28_18-36.db.gz
+2026-04-28 18:36:15  INFO  Cleanup: deleted today middle backup SatpudaCore_2026-04-28_18-35.db.gz
+2026-04-28 18:36:15  INFO  Backup OK [close] - SatpudaCore_2026-04-28_18-36.db.gz -> satpuda medical
+2026-04-28 18:37:14  INFO  Cleanup: deleted today middle backup SatpudaCore_2026-04-28_18-35.db.gz
+2026-04-28 18:37:14  INFO  Backup OK [open] - SatpudaCore_2026-04-28_18-37.db.gz -> satpuda medical
+2026-04-28 18:41:12  INFO  Slot close_last = SatpudaCore_2026-04-28_18-41.db.gz
+2026-04-28 18:41:19  INFO  Cleanup: deleted today middle backup SatpudaCore_2026-04-28_18-36.db.gz
+2026-04-28 18:41:19  INFO  Backup OK [close] - SatpudaCore_2026-04-28_18-41.db.gz -> satpuda medical
+2026-04-28 18:41:32  INFO  Cleanup: deleted today middle backup SatpudaCore_2026-04-28_18-37.db.gz
+2026-04-28 18:41:32  INFO  Backup OK [open] - SatpudaCore_2026-04-28_18-41.db.gz -> satpuda medical
+2026-04-28 19:26:08  INFO  Slot close_last = SatpudaCore_2026-04-28_19-26.db.gz
+2026-04-28 19:26:14  INFO  Backup OK [close] - SatpudaCore_2026-04-28_19-26.db.gz -> satpuda medical
+2026-04-28 19:26:32  INFO  Cleanup: deleted today middle backup SatpudaCore_2026-04-28_18-41.db.gz
+2026-04-28 19:26:32  INFO  Cleanup: deleted today middle backup SatpudaCore_2026-04-28_18-41.db.gz
+2026-04-28 19:26:32  INFO  Backup OK [open] - SatpudaCore_2026-04-28_19-26.db.gz -> satpuda medical
+2026-04-28 19:29:43  INFO  Backup OK [open] - SatpudaCore_2026-04-28_19-29.db.gz -> satpuda medical
+2026-04-28 19:42:58  INFO  Slot close_last = SatpudaCore_2026-04-28_19-42.db.gz
+2026-04-28 19:43:07  INFO  Cleanup: deleted today middle backup SatpudaCore_2026-04-28_19-26.db.gz
+2026-04-28 19:43:07  INFO  Backup OK [close] - SatpudaCore_2026-04-28_19-42.db.gz -> satpuda medical
+2026-04-28 19:43:28  INFO  Cleanup: deleted today middle backup SatpudaCore_2026-04-28_19-26.db.gz
+2026-04-28 19:43:29  INFO  Cleanup: deleted today middle backup SatpudaCore_2026-04-28_19-29.db.gz
+2026-04-28 19:43:29  INFO  Backup OK [open] - SatpudaCore_2026-04-28_19-43.db.gz -> satpuda medical
+2026-04-28 19:44:20  INFO  Slot close_last = SatpudaCore_2026-04-28_19-44.db.gz
+2026-04-28 19:44:27  INFO  Cleanup: deleted today middle backup SatpudaCore_2026-04-28_19-42.db.gz
+2026-04-28 19:44:27  INFO  Backup OK [close] - SatpudaCore_2026-04-28_19-44.db.gz -> satpuda medical
+2026-04-28 19:51:18  INFO  Cleanup: deleted today middle backup SatpudaCore_2026-04-28_19-49.db.gz
+2026-04-28 19:51:18  INFO  Backup OK [open] - SatpudaCore_2026-04-28_19-51.db.gz -> satpuda medical
+2026-04-28 19:51:47  INFO  Slot close_last = SatpudaCore_2026-04-28_19-51.db.gz
+2026-04-28 19:51:54  INFO  Cleanup: deleted today middle backup SatpudaCore_2026-04-28_19-44.db.gz
+2026-04-28 19:51:54  INFO  Backup OK [close] - SatpudaCore_2026-04-28_19-51.db.gz -> satpuda medical
+2026-04-28 19:55:47  INFO  Cleanup: deleted today middle backup SatpudaCore_2026-04-28_19-50.db.gz
+2026-04-28 19:55:47  INFO  Backup OK [open] - SatpudaCore_2026-04-28_19-55.db.gz -> satpuda medical
+2026-04-28 20:00:50  INFO  Slot close_last = SatpudaCore_2026-04-28_20-00.db.gz
+2026-04-28 20:00:56  INFO  Cleanup: deleted today middle backup SatpudaCore_2026-04-28_19-51.db.gz
+2026-04-28 20:00:57  INFO  Cleanup: deleted today middle backup SatpudaCore_2026-04-28_19-51.db.gz
+2026-04-28 20:00:57  INFO  Backup OK [close] - SatpudaCore_2026-04-28_20-00.db.gz -> satpuda medical
+2026-04-28 20:01:12  INFO  Backup OK [open] - SatpudaCore_2026-04-28_20-01.db.gz -> satpuda medical
+2026-04-28 20:01:53  INFO  Slot close_last = SatpudaCore_2026-04-28_20-01.db.gz
+2026-04-28 20:02:00  INFO  Cleanup: deleted today middle backup SatpudaCore_2026-04-28_19-55.db.gz
+2026-04-28 20:02:01  INFO  Cleanup: deleted today middle backup SatpudaCore_2026-04-28_20-00.db.gz
+2026-04-28 20:02:01  INFO  Backup OK [close] - SatpudaCore_2026-04-28_20-01.db.gz -> satpuda medical
+2026-04-28 20:22:52  INFO  Backup OK [open] - SatpudaCore_2026-04-28_20-22.db.gz -> satpuda medical
+2026-04-28 20:23:33  INFO  Slot close_last = SatpudaCore_2026-04-28_20-23.db.gz
+2026-04-28 20:23:42  INFO  Cleanup: deleted today middle backup SatpudaCore_2026-04-28_20-01.db.gz
+2026-04-28 20:23:43  INFO  Cleanup: deleted today middle backup SatpudaCore_2026-04-28_20-01.db.gz
+2026-04-28 20:23:43  INFO  Backup OK [close] - SatpudaCore_2026-04-28_20-23.db.gz -> satpuda medical
+2026-04-28 20:32:07  INFO  Backup OK [open] - SatpudaCore_2026-04-28_20-32.db.gz -> satpuda medical
+2026-04-28 21:06:01  INFO  Slot close_last = SatpudaCore_2026-04-28_21-06.db.gz
+2026-04-28 21:06:09  INFO  Cleanup: deleted today middle backup SatpudaCore_2026-04-28_20-22.db.gz
+2026-04-28 21:06:09  INFO  Backup OK [close] - SatpudaCore_2026-04-28_21-06.db.gz -> satpuda medical
+2026-04-30 16:23:03  INFO  Slot open1 = SatpudaCore_2026-04-30_16-23.db.gz
+2026-04-30 16:24:12  ERROR  Backup Drive error: The write operation timed out
+2026-04-30 16:25:22  ERROR  Backup Drive error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-04-30 16:39:48  INFO  Slot close_last = SatpudaCore_2026-04-30_16-39.db.gz
+2026-04-30 16:40:45  INFO  Backup OK [close] - SatpudaCore_2026-04-30_16-39.db.gz -> satpuda medical
+2026-04-30 16:41:22  ERROR  Backup Drive error: The write operation timed out
+2026-04-30 16:41:48  INFO  Slot close_last = SatpudaCore_2026-04-30_16-41.db.gz
+2026-04-30 16:42:59  INFO  Backup OK [close] - SatpudaCore_2026-04-30_16-41.db.gz -> satpuda medical
+2026-04-30 20:54:02  INFO  Backup OK [open] - SatpudaCore_2026-04-30_20-53.db.gz -> satpuda medical
+2026-04-30 21:25:34  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-04-30 21:25:55  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-01 08:20:31  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-01 08:26:49  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-01 08:29:09  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-01 08:29:25  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-01 08:29:57  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-01 08:31:18  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-01 08:34:52  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-01 08:35:48  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-01 08:37:27  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-01 08:39:27  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-01 08:42:08  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-01 08:42:55  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-01 08:43:47  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-01 08:45:41  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-01 08:46:19  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-01 08:48:23  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-01 08:55:03  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-01 08:55:18  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-01 15:31:13  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-01 16:27:43  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-01 23:14:38  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-01 23:15:53  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-01 23:18:32  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 09:03:46  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 09:11:26  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 09:11:33  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 09:18:13  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 09:20:32  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 09:40:30  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 09:40:38  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 09:45:30  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 09:45:56  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 09:47:55  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 09:48:09  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 10:04:35  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 10:04:41  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 10:14:59  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 10:15:48  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 10:25:30  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 10:25:36  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 10:37:54  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 10:38:08  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 10:41:56  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 10:43:19  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 10:50:40  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 10:50:49  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 10:52:06  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 15:18:40  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 15:30:07  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 15:30:19  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 15:33:57  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 16:14:30  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 16:14:37  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 16:30:01  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 16:34:19  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 16:41:56  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 16:42:02  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 16:50:39  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 16:50:46  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 16:56:30  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 16:56:37  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 17:07:55  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 20:19:20  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 20:22:38  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 20:26:29  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 20:31:09  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 20:53:09  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 20:53:45  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 20:57:21  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 21:00:10  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 21:01:23  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 21:01:58  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 21:02:08  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 21:02:56  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 21:02:59  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 21:03:17  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 21:03:36  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 21:03:44  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 21:04:18  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 21:04:25  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 22:00:42  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-02 22:01:46  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-03 06:58:03  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-03 07:03:07  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-03 07:03:20  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-03 08:43:14  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-03 08:45:20  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-03 19:41:30  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-03 19:45:14  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-03 19:45:21  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-03 19:52:43  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 09:25:05  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 09:27:08  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 10:04:37  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 10:14:36  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 10:17:18  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 10:27:04  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 10:34:47  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 10:34:54  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 10:45:50  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 10:46:02  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 10:50:58  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 10:51:03  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 10:55:08  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 10:55:16  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 11:32:05  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 11:32:12  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 11:37:02  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 11:37:09  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 11:38:00  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 11:46:12  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 11:51:06  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 11:51:12  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 11:54:03  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 11:54:09  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 11:54:17  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 11:54:47  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 11:55:05  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 11:55:11  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 11:55:23  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 11:55:28  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 11:55:44  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 11:55:50  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 11:56:31  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 11:56:38  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 12:07:15  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 12:07:22  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 12:09:40  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 12:09:57  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 12:10:08  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 12:10:20  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 12:10:36  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-04 12:11:12  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-05 02:45:30  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-05 02:46:25  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-06 17:48:15  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-06 20:10:23  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-06 20:15:47  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-06 20:15:55  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-06 20:35:29  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-06 20:35:36  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-07 10:54:05  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-07 11:03:02  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-07 11:07:40  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-07 12:07:40  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-07 19:29:14  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-07 20:02:38  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-07 20:02:43  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-07 20:27:04  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-07 20:33:19  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-07 22:25:52  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-07 23:19:16  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-08 01:44:05  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-08 02:29:14  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-08 05:56:35  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-08 06:56:35  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-08 07:07:28  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-08 07:07:33  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-08 07:07:36  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-08 07:10:13  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-08 07:10:15  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-08 07:11:43  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-08 07:23:30  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-08 07:23:33  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-08 07:29:12  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-08 07:29:25  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-08 07:31:36  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-08 07:39:39  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-08 07:43:00  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-09 10:51:10  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-09 10:59:26  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-09 10:59:45  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-09 11:04:15  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-09 11:04:28  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-09 11:04:45  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-09 11:04:53  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-09 11:04:56  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-09 11:10:30  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-09 11:18:28  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-09 11:18:48  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-09 11:19:01  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-12 14:35:11  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-12 14:57:16  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-12 14:57:22  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-12 15:26:00  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-05-12 15:30:56  INFO  Backup skipped - backup_config.dat missing or invalid.
