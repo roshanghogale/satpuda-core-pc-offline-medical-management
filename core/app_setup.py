@@ -23,10 +23,24 @@ from core.font_config import *
 # ── Theme ─────────────────────────────────────────────────────────────────────
 
 AVAILABLE_THEMES = {
-    'superhero': 'Dark Blue',  'darkly': 'Dark Gray',
-    'solar':     'Dark Orange','vapor':  'Dark Purple',
-    'cosmo':     'Light Blue', 'minty':  'Light Green',
-    'journal':   'Light Classic','sandstone': 'Light Warm',
+    # ── Dark themes ───────────────────────────────────────────────────────
+    'superhero':  'Dark Blue',
+    'darkly':     'Dark Gray',
+    'cyborg':     'Dark Cyan',
+    'solar':      'Dark Orange',
+    'vapor':      'Dark Purple',
+    'slate':      'Dark Slate',
+    # ── Light themes ──────────────────────────────────────────────────────
+    'cosmo':      'Light Blue',
+    'minty':      'Light Green',
+    'flatly':     'Light Flat',
+    'journal':    'Light Classic',
+    'sandstone':  'Light Warm',
+    'litera':     'Light Clean',
+    'lumen':      'Light Lumen',
+    'pulse':      'Light Purple',
+    'united':     'Light United',
+    'yeti':       'Light Yeti',
 }
 
 

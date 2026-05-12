@@ -15,51 +15,7 @@ from core.layout_config import (
 from core.scroll_manager import make_scrollable
 
 
-def _restart_app(root=None):
-    import sys, subprocess
-    if getattr(sys, 'frozen', False):
-        args = [sys.executable]
-    else:
-        args = [sys.executable, os.path.abspath(sys.argv[0])] + sys.argv[1:]
-    if root is not None:
-        try: root.quit()
-        except Exception: pass
-        try: root.destroy()
-        except Exception: pass
-    try:
-        subprocess.Popen(args)
-    except Exception:
-        pass
-
-
-def _theme_config_path():
-    import sys
-    if getattr(sys, 'frozen', False):
-        return os.path.join(
-            os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
-            'VeterinaryApp', 'theme_config.txt')
-    return os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        'config', 'theme_config.txt')
-
-
-def _load_theme():
-    try:
-        path = _theme_config_path()
-        if os.path.exists(path):
-            t = open(path).read().strip()
-            return t if t else 'superhero'
-    except Exception:
-        pass
-    return 'superhero'
-
-
-def _save_theme(theme):
-    try:
-        with open(_theme_config_path(), 'w') as f:
-            f.write(theme)
-    except Exception:
-        pass
+from core.app_setup import AVAILABLE_THEMES, load_theme, save_theme, restart_app as _restart_app
 
 
 class LayoutTab:
@@ -86,23 +42,31 @@ class LayoutTab:
 
         # ── Theme ─────────────────────────────────────────────────────────
         if TTKBOOTSTRAP_AVAILABLE:
-            themes = {
-                'superhero': 'Dark Blue',  'darkly': 'Dark Gray',
-                'solar': 'Dark Orange',    'vapor': 'Dark Purple',
-                'cosmo': 'Light Blue',     'minty': 'Light Green',
-                'journal': 'Light Classic','sandstone': 'Light Warm',
-            }
-            current = _load_theme()
+            current = load_theme()
             tf = ttk.LabelFrame(frame, text="\U0001f3a8 Theme")
             tf.pack(fill=tk.X, padx=20, pady=(15, 8))
-            ttk.Label(tf, text=f"Active theme: {themes.get(current, current)}",
+            ttk.Label(tf, text=f"Active theme: {AVAILABLE_THEMES.get(current, current)}",
                       font=(FONT_FAMILY, FONT_SIZE_LABELS, 'bold')).pack(padx=10, pady=(8, 4))
-            br = ttk.Frame(tf)
-            br.pack(padx=10, pady=(0, 8))
-            for key, label in themes.items():
-                ttk.Button(br, text=label, width=13,
-                           command=lambda t=key: self._change_theme(t)).pack(
-                    side=tk.LEFT, padx=3, pady=2)
+            # Dark themes row
+            dark_row = ttk.Frame(tf)
+            dark_row.pack(padx=10, pady=(2, 0))
+            ttk.Label(dark_row, text="Dark:", width=6,
+                      font=(FONT_FAMILY, FONT_SIZE_LABELS, 'bold')).pack(side=tk.LEFT, padx=(0, 4))
+            for key, label in AVAILABLE_THEMES.items():
+                if 'Dark' in label:
+                    ttk.Button(dark_row, text=label.replace('Dark ', ''), width=11,
+                               command=lambda t=key: self._change_theme(t)).pack(
+                        side=tk.LEFT, padx=3, pady=2)
+            # Light themes row
+            light_row = ttk.Frame(tf)
+            light_row.pack(padx=10, pady=(2, 8))
+            ttk.Label(light_row, text="Light:", width=6,
+                      font=(FONT_FAMILY, FONT_SIZE_LABELS, 'bold')).pack(side=tk.LEFT, padx=(0, 4))
+            for key, label in AVAILABLE_THEMES.items():
+                if 'Light' in label:
+                    ttk.Button(light_row, text=label.replace('Light ', ''), width=11,
+                               command=lambda t=key: self._change_theme(t)).pack(
+                        side=tk.LEFT, padx=3, pady=2)
 
         # ── Font Size ──────────────────────────────────────────────────────
         ff = ttk.LabelFrame(frame, text="Font Size")
@@ -277,7 +241,7 @@ class LayoutTab:
     def _change_theme(self, theme_name):
         if TTKBOOTSTRAP_AVAILABLE:
             try:
-                _save_theme(theme_name)
+                save_theme(theme_name)
                 messagebox.showinfo("Theme Changed", "Application will restart with the new theme.")
                 _restart_app(self._root)
             except Exception as e:
