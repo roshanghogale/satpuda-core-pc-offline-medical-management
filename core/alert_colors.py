@@ -34,7 +34,11 @@ _THEME_ALERT_COLORS = {
 _DEFAULT_DARK  = {'success': '#5cb85c', 'warning': '#f0ad4e', 'danger': '#d9534f', 'info': '#5bc0de'}
 _DEFAULT_LIGHT = {'success': '#1a7a30', 'warning': '#b06000', 'danger': '#b03030', 'info': '#0a6a8a'}
 
-_DARK_THEMES = {'superhero','darkly','cyborg','solar','vapor'}
+_DARK_THEMES = {
+    'superhero','darkly','cyborg','solar','vapor',
+    # custom dark
+    'crimson','rose','navy','forest','midnight',
+}
 
 # Muted color per theme (for 'gray' text)
 _THEME_MUTED = {
@@ -45,7 +49,30 @@ _THEME_MUTED = {
     'sandstone': '#8e8c84', 'simplex': '#858e96',  'united': '#aea79f',
     'yeti': '#707070',      'cerculean': '#a9b4be','journal': '#aaaaaa',
     'lumen': '#919191',
+    # custom dark
+    'crimson':  '#c08090', 'rose':    '#c090a8', 'navy':    '#8090b8',
+    'forest':   '#80b090', 'midnight':'#a090c8',
+    # custom light
+    'crimson-light': '#a06070', 'rose-light':   '#b06080',
+    'navy-light':    '#6080b0', 'forest-light':  '#508060',
+    'amber-light':   '#a07040',
 }
+
+# Per-theme alert colors for custom themes
+_THEME_ALERT_COLORS.update({
+    # custom dark
+    'crimson':  {'success': '#3ddc84', 'warning': '#ffca28', 'danger': '#ff6b6b', 'info': '#29b6f6'},
+    'rose':     {'success': '#4caf50', 'warning': '#ff9800', 'danger': '#ff5252', 'info': '#00bcd4'},
+    'navy':     {'success': '#10b981', 'warning': '#fbbf24', 'danger': '#f87171', 'info': '#38bdf8'},
+    'forest':   {'success': '#4ade80', 'warning': '#facc15', 'danger': '#f87171', 'info': '#22d3ee'},
+    'midnight': {'success': '#10b981', 'warning': '#f59e0b', 'danger': '#ef4444', 'info': '#06b6d4'},
+    # custom light
+    'crimson-light': {'success': '#198754', 'warning': '#fd7e14', 'danger': '#c41e3a', 'info': '#0d6efd'},
+    'rose-light':    {'success': '#388e3c', 'warning': '#f57c00', 'danger': '#d81b60', 'info': '#0288d1'},
+    'navy-light':    {'success': '#059669', 'warning': '#d97706', 'danger': '#dc2626', 'info': '#1e40af'},
+    'forest-light':  {'success': '#16a34a', 'warning': '#ca8a04', 'danger': '#dc2626', 'info': '#0891b2'},
+    'amber-light':   {'success': '#15803d', 'warning': '#b45309', 'danger': '#dc2626', 'info': '#0369a1'},
+})
 
 # Tree row tag colors per theme
 _THEME_TREE_TAGS = {
@@ -72,6 +99,20 @@ _THEME_TREE_TAGS = {
 }
 _DEFAULT_TREE_LIGHT = {'due_bg':'#f8d7da','due_fg':'#721c24','cleared_bg':'#d4edda','cleared_fg':'#155724','partial_bg':'#fff3cd','partial_fg':'#856404'}
 _DEFAULT_TREE_DARK  = {'due_bg':'#4a1a1a','due_fg':'#ff9999','cleared_bg':'#1a3a1a','cleared_fg':'#99dd99','partial_bg':'#3a3010','partial_fg':'#ffd080'}
+
+# Tree tags for custom themes
+_THEME_TREE_TAGS.update({
+    'crimson':  {'due_bg':'#4a0a10','due_fg':'#ff9999','cleared_bg':'#0a3a1a','cleared_fg':'#99dd99','partial_bg':'#3a2a00','partial_fg':'#ffd080'},
+    'rose':     {'due_bg':'#4a0a20','due_fg':'#ffaacc','cleared_bg':'#0a3a1a','cleared_fg':'#99dd99','partial_bg':'#3a2a00','partial_fg':'#ffd080'},
+    'navy':     {'due_bg':'#1a1a4a','due_fg':'#aaaaff','cleared_bg':'#0a3a1a','cleared_fg':'#99dd99','partial_bg':'#3a3010','partial_fg':'#ffd080'},
+    'forest':   {'due_bg':'#3a0a0a','due_fg':'#ff9999','cleared_bg':'#0a3a10','cleared_fg':'#88ff99','partial_bg':'#2a2a00','partial_fg':'#ffee66'},
+    'midnight': {'due_bg':'#2a0a3a','due_fg':'#cc99ff','cleared_bg':'#0a2a1a','cleared_fg':'#88ffcc','partial_bg':'#2a2000','partial_fg':'#ffdd44'},
+    'crimson-light':  {'due_bg':'#f8d7da','due_fg':'#721c24','cleared_bg':'#d4edda','cleared_fg':'#155724','partial_bg':'#fff3cd','partial_fg':'#856404'},
+    'rose-light':     {'due_bg':'#fce4ec','due_fg':'#880e4f','cleared_bg':'#e8f5e9','cleared_fg':'#1b5e20','partial_bg':'#fff8e1','partial_fg':'#e65100'},
+    'navy-light':     {'due_bg':'#dbeafe','due_fg':'#1e3a8a','cleared_bg':'#d1fae5','cleared_fg':'#065f46','partial_bg':'#fef3c7','partial_fg':'#92400e'},
+    'forest-light':   {'due_bg':'#fee2e2','due_fg':'#7f1d1d','cleared_bg':'#dcfce7','cleared_fg':'#14532d','partial_bg':'#fef9c3','partial_fg':'#713f12'},
+    'amber-light':    {'due_bg':'#fee2e2','due_fg':'#7f1d1d','cleared_bg':'#d1fae5','cleared_fg':'#065f46','partial_bg':'#fef3c7','partial_fg':'#92400e'},
+})
 
 
 def _current_theme():

@@ -23,13 +23,25 @@ from core.font_config import *
 # ── Theme ─────────────────────────────────────────────────────────────────────
 
 AVAILABLE_THEMES = {
-    # ── Dark themes ───────────────────────────────────────────────────────
+    # ── Custom dark themes ────────────────────────────────────────────────
+    'crimson':    'Custom Dark — Crimson Red',
+    'rose':       'Custom Dark — Rose Pink',
+    'navy':       'Custom Dark — Navy Blue',
+    'forest':     'Custom Dark — Forest Green',
+    'midnight':   'Custom Dark — Midnight Purple',
+    # ── Custom light themes ───────────────────────────────────────────────
+    'crimson-light':  'Custom Light — Crimson Red',
+    'rose-light':     'Custom Light — Rose Pink',
+    'navy-light':     'Custom Light — Navy Blue',
+    'forest-light':   'Custom Light — Forest Green',
+    'amber-light':    'Custom Light — Amber Gold',
+    # ── Built-in dark themes ──────────────────────────────────────────────
     'superhero':  'Dark — Blue Steel',
     'darkly':     'Dark — Charcoal',
     'cyborg':     'Dark — Cyborg',
     'solar':      'Dark — Solarized',
     'vapor':      'Dark — Vapor Neon',
-    # ── Light themes ──────────────────────────────────────────────────────
+    # ── Built-in light themes ─────────────────────────────────────────────
     'cosmo':      'Light — Cosmo Blue',
     'flatly':     'Light — Flatly',
     'litera':     'Light — Litera',
@@ -84,6 +96,9 @@ def create_window(theme: str):
         if TTKBOOTSTRAP_AVAILABLE:
             import warnings
             warnings.filterwarnings("ignore", category=UserWarning)
+            # Register custom themes before creating the window
+            from core.custom_themes import register_custom_themes
+            register_custom_themes()
             root = ttk.Window(themename=theme)
             _setup_fonts(root)
             from core.alert_colors import apply_alert_colors_to_theme
