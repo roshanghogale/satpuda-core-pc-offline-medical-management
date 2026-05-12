@@ -127,6 +127,11 @@ class PurchaseHistoryPage:
         tf.grid_rowconfigure(0, weight=1)
         tf.grid_columnconfigure(0, weight=1)
 
+        from core.alert_colors import get_tree_tag_colors as _gtc
+        _clr = _gtc()
+        self.purchase_tree.tag_configure('account_cleared', background=_clr['cleared_bg'], foreground=_clr['cleared_fg'])
+        self.purchase_tree.tag_configure('has_due',         background=_clr['due_bg'],     foreground=_clr['due_fg'])
+
         self._ctx = tk.Menu(self.parent, tearoff=0)
         self._ctx.add_command(label="Edit Purchase",   command=self.edit_purchase)
         self._ctx.add_command(label="Delete Purchase", command=self.delete_purchase)
@@ -341,10 +346,7 @@ class PurchaseHistoryPage:
             self.purchase_tree.insert(
                 '', tk.END, iid=str(purchase_id), values=vals, tags=tags)
 
-        self.purchase_tree.tag_configure(
-            'account_cleared', background='#d4edda', foreground='#155724')
-        self.purchase_tree.tag_configure(
-            'has_due', background='#f8d7da', foreground='#721c24')
+            pass  # tags configured once in _build_ui
 
     def clear_filter(self):
         self.from_date.delete(0, tk.END)

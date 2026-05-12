@@ -48,11 +48,13 @@ def _tag_for_running(running):
 
 
 def _apply_tags(tree):
-    tree.tag_configure('due',     foreground='#721c24')
-    tree.tag_configure('credit',  foreground='#155724')
-    tree.tag_configure('clear',   foreground='gray')
-    tree.tag_configure('payment', foreground='#0d6efd')
-    tree.tag_configure('return',  foreground='#6f42c1')
+    from core.alert_colors import get_tree_tag_colors as _gtc
+    _clr = _gtc()
+    tree.tag_configure('due',     background=_clr['due_bg'],     foreground=_clr['due_fg'])
+    tree.tag_configure('credit',  background=_clr['cleared_bg'], foreground=_clr['cleared_fg'])
+    tree.tag_configure('clear',   background=_clr['partial_bg'], foreground=_clr['partial_fg'])
+    tree.tag_configure('payment', background=_clr['cleared_bg'], foreground=_clr['cleared_fg'])
+    tree.tag_configure('return',  background=_clr['partial_bg'], foreground=_clr['partial_fg'])
 
 
 # -- Main class ----------------------------------------------------------------
