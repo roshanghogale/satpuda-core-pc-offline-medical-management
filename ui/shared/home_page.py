@@ -271,7 +271,7 @@ def build_home(main_frame, conn, nav_click_fn, open_billing_fn,
         from PIL import Image, ImageTk
         img = Image.open(_get_banner_path())
         # Scale to fill available width; height follows aspect ratio
-        target_w = 1500
+        target_w = 1000
         ratio    = target_w / img.width
         target_h = int(img.height * ratio)
         img      = img.resize((target_w, target_h), Image.LANCZOS)
