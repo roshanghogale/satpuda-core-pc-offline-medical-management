@@ -23,38 +23,28 @@ from core.font_config import *
 # ── Theme ─────────────────────────────────────────────────────────────────────
 
 AVAILABLE_THEMES = {
-    # ── Custom dark themes ────────────────────────────────────────────────
-    'crimson':    'Custom Dark — Crimson Red',
-    'rose':       'Custom Dark — Rose Pink',
-    'navy':       'Custom Dark — Navy Blue',
-    'forest':     'Custom Dark — Forest Green',
-    'midnight':   'Custom Dark — Midnight Purple',
-    # ── Custom light themes ───────────────────────────────────────────────
-    'crimson-light':  'Custom Light — Crimson Red',
-    'rose-light':     'Custom Light — Rose Pink',
-    'navy-light':     'Custom Light — Navy Blue',
-    'forest-light':   'Custom Light — Forest Green',
-    'amber-light':    'Custom Light — Amber Gold',
-    # ── Built-in dark themes ──────────────────────────────────────────────
-    'superhero':  'Dark — Blue Steel',
-    'darkly':     'Dark — Charcoal',
-    'cyborg':     'Dark — Cyborg',
-    'solar':      'Dark — Solarized',
-    'vapor':      'Dark — Vapor Neon',
-    # ── Built-in light themes ─────────────────────────────────────────────
-    'cosmo':      'Light — Cosmo Blue',
-    'flatly':     'Light — Flatly',
-    'litera':     'Light — Litera',
-    'minty':      'Light — Minty Green',
-    'morph':      'Light — Morph Blue',
-    'pulse':      'Light — Pulse Purple',
-    'sandstone':  'Light — Sandstone',
-    'simplex':    'Light — Simplex Red',
-    'united':     'Light — United Orange',
-    'yeti':       'Light — Yeti Teal',
-    'cerculean':  'Light — Cerculean',
-    'journal':    'Light — Journal',
-    'lumen':      'Light — Lumen',
+    # ── Dark themes (10) ─────────────────────────────────────── dark first
+    'steel-dark':    'Dark  — Steel Blue',
+    'charcoal-dark': 'Dark  — Charcoal Grey',
+    'crimson-dark':  'Dark  — Crimson Red',
+    'rose-dark':     'Dark  — Rose Pink',
+    'navy-dark':     'Dark  — Navy Blue',
+    'forest-dark':   'Dark  — Forest Green',
+    'midnight-dark': 'Dark  — Midnight Violet',
+    'amber-dark':    'Dark  — Amber Gold',
+    'teal-dark':     'Dark  — Teal Cyan',
+    'violet-dark':   'Dark  — Violet Purple',
+    # ── Light themes (10) ──────────────────────────────────── light second
+    'steel-light':    'Light — Steel Blue',
+    'charcoal-light': 'Light — Charcoal Grey',
+    'crimson-light':  'Light — Crimson Red',
+    'rose-light':     'Light — Rose Pink',
+    'navy-light':     'Light — Navy Blue',
+    'forest-light':   'Light — Forest Green',
+    'midnight-light': 'Light — Midnight Violet',
+    'amber-light':    'Light — Amber Gold',
+    'teal-light':     'Light — Teal Cyan',
+    'violet-light':   'Light — Violet Purple',
 }
 
 
@@ -77,7 +67,7 @@ def load_theme() -> str:
                 return t
     except Exception:
         pass
-    return 'superhero'
+    return 'steel-dark'
 
 
 def save_theme(theme: str):
