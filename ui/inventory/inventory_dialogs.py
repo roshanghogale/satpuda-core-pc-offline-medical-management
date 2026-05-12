@@ -5,7 +5,7 @@ Edit medicine, view details, and delete medicine dialogs.
 Called by InventoryPage — no tree/filter UI here.
 """
 import tkinter as tk
-from tkinter import messagebox
+from core.themed_messagebox import showinfo, showwarning, showerror, askyesno
 
 try:
     import ttkbootstrap as ttk
@@ -89,11 +89,11 @@ def open_edit_dialog(parent, conn, medicine_id, refresh_callback):
                   float(fields['MRP'].get() or 0), float(fields['Rate'].get() or 0),
                   fields['Manufacturer'].get(), fields['Schedule'].get(), medicine_id))
             conn.commit()
-            messagebox.showinfo("Success", "Medicine updated successfully!")
+            showinfo("Success", "Medicine updated successfully!", parent=dlg)
             dlg.destroy()
             refresh_callback()
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to update medicine: {e}")
+            showerror("Error", f"Failed to update medicine: {e}", parent=dlg)
 
     plain = [fields[l] for l in labels if l not in ('Type','Schedule')]
     for idx, w in enumerate(plain):
@@ -181,7 +181,7 @@ def open_view_dialog(parent, conn, medicine_id):
 
 
 def delete_medicine(conn, medicine_id, medicine_name, batch_no, refresh_callback):
-    if not messagebox.askyesno(
+    if not askyesno(
         "Confirm Delete",
         f"Delete {medicine_name} (Batch: {batch_no})?"):
         return
@@ -189,14 +189,14 @@ def delete_medicine(conn, medicine_id, medicine_name, batch_no, refresh_callback
     try:
         cursor.execute("SELECT COUNT(*) FROM sales_items WHERE medicine_id=?", (medicine_id,))
         if cursor.fetchone()[0] > 0:
-            messagebox.showwarning("Cannot Delete",
-                                   "This medicine has sales history and cannot be deleted.")
+            showwarning("Cannot Delete",
+                        "This medicine has sales history and cannot be deleted.")
             return
         cursor.execute("DELETE FROM purchase_items WHERE medicine_id=?", (medicine_id,))
         cursor.execute("DELETE FROM medicines WHERE id=?", (medicine_id,))
         conn.commit()
-        messagebox.showinfo("Success", "Medicine deleted successfully!")
+        showinfo("Success", "Medicine deleted successfully!")
         refresh_callback()
     except Exception as e:
         conn.rollback()
-        messagebox.showerror("Error", f"Failed to delete medicine: {e}")
+        showerror("Error", f"Failed to delete medicine: {e}")

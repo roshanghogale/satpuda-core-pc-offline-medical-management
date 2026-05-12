@@ -8,6 +8,7 @@ import sqlite3
 from core.font_config import *
 from core.layout_config import DOCTORS_ROWS
 from core.scroll_manager import make_scrollable, open_dialog
+from core.themed_messagebox import showinfo, showwarning, showerror, askyesno
 
 
 class DoctorsTab:
@@ -113,21 +114,21 @@ class DoctorsTab:
         if reg_no == "e.g. MMC/2021/67890":
             reg_no = ''
         if not name:
-            messagebox.showwarning("Missing Information", "Please enter doctor name.")
+            showwarning("Missing Information", "Please enter doctor name.")
             return
         if not reg_no:
-            messagebox.showwarning("Missing Information", "Please enter registration number.")
+            showwarning("Missing Information", "Please enter registration number.")
             return
         try:
             self.cursor.execute("SELECT id FROM doctors WHERE UPPER(name)=?", (name,))
             if self.cursor.fetchone():
-                messagebox.showwarning("Duplicate", "Doctor with this name already exists.")
+                showwarning("Duplicate", "Doctor with this name already exists.")
                 return
             self.cursor.execute(
                 "INSERT INTO doctors (name, registration_number, phone) VALUES (?,?,?)",
                 (name, reg_no, phone))
             self.conn.commit()
-            messagebox.showinfo("Success", "Doctor added successfully!")
+            showinfo("Success", "Doctor added successfully!")
             self.doctor_name.delete(0, tk.END)
             self.doctor_reg_no.delete(0, tk.END)
             self.doctor_reg_no.insert(0, "e.g. MMC/2021/67890")
@@ -135,9 +136,9 @@ class DoctorsTab:
             self.load()
             self.doctor_name.focus()
         except sqlite3.IntegrityError:
-            messagebox.showerror("Error", "Doctor already exists.")
+            showerror("Error", "Doctor already exists.")
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to add doctor: {e}")
+            showerror("Error", f"Failed to add doctor: {e}")
 
     def edit(self):
         sel = self.tree.selection()
@@ -150,7 +151,7 @@ class DoctorsTab:
                 doctor_id, doctor_row = row[4], row
                 break
         if not doctor_id:
-            messagebox.showerror("Error", "Could not find doctor record.")
+            showerror("Error", "Could not find doctor record.")
             return
 
         dlg = open_dialog(self.tree, "Edit Doctor", width=500, height=290, resizable=False)
@@ -176,21 +177,21 @@ class DoctorsTab:
             new_reg   = reg_e.get().strip()
             new_phone = phone_e.get().strip()
             if not new_name:
-                messagebox.showwarning("Missing", "Doctor name cannot be empty.", parent=dlg)
+                showwarning("Missing", "Doctor name cannot be empty.", parent=dlg)
                 return
             if not new_reg:
-                messagebox.showwarning("Missing", "Registration number cannot be empty.", parent=dlg)
+                showwarning("Missing", "Registration number cannot be empty.", parent=dlg)
                 return
             try:
                 self.cursor.execute(
                     "UPDATE doctors SET name=?,registration_number=?,phone=? WHERE id=?",
                     (new_name, new_reg, new_phone, doctor_id))
                 self.conn.commit()
-                messagebox.showinfo("Success", "Doctor updated successfully!")
+                showinfo("Success", "Doctor updated successfully!")
                 dlg.destroy()
                 self.load()
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to update doctor: {e}")
+                showerror("Error", f"Failed to update doctor: {e}")
 
         name_e.bind('<Return>', lambda e: reg_e.focus())
         name_e.bind('<Down>',   lambda e: reg_e.focus())
@@ -216,7 +217,7 @@ class DoctorsTab:
         if not sel:
             return
         values = self.tree.item(sel[0])['values']
-        if not messagebox.askyesno("Confirm Delete", f"Delete doctor {values[0]}?"):
+        if not askyesno("Confirm Delete", f"Delete doctor {values[0]}?"):
             return
         doctor_id = None
         for row in self.doctors_data:
@@ -224,12 +225,12 @@ class DoctorsTab:
                 doctor_id = row[4]
                 break
         if not doctor_id:
-            messagebox.showerror("Error", "Could not find doctor record.")
+            showerror("Error", "Could not find doctor record.")
             return
         try:
             self.cursor.execute("DELETE FROM doctors WHERE id=?", (doctor_id,))
             self.conn.commit()
-            messagebox.showinfo("Success", "Doctor deleted successfully!")
+            showinfo("Success", "Doctor deleted successfully!")
             self.load()
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to delete doctor: {e}")
+            showerror("Error", f"Failed to delete doctor: {e}")

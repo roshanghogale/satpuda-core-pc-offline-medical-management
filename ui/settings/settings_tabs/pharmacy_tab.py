@@ -7,6 +7,7 @@ from tkinter import messagebox
 import os
 from core.font_config import *
 from core.scroll_manager import make_scrollable
+from core.themed_messagebox import showinfo, showwarning, showerror, askyesno
 
 
 class PharmacyTab:
@@ -58,7 +59,7 @@ class PharmacyTab:
         self._logo_path_var = tk.StringVar(value="No logo selected")
         ttk.Label(logo_frame, textvariable=self._logo_path_var,
                   font=(FONT_FAMILY, FONT_SIZE_SUPPORTING_TEXT),
-                  foreground='gray', width=35, anchor='w').pack(side=tk.LEFT, padx=(0, 8))
+                  width=35, anchor='w').pack(side=tk.LEFT, padx=(0, 8))
         ttk.Button(logo_frame, text="📁 Choose Image", command=self._choose_logo).pack(side=tk.LEFT, padx=2)
         ttk.Button(logo_frame, text="✖ Remove", command=self._remove_logo).pack(side=tk.LEFT, padx=2)
 
@@ -173,6 +174,6 @@ class PharmacyTab:
                     VALUES (?,?,?,?,?,?,?,?)
                 """, data)
             self.conn.commit()
-            messagebox.showinfo("Success", "Pharmacy profile saved successfully!")
+            showinfo("Success", "Pharmacy profile saved successfully!")
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to save profile: {e}")
+            showerror("Error", f"Failed to save profile: {e}")

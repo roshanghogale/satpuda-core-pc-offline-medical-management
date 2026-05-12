@@ -3,7 +3,7 @@ try:
     import ttkbootstrap as ttk
 except ImportError:
     from tkinter import ttk
-from tkinter import messagebox
+from core.themed_messagebox import showinfo, showwarning, showerror, askyesno
 import threading
 from core.font_config import *
 from core.alert_colors import get_alert_color
@@ -101,7 +101,7 @@ class DatabaseTab:
         try:
             self.cursor.execute("SELECT COUNT(*) FROM sales")
             if self.cursor.fetchone()[0] == 0:
-                messagebox.showinfo('Nothing to Export', 'No sales records found.')
+                showinfo('Nothing to Export', 'No sales records found.', parent=self._parent)
                 return
             self.cursor.execute("""
                 SELECT s.bill_no, s.bill_date, c.name, COALESCE(c.phone,''),
@@ -126,13 +126,13 @@ class DatabaseTab:
             from core.export_manager import export_data
             export_data(self._parent, f'Sales Export ({len(rows)} rows)', headers, rows, 'sales_export')
         except Exception as e:
-            messagebox.showerror('Export Error', str(e))
+            showerror('Export Error', str(e), parent=self._parent)
 
     def export_purchases(self):
         try:
             self.cursor.execute("SELECT COUNT(*) FROM purchases")
             if self.cursor.fetchone()[0] == 0:
-                messagebox.showinfo('Nothing to Export', 'No purchase records found.')
+                showinfo('Nothing to Export', 'No purchase records found.', parent=self._parent)
                 return
             self.cursor.execute("""
                 SELECT p.purchase_no, COALESCE(p.bill_number,''), p.purchase_date,
@@ -157,13 +157,13 @@ class DatabaseTab:
             export_data(self._parent, f'Purchases Export ({len(rows)} rows)',
                         headers, rows, 'purchases_export')
         except Exception as e:
-            messagebox.showerror('Export Error', str(e))
+            showerror('Export Error', str(e), parent=self._parent)
 
     def export_inventory(self):
         try:
             self.cursor.execute("SELECT COUNT(*) FROM medicines")
             if self.cursor.fetchone()[0] == 0:
-                messagebox.showinfo('Nothing to Export', 'No medicines found.')
+                showinfo('Nothing to Export', 'No medicines found.', parent=self._parent)
                 return
             self.cursor.execute("""
                 SELECT m.name, m.type, COALESCE(m.batch_no,''), COALESCE(m.expiry_date,''),
@@ -182,7 +182,7 @@ class DatabaseTab:
             export_data(self._parent, f'Inventory Export ({len(rows)} medicines)',
                         headers, rows, 'inventory_export')
         except Exception as e:
-            messagebox.showerror('Export Error', str(e))
+            showerror('Export Error', str(e), parent=self._parent)
 
     def export_all(self):
         from core.export_manager import export_all_combined
@@ -208,7 +208,7 @@ class DatabaseTab:
                 'Bill Total','Discount','Cash Paid','Online Paid',
                 'Amount Paid','Due Amount','Total Due'], self.cursor.fetchall()))
         except Exception as e:
-            messagebox.showerror('Export Error', f'Sales: {e}'); return
+            showerror('Export Error', f'Sales: {e}', parent=self._parent); return
 
         try:
             self.cursor.execute("""
@@ -229,7 +229,7 @@ class DatabaseTab:
                 'Medicine','Type','Qty','Free Qty','Rate','MRP','Batch No','Expiry Date',
                 'Total Amount','Amount Paid','Due Amount','Total Due'], self.cursor.fetchall()))
         except Exception as e:
-            messagebox.showerror('Export Error', f'Purchases: {e}'); return
+            showerror('Export Error', f'Purchases: {e}', parent=self._parent); return
 
         try:
             self.cursor.execute("""
@@ -241,10 +241,10 @@ class DatabaseTab:
             sections.append(('Inventory', ['Name','Type','Batch No','Expiry Date','Stock Qty',
                 'MRP','Rate','Manufacturer','Schedule','HSN Code'], self.cursor.fetchall()))
         except Exception as e:
-            messagebox.showerror('Export Error', f'Inventory: {e}'); return
+            showerror('Export Error', f'Inventory: {e}', parent=self._parent); return
 
         if not any(rows for _, _, rows in sections):
-            messagebox.showinfo('Nothing to Export', 'No data found.')
+            showinfo('Nothing to Export', 'No data found.', parent=self._parent)
             return
         export_all_combined(self._parent, sections)
 
@@ -258,13 +258,14 @@ class DatabaseTab:
 
         def _confirm():
             if pwd_var.get() != 'RoshanDeleteDatabase':
-                messagebox.showerror("Wrong Password", "Incorrect password.", parent=dlg)
+                showerror("Wrong Password", "Incorrect password.", parent=dlg)
                 pwd_e.delete(0, tk.END)
                 pwd_e.focus()
                 return
             dlg.destroy()
-            if not messagebox.askyesno("Confirm Delete",
-                                       "This will permanently delete ALL data. Are you sure?"):
+            if not askyesno("Confirm Delete",
+                            "This will permanently delete ALL data. Are you sure?",
+                            parent=self._parent):
                 return
             tables = ['sales_items','sales','purchase_items','purchases',
                       'medicine_shelf','medicines','customers','suppliers',
@@ -290,7 +291,7 @@ class DatabaseTab:
                     migrate_schema(self.conn)
                 except Exception:
                     pass
-            messagebox.showinfo("Success", "All data deleted. The application will now restart.")
+            showinfo("Success", "All data deleted. The application will now restart.", parent=self._parent)
             _restart_app(root)
 
         pwd_e.bind('<Return>', lambda e: _confirm())

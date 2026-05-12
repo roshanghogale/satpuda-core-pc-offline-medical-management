@@ -316,20 +316,17 @@ class PurchaseFormMixin:
             row=1, column=1, sticky=tk.W, padx=4, pady=2)
 
         ttk.Label(tf, text="Final Amount:",
-                  font=(FONT_FAMILY, FONT_SIZE_LABELS, 'bold'),
-                  foreground='blue').grid(row=1, column=6, sticky=tk.W, padx=8, pady=2)
+                  font=(FONT_FAMILY, FONT_SIZE_LABELS, 'bold')).grid(row=1, column=6, sticky=tk.W, padx=8, pady=2)
         self.final_amount_var = tk.StringVar(value="0.00")
         ttk.Label(tf, textvariable=self.final_amount_var,
-                  font=(FONT_FAMILY, FONT_SIZE_LABELS, 'bold'),
-                  foreground='blue').grid(row=1, column=7, sticky=tk.W, padx=4, pady=2)
+                  font=(FONT_FAMILY, FONT_SIZE_LABELS, 'bold')).grid(row=1, column=7, sticky=tk.W, padx=4, pady=2)
 
         ttk.Label(tf, text="Current Credit:",
                   font=(FONT_FAMILY, FONT_SIZE_LABELS)).grid(
             row=1, column=8, sticky=tk.W, padx=8, pady=2)
         self.current_credit_var = tk.StringVar(value="0.00")
         ttk.Label(tf, textvariable=self.current_credit_var,
-                  font=(FONT_FAMILY, FONT_SIZE_LABELS),
-                  foreground='green').grid(row=1, column=9, sticky=tk.W, padx=4, pady=2)
+                  font=(FONT_FAMILY, FONT_SIZE_LABELS)).grid(row=1, column=9, sticky=tk.W, padx=4, pady=2)
 
         # ── Row 2: Overall Disc % | Overall Disc ₹ | Rounding | Prev Due | Prev Credit | Amount Paid | [Save] ──
         ttk.Label(tf, text="Overall Disc %:").grid(row=2, column=0, sticky=tk.W, padx=4, pady=2)
@@ -355,7 +352,7 @@ class PurchaseFormMixin:
         self.previous_due_var = tk.StringVar(value="0.00")
         ttk.Label(tf, textvariable=self.previous_due_var,
                   font=(FONT_FAMILY, FONT_SIZE_LABELS),
-                  foreground='orange', width=8, anchor='w').grid(
+                  width=8, anchor='w').grid(
             row=2, column=7, padx=4, pady=2)
 
         # Previous Credit — read-only display
@@ -363,7 +360,7 @@ class PurchaseFormMixin:
         self.previous_credit_var = tk.StringVar(value="0.00")
         ttk.Label(tf, textvariable=self.previous_credit_var,
                   font=(FONT_FAMILY, FONT_SIZE_LABELS),
-                  foreground='green', width=8, anchor='w').grid(
+                  width=8, anchor='w').grid(
             row=2, column=9, padx=4, pady=2)
 
         ttk.Label(tf, text="Amount Paid:").grid(row=3, column=0, sticky=tk.W, padx=4, pady=2)

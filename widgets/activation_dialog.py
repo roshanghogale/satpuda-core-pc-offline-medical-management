@@ -48,7 +48,29 @@ def show_activation_dialog(on_success_callback):
     tk.Label(card,
              text="This device is not activated.\nContact the developer to activate this software.",
              font=('Segoe UI', 10), bg='#161b22', fg='#8b949e',
-             justify='center').pack(pady=(6, 20))
+             justify='center').pack(pady=(6, 4))
+
+    # ── Contact info ───────────────────────────────────────────────────────────
+    contact_frame = tk.Frame(card, bg='#1c2128',
+                             highlightbackground='#30363d', highlightthickness=1)
+    contact_frame.pack(padx=48, pady=(0, 16), fill=tk.X)
+
+    tk.Label(contact_frame, text="Developer Contact",
+             font=('Segoe UI', 9, 'bold'), bg='#1c2128', fg='#58a6ff').pack(pady=(8, 4))
+
+    for icon, text in [
+        ('📞', 'Roshan Bonde  —  +91 98765 43210'),
+        ('✉', 'roshanb.dev@gmail.com'),
+        ('💬', 'WhatsApp: +91 98765 43210'),
+    ]:
+        row = tk.Frame(contact_frame, bg='#1c2128')
+        row.pack(anchor='center', pady=1)
+        tk.Label(row, text=icon, font=('Segoe UI', 10),
+                 bg='#1c2128', fg='#8b949e').pack(side=tk.LEFT, padx=(0, 6))
+        tk.Label(row, text=text, font=('Segoe UI', 9),
+                 bg='#1c2128', fg='#c9d1d9').pack(side=tk.LEFT)
+
+    tk.Frame(contact_frame, bg='#1c2128', height=8).pack()
 
     # ── Form ───────────────────────────────────────────────────────────────────
     form = tk.Frame(card, bg='#161b22')

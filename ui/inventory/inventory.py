@@ -157,7 +157,13 @@ class InventoryPage:
 
         for tag, bg in [('out_of_stock','#ffebee'),('low_stock','#fff3e0'),
                         ('expired','#ffebee'),('near_expiry','#fff3e0')]:
-            self.inventory_tree.tag_configure(tag, background=bg, foreground='#000000')
+            from core.alert_colors import get_tree_tag_colors
+            clr = get_tree_tag_colors()
+            self.inventory_tree.tag_configure('out_of_stock', background=clr['due_bg'],     foreground=clr['due_fg'])
+            self.inventory_tree.tag_configure('low_stock',    background=clr['partial_bg'], foreground=clr['partial_fg'])
+            self.inventory_tree.tag_configure('expired',      background=clr['due_bg'],     foreground=clr['due_fg'])
+            self.inventory_tree.tag_configure('near_expiry',  background=clr['partial_bg'], foreground=clr['partial_fg'])
+            break
 
     # ── Data loading ──────────────────────────────────────────────────────
 

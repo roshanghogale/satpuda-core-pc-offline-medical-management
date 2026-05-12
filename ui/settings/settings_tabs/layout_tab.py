@@ -6,7 +6,7 @@ try:
 except ImportError:
     from tkinter import ttk
     TTKBOOTSTRAP_AVAILABLE = False
-from tkinter import messagebox
+from core.themed_messagebox import showinfo, showwarning, showerror, askyesno
 from core.font_config import *
 from core.layout_config import (
     _DEFAULTS, _SCHEDULE_UNIT_DEFAULTS, _TYPE_QTY_DEFAULTS,
@@ -247,7 +247,7 @@ class LayoutTab:
         if TTKBOOTSTRAP_AVAILABLE:
             try:
                 save_theme(theme_name)
-                messagebox.showinfo("Theme Changed", "Application will restart with the new theme.")
+                showinfo("Theme Changed", "Application will restart with the new theme.")
                 _restart_app(self._root)
             except Exception as e:
                 print(f"Error changing theme: {e}")
@@ -271,7 +271,7 @@ class LayoutTab:
             with open(_get_font_size_path(), 'w') as f:
                 f.write(str(size))
         except Exception as e:
-            messagebox.showerror("Error", f"Could not save font size: {e}")
+            showerror("Error", f"Could not save font size: {e}")
             return
         try:
             data = {k: v.get() for k, v in self._row_vars.items()}
@@ -294,8 +294,8 @@ class LayoutTab:
                     data[f'typeqty_{t}'] = _TYPE_QTY_DEFAULTS.get(t, 0)
             save_layout(data)
         except Exception as e:
-            messagebox.showerror("Error", f"Could not save layout: {e}")
+            showerror("Error", f"Could not save layout: {e}")
             return
         if not silent:
-            messagebox.showinfo("Layout Saved", "Layout saved. The application will now restart.")
+            showinfo("Layout Saved", "Layout saved. The application will now restart.")
             _restart_app(self._root)

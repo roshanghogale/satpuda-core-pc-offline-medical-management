@@ -88,6 +88,7 @@ def create_window(theme: str):
             _setup_fonts(root)
             from core.alert_colors import apply_alert_colors_to_theme
             apply_alert_colors_to_theme()
+            _apply_native_widget_theme(root)
             root.after(100, lambda: _refresh_fonts(root))
         else:
             root = tk.Tk()
@@ -96,6 +97,55 @@ def create_window(theme: str):
         root = tk.Tk()
         _setup_fallback_fonts(root)
     return root
+
+
+def _apply_native_widget_theme(root):
+    """Apply ttkbootstrap theme colors to native tk widgets (Menu, Listbox, Canvas)."""
+    try:
+        style  = ttk.Style()
+        colors = style.colors
+        bg     = colors.bg
+        fg     = colors.fg
+        selbg  = colors.selectbg
+        selfg  = colors.selectfg
+        inputbg = getattr(colors, 'inputbg', bg)
+        inputfg = getattr(colors, 'inputfg', fg)
+        border  = getattr(colors, 'border',  selbg)
+
+        # tk.Menu
+        root.option_add('*Menu.background',       bg)
+        root.option_add('*Menu.foreground',       fg)
+        root.option_add('*Menu.activeBackground', selbg)
+        root.option_add('*Menu.activeForeground', selfg)
+        root.option_add('*Menu.relief',           'flat')
+        root.option_add('*Menu.borderWidth',      '1')
+
+        # tk.Listbox
+        root.option_add('*Listbox.background',       inputbg)
+        root.option_add('*Listbox.foreground',       inputfg)
+        root.option_add('*Listbox.selectBackground', selbg)
+        root.option_add('*Listbox.selectForeground', selfg)
+        root.option_add('*Listbox.relief',           'flat')
+        root.option_add('*Listbox.borderWidth',      '1')
+        root.option_add('*Listbox.highlightThickness','1')
+        root.option_add('*Listbox.highlightColor',   border)
+
+        # tk.Canvas (used by scrollable frames)
+        root.option_add('*Canvas.background', bg)
+        root.option_add('*Canvas.highlightThickness', '0')
+
+        # tk.Text
+        root.option_add('*Text.background',       inputbg)
+        root.option_add('*Text.foreground',       inputfg)
+        root.option_add('*Text.insertBackground', fg)
+        root.option_add('*Text.selectBackground', selbg)
+        root.option_add('*Text.selectForeground', selfg)
+        root.option_add('*Text.relief',           'flat')
+        root.option_add('*Text.borderWidth',      '1')
+        root.option_add('*Text.highlightThickness','1')
+        root.option_add('*Text.highlightColor',   border)
+    except Exception:
+        pass
 
 
 def _setup_fonts(root):

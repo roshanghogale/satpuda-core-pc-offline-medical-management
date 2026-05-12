@@ -1,10 +1,9 @@
 import tkinter as tk
-from tkinter import messagebox
-
 try:
     import ttkbootstrap as ttk
 except ImportError:
     from tkinter import ttk
+from core.themed_messagebox import showinfo, showwarning, showerror, askyesno
 
 from core.calc_engine import calc_bill_summary, calc_payment_result, auto_round
 from core.customer_service import get_or_create_customer, get_customer_names
@@ -52,7 +51,7 @@ class BillingPage(BillingNavMixin, BillingFormMixin):
             show_bill_preview(self.parent, self.conn,
                               self._last_bill_no, self._last_sale_id)
         else:
-            messagebox.showinfo("No Bill", "No bill generated yet in this session.")
+            showinfo("No Bill", "No bill generated yet in this session.", parent=self.parent)
 
     # ── Calculate ─────────────────────────────────────────────────────────
 
@@ -111,14 +110,14 @@ class BillingPage(BillingNavMixin, BillingFormMixin):
     def generate_bill(self):
         self.cursor.execute("SELECT * FROM pharmacy_profile LIMIT 1")
         if not self.cursor.fetchone():
-            messagebox.showwarning("Setup Required",
-                                   "Please set up pharmacy profile in Settings first.")
+            showwarning("Setup Required",
+                        "Please set up pharmacy profile in Settings first.", parent=self.parent)
             return
         if not self.customer_name.get().strip():
-            messagebox.showwarning("Missing Information", "Please enter customer name.")
+            showwarning("Missing Information", "Please enter customer name.", parent=self.parent)
             return
         if not self.selected_medicines:
-            messagebox.showwarning("No Medicines", "Please add medicines to the bill.")
+            showwarning("No Medicines", "Please add medicines to the bill.", parent=self.parent)
             return
 
         try:
@@ -151,15 +150,15 @@ class BillingPage(BillingNavMixin, BillingFormMixin):
             self.customer_name.configure(values=get_customer_names(self.conn))
             self._last_bill_no = bill_no
             self._last_sale_id = sale_id
-            messagebox.showinfo(
-                "Success",
-                f"Bill {bill_no} generated!  [F5=New Bill | Ctrl+P=Print]")
+            showinfo("Success",
+                     f"Bill {bill_no} generated!  [F5=New Bill | Ctrl+P=Print]",
+                     parent=self.parent)
             show_bill_preview(self.parent, self.conn, bill_no, sale_id)
             self.clear_form()
 
         except Exception as e:
             self.conn.rollback()
-            messagebox.showerror("Error", f"Failed to generate bill: {e}")
+            showerror("Error", f"Failed to generate bill: {e}", parent=self.parent)
 
     # ── Clear ─────────────────────────────────────────────────────────────
 

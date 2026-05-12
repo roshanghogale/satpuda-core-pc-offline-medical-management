@@ -237,6 +237,16 @@ def _apply_icon(window):
         pass
 
 
+def _apply_dialog_theme(dlg):
+    """Apply ttkbootstrap theme background to a Toplevel dialog."""
+    try:
+        import ttkbootstrap as _ttk
+        bg = _ttk.Style().colors.bg
+        dlg.configure(bg=bg)
+    except Exception:
+        pass
+
+
 def open_dialog(parent, title, width=None, height=None, resizable=True):
     """
     Create a standard modal Toplevel dialog.
@@ -245,6 +255,7 @@ def open_dialog(parent, title, width=None, height=None, resizable=True):
     dlg = tk.Toplevel(parent)
     dlg.title(title)
     dlg.resizable(resizable, resizable)
+    _apply_dialog_theme(dlg)
 
     # Set window icon
     _apply_icon(dlg)

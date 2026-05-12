@@ -77,9 +77,10 @@ class SettingsPage:
                   font=(FONT_FAMILY, FONT_SIZE_LABELS, 'bold')).pack(side=tk.LEFT, padx=(0, 8))
         ttk.Button(web_bar, text="🌐 Open Web Purchase Entry",
                    command=self._open_web_purchase).pack(side=tk.LEFT)
+        from core.alert_colors import get_muted_color
         ttk.Label(web_bar, text="Enter purchases in the browser, copy JSON, paste below.",
                   font=(FONT_FAMILY, FONT_SIZE_SUPPORTING_TEXT),
-                  foreground='gray').pack(side=tk.LEFT, padx=12)
+                  foreground=get_muted_color()).pack(side=tk.LEFT, padx=12)
         ttk.Separator(frame, orient='horizontal').pack(fill=tk.X, padx=10, pady=4)
         ImportPurchasesPage(frame, self.conn)
 

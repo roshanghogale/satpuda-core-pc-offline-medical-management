@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import messagebox
+from core.themed_messagebox import showinfo, showwarning, showerror, askyesno
 try:
     import ttkbootstrap as ttk
 except ImportError:
@@ -92,8 +92,10 @@ class CustomersPage:
         tree_frame.grid_rowconfigure(0, weight=1)
         tree_frame.grid_columnconfigure(0, weight=1)
 
-        self.tree.tag_configure('has_due',    background='#f8d7da', foreground='#721c24')
-        self.tree.tag_configure('has_credit', background='#d4edda', foreground='#155724')
+        from core.alert_colors import get_tree_tag_colors
+        clr = get_tree_tag_colors()
+        self.tree.tag_configure('has_due',    background=clr['due_bg'],     foreground=clr['due_fg'])
+        self.tree.tag_configure('has_credit', background=clr['cleared_bg'], foreground=clr['cleared_fg'])
 
         # Context menu
         self.ctx_menu = tk.Menu(self.parent, tearoff=0)
@@ -146,7 +148,7 @@ class CustomersPage:
                  f"{float(c['total_credit']):.2f}")
                 for c in self._all_data]
         if not rows:
-            messagebox.showinfo("No Records", "No customers found.")
+            showinfo("No Records", "No customers found.", parent=self.parent)
             return
         headers = ['Name', 'Phone', 'Address', 'Total Due', 'Credit']
         export_data(self.parent, 'Customer List', headers, rows, 'customer_list')
@@ -162,7 +164,7 @@ class CustomersPage:
         """)
         rows = self.cursor.fetchall()
         if not rows:
-            messagebox.showinfo("No Records", "No customers with outstanding dues found.")
+            showinfo("No Records", "No customers with outstanding dues found.", parent=self.parent)
             return
         headers = ['Customer', 'Phone', 'Total Due', 'Credit']
         export_data(self.parent, 'Customer Due List', headers, rows, 'customer_due_list')
@@ -278,7 +280,7 @@ class CustomersPage:
         for c in self._all_data:
             recalculate_customer_due(self.conn, c['id'])
         self.load_customers()
-        messagebox.showinfo("Done", "All customer dues recalculated.")
+        showinfo("Done", "All customer dues recalculated.", parent=self.parent)
 
     # ── Keyboard nav ──────────────────────────────────────────────────────
 

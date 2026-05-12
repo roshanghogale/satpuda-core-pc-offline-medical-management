@@ -8,7 +8,7 @@ No DB saves, no bill generation.
 import re
 import tkinter as tk
 from datetime import datetime
-from tkinter import messagebox
+from core.themed_messagebox import showinfo, showwarning, showerror, askyesno
 
 try:
     import ttkbootstrap as ttk
@@ -374,8 +374,8 @@ class BillingFormMixin:
         sel = self.medicine_combo.get_selected_medicine()
         if sel:
             if sel.get('schedule') and not self.doctor_name.get():
-                messagebox.showwarning("Doctor Required",
-                                       "This medicine requires a doctor name.")
+                showwarning("Doctor Required",
+                        "This medicine requires a doctor name.", parent=self.parent)
                 self.doctor_name.focus()
                 return
             self.quantity.focus()
@@ -384,34 +384,34 @@ class BillingFormMixin:
         sel      = self.medicine_combo.get_selected_medicine()
         qty_text = self.quantity.get()
         if not sel or not qty_text:
-            messagebox.showwarning("Missing Information",
-                                   "Please select medicine and enter quantity.")
+            showwarning("Missing Information",
+                        "Please select medicine and enter quantity.", parent=self.parent)
             if not qty_text:
                 self.quantity.focus()
             return
         try:
             qty = int(qty_text)
         except ValueError:
-            messagebox.showerror("Invalid Quantity", "Please enter a valid quantity.")
+            showerror("Invalid Quantity", "Please enter a valid quantity.", parent=self.parent)
             return
         if sel.get('schedule') and not self.doctor_name.get():
-            messagebox.showwarning("Doctor Required",
-                                   "Please select a doctor for scheduled medicines.")
+            showwarning("Doctor Required",
+                        "Please select a doctor for scheduled medicines.", parent=self.parent)
             return
         try:
             exp = datetime.strptime(sel['expiry'], '%Y-%m-%d')
             if exp <= datetime.now():
-                messagebox.showerror("Expired Medicine",
-                                     f"{sel['name']} expired on {sel['expiry']}.")
+                showerror("Expired Medicine",
+                          f"{sel['name']} expired on {sel['expiry']}.", parent=self.parent)
                 return
         except Exception:
             pass
         if sel['stock'] == 0:
-            messagebox.showerror("Out of Stock", f"{sel['name']} is out of stock.")
+            showerror("Out of Stock", f"{sel['name']} is out of stock.", parent=self.parent)
             return
         if qty > sel['stock']:
-            messagebox.showerror("Insufficient Stock",
-                                 f"Only {int(sel['stock'])} units available.")
+            showerror("Insufficient Stock",
+                      f"Only {int(sel['stock'])} units available.", parent=self.parent)
             return
 
         self.cursor.execute(
@@ -530,7 +530,8 @@ class BillingFormMixin:
                 dlg.destroy()
                 self.medicine_tree.focus()
             except ValueError:
-                messagebox.showerror("Invalid Input", "Please enter valid quantity and discount.")
+                showerror("Invalid Input", "Please enter valid quantity and discount.",
+                          parent=self.parent)
 
         qty_e.bind('<Down>',   lambda e: (disc_e.focus(), disc_e.select_range(0, tk.END)))
         qty_e.bind('<Return>', lambda e: (disc_e.focus(), disc_e.select_range(0, tk.END)))

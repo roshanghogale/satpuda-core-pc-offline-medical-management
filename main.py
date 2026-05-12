@@ -524,11 +524,12 @@ class VeterinaryManagementSystem:
 
     def _show_backup_error(self, message):
         try:
-            from tkinter import messagebox
-            self.root.after(0, lambda: messagebox.showwarning(
+            from core.themed_messagebox import showwarning
+            self.root.after(0, lambda: showwarning(
                 "Backup Connection Error",
                 f"Automatic backup could not connect to Google Drive.\n\n"
-                f"Reason: {message}\n\nYour data is safe locally. Backup will retry in 1 hour."))
+                f"Reason: {message}\n\nYour data is safe locally. Backup will retry in 1 hour.",
+                parent=self.root))
         except Exception: pass
 
     # ── Theme (called from settings) ──────────────────────────────────────
@@ -536,8 +537,9 @@ class VeterinaryManagementSystem:
     def change_theme(self, theme_name):
         if theme_name in self.available_themes:
             save_theme(theme_name)
-            from tkinter import messagebox
-            messagebox.showinfo("Theme Changed", "Application will restart with the new theme.")
+            from core.themed_messagebox import showinfo
+            showinfo("Theme Changed", "Application will restart with the new theme.",
+                     parent=self.root)
             restart_app(self.root)
 
     def run(self):

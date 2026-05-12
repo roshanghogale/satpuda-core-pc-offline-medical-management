@@ -19,6 +19,7 @@ from core.font_config import *
 from core.alert_colors import get_alert_color
 from core.layout_config import SUPPLIERS_ROWS
 from core.scroll_manager import make_scrollable, open_dialog
+from core.themed_messagebox import showinfo, showwarning, showerror, askyesno
 
 
 class SuppliersTab:
@@ -77,8 +78,10 @@ class SuppliersTab:
             self.tree.heading(col, text=col)
             self.tree.column(col, width=col_widths.get(col, 100))
 
-        self.tree.tag_configure('has_due',    background='#f8d7da', foreground='#721c24')
-        self.tree.tag_configure('has_credit', background='#d4edda', foreground='#155724')
+        from core.alert_colors import get_tree_tag_colors
+        clr = get_tree_tag_colors()
+        self.tree.tag_configure('has_due',    background=clr['due_bg'],     foreground=clr['due_fg'])
+        self.tree.tag_configure('has_credit', background=clr['cleared_bg'], foreground=clr['cleared_fg'])
 
         sb = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
@@ -177,7 +180,7 @@ class SuppliersTab:
             except Exception as e:
                 print(f"[RECALC] supplier {row[0]}: {e}")
         self.load()
-        messagebox.showinfo("Done", "All supplier balances recalculated.")
+        showinfo("Done", "All supplier balances recalculated.")
 
     def edit(self):
         sel = self.tree.selection()
@@ -216,11 +219,11 @@ class SuppliersTab:
                     (name_e.get(), phone_e.get(), gstin_e.get(),
                      addr_e.get(1.0, tk.END).strip(), supplier_id))
                 self.conn.commit()
-                messagebox.showinfo("Success", "Supplier updated successfully!")
+                showinfo("Success", "Supplier updated successfully!")
                 dlg.destroy()
                 self.load()
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to update supplier: {e}")
+                showerror("Error", f"Failed to update supplier: {e}")
 
         name_e.bind('<Return>',  lambda e: phone_e.focus())
         name_e.bind('<Down>',    lambda e: phone_e.focus())
@@ -248,19 +251,19 @@ class SuppliersTab:
             return
         supplier_id = int(sel[0])
         name = self.tree.item(sel[0])['values'][0]
-        if not messagebox.askyesno("Confirm Delete", f"Delete supplier {name}?"):
+        if not askyesno("Confirm Delete", f"Delete supplier {name}?"):
             return
         try:
             self.cursor.execute(
                 "SELECT COUNT(*) FROM purchases WHERE supplier_id=?", (supplier_id,))
             if self.cursor.fetchone()[0] > 0:
-                messagebox.showwarning(
+                showwarning(
                     "Cannot Delete",
                     "Supplier has purchase history and cannot be deleted.")
                 return
             self.cursor.execute("DELETE FROM suppliers WHERE id=?", (supplier_id,))
             self.conn.commit()
-            messagebox.showinfo("Success", "Supplier deleted successfully!")
+            showinfo("Success", "Supplier deleted successfully!")
             self.load()
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to delete supplier: {e}")
+            showerror("Error", f"Failed to delete supplier: {e}")

@@ -1,5 +1,9 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+try:
+    import ttkbootstrap as ttk
+except ImportError:
+    from tkinter import ttk
+from tkinter import messagebox
 import tempfile
 import os
 import threading
