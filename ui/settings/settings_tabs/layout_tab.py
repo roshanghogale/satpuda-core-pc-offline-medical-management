@@ -43,30 +43,27 @@ class LayoutTab:
         # ── Theme ─────────────────────────────────────────────────────────
         if TTKBOOTSTRAP_AVAILABLE:
             current = load_theme()
+            # Build display list: "Dark Blue  (superhero)" etc.
+            theme_display = [f"{label}  ({key})" for key, label in AVAILABLE_THEMES.items()]
+            current_display = f"{AVAILABLE_THEMES.get(current, current)}  ({current})"
+
             tf = ttk.LabelFrame(frame, text="\U0001f3a8 Theme")
             tf.pack(fill=tk.X, padx=20, pady=(15, 8))
-            ttk.Label(tf, text=f"Active theme: {AVAILABLE_THEMES.get(current, current)}",
-                      font=(FONT_FAMILY, FONT_SIZE_LABELS, 'bold')).pack(padx=10, pady=(8, 4))
-            # Dark themes row
-            dark_row = ttk.Frame(tf)
-            dark_row.pack(padx=10, pady=(2, 0))
-            ttk.Label(dark_row, text="Dark:", width=6,
-                      font=(FONT_FAMILY, FONT_SIZE_LABELS, 'bold')).pack(side=tk.LEFT, padx=(0, 4))
-            for key, label in AVAILABLE_THEMES.items():
-                if 'Dark' in label:
-                    ttk.Button(dark_row, text=label.replace('Dark ', ''), width=11,
-                               command=lambda t=key: self._change_theme(t)).pack(
-                        side=tk.LEFT, padx=3, pady=2)
-            # Light themes row
-            light_row = ttk.Frame(tf)
-            light_row.pack(padx=10, pady=(2, 8))
-            ttk.Label(light_row, text="Light:", width=6,
-                      font=(FONT_FAMILY, FONT_SIZE_LABELS, 'bold')).pack(side=tk.LEFT, padx=(0, 4))
-            for key, label in AVAILABLE_THEMES.items():
-                if 'Light' in label:
-                    ttk.Button(light_row, text=label.replace('Light ', ''), width=11,
-                               command=lambda t=key: self._change_theme(t)).pack(
-                        side=tk.LEFT, padx=3, pady=2)
+
+            tr = ttk.Frame(tf)
+            tr.pack(fill=tk.X, padx=10, pady=(10, 4))
+            ttk.Label(tr, text="Select Theme:",
+                      font=(FONT_FAMILY, FONT_SIZE_LABELS, 'bold')).pack(side=tk.LEFT, padx=(0, 8))
+            self._theme_var = tk.StringVar(value=current_display)
+            theme_combo = ttk.Combobox(tr, textvariable=self._theme_var,
+                                       values=theme_display, state='readonly', width=30)
+            theme_combo.pack(side=tk.LEFT, padx=(0, 10))
+            ttk.Button(tr, text="Apply Theme",
+                       command=self._apply_theme_from_combo).pack(side=tk.LEFT, padx=4)
+
+            ttk.Label(tf,
+                      text="Active: " + AVAILABLE_THEMES.get(current, current) + f"  ({current})",
+                      font=(FONT_FAMILY, FONT_SIZE_LABELS)).pack(padx=10, pady=(0, 10))
 
         # ── Font Size ──────────────────────────────────────────────────────
         ff = ttk.LabelFrame(frame, text="Font Size")
@@ -237,6 +234,14 @@ class LayoutTab:
             self.font_preview_lbl.configure(font=('Segoe UI', new_val))
         except Exception:
             pass
+
+    def _apply_theme_from_combo(self):
+        val = self._theme_var.get()  # e.g. "Dark Blue  (superhero)"
+        try:
+            key = val.split('(')[-1].rstrip(')')
+            self._change_theme(key)
+        except Exception as e:
+            print(f"Theme apply error: {e}")
 
     def _change_theme(self, theme_name):
         if TTKBOOTSTRAP_AVAILABLE:
