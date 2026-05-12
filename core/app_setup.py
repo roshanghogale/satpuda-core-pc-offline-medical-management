@@ -24,25 +24,25 @@ from core.font_config import *
 
 AVAILABLE_THEMES = {
     # ── Dark themes ───────────────────────────────────────────────────────
-    'superhero':  'Dark Blue',
-    'darkly':     'Dark Gray',
-    'cyborg':     'Dark Cyan',
-    'solar':      'Dark Orange',
-    'vapor':      'Dark Purple',
+    'superhero':  'Dark — Blue Steel',
+    'darkly':     'Dark — Charcoal',
+    'cyborg':     'Dark — Cyborg',
+    'solar':      'Dark — Solarized',
+    'vapor':      'Dark — Vapor Neon',
     # ── Light themes ──────────────────────────────────────────────────────
-    'cosmo':      'Light Blue',
-    'minty':      'Light Green',
-    'flatly':     'Light Flat',
-    'journal':    'Light Classic',
-    'sandstone':  'Light Warm',
-    'litera':     'Light Clean',
-    'lumen':      'Light Lumen',
-    'pulse':      'Light Purple',
-    'united':     'Light United',
-    'yeti':       'Light Yeti',
-    'morph':      'Light Morph',
-    'simplex':    'Light Simplex',
-    'cerculean':  'Light Cerculean',
+    'cosmo':      'Light — Cosmo Blue',
+    'flatly':     'Light — Flatly',
+    'litera':     'Light — Litera',
+    'minty':      'Light — Minty Green',
+    'morph':      'Light — Morph Blue',
+    'pulse':      'Light — Pulse Purple',
+    'sandstone':  'Light — Sandstone',
+    'simplex':    'Light — Simplex Red',
+    'united':     'Light — United Orange',
+    'yeti':       'Light — Yeti Teal',
+    'cerculean':  'Light — Cerculean',
+    'journal':    'Light — Journal',
+    'lumen':      'Light — Lumen',
 }
 
 
