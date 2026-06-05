@@ -75,6 +75,22 @@ try:
 except Exception:
     pass
 
+# ── Selftest for restart correctness ─────────────────────────────────────
+# Usage (manual): run SatpudaCore.exe --selftest-restart
+# First run relaunches; second run verifies sqlite3 import succeeds.
+_SELFTEST_RESTART = "--selftest-restart" in sys.argv
+_SELFTEST_RESTARTED = "--selftest-restarted" in sys.argv
+if _SELFTEST_RESTART and not _SELFTEST_RESTARTED:
+    try:
+        sys.argv.append("--selftest-restarted")
+        from core.frozen_bootstrap import relaunch_executable
+        relaunch_executable()
+    except Exception:
+        try:
+            open("selftest_error.txt", "w", encoding="utf-8").write("selftest relaunch failed")
+        except Exception:
+            pass
+
 # ── License / expiry checks ───────────────────────────────────────────────────
 def _run_license_check():
     from core.license_manager import needs_activation, prepare_device_key
@@ -97,8 +113,9 @@ def _run_expiry_check():
         if not activated[0]:
             sys.exit(0)
 
-_run_license_check()
-_run_expiry_check()
+if not (_SELFTEST_RESTART and _SELFTEST_RESTARTED):
+    _run_license_check()
+    _run_expiry_check()
 
 # ── Imports ───────────────────────────────────────────────────────────────────
 import tkinter as tk
@@ -108,6 +125,13 @@ except ImportError:
     from tkinter import ttk
 
 import sqlite3
+if _SELFTEST_RESTARTED:
+    # If we reached here, sqlite3 extension module was imported successfully.
+    try:
+        open("selftest_ok.txt", "w", encoding="utf-8").write("sqlite3 import ok after restart")
+    except Exception:
+        pass
+    sys.exit(0)
 from core.app_setup import (
     AVAILABLE_THEMES, load_theme, save_theme,
     create_window, set_window_icon, restart_app, load_app_mode,

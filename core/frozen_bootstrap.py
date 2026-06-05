@@ -97,38 +97,39 @@ def clean_env_for_child_process() -> dict:
 
 def relaunch_executable(root=None) -> None:
     """Restart the running EXE with a clean environment and correct working directory."""
-    import subprocess
-
     if not getattr(sys, 'frozen', False):
+        import subprocess
+
         args = [sys.executable, os.path.abspath(sys.argv[0])] + sys.argv[1:]
         cwd = os.path.dirname(os.path.abspath(sys.argv[0]))
-        env = None
-    else:
-        args = [os.path.abspath(sys.executable)]
-        cwd = os.path.dirname(args[0])
-        env = clean_env_for_child_process()
+        try:
+            if root is not None:
+                try: root.quit()
+                except Exception: pass
+                try: root._style = type('_S', (), {'instance': None})()
+                except Exception: pass
+                try: root.destroy()
+                except Exception: pass
+            subprocess.Popen(args, cwd=cwd)
+        except Exception:
+            pass
+        sys.exit(0)
+
+    # Frozen EXE: replace the current process (no parallel extraction/locks).
+    exe_path = os.path.abspath(sys.executable)
+    args = [exe_path] + sys.argv[1:]
+    env = clean_env_for_child_process()
 
     if root is not None:
-        try:
-            root.quit()
-        except Exception:
-            pass
-        try:
-            root._style = type('_S', (), {'instance': None})()
-        except Exception:
-            pass
-        try:
-            root.destroy()
-        except Exception:
-            pass
+        try: root.quit()
+        except Exception: pass
+        try: root._style = type('_S', (), {'instance': None})()
+        except Exception: pass
+        try: root.destroy()
+        except Exception: pass
 
-    subprocess.Popen(
-        args,
-        cwd=cwd,
-        env=env,
-        close_fds=False,
-    )
-    sys.exit(0)
+    # os.execve does not spawn a new process; it avoids PyInstaller temp extraction races.
+    os.execve(exe_path, args, env)
 
 
 def build_update_batch(
