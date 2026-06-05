@@ -41,6 +41,7 @@ class BillingPage(BillingNavMixin, BillingFormMixin):
         root.bind('<Control-p>', lambda e: self._print_last_bill())
         root.bind('<Control-P>', lambda e: self._print_last_bill())
         root.bind('<F6>',        lambda e: self.cash_paid.focus())
+        root.bind('<End>',       lambda e: self._focus_payment_field())
         self.parent.after(100, self._setup_arrow_nav)
 
     def _rebind_mousewheel(self):
@@ -145,6 +146,7 @@ class BillingPage(BillingNavMixin, BillingFormMixin):
                 doctor_name  = self.doctor_name.get(),
                 doctor_phone = self.doctor_phone.get().strip(),
                 previous_due = self.previous_due,
+                bill_date    = self.get_bill_date_value(),
             )
 
             self.customer_name.configure(values=get_customer_names(self.conn))
@@ -169,6 +171,7 @@ class BillingPage(BillingNavMixin, BillingFormMixin):
         self.customer_address.delete(0, tk.END)
         self.doctor_name.set('')
         self.doctor_phone.delete(0, tk.END)
+        self._reset_bill_date_today()
         self.clear_medicine_fields()
 
         self.discount_pct.delete(0, tk.END); self.discount_pct.insert(0, "0")

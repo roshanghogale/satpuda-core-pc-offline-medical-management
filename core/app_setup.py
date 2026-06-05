@@ -78,7 +78,62 @@ def save_theme(theme: str):
         pass
 
 
+# ── App Mode (medical / veterinary) ──────────────────────────────────────────
+
+def _app_mode_path() -> str:
+    if getattr(sys, 'frozen', False):
+        return os.path.join(
+            os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
+            'VeterinaryApp', 'app_mode.txt')
+    return os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        '..', 'config', 'app_mode.txt')
+
+
+def load_app_mode() -> str:
+    """Return 'medical' or 'veterinary'."""
+    try:
+        path = _app_mode_path()
+        if os.path.exists(path):
+            m = open(path).read().strip().lower()
+            if m in ('medical', 'veterinary'):
+                return m
+    except Exception:
+        pass
+    return 'medical'
+
+
+def save_app_mode(mode: str):
+    try:
+        with open(_app_mode_path(), 'w') as f:
+            f.write(mode)
+    except Exception:
+        pass
+
+
 # ── Window creation ───────────────────────────────────────────────────────────
+
+def _patch_ttkbootstrap_return_binding(root: tk.Widget) -> None:
+    """
+    ttkbootstrap invokes the default button on Enter globally. If a dialog was
+    closed, the target widget may already be destroyed → KeyError / TclError.
+    """
+    def _safe_return(event):
+        try:
+            w = root.nametowidget(event.widget)
+            if w.winfo_exists():
+                w.invoke()
+        except (KeyError, tk.TclError):
+            pass
+
+    try:
+        root.unbind_class('TButton', '<Key-Return>')
+        root.unbind_class('TButton', '<KP_Enter>')
+    except Exception:
+        pass
+    root.bind_class('TButton', '<Key-Return>', _safe_return, add='+')
+    root.bind_class('TButton', '<KP_Enter>', _safe_return, add='+')
+
 
 def create_window(theme: str):
     """Create and return the root window with fonts applied."""
@@ -90,6 +145,7 @@ def create_window(theme: str):
             from core.custom_themes import register_custom_themes
             register_custom_themes()
             root = ttk.Window(themename=theme)
+            _patch_ttkbootstrap_return_binding(root)
             _setup_fonts(root)
             from core.alert_colors import apply_alert_colors_to_theme
             apply_alert_colors_to_theme()
@@ -207,15 +263,8 @@ def _refresh_fonts(root):
 
 def set_window_icon(root):
     try:
-        base = sys._MEIPASS if getattr(sys, 'frozen', False) \
-               else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        ico = os.path.join(base, 'assets', 'satpuda_logo.ico')
-        png = os.path.join(base, 'assets', 'satpuda_logo.png')
-        if os.path.exists(ico):
-            root.iconbitmap(default=ico)
-        if os.path.exists(png):
-            root._taskbar_icon = tk.PhotoImage(file=png)
-            root.wm_iconphoto(True, root._taskbar_icon)
+        from core.window_icon import apply_main_window_icon
+        apply_main_window_icon(root)
     except Exception:
         pass
 

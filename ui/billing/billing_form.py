@@ -7,7 +7,7 @@ No DB saves, no bill generation.
 """
 import re
 import tkinter as tk
-from datetime import datetime
+from datetime import datetime, date
 from core.themed_messagebox import showinfo, showwarning, showerror, askyesno
 
 try:
@@ -17,7 +17,8 @@ except ImportError:
 
 from core.alert_colors import get_alert_color
 from core.font_config import *
-from core.layout_config import BILLING_ROWS
+from core.layout_config import BILLING_ROWS, is_strip_count_type, parse_tablets_per_stripe
+from core.column_config import get_visible_columns
 from core.scroll_manager import make_scrollable, open_dialog
 from core.customer_service import (
     get_customer_names, get_customer_by_name, get_all_doctor_names
@@ -82,7 +83,13 @@ class BillingFormMixin:
         ttk.Label(cf, text="Doctor Phone:").grid(row=1, column=2, sticky=tk.W, padx=5, pady=5)
         self.doctor_phone = ttk.Entry(cf, width=15)
         self.doctor_phone.grid(row=1, column=3, padx=5, pady=5)
-        self.doctor_phone.bind('<Return>', self.on_doctor_phone_enter)
+        self.doctor_phone.bind('<Return>', lambda e: self._focus_bill_date())
+
+        ttk.Label(cf, text="Bill Date:").grid(row=1, column=4, sticky=tk.W, padx=5, pady=5)
+        self._bill_date_default = date.today().strftime('%Y-%m-%d')
+        self.bill_date_var = tk.StringVar(value=self._bill_date_default)
+        self.bill_date = self._make_bill_date_widget(cf)
+        self.bill_date.grid(row=1, column=5, padx=5, pady=5, sticky=tk.W)
 
         # ── Medicine selection ────────────────────────────────────────────
         mf = ttk.LabelFrame(main_frame, text="Medicine Selection")
@@ -105,7 +112,7 @@ class BillingFormMixin:
         self.medicine_discount.insert(0, "0")
         self.medicine_discount.bind('<Return>', lambda e: self.add_medicine_and_focus())
 
-        ttk.Label(mf, text="(Tablets for Tablet, Units for others)",
+        ttk.Label(mf, text="(Tablets for d/strip types, units for ml/g types)",
                   font=(FONT_FAMILY, 8)).grid(row=1, column=2, columnspan=2, sticky=tk.W, padx=5)
 
         try:
@@ -238,6 +245,64 @@ class BillingFormMixin:
             self.generate_btn = ttk.Button(sumf, text="Generate Bill (F5)",
                                            command=self.generate_bill)
             self.generate_btn.grid(row=2, column=9, columnspan=3, padx=6, pady=4, sticky=tk.EW)
+
+    def _focus_medicine_name(self):
+        try:
+            self.medicine_combo.focus_step1()
+        except Exception:
+            pass
+
+    def _make_bill_date_widget(self, parent):
+        def _on_date_enter(_event=None):
+            self._focus_medicine_name()
+            return 'break'
+
+        try:
+            from ttkbootstrap.widgets import DateEntry
+            w = DateEntry(parent, dateformat='%Y-%m-%d', width=12, bootstyle='primary')
+            try:
+                w.entry.configure(textvariable=self.bill_date_var)
+            except Exception:
+                pass
+            entry = getattr(w, 'entry', w)
+            entry.bind('<Return>', _on_date_enter, add='+')
+            entry.bind('<KP_Enter>', _on_date_enter, add='+')
+            w.bind('<<DateEntrySelected>>', lambda e: self._focus_medicine_name())
+            return w
+        except Exception:
+            ent = ttk.Entry(parent, textvariable=self.bill_date_var, width=12)
+            ent.bind('<Return>', _on_date_enter, add='+')
+            return ent
+
+    def _focus_bill_date(self):
+        try:
+            if hasattr(self.bill_date, 'entry'):
+                self.bill_date.entry.focus_set()
+            else:
+                self.bill_date.focus_set()
+        except Exception:
+            pass
+
+    def get_bill_date_value(self):
+        raw = (self.bill_date_var.get() or '').strip()
+        if not raw:
+            return date.today()
+        for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y'):
+            try:
+                return datetime.strptime(raw, fmt).date()
+            except ValueError:
+                continue
+        return date.today()
+
+    def _reset_bill_date_today(self):
+        today = date.today().strftime('%Y-%m-%d')
+        self._bill_date_default = today
+        self.bill_date_var.set(today)
+        try:
+            if hasattr(self.bill_date, 'set_date'):
+                self.bill_date.set_date(date.today())
+        except Exception:
+            pass
 
     # ── Two-way discount binding ────────────────────────────────────────────────────
 
@@ -423,9 +488,9 @@ class BillingFormMixin:
         gst_percent = info[2] if info else 0
         location    = self._fmt_location(info[3] if info else '')
 
-        if med_type and med_type.lower() in ('tablet', 'bolus'):
+        if is_strip_count_type(med_type or ''):
             try:
-                ups  = float(unit_value) if unit_value else 1
+                ups  = parse_tablets_per_stripe(unit_value)
                 rate = sel['mrp'] / ups
             except (ValueError, ZeroDivisionError):
                 rate = sel['mrp']
@@ -489,10 +554,11 @@ class BillingFormMixin:
         values = self.medicine_tree.item(sel[0])['values']
 
         dlg = open_dialog(self.parent, "Edit Medicine", width=360, height=240, resizable=False)
-        ttk.Label(dlg, text=f"Medicine: {values[0]}",
+        body = dlg.content
+        ttk.Label(body, text=f"Medicine: {values[0]}",
                   font=(FONT_FAMILY, FONT_SIZE_LABELS, 'bold')).pack(pady=(12, 6))
 
-        ff = ttk.Frame(dlg)
+        ff = ttk.Frame(body)
         ff.pack(pady=5, padx=12, fill=tk.X)
         ff.grid_columnconfigure(1, weight=1)
 
@@ -539,11 +605,9 @@ class BillingFormMixin:
         disc_e.bind('<Return>', lambda e: update())
         dlg.bind('<Escape>', lambda e: dlg.destroy())
 
-        bf = ttk.Frame(dlg)
-        bf.pack(pady=8)
-        ub = ttk.Button(bf, text="Update", command=update)
+        ub = ttk.Button(dlg.footer, text="Update", command=update)
         ub.pack(side=tk.LEFT, padx=6)
-        cb = ttk.Button(bf, text="Cancel", command=dlg.destroy)
+        cb = ttk.Button(dlg.footer, text="Cancel", command=dlg.destroy)
         cb.pack(side=tk.LEFT, padx=6)
         ub.bind('<Return>', lambda e: update())
         cb.bind('<Return>', lambda e: dlg.destroy())
@@ -571,11 +635,12 @@ class BillingFormMixin:
             return False
 
     def _apply_location_column_visibility(self):
-        if self._show_location_enabled():
-            self.medicine_tree.configure(displaycolumns=self._all_columns)
-        else:
-            self.medicine_tree.configure(
-                displaycolumns=[c for c in self._all_columns if c != 'Location'])
+        visible = get_visible_columns('billing', self._all_columns)
+        if not self._show_location_enabled():
+            visible = [c for c in visible if c != 'Location']
+        if not visible:
+            visible = list(self._all_columns)
+        self.medicine_tree.configure(displaycolumns=visible)
 
     def _fmt_location(self, raw):
         if not raw or not raw.strip():

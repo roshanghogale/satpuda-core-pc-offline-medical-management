@@ -135,6 +135,7 @@ _TABLES = [
         name TEXT, address TEXT, phone TEXT, email TEXT,
         gstin TEXT, dl_number TEXT,
         gst_enabled INTEGER DEFAULT 1, logo_path TEXT,
+        fssai_number TEXT, show_fssai_on_bill INTEGER DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )""",
     """CREATE TABLE IF NOT EXISTS customer_payments (
@@ -208,6 +209,14 @@ _TABLES = [
         amount      REAL DEFAULT 0,
         FOREIGN KEY (return_id)   REFERENCES sales_returns (id),
         FOREIGN KEY (medicine_id) REFERENCES medicines (id)
+    )""",
+    """CREATE TABLE IF NOT EXISTS general_products (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+        rate REAL DEFAULT 0,
+        mrp REAL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )""",
 ]
 
@@ -415,6 +424,8 @@ def _migrate_pharmacy_profile(cur):
     try:
         _alter_if_missing(cur, 'pharmacy_profile', 'gst_enabled', 'INTEGER DEFAULT 1')
         _alter_if_missing(cur, 'pharmacy_profile', 'logo_path', 'TEXT')
+        _alter_if_missing(cur, 'pharmacy_profile', 'fssai_number', 'TEXT')
+        _alter_if_missing(cur, 'pharmacy_profile', 'show_fssai_on_bill', 'INTEGER DEFAULT 0')
     except Exception as e:
         print(f"pharmacy_profile migration: {e}")
 

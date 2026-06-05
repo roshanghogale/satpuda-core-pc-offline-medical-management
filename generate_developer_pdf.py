@@ -114,8 +114,8 @@ def generate():
     story.append(Spacer(1, 3*mm))
     story.append(tbl([
         ['Field', 'Value'],
-        ['Username', 'RoshanMedicalManagerUserName'],
-        ['Password', 'RoshanMedicalManagerPassword'],
+        ['Username', 'satpudacoreusername'],
+        ['Password', 'satpuda core'],
         ['Device Key', '(read from device.key file — unique per device)'],
     ]))
     story.append(Spacer(1, 6*mm))
@@ -184,8 +184,8 @@ def generate():
         "Open device.key using any method from Section 3 above.",
         "Copy the 64-character content of device.key.",
         "In the activation dialog, enter:",
-        "      Username  →  RoshanMedicalManagerUserName",
-        "      Password  →  RoshanMedicalManagerPassword",
+        "      Username  →  satpudacoreusername",
+        "      Password  →  satpuda core",
         "      Device Key  →  (paste the copied content)",
         "Click 'Activate Software'.",
         "The app opens. device.key is automatically deleted.",

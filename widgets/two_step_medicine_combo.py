@@ -1,6 +1,10 @@
 import tkinter as tk
-from tkinter import ttk
+try:
+    import ttkbootstrap as ttk
+except ImportError:
+    from tkinter import ttk
 from core.font_config import *
+from core.layout_config import is_strip_count_type
 
 class TwoStepMedicineCombo(ttk.Frame):
     def __init__(self, master, conn, width=60, *args, **kwargs):
@@ -211,6 +215,15 @@ class TwoStepMedicineCombo(ttk.Frame):
         """Show dropdown immediately on focus using current entry text."""
         self.after(10, self._do_filter)
 
+    def focus_step1(self):
+        """Focus medicine name entry and show the name dropdown."""
+        try:
+            self.hide_step2()
+            self.step1_entry.focus_set()
+            self.after(10, self._do_filter)
+        except Exception:
+            pass
+
     def on_step1_key(self, event):
         """Trigger filter on every key except navigation keys."""
         if event.keysym in ("Up", "Down", "Return", "Escape", "Tab"):
@@ -371,7 +384,7 @@ class TwoStepMedicineCombo(ttk.Frame):
         for row in rows:
             med_id, name, batch, expiry, stock, mrp, rate, manufacturer, schedule, med_type, unit = row
             expiry_display = expiry[:7] if expiry else 'N/A'
-            pack_size = f"1*{unit}" if med_type and med_type.lower() in ['tablet','bolus'] else unit
+            pack_size = f"1*{unit}" if med_type and is_strip_count_type(med_type) else unit
             self.variants.append({
                 'id': med_id, 'name': name, 'batch': batch,
                 'pack_size': pack_size, 'expiry_display': expiry_display,

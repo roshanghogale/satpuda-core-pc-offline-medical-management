@@ -5,13 +5,13 @@ except ImportError:
     from tkinter import ttk
 
 from ui.settings.settings_tabs.pharmacy_tab   import PharmacyTab
-from ui.settings.settings_tabs.doctors_tab    import DoctorsTab
-from ui.settings.settings_tabs.suppliers_tab  import SuppliersTab
+from ui.settings.settings_tabs.contacts_tab   import ContactsTab
 from ui.settings.settings_tabs.layout_tab     import LayoutTab
 from ui.settings.settings_tabs.database_tab   import DatabaseTab
 from ui.settings.settings_tabs.payment_tab    import PaymentTab
 from ui.settings.settings_tabs.ledger_tab     import LedgerTab
-from ui.settings.settings_tabs.misc_tabs      import ThresholdsTab, ShortcutsTab
+from ui.settings.settings_tabs.misc_tabs      import ThresholdsTab, ShortcutsTab, AppModeTab
+from ui.settings.settings_tabs.updates_tab    import UpdatesTab
 from ui.settings.settings_tabs.customer_payment_tab import CustomerPaymentTab
 
 
@@ -28,8 +28,7 @@ class SettingsPage:
 
         # ── Tabs (each owns its own UI + logic) ───────────────────────────
         self._pharmacy   = PharmacyTab(notebook, conn)
-        self._doctors    = DoctorsTab(notebook, conn)
-        self._suppliers  = SuppliersTab(notebook, conn)
+        self._contacts   = ContactsTab(notebook, conn)
 
         # Shelf Management — delegates to existing ShelfManagementPage
         shelf_frame = ttk.Frame(notebook)
@@ -55,6 +54,8 @@ class SettingsPage:
         self._payment    = PaymentTab(notebook, conn)
         self._cust_pay   = CustomerPaymentTab(notebook, conn)
         self._ledger     = LedgerTab(notebook, conn)
+        self._app_mode   = AppModeTab(notebook)
+        self._updates    = UpdatesTab(notebook)
         self._shortcuts  = ShortcutsTab(notebook)
 
         # Ctrl+Tab navigation
@@ -70,8 +71,20 @@ class SettingsPage:
         except ImportError:
             from tkinter import ttk
 
+        bill_bar = ttk.LabelFrame(frame, text="Import Purchase Bill")
+        bill_bar.pack(fill=tk.X, padx=10, pady=(10, 4))
+        ttk.Button(
+            bill_bar,
+            text="Import Purchase Bill",
+            command=self._open_import_purchase_bill,
+        ).pack(side=tk.LEFT, padx=8, pady=8)
+        ttk.Label(bill_bar,
+            text="Pick a PDF, CSV or Excel bill — the Purchase page opens with rows filled in for you to verify and save.",
+            foreground='gray',
+        ).pack(side=tk.LEFT, padx=8, pady=8)
+
         web_bar = ttk.Frame(frame)
-        web_bar.pack(fill=tk.X, padx=10, pady=(10, 4))
+        web_bar.pack(fill=tk.X, padx=10, pady=(4, 4))
         from core.font_config import FONT_FAMILY, FONT_SIZE_LABELS, FONT_SIZE_SUPPORTING_TEXT
         ttk.Label(web_bar, text="Web Purchase Entry:",
                   font=(FONT_FAMILY, FONT_SIZE_LABELS, 'bold')).pack(side=tk.LEFT, padx=(0, 8))
@@ -84,18 +97,63 @@ class SettingsPage:
         ttk.Separator(frame, orient='horizontal').pack(fill=tk.X, padx=10, pady=4)
         ImportPurchasesPage(frame, self.conn)
 
+    def _open_import_purchase_bill(self):
+        root = self.parent.winfo_toplevel()
+        app = getattr(root, '_main_app', None)
+        purchase_page = None
+        if app is not None and hasattr(app, 'open_purchase'):
+            try:
+                if hasattr(app, 'nav_click') and 'Purchase' in getattr(app, 'nav_buttons', {}):
+                    app.nav_click(app.open_purchase, 'Purchase')
+                else:
+                    app.open_purchase()
+                purchase_page = getattr(app, '_purchase_page', None)
+            except Exception as e:
+                from tkinter import messagebox
+                messagebox.showerror(
+                    "Import Purchase Bill",
+                    f"Could not open the Purchase page:\n{e}",
+                    parent=root,
+                )
+                return
+
+        if purchase_page is None:
+            from tkinter import messagebox
+            messagebox.showerror(
+                "Import Purchase Bill",
+                "Purchase page is not available. Open Purchase once, then try again.",
+                parent=root,
+            )
+            return
+
+        from core.purchase_import_flow import import_purchase_bill_direct
+        import_purchase_bill_direct(root, purchase_page)
+
     def _open_web_purchase(self):
-        import sys, os, webbrowser, shutil, json
+        import sys
+        import os
+        import webbrowser
+        import shutil
+        from tkinter import messagebox
+        from core.web_purchase_server import (
+            start_web_purchase_server, stop_web_purchase_server,
+            get_api_base_url, write_runtime_catalog,
+        )
+
+        web_root = None
         if getattr(sys, 'frozen', False):
-            src = os.path.join(sys._MEIPASS, 'web_app', 'index.html')
             dst_dir = os.path.join(
                 os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
-                'VeterinaryApp', 'web_app')
+                'VeterinaryApp', 'web_app',
+            )
             os.makedirs(dst_dir, exist_ok=True)
+            src = os.path.join(sys._MEIPASS, 'web_app', 'index.html')
             dst = os.path.join(dst_dir, 'index.html')
             try:
                 shutil.copy2(src, dst)
-                # also copy assets folder
+                src_meds = os.path.join(sys._MEIPASS, 'web_app', 'medicines.json')
+                if os.path.isfile(src_meds):
+                    shutil.copy2(src_meds, os.path.join(dst_dir, 'medicines.json'))
                 src_assets = os.path.join(sys._MEIPASS, 'web_app', 'assets')
                 dst_assets = os.path.join(dst_dir, 'assets')
                 if os.path.isdir(src_assets):
@@ -103,59 +161,40 @@ class SettingsPage:
                         shutil.rmtree(dst_assets)
                     shutil.copytree(src_assets, dst_assets)
             except Exception as e:
-                from tkinter import messagebox
                 messagebox.showerror('Web App Error', f'Could not extract web app:\n{e}')
                 return
-            index = dst
+            web_root = dst_dir
         else:
-            index = os.path.join(
+            web_root = os.path.join(
                 os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-                'web_app', 'index.html')
-        if not os.path.exists(index):
-            from tkinter import messagebox
+                'web_app',
+            )
+
+        index = os.path.join(web_root, 'index.html')
+        if not os.path.isfile(index):
             messagebox.showerror('Not Found', f'Web app not found at:\n{index}')
             return
-        from core.layout_config import load_layout, _DEFAULT_SCHEDULES, _DEFAULT_MED_TYPES
-        layout    = load_layout()
-        schedules = layout.get('schedules', list(_DEFAULT_SCHEDULES))
-        med_types = layout.get('med_types',  list(_DEFAULT_MED_TYPES))
-        med_names = []
+
         try:
-            cur = self.conn.cursor()
-            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='medicines_master'")
-            if cur.fetchone():
-                cur.execute("SELECT name FROM medicines_master ORDER BY name COLLATE NOCASE")
-                med_names = [r[0] for r in cur.fetchall()]
-        except Exception:
-            pass
-        # Write localStorage data into launcher.html and open index.html directly.
-        # Browsers block file:// -> file:// redirects, so we write the data into
-        # a launcher that uses a same-origin iframe trick — but the simplest reliable
-        # approach is to write the script into a copy of index.html itself.
-        launcher = os.path.join(os.path.dirname(index), 'launcher.html')
-        inject = (
-            f"<script>\n"
-            f"localStorage.setItem('vet_schedules', JSON.stringify({json.dumps(schedules)}));\n"
-            f"localStorage.setItem('vet_med_types', JSON.stringify({json.dumps(med_types)}));\n"
-            f"localStorage.setItem('vet_medicine_names', JSON.stringify({json.dumps(med_names)}));\n"
-            f"</script>\n"
-        )
-        try:
-            with open(index, 'r', encoding='utf-8') as f:
-                original = f.read()
-            # Inject before </head> or at top if no </head>
-            if '</head>' in original:
-                patched = original.replace('</head>', inject + '</head>', 1)
-            else:
-                patched = inject + original
-            with open(launcher, 'w', encoding='utf-8') as f:
-                f.write(patched)
-            webbrowser.open(f'file:///{launcher.replace(os.sep, "/")}')
+            write_runtime_catalog(web_root, self.conn)
+            stop_web_purchase_server()
+            start_web_purchase_server(self.conn, web_root=web_root)
+            url = get_api_base_url() + '/'
+            webbrowser.open(url)
         except Exception as e:
-            from tkinter import messagebox
-            messagebox.showerror('Web App Error', f'Could not open web app:\n{e}')
+            messagebox.showerror('Web App Error', f'Could not start web purchase server:\n{e}')
 
     # ── Keyboard navigation ───────────────────────────────────────────────
+
+    def open_contacts(self, subtab: str = "Customers"):
+        """Open Settings → Contacts → subtab (Doctors / Customers / Suppliers)."""
+        nb = self._notebook
+        for i in range(nb.index("end")):
+            if nb.tab(i, "text") == "Contacts":
+                nb.select(i)
+                break
+        if hasattr(self, "_contacts"):
+            self._contacts.select_subtab(subtab)
 
     def _setup_notebook_nav(self, notebook):
         def _next(e):

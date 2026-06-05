@@ -26,8 +26,10 @@ import logging
 from core.alert_colors import get_alert_color
 from core.font_config import *
 from core.layout_config import PURCHASE_HISTORY_ROWS, SCHEDULES
+from core.column_config import apply_column_visibility, all_column_names
 from core.scroll_manager import make_scrollable, open_dialog
 from core.export_manager import export_data
+from core.column_config import export_table
 from widgets.searchable_combo import SearchableCombo
 from ui.purchase.purchase_history_edit import open_edit_window, delete_purchase
 
@@ -103,20 +105,19 @@ class PurchaseHistoryPage:
         tf = ttk.Frame(main_frame)
         tf.pack(fill=tk.BOTH, expand=True, pady=5)
 
-        cols = ('Bill No', 'Date', 'Supplier', 'Phone',
-                'Final Amount', 'Paid at Entry', 'Paid via Payment', 'Returns',
-                'Entry Due', 'Status', 'Items')
+        self._all_columns = tuple(all_column_names('purchase_history'))
         widths = {
             'Bill No': 110, 'Date': 95, 'Supplier': 160, 'Phone': 105,
             'Final Amount': 110, 'Paid at Entry': 105, 'Paid via Payment': 115,
             'Returns': 80, 'Entry Due': 90, 'Status': 90, 'Items': 55,
         }
         self.purchase_tree = ttk.Treeview(
-            tf, columns=cols, show='headings',
+            tf, columns=self._all_columns, show='headings',
             height=PURCHASE_HISTORY_ROWS, style='Large.Treeview')
-        for col in cols:
+        for col in self._all_columns:
             self.purchase_tree.heading(col, text=col)
             self.purchase_tree.column(col, width=widths.get(col, 90))
+        apply_column_visibility(self.purchase_tree, 'purchase_history', self._all_columns)
 
         vsb = ttk.Scrollbar(tf, orient=tk.VERTICAL,   command=self.purchase_tree.yview)
         hsb = ttk.Scrollbar(tf, orient=tk.HORIZONTAL, command=self.purchase_tree.xview)
@@ -431,6 +432,7 @@ class PurchaseHistoryPage:
     def _export_menu(self):
         dlg = open_dialog(self.parent, "Export Purchase Reports",
                           width=320, height=280, resizable=False)
+        body = dlg.content
         for label, cmd in [
             ("Current View",        self._export_current_view),
             ("Purchase Register",   self._export_purchase_register),
@@ -438,7 +440,7 @@ class PurchaseHistoryPage:
             ("Supplier Due Report", self._export_supplier_due),
             ("GST Purchase Report", self._export_gst_purchase),
         ]:
-            ttk.Button(dlg, text=label, width=36,
+            ttk.Button(body, text=label, width=36,
                        command=lambda c=cmd, d=dlg: [d.destroy(), c()]
                        ).pack(pady=4, padx=10)
 
@@ -446,14 +448,13 @@ class PurchaseHistoryPage:
         return self.from_date.get().strip(), self.to_date.get().strip()
 
     def _export_current_view(self):
-        cols = self.purchase_tree['columns']
-        rows = [self.purchase_tree.item(iid)['values']
-                for iid in self.purchase_tree.get_children()]
+        from core.column_config import export_tree_current_view
+        cols, rows = export_tree_current_view(self.purchase_tree)
         if not rows:
             showinfo("No Records", "No data visible.")
             return
         export_data(self.parent, 'Purchases - Current View',
-                    list(cols), rows, 'purchases_current_view')
+                    cols, rows, 'purchases_current_view')
 
     def _export_purchase_register(self):
         """Phase 1: uses amount_paid_at_entry, not stale snapshot columns."""
@@ -473,10 +474,10 @@ class PurchaseHistoryPage:
         if not rows:
             showinfo("No Records", "No purchases found.")
             return
-        export_data(self.parent, 'Purchase Register',
-                    ['Bill No', 'Date', 'Supplier', 'Phone',
-                     'Total Amount', 'Paid at Entry', 'Returns'],
-                    rows, 'purchase_register')
+        export_table(self.parent, 'Purchase Register',
+                     ['Bill No', 'Date', 'Supplier', 'Phone',
+                      'Final Amount', 'Paid at Entry', 'Returns'],
+                     rows, 'purchase_register', 'purchase_history', 'purchase_register')
 
     def _export_monthly_summary(self):
         fd, td = self._get_date_range()
@@ -505,9 +506,9 @@ class PurchaseHistoryPage:
                      sum(r[1] for r in raw),
                      f'{sum(r[2] for r in raw):.2f}',
                      f'{sum(r[3] for r in raw):.2f}'])
-        export_data(self.parent, 'Monthly Purchase Summary',
-                    ['Month', 'Purchases', 'Total Amount', 'Paid at Entry'],
-                    rows, 'monthly_purchase_summary')
+        export_table(self.parent, 'Monthly Purchase Summary',
+                      ['Month', 'Purchases', 'Final Amount', 'Paid at Entry'],
+                      rows, 'monthly_purchase_summary', 'purchase_history', 'monthly_summary')
 
     def _export_supplier_due(self):
         """Phase 2: reads from suppliers table — single source of truth."""
@@ -522,9 +523,9 @@ class PurchaseHistoryPage:
         if not rows:
             showinfo("No Records", "No outstanding dues.")
             return
-        export_data(self.parent, 'Supplier Due Report',
-                    ['Supplier', 'Phone', 'Total Due', 'Credit'],
-                    rows, 'supplier_due_report')
+        export_table(self.parent, 'Supplier Due Report',
+                      ['Name', 'Phone', 'Total Due', 'Credit'],
+                      rows, 'supplier_due_report', 'suppliers', 'supplier_due')
 
     def _export_gst_purchase(self):
         fd, td = self._get_date_range()
@@ -545,10 +546,10 @@ class PurchaseHistoryPage:
         if not rows:
             showinfo("No Records", "No items found.")
             return
-        export_data(self.parent, 'GST Purchase Report',
-                    ['Bill No', 'Date', 'Supplier', 'Medicine',
-                     'HSN', 'GST%', 'Qty', 'Rate', 'Amount'],
-                    rows, 'gst_purchase_report')
+        export_table(self.parent, 'GST Purchase Report',
+                      ['Bill No', 'Date', 'Supplier', 'Medicine',
+                       'HSN', 'GST%', 'Qty', 'Rate', 'Amount'],
+                      rows, 'gst_purchase_report', 'purchase_history', 'gst_purchase')
 
     # ── Keyboard nav ──────────────────────────────────────────────────────
 

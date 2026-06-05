@@ -18,17 +18,16 @@ from tkinter import messagebox
 from core.font_config import *
 from core.alert_colors import get_alert_color
 from core.layout_config import SUPPLIERS_ROWS
+from core.column_config import apply_column_visibility, all_column_names
 from core.scroll_manager import make_scrollable, open_dialog
 from core.themed_messagebox import showinfo, showwarning, showerror, askyesno
 
 
 class SuppliersTab:
-    def __init__(self, notebook, conn):
+    def __init__(self, parent, conn):
         self.conn = conn
         self.cursor = conn.cursor()
-        outer = ttk.Frame(notebook)
-        notebook.add(outer, text="Suppliers")
-        frame = make_scrollable(outer)
+        frame = make_scrollable(parent)
         self._build(frame)
         self.load()
 
@@ -67,16 +66,17 @@ class SuppliersTab:
         list_frame = ttk.LabelFrame(frame, text="Suppliers List")
         list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
 
-        columns = ('Name', 'Phone', 'GSTIN', 'Address', 'Total Due', 'Credit', 'Status')
+        self._all_columns = tuple(all_column_names('suppliers'))
         col_widths = {
             'Name': 180, 'Phone': 110, 'GSTIN': 140,
             'Address': 220, 'Total Due': 100, 'Credit': 90, 'Status': 80,
         }
-        self.tree = ttk.Treeview(list_frame, columns=columns, show='headings',
+        self.tree = ttk.Treeview(list_frame, columns=self._all_columns, show='headings',
                                  height=SUPPLIERS_ROWS, style='Large.Treeview')
-        for col in columns:
+        for col in self._all_columns:
             self.tree.heading(col, text=col)
             self.tree.column(col, width=col_widths.get(col, 100))
+        apply_column_visibility(self.tree, 'suppliers', self._all_columns)
 
         from core.alert_colors import get_tree_tag_colors
         clr = get_tree_tag_colors()
@@ -190,25 +190,26 @@ class SuppliersTab:
         values = self.tree.item(sel[0])['values']
 
         dlg = open_dialog(self.tree, "Edit Supplier", width=540, height=400, resizable=False)
-        dlg.grid_columnconfigure(1, weight=1)
+        body = dlg.content
+        body.grid_columnconfigure(1, weight=1)
 
-        ttk.Label(dlg, text="Supplier Name:").grid(row=0, column=0, padx=12, pady=10, sticky=tk.W)
-        name_e = ttk.Entry(dlg, width=36)
+        ttk.Label(body, text="Supplier Name:").grid(row=0, column=0, padx=12, pady=10, sticky=tk.W)
+        name_e = ttk.Entry(body, width=36)
         name_e.grid(row=0, column=1, padx=12, pady=10, sticky=tk.EW)
         name_e.insert(0, values[0])
 
-        ttk.Label(dlg, text="Phone:").grid(row=1, column=0, padx=12, pady=10, sticky=tk.W)
-        phone_e = ttk.Entry(dlg, width=36)
+        ttk.Label(body, text="Phone:").grid(row=1, column=0, padx=12, pady=10, sticky=tk.W)
+        phone_e = ttk.Entry(body, width=36)
         phone_e.grid(row=1, column=1, padx=12, pady=10, sticky=tk.EW)
         phone_e.insert(0, values[1])
 
-        ttk.Label(dlg, text="GSTIN:").grid(row=2, column=0, padx=12, pady=10, sticky=tk.W)
-        gstin_e = ttk.Entry(dlg, width=36)
+        ttk.Label(body, text="GSTIN:").grid(row=2, column=0, padx=12, pady=10, sticky=tk.W)
+        gstin_e = ttk.Entry(body, width=36)
         gstin_e.grid(row=2, column=1, padx=12, pady=10, sticky=tk.EW)
         gstin_e.insert(0, values[2])
 
-        ttk.Label(dlg, text="Address:").grid(row=3, column=0, padx=12, pady=10, sticky=tk.W)
-        addr_e = tk.Text(dlg, width=36, height=3)
+        ttk.Label(body, text="Address:").grid(row=3, column=0, padx=12, pady=10, sticky=tk.W)
+        addr_e = tk.Text(body, width=36, height=3)
         addr_e.grid(row=3, column=1, padx=12, pady=10, sticky=tk.EW)
         addr_e.insert(tk.END, values[3])
 
@@ -235,11 +236,9 @@ class SuppliersTab:
         gstin_e.bind('<Up>',     lambda e: phone_e.focus())
         dlg.bind('<Escape>', lambda e: dlg.destroy())
 
-        bf = ttk.Frame(dlg)
-        bf.grid(row=4, column=0, columnspan=2, pady=12)
-        sb_btn = ttk.Button(bf, text="Save Changes", command=save)
+        sb_btn = ttk.Button(dlg.footer, text="Save Changes", command=save)
         sb_btn.pack(side=tk.LEFT, padx=8)
-        cb_btn = ttk.Button(bf, text="Cancel", command=dlg.destroy)
+        cb_btn = ttk.Button(dlg.footer, text="Cancel", command=dlg.destroy)
         cb_btn.pack(side=tk.LEFT, padx=8)
         sb_btn.bind('<Return>', lambda e: save())
         cb_btn.bind('<Return>', lambda e: dlg.destroy())

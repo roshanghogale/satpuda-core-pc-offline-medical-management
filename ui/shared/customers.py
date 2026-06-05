@@ -10,6 +10,7 @@ from core.font_config import *
 from core.scroll_manager import make_scrollable
 from core.customer_service import get_all_customers, recalculate_customer_due
 from core.layout_config import CUSTOMERS_ROWS
+from core.column_config import apply_column_visibility, all_column_names
 from widgets.searchable_combo import SearchableCombo
 
 
@@ -68,17 +69,18 @@ class CustomersPage:
         tree_frame = ttk.Frame(inner)
         tree_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
-        cols = ('Name', 'Phone', 'Address', 'Total Due', 'Credit')
+        self._all_columns = tuple(all_column_names('customers'))
         self.tree = ttk.Treeview(
-            tree_frame, columns=cols, show='headings',
+            tree_frame, columns=self._all_columns, show='headings',
             height=CUSTOMERS_ROWS, style='Large.Treeview')
 
         widths = {'Name': 200, 'Phone': 130, 'Address': 260,
                   'Total Due': 110, 'Credit': 110}
-        for col in cols:
+        for col in self._all_columns:
             self.tree.heading(col, text=col,
                               command=lambda c=col: self._sort(c))
             self.tree.column(col, width=widths.get(col, 120))
+        apply_column_visibility(self.tree, 'customers', self._all_columns)
 
         vsb = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL,
                             command=self.tree.yview)
@@ -132,14 +134,25 @@ class CustomersPage:
     def _export_menu(self):
         from core.scroll_manager import open_dialog
         dlg = open_dialog(self.parent, "Export Customer Reports", width=320, height=160, resizable=False)
+        body = dlg.content
         reports = [
-            ("Customer List",        self._export_customer_list),
-            ("Customer Due List",    self._export_customer_due),
+            ("Current View (filtered)", self._export_current_view),
+            ("Customer List (all)",   self._export_customer_list),
+            ("Customer Due List",     self._export_customer_due),
         ]
         for label, cmd in reports:
-            ttk.Button(dlg, text=label, width=36,
+            ttk.Button(body, text=label, width=36,
                        command=lambda c=cmd, d=dlg: [d.destroy(), c()]
                        ).pack(pady=4, padx=10)
+
+    def _export_current_view(self):
+        from core.column_config import export_tree_current_view
+        from core.export_manager import export_data
+        cols, rows = export_tree_current_view(self.tree)
+        if not rows:
+            showinfo("No Records", "No customers visible.", parent=self.parent)
+            return
+        export_data(self.parent, 'Customers - Current View', cols, rows, 'customers_current_view')
 
     def _export_customer_list(self):
         from core.export_manager import export_data
@@ -151,7 +164,8 @@ class CustomersPage:
             showinfo("No Records", "No customers found.", parent=self.parent)
             return
         headers = ['Name', 'Phone', 'Address', 'Total Due', 'Credit']
-        export_data(self.parent, 'Customer List', headers, rows, 'customer_list')
+        from core.column_config import export_table
+        export_table(self.parent, 'Customer List', headers, rows, 'customer_list', 'customers', 'customer_list')
 
     def _export_customer_due(self):
         from core.export_manager import export_data
@@ -166,8 +180,9 @@ class CustomersPage:
         if not rows:
             showinfo("No Records", "No customers with outstanding dues found.", parent=self.parent)
             return
-        headers = ['Customer', 'Phone', 'Total Due', 'Credit']
-        export_data(self.parent, 'Customer Due List', headers, rows, 'customer_due_list')
+        headers = ['Name', 'Phone', 'Total Due', 'Credit']
+        from core.column_config import export_table
+        export_table(self.parent, 'Customer Due List', headers, rows, 'customer_due_list', 'customers', 'customer_due_list')
 
     def load_customers(self):
         self._all_data = get_all_customers(self.conn)
@@ -251,9 +266,10 @@ class CustomersPage:
         from core.scroll_manager import open_dialog
         dlg = open_dialog(self.parent, f"Sales History — {customer_name}",
                           width=960, height=640, resizable=False)
+        body = dlg.content
 
         cols = ('Date', 'Bill No', 'Total', 'Paid', 'Due', 'Total Due')
-        tree = ttk.Treeview(dlg, columns=cols, show='headings',
+        tree = ttk.Treeview(body, columns=cols, show='headings',
                             height=18, style='Large.Treeview')
         for col in cols:
             tree.heading(col, text=col)
@@ -268,6 +284,8 @@ class CustomersPage:
         )
         for row in self.cursor.fetchall():
             tree.insert('', tk.END, values=row)
+
+        ttk.Button(dlg.footer, text="Close", command=dlg.destroy).pack(side=tk.RIGHT, padx=8)
 
     def _recalc_selected(self):
         sel = self.tree.selection()

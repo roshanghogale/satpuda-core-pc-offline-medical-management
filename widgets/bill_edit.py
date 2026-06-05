@@ -320,16 +320,13 @@ class BillEditPage:
             return
         values = self.medicine_tree.item(sel[0])['values']
 
-        dlg = tk.Toplevel(self.parent)
-        dlg.title("Edit Quantity")
-        dlg.geometry("360x190")
-        dlg.resizable(False, False)
-        dlg.grab_set()
-
-        ttk.Label(dlg, text=f"Medicine: {values[0]}",
+        from core.scroll_manager import open_dialog
+        dlg = open_dialog(self.parent, "Edit Quantity", width=360, height=200, resizable=False)
+        body = dlg.content
+        ttk.Label(body, text=f"Medicine: {values[0]}",
                   font=(FONT_FAMILY, FONT_SIZE_LABELS, 'bold')).pack(pady=(12, 6))
-        ttk.Label(dlg, text="Quantity (0 to remove):").pack()
-        qty_e = ttk.Entry(dlg, width=22)
+        ttk.Label(body, text="Quantity (0 to remove):").pack()
+        qty_e = ttk.Entry(body, width=22)
         qty_e.pack(pady=6)
         qty_e.insert(0, str(values[3]))
         qty_e.select_range(0, tk.END)
@@ -353,11 +350,9 @@ class BillEditPage:
 
         qty_e.bind('<Return>', lambda e: update())
         dlg.bind('<Escape>', lambda e: dlg.destroy())
-        bf = ttk.Frame(dlg)
-        bf.pack(pady=8)
-        ub = ttk.Button(bf, text="Update", command=update)
+        ub = ttk.Button(dlg.footer, text="Update", command=update)
         ub.pack(side=tk.LEFT, padx=6)
-        cb = ttk.Button(bf, text="Cancel", command=dlg.destroy)
+        cb = ttk.Button(dlg.footer, text="Cancel", command=dlg.destroy)
         cb.pack(side=tk.LEFT, padx=6)
         ub.bind('<Return>', lambda e: update())
         cb.bind('<Return>', lambda e: dlg.destroy())

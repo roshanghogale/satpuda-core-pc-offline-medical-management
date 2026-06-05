@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prebuild": "python ../scripts/export_web_medicines.py",
     "build": "vite build",
+    "build:web": "npm run build && node scripts/copy-to-web-app.cjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },

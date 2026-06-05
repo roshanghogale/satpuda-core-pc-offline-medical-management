@@ -86,3 +86,51 @@ class BillingNavMixin:
             '<Escape>', lambda e: self.customer_name.hide_list(), add='+')
         self.doctor_name.entry.bind(
             '<Escape>', lambda e: self.doctor_name.hide_list(), add='+')
+
+        self._bind_end_to_payment()
+
+    def _focus_payment_field(self, event=None):
+        try:
+            self.cash_paid.focus_set()
+            self.cash_paid.select_range(0, tk.END)
+            self._scroll_to_widget(self.cash_paid)
+        except Exception:
+            pass
+        return 'break'
+
+    def _bind_end_to_payment(self):
+        skip = {self.cash_paid, self.online_paid}
+
+        def handler(event):
+            return self._focus_payment_field()
+
+        nav = [
+            self.customer_name.entry,
+            self.customer_phone,
+            self.customer_address,
+            self.doctor_name.entry,
+            self.doctor_phone,
+            self.medicine_combo.step1_entry,
+            self.quantity,
+            self.medicine_discount,
+            self.discount,
+            self.rounding,
+            self.clear_btn,
+            self.generate_btn,
+        ]
+        for w in nav:
+            if w in skip:
+                continue
+            try:
+                if w.winfo_exists():
+                    w.bind('<End>', handler, add='+')
+            except Exception:
+                pass
+
+        combo = getattr(self.medicine_combo, 'step2_entry', None)
+        if combo is not None:
+            try:
+                if combo.winfo_exists():
+                    combo.bind('<End>', handler, add='+')
+            except Exception:
+                pass

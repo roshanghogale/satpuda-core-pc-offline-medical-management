@@ -1,0 +1,22 @@
+{
+  "template": "classic",
+  "show_gst": true,
+  "show_discount": true,
+  "show_batch": true,
+  "show_expiry": true,
+  "show_doctor": true,
+  "show_terms": true,
+  "show_signature": true,
+  "copies": 2,
+  "blessing_line": "SHREE GANESHAY NAMAH",
+  "paper_size": "A5",
+  "orientation": "landscape",
+  "margins": {
+    "top": 0,
+    "bottom": 0,
+    "left": 0,
+    "right": 0
+  },
+  "font_size_pct": 100,
+  "border_thickness": 1.0
+}

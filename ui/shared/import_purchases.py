@@ -136,77 +136,8 @@ class ImportPurchasesPage:
         self._load_bill(self._index)
 
     def _json_bill_to_internal(self, b):
-        """Convert one JSON bill dict to the internal format used by PurchasePage."""
-        items = []
-        for it in b.get('items', []):
-            med_type = it.get('type', '')
-            is_tablet_bolus = med_type.lower() in ['tablet', 'bolus']
-            qty = float(it.get('qty', 0))
-            free_qty = float(it.get('free_qty', 0))
-            tps = int(it.get('tablets_per_stripe', 1))
-            rate = float(it.get('rate', 0))
-            gst = float(it.get('gst_percent', 0))
-            item_disc = float(it.get('item_discount', 0))
-
-            base = qty * rate
-            if item_disc:
-                base = base * (1 - item_disc / 100)
-            # Accept pre-calculated gst_amount from JSON (web app sends it)
-            if 'gst_amount' in it:
-                gst_amt = float(it['gst_amount'])
-            else:
-                gst_amt = base * gst / 100
-            amount = round(base + gst_amt, 2)
-
-            schedule = it.get('schedule', '')
-            if schedule == 'Non-Scheduled':
-                schedule = ''
-
-            expiry_raw = it.get('expiry_date', '')
-            # normalise to MM/YY
-            if '/' in expiry_raw:
-                parts = expiry_raw.split('/')
-                mm = parts[0].zfill(2)
-                yy = parts[1][-2:]   # take last 2 digits
-                expiry = f"{mm}/{yy}"
-            else:
-                expiry = expiry_raw
-
-            item = {
-                'medicine_id': None,   # resolved on save
-                'name': it.get('medicine_name', ''),
-                'type': med_type,
-                'batch': it.get('batch_no', ''),
-                'expiry': expiry,
-                'qty': qty,
-                'free_qty': free_qty,
-                'rate': rate,
-                # canonical keys for PurchaseCalculator
-                'discount_pct':      item_disc,
-                'gst_pct':           gst,
-                'mrp':               float(it.get('mrp', 0)),
-                'manufacturer':      it.get('manufacturer', ''),
-                'schedule':          schedule,
-                'content_drug':      it.get('content_drug', ''),
-                'hsn_code':          it.get('hsn_code', ''),
-                'tablets_per_stripe': tps,
-                'total_tablets':     qty * tps if is_tablet_bolus else 0,
-                'free_tablets':      free_qty * tps if is_tablet_bolus else 0,
-                'quantity_value':    it.get('quantity_value', '1'),
-                'auto_unit':         '',
-            }
-            items.append(item)
-
-        return {
-            'supplier': b.get('supplier', {}),
-            'purchase_date': b.get('purchase_date',
-                                   datetime.now().strftime('%Y-%m-%d')),
-            'bill_number': b.get('bill_number', ''),
-            'gst_calc_method': b.get('gst_calc_method', 'discount_before_gst'),
-            'overall_discount': float(b.get('overall_discount', 0)),
-            'amount_paid': float(b.get('amount_paid', 0)),
-            'items': items,
-        }
+        from core.web_purchase_save import json_bill_to_internal
+        return json_bill_to_internal(b)
 
     # ── navigation ────────────────────────────────────────────────────────
 
@@ -296,6 +227,10 @@ class ImportPurchasesPage:
         b['purchase_date']    = p.purchase_date.get().strip()
         b['bill_number']      = p.bill_number.get().strip()
         b['overall_discount'] = float(p.overall_discount.get() or 0)
+        try:
+            b['overall_discount_pct'] = float(p.overall_discount_pct.get() or 0)
+        except (ValueError, AttributeError):
+            b['overall_discount_pct'] = 0.0
         b['amount_paid']      = float(p.amount_paid.get() or 0)
         b['items'] = list(p.purchase_items)
 
@@ -349,15 +284,22 @@ class ImportPurchasesPage:
         page.purchase_items = list(bill['items'])
         page.update_items_tree()
 
-        # Set overall discount and amount paid
+        # Set overall discount and amount paid (₹ and % stay in sync)
+        disc_pct = float(bill.get('overall_discount_pct', 0) or 0)
+        disc_rs = float(bill.get('overall_discount', 0) or 0)
+        page.overall_discount_pct.delete(0, tk.END)
+        page.overall_discount_pct.insert(0, str(disc_pct) if disc_pct else '0')
         page.overall_discount.delete(0, tk.END)
-        page.overall_discount.insert(0, str(bill.get('overall_discount', 0)))
+        page.overall_discount.insert(0, str(disc_rs))
         page.amount_paid.delete(0, tk.END)
         page.amount_paid.insert(0, str(bill.get('amount_paid', 0)))
 
-        # Recalculate totals
+        page.update_items_tree()
+        if disc_pct and not disc_rs:
+            page.sync_overall_discount_fields('pct')
+        else:
+            page.sync_overall_discount_fields('rupees')
         page.calculate_total()
-        page.calculate_payment_due()
 
         # Disable individual save — use nav buttons only
         page.save_btn.config(text="Use Next/Submit to save", state=tk.DISABLED)
@@ -401,56 +343,8 @@ class ImportPurchasesPage:
             self._clear_all()
 
     def _save_bill(self, bill):
-        """Save one bill using PurchaseCalculator + purchase_service."""
-        from core.purchase_calculator import PurchaseCalculator
-        from core.purchase_service import (
-            get_or_create_supplier, get_or_create_medicine,
-            save_purchase as svc_save_purchase, get_supplier_due,
-        )
-        sup = bill['supplier']
-        items = bill['items']
-
-        # Normalise item keys to canonical format expected by PurchaseCalculator
-        for item in items:
-            item.setdefault('discount_pct', item.get('item_discount', 0))
-            item.setdefault('gst_pct',      item.get('gst_value', 0))
-
-        # Resolve medicine IDs
-        for item in items:
-            if not item.get('medicine_id'):
-                item['medicine_id'] = get_or_create_medicine(
-                    self.conn,
-                    item['name'], item['type'],
-                    item['batch'], item['expiry'],
-                    item['gst_pct'], item.get('mrp', 0), item['rate'],
-                    item.get('manufacturer', ''), item.get('hsn_code', ''),
-                    item.get('schedule', ''), item.get('content_drug', ''),
-                )
-
-        supplier_id = get_or_create_supplier(
-            self.conn,
-            sup.get('name', ''), sup.get('address', ''),
-            sup.get('phone', ''), sup.get('gstin', ''),
-            sup.get('dl_numbers', ''),
-        )
-
-        prev_due, prev_credit = get_supplier_due(self.conn, sup.get('name', ''))
-
-        result = PurchaseCalculator(
-            items=items,
-            overall_discount=float(bill.get('overall_discount', 0)),
-            rounding=0.0,
-            previous_due=prev_due,
-            previous_credit=prev_credit,
-            amount_paid=float(bill.get('amount_paid', 0)),
-        ).calculate()
-
-        svc_save_purchase(
-            self.conn, supplier_id,
-            bill.get('purchase_date', datetime.now().strftime('%Y-%m-%d')),
-            bill.get('bill_number', ''),
-            result, items,
-        )
+        from core.web_purchase_save import save_internal_bill
+        save_internal_bill(self.conn, bill)
 
     # ── clear ─────────────────────────────────────────────────────────────
 

@@ -1,5 +1,5 @@
 # Suppress warnings at startup
-import os, sys, shutil, warnings
+import os, sys, shutil, warnings, threading, queue
 os.environ['PYTHONWARNINGS'] = 'ignore'
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", message=".*Task policy set failed.*")
@@ -14,26 +14,44 @@ def _setup_exe_environment():
     base_dir = sys._MEIPASS
     if base_dir not in sys.path:
         sys.path.insert(0, base_dir)
-    # Copy all config files to AppData on first run (or if missing)
+    # Seed AppData from the EXE bundle only when a file is missing (first install).
+    # Never overwrite existing files — updates must preserve activation, expiry,
+    # backup_config, theme, and all other per-store settings.
     for fname in ('theme_config.txt', 'layout_config.txt', 'font_size.txt',
                   'expiry.dat', 'backup_creds.dat', 'sample_import.json',
-                  'backup_config.dat', 'backup_slots.dat'):
+                  'backup_config.dat', 'backup_slots.dat', 'app_mode.txt',
+                  'activation.dat'):
         dst = os.path.join(app_data, fname)
-        # Always overwrite expiry.dat from bundled version (demo enforcement)
-        if fname == 'expiry.dat' or not os.path.exists(dst):
-            # Try config/ subfolder first, then root of _MEIPASS
-            src_config = os.path.join(base_dir, 'config', fname)
-            src_root   = os.path.join(base_dir, fname)
-            src = src_config if os.path.exists(src_config) else src_root
-            if os.path.exists(src):
-                shutil.copy2(src, dst)
-            elif fname in ('theme_config.txt', 'font_size.txt', 'layout_config.txt'):
-                defaults = {'theme_config.txt': 'superhero',
-                            'font_size.txt': '10', 'layout_config.txt': '{}'}
-                open(dst, 'w').write(defaults.get(fname, ''))
+        if os.path.exists(dst):
+            continue
+        src_config = os.path.join(base_dir, 'config', fname)
+        src_root   = os.path.join(base_dir, fname)
+        src = src_config if os.path.exists(src_config) else src_root
+        if os.path.exists(src):
+            shutil.copy2(src, dst)
+        elif fname in ('theme_config.txt', 'font_size.txt', 'layout_config.txt'):
+            defaults = {'theme_config.txt': 'superhero',
+                        'font_size.txt': '10', 'layout_config.txt': '{}'}
+            open(dst, 'w').write(defaults.get(fname, ''))
+    try:
+        from core.backup_manager import seed_bundled_backup_files
+        seed_bundled_backup_files()
+    except Exception:
+        pass
+    try:
+        from core.window_icon import _ensure_cached_ico
+        _ensure_cached_ico()
+    except Exception:
+        pass
     os.chdir(app_data)
 
 _setup_exe_environment()
+
+try:
+    from core.window_icon import init_process_app_id
+    init_process_app_id()
+except Exception:
+    pass
 
 # ── License / expiry checks ───────────────────────────────────────────────────
 def _run_license_check():
@@ -70,10 +88,14 @@ except ImportError:
 import sqlite3
 from core.app_setup import (
     AVAILABLE_THEMES, load_theme, save_theme,
-    create_window, set_window_icon, restart_app,
+    create_window, set_window_icon, restart_app, load_app_mode,
 )
 from core.db_setup import initialise as db_initialise
 from core.input_controller import GlobalInputController
+from core.master_medicine_service import (
+    ensure_mode_master_state,
+    sync_master_with_inventory_db_path,
+)
 
 
 class VeterinaryManagementSystem:
@@ -89,19 +111,22 @@ class VeterinaryManagementSystem:
         self.root.state('zoomed')
 
         self._init_database()
+        self._master_medicine_ready = False
 
         self._billing_page  = None
         self._purchase_page = None
 
+        self._prepare_master_medicine_on_startup()
         self._build_nav()
 
         self.root._input_ctrl = self.input_ctrl
         self.root._main_app   = self
 
         self._start_backup()
+        self._schedule_startup_alerts()
+        self._schedule_update_check()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
-        # Auto-import medicines master in background if not yet done
-        self.root.after(2000, self._auto_import_medicines_master)
+        # Startup already prepared/cleared master DB by mode.
 
     # ── Database ──────────────────────────────────────────────────────────
 
@@ -133,7 +158,6 @@ class VeterinaryManagementSystem:
             ("Inventory",        self.open_inventory),
             ("Sales History",    self.open_sales_history),
             ("Purchase History", self.open_purchase_history),
-            ("Customers",        self.open_customers),
             ("Returns",          self.open_returns),
             ("Settings",         self.open_settings),
         ]
@@ -178,9 +202,8 @@ class VeterinaryManagementSystem:
             '3': ('Inventory',        self.open_inventory),
             '4': ('Sales History',    self.open_sales_history),
             '5': ('Purchase History', self.open_purchase_history),
-            '6': ('Customers',        self.open_customers),
-            '7': ('Settings',         self.open_settings),
-            '8': ('Returns',          self.open_returns),
+            '6': ('Settings',         self.open_settings),
+            '7': ('Returns',          self.open_returns),
         }
         INPUT_CLASSES = ('Entry', 'TEntry', 'TCombobox', 'Text', 'Listbox')
 
@@ -261,6 +284,8 @@ class VeterinaryManagementSystem:
         canvas = getattr(inner_frame, '_canvas', None)
         self.input_ctrl.set_active_canvas(canvas)
         self.input_ctrl.set_active_frame(inner_frame)
+        if not (self._purchase_page and getattr(self._purchase_page, '_inner_frame', None) is inner_frame):
+            self.input_ctrl.set_f2_handler(None)
 
     # ── Pages ─────────────────────────────────────────────────────────────
 
@@ -281,11 +306,30 @@ class VeterinaryManagementSystem:
             open_billing_fn  = lambda: self.nav_click(self.open_billing,  'Sales'),
             open_purchase_fn = lambda: self.nav_click(self.open_purchase, 'Purchase'),
             open_inventory_fn= lambda: self.nav_click(self.open_inventory,'Inventory'),
-            open_customers_fn= lambda: self.nav_click(self.open_customers,'Customers'),
+            open_contacts_fn = lambda: self.nav_click(self.open_contacts, 'Settings'),
             open_ledger_fn   = lambda: self.nav_click(lambda: self.open_settings('Ledger'), 'Settings'),
+            open_general_products_fn=self.open_general_products,
             input_ctrl       = self.input_ctrl,
             register_canvas_fn = self._register_canvas,
         )
+
+    def open_general_products(self):
+        """Standalone general product rates — home quick access only (not in top nav)."""
+        self.clear_main_frame()
+        for btn in self.nav_buttons.values():
+            try:
+                btn.configure(bootstyle='outline-primary')
+            except Exception:
+                pass
+        self.active_nav = None
+
+        from ui.general_products import GeneralProductsPage
+        container = ttk.Frame(self.main_frame)
+        container.pack(fill=tk.BOTH, expand=True)
+        page = GeneralProductsPage(container, self.conn)
+        inner = getattr(page, '_inner_frame', None)
+        if inner is not None:
+            container.after(50, lambda: self._register_canvas(inner))
 
     def open_billing(self):
         self.clear_main_frame()
@@ -318,6 +362,7 @@ class VeterinaryManagementSystem:
             self._purchase_page._rebind_mousewheel()
             self.root.after(50, self._purchase_page.supplier_name.focus)
         self._register_canvas(self._purchase_page._inner_frame)
+        self.input_ctrl.set_f2_handler(self._purchase_page._f2_import_bill)
 
     def open_sales_history(self):
         self.clear_main_frame()
@@ -334,10 +379,17 @@ class VeterinaryManagementSystem:
         from ui.inventory import InventoryPage
         self._register_canvas(InventoryPage(self.main_frame, self.conn)._inner_frame)
 
-    def open_customers(self):
+    def open_contacts(self, subtab="Customers"):
+        """Customers / doctors / suppliers — Settings → Contacts only."""
         self.clear_main_frame()
-        from ui.shared.customers import CustomersPage
-        self._register_canvas(CustomersPage(self.main_frame, self.conn)._inner_frame)
+        from ui.settings import SettingsPage
+        page = SettingsPage(self.main_frame, self.conn)
+        page.open_contacts(subtab)
+        self._update_settings_canvas(page)
+        page._notebook.bind(
+            "<<NotebookTabChanged>>",
+            lambda e: self._update_settings_canvas(page),
+        )
 
     def open_returns(self):
         self.clear_main_frame()
@@ -372,17 +424,18 @@ class VeterinaryManagementSystem:
         pur_btn.pack(side=tk.LEFT, padx=6, pady=4)
         _show('sales')
 
-    def open_settings(self, select_tab=None):
+    def open_settings(self, select_tab=None, contacts_sub=None):
         self.clear_main_frame()
         from ui.settings import SettingsPage
         page = SettingsPage(self.main_frame, self.conn)
         if select_tab:
-            # Select the tab whose text matches select_tab
             nb = page._notebook
             for i in range(nb.index('end')):
                 if nb.tab(i, 'text') == select_tab:
                     nb.select(i)
                     break
+        if contacts_sub:
+            page.open_contacts(contacts_sub)
         self._update_settings_canvas(page)
         page._notebook.bind('<<NotebookTabChanged>>',
                             lambda e: self._update_settings_canvas(page))
@@ -391,8 +444,12 @@ class VeterinaryManagementSystem:
         try:
             tab_id     = settings_page._notebook.select()
             tab_widget = settings_page._notebook.nametowidget(tab_id)
-            canvas     = self._find_tab_canvas(tab_widget)
-            self.input_ctrl.set_active_canvas(canvas)
+            tab_text   = settings_page._notebook.tab(tab_id, 'text')
+            if tab_text == 'Appearance':
+                settings_page._layout.sync_input_canvas()
+            else:
+                canvas = self._find_tab_canvas(tab_widget)
+                self.input_ctrl.set_active_canvas(canvas)
             self.input_ctrl.set_active_frame(tab_widget)
         except Exception:
             self.input_ctrl.set_active_canvas(None)
@@ -405,121 +462,122 @@ class VeterinaryManagementSystem:
             if result is not None: return result
         return None
 
-    # ── Medicines master auto-import ─────────────────────────────────────
+    # ── Master medicines DB startup preparation ───────────────────────────
 
-    def _auto_import_medicines_master(self):
-        """If medicines_master table is empty, import from bundled Excel in background."""
-        import threading
-        try:
-            cur = self.conn.cursor()
-            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='medicines_master'")
-            if cur.fetchone():
-                cur.execute("SELECT COUNT(*) FROM medicines_master")
-                if cur.fetchone()[0] > 0:
-                    return  # already populated
-        except Exception:
+    def _prepare_master_medicine_on_startup(self):
+        mode = load_app_mode()
+        self.root._master_mode = mode
+        self.root._master_loading = (mode == 'medical')
+        self.root._master_ready = (mode != 'medical')
+        self._master_medicine_ready = (mode != 'medical')
+        if mode != 'medical':
+            # Veterinary mode keeps master db cleared.
+            try:
+                ensure_mode_master_state(mode)
+            except Exception:
+                pass
             return
 
-        def _run():
+        progress_win = tk.Toplevel(self.root)
+        progress_win.title("Preparing Medicines")
+        progress_win.geometry("460x140")
+        progress_win.resizable(False, False)
+        progress_win.transient(self.root)
+        # Do not grab focus globally; a stale grab can freeze all app inputs.
+        progress_win.attributes('-topmost', True)
+        try:
+            progress_win.configure(padx=16, pady=14)
+        except Exception:
+            pass
+        ttk.Label(
+            progress_win,
+            text="Loading medical master medicines. Please wait...",
+        ).pack(anchor='w', pady=(0, 8))
+        status_var = tk.StringVar(value="Starting...")
+        ttk.Label(progress_win, textvariable=status_var).pack(anchor='w', pady=(0, 8))
+        pb = ttk.Progressbar(progress_win, mode='determinate', maximum=100)
+        pb.pack(fill=tk.X)
+        q = queue.Queue()
+
+        def _emit(percent, message):
             try:
-                import re, sqlite3 as _sq
-                import openpyxl
+                q.put((int(percent), str(message)))
+            except Exception:
+                pass
 
-                # Locate bundled Excel
-                if getattr(sys, 'frozen', False):
-                    xlsx = os.path.join(sys._MEIPASS, 'assets',
-                                        'medicines_master_with_cdsco.xlsx')
-                else:
-                    xlsx = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                        'assets', 'medicines_master_with_cdsco.xlsx')
+        def _worker():
+            ok, count, msg = ensure_mode_master_state('medical', progress_cb=_emit)
+            if ok:
+                try:
+                    _emit(99, "Syncing inventory medicines to master DB...")
+                    sync_master_with_inventory_db_path(self.db_path)
+                except Exception:
+                    pass
+            q.put(("done", ok, count, msg))
 
-                if not os.path.exists(xlsx):
-                    return
+        threading.Thread(target=_worker, daemon=True).start()
 
-                _TYPE_KW = [
-                    ('Tablet','Tablet'),('Capsule','Capsule'),('Syrup','Syrup'),
-                    ('Injection','Injection'),('Ointment','Ointment'),
-                    ('Cream','Ointment'),('Gel','Gel'),('Drops','Syrup'),
-                    ('Powder','Powder'),('Spray','Syrup'),('Inhaler','Injection'),
-                    ('Solution','Syrup'),('Suspension','Syrup'),
-                    ('Liniment','Liniment'),('Bolus','Bolus'),('Vaccine','Vaccine'),
-                ]
-                def _dtype(name, form):
-                    text = f"{name} {form}".lower()
-                    for kw, t in _TYPE_KW:
-                        if kw.lower() in text: return t
-                    return 'Other'
+        def _poll():
+            try:
+                while True:
+                    item = q.get_nowait()
+                    if item and item[0] == "done":
+                        _ok, _count, _msg = item[1], item[2], item[3]
+                        pb['value'] = 100
+                        status_var.set(
+                            f"Ready ({_count:,})" if _ok else f"Master load issue: {_msg}"
+                        )
+                        self.root._master_loading = False
+                        self.root._master_ready = bool(_ok)
+                        self._master_medicine_ready = bool(_ok)
+                        self.root.after(250, lambda: self._close_master_progress(progress_win))
+                        self.root.event_generate("<<MasterMedicineReady>>", when="tail")
+                        return
+                    pct, msg = item
+                    pb['value'] = max(0, min(100, int(pct)))
+                    status_var.set(msg)
+            except queue.Empty:
+                pass
+            self.root.after(80, _poll)
 
-                wb = openpyxl.load_workbook(xlsx, read_only=True)
-                rows = list(wb.active.iter_rows(values_only=True))
-                wb.close()
+        _poll()
+        # Non-blocking startup: keep app responsive while master db prepares.
 
-                # Use a separate connection for the background thread
-                conn2 = _sq.connect(self.db_path)
-                cur2  = conn2.cursor()
-                cur2.execute("DROP TABLE IF EXISTS medicines_master")
-                cur2.execute("""
-                    CREATE TABLE medicines_master (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        name TEXT NOT NULL, manufacturer TEXT,
-                        mrp REAL, content_drug TEXT,
-                        med_type TEXT, pack_size TEXT
-                    )""")
-                cur2.execute("CREATE INDEX IF NOT EXISTS idx_mm_name "
-                             "ON medicines_master(name COLLATE NOCASE)")
-
-                batch = []
-                for r in rows[1:]:
-                    name = str(r[0]).strip() if r[0] else ''
-                    if not name or name.lower() == 'none':
-                        continue
-                    mfg  = str(r[1]).strip()  if r[1]  else ''
-                    try:   mrp = float(r[10]) if r[10] is not None else 0.0
-                    except: mrp = 0.0
-                    salt = str(r[11]).strip() if r[11] else ''
-                    salt = re.sub(r'\s*\+\s*nan\s*', '', salt).strip().strip('+').strip()
-                    form = str(r[16]).strip() if r[16] else ''
-                    pack = str(r[17]).strip() if r[17] else ''
-                    batch.append((name, mfg, mrp, salt, _dtype(name, form), pack))
-                    if len(batch) >= 5000:
-                        cur2.executemany(
-                            "INSERT INTO medicines_master "
-                            "(name,manufacturer,mrp,content_drug,med_type,pack_size) "
-                            "VALUES (?,?,?,?,?,?)", batch)
-                        batch.clear()
-                if batch:
-                    cur2.executemany(
-                        "INSERT INTO medicines_master "
-                        "(name,manufacturer,mrp,content_drug,med_type,pack_size) "
-                        "VALUES (?,?,?,?,?,?)", batch)
-                conn2.commit()
-                conn2.close()
-            except Exception as e:
-                print(f"[medicines_master] auto-import failed: {e}")
-
-        threading.Thread(target=_run, daemon=True).start()
+    def _close_master_progress(self, progress_win):
+        try:
+            progress_win.destroy()
+        except Exception:
+            pass
 
     # ── Backup ────────────────────────────────────────────────────────────
 
     def _start_backup(self):
         try:
-            from core.backup_manager import run_backup_on_open
+            from core.backup_manager import is_auto_backup_enabled, run_backup_on_open
+            if not is_auto_backup_enabled():
+                return
             run_backup_on_open(on_error=self._show_backup_error)
-        except Exception: pass
-        self.root.after(60 * 60 * 1000, self._schedule_backup)
+            self.root.after(60 * 60 * 1000, self._schedule_backup)
+        except Exception:
+            pass
 
     def _schedule_backup(self):
         try:
-            from core.backup_manager import run_backup_silently
+            from core.backup_manager import is_auto_backup_enabled, run_backup_silently
+            if not is_auto_backup_enabled():
+                return
             run_backup_silently(on_error=self._show_backup_error)
-        except Exception: pass
-        self.root.after(60 * 60 * 1000, self._schedule_backup)
+            self.root.after(60 * 60 * 1000, self._schedule_backup)
+        except Exception:
+            pass
 
     def _on_close(self):
         try:
-            from core.backup_manager import run_backup_now
-            run_backup_now()
-        except Exception: pass
+            from core.backup_manager import is_auto_backup_enabled, run_backup_now
+            if is_auto_backup_enabled():
+                run_backup_now()
+        except Exception:
+            pass
         self.root.destroy()
 
     def _show_backup_error(self, message):
@@ -531,6 +589,62 @@ class VeterinaryManagementSystem:
                 f"Reason: {message}\n\nYour data is safe locally. Backup will retry in 1 hour.",
                 parent=self.root))
         except Exception: pass
+
+    def _schedule_startup_alerts(self):
+        """Wait until the maximized main window is mapped (fixes invisible dialogs in EXE)."""
+        def _try():
+            try:
+                self.root.update_idletasks()
+                if self.root.winfo_width() < 200:
+                    self.root.after(300, _try)
+                    return
+            except Exception:
+                pass
+            self._show_startup_alerts()
+
+        self.root.after(800, _try)
+
+    def _show_startup_alerts(self):
+        try:
+            from core.startup_alerts import show_startup_alerts
+            show_startup_alerts(self.root, self.conn)
+        except Exception:
+            pass
+
+    def _schedule_update_check(self):
+        """Once per day, silently check GitHub Releases and prompt if newer."""
+        self.root.after(6000, self._run_update_check)
+
+    def _run_update_check(self):
+        def _run():
+            try:
+                from core.github_updater import (
+                    should_auto_check_today,
+                    check_for_update,
+                    format_release_summary,
+                )
+                if not should_auto_check_today():
+                    return
+                info = check_for_update()
+                if not info.available or not info.has_download:
+                    return
+
+                def _prompt():
+                    from core.themed_messagebox import askyesno
+                    notes = format_release_summary(info)
+                    if askyesno(
+                        "Update Available",
+                        f"A new version is available.\n\n{notes}\n\n"
+                        "Open Settings → Updates to download and install now?",
+                        parent=self.root,
+                    ):
+                        self.open_settings("Updates")
+
+                self.root.after(0, _prompt)
+            except Exception:
+                pass
+
+        threading.Thread(target=_run, daemon=True).start()
 
     # ── Theme (called from settings) ──────────────────────────────────────
 

@@ -5,13 +5,13 @@ All database write operations for the billing flow.
 Used by ui/billing.py (generate_bill) and widgets/bill_edit.py (save_bill).
 No UI code. No calculation code.
 """
-from datetime import datetime
+from datetime import datetime, date
 
 
 def save_new_bill(conn, customer_id, medicines, discount_pct,
                   rounding, cash_paid, online_paid,
                   doctor_name, doctor_phone, previous_due,
-                  discount_rs=None):
+                  discount_rs=None, bill_date=None):
     """
     Insert a new sale + items, update stock, update customer balance.
     Returns (bill_no, sale_id).
@@ -63,7 +63,7 @@ def save_new_bill(conn, customer_id, medicines, discount_pct,
              previous_due, previous_credit, due_amount, credit_amount, total_due,
              bill_cleared, account_cleared)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)
-    """, (bill_no, customer_id, datetime.now().date(), total, disc_amt, disc_pct, rounding,
+    """, (bill_no, customer_id, bill_date or date.today(), total, disc_amt, disc_pct, rounding,
           amount_paid, cash_paid, online_paid, doc_upper,
           prev_due, prev_credit, due_amount, credit_amount, due_amount, bill_cleared))
     sale_id = cur.lastrowid
@@ -136,7 +136,8 @@ def update_existing_bill(conn, sale_id, medicines, discount_pct,
     # Restore old stock
     cur.execute("SELECT medicine_id, qty FROM sales_items WHERE sale_id=?", (sale_id,))
     for med_id, qty in cur.fetchall():
-        cur.execute("UPDATE medicines SET stock_qty=stock_qty+? WHERE id=?", (qty, med_id))
+        restore_qty = abs(float(qty or 0))
+        cur.execute("UPDATE medicines SET stock_qty=stock_qty+? WHERE id=?", (restore_qty, med_id))
 
     cur.execute("DELETE FROM sales_items WHERE sale_id=?", (sale_id,))
     _insert_items_and_update_stock(cur, sale_id, medicines)
@@ -152,23 +153,28 @@ def update_existing_bill(conn, sale_id, medicines, discount_pct,
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _insert_items_and_update_stock(cur, sale_id, medicines):
+    from core.layout_config import is_strip_count_type, parse_tablets_per_stripe
+
     for med in medicines:
         # Snapshot cost_price at sale time from latest purchase
         med_id = med['id']
         cur.execute("""
-            SELECT CASE
-                WHEN LOWER(m.type) IN ('tablet','bolus')
-                     AND CAST(COALESCE(NULLIF(m.unit,''),'1') AS REAL) > 0
-                THEN pi.rate / CAST(COALESCE(NULLIF(m.unit,''),'1') AS REAL)
-                ELSE pi.rate
-            END
+            SELECT pi.rate, m.type, COALESCE(m.unit, '1')
             FROM purchase_items pi
             JOIN medicines m ON pi.medicine_id = m.id
             WHERE pi.medicine_id = ?
             ORDER BY pi.id DESC LIMIT 1
         """, (med_id,))
-        cp_row     = cur.fetchone()
-        cost_price = round(float(cp_row[0]), 4) if cp_row and cp_row[0] else 0.0
+        cp_row = cur.fetchone()
+        if cp_row and cp_row[0] is not None:
+            pi_rate, mtype, unit = cp_row
+            if is_strip_count_type(mtype or ''):
+                tps = parse_tablets_per_stripe(unit)
+                cost_price = round(float(pi_rate) / tps, 4) if tps else round(float(pi_rate), 4)
+            else:
+                cost_price = round(float(pi_rate), 4)
+        else:
+            cost_price = 0.0
 
         cur.execute("""
             INSERT INTO sales_items

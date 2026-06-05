@@ -63,6 +63,41 @@ class PurchaseNavMixin:
         self.parent.winfo_toplevel().bind(
             '<FocusIn>', lambda e: self._scroll_to_widget(e.widget), add='+')
 
+        self._bind_end_to_payment()
+
+    def _focus_payment_field(self, event=None):
+        try:
+            self.amount_paid.focus_set()
+            self.amount_paid.select_range(0, tk.END)
+            self._scroll_to_widget(self.amount_paid)
+        except Exception:
+            pass
+        return 'break'
+
+    def _bind_end_to_payment(self):
+        skip = {self.amount_paid}
+
+        def handler(event):
+            return self._focus_payment_field()
+
+        for w in self._get_full_nav():
+            if w in skip:
+                continue
+            try:
+                if w.winfo_exists():
+                    w.bind('<End>', handler, add='+')
+            except Exception:
+                pass
+
+        for attr in ('overall_discount_pct',):
+            if hasattr(self, attr):
+                try:
+                    w = getattr(self, attr)
+                    if w.winfo_exists():
+                        w.bind('<End>', handler, add='+')
+                except Exception:
+                    pass
+
     # ── full nav list (includes dynamic qty fields) ───────────────────────
 
     def _get_full_nav(self):

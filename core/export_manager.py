@@ -22,12 +22,10 @@ from tkinter import ttk, filedialog, messagebox
 
 
 def _apply_icon(window):
-    """Apply satpuda_logo.ico to any Tk/Toplevel window."""
+    """Apply satpuda_logo to any Tk/Toplevel window."""
     try:
-        from core.license_manager import get_icon_path
-        ico = get_icon_path()
-        if os.path.exists(ico):
-            window.iconbitmap(ico)
+        from core.window_icon import apply_window_icon
+        apply_window_icon(window)
     except Exception:
         pass
 
@@ -36,28 +34,19 @@ def _apply_icon(window):
 
 def export_data(parent, title, headers, rows, default_name='export'):
     """Show format picker then save. rows = list of tuples/lists."""
-    top = parent.winfo_toplevel()
-    dlg = tk.Toplevel(top)
-    dlg.title(f"Export — {title}")
-    dlg.resizable(False, False)
-    dlg.transient(top)
-    dlg.grab_set()
-    dlg.lift()
-    dlg.focus_force()
-    _apply_icon(dlg)
-    dlg.update_idletasks()
-    w, h = 340, 180
-    x = (dlg.winfo_screenwidth()  - w) // 2
-    y = (dlg.winfo_screenheight() - h) // 2
-    dlg.geometry(f"{w}x{h}+{x}+{y}")
+    from core.scroll_manager import open_dialog
 
-    ttk.Label(dlg, text=f"Export: {title}",
-              font=('Segoe UI', 11, 'bold')).pack(pady=(16, 6))
-    ttk.Label(dlg, text="Choose format:").pack()
+    top = parent.winfo_toplevel()
+    dlg = open_dialog(top, f"Export — {title}", width=360, height=200, resizable=False)
+    body = dlg.content
+
+    ttk.Label(body, text=f"Export: {title}",
+              font=('Segoe UI', 11, 'bold')).pack(pady=(12, 6), padx=12)
+    ttk.Label(body, text="Choose format:").pack(padx=12)
 
     fmt_var = tk.StringVar(value='csv')
-    btn_row = ttk.Frame(dlg)
-    btn_row.pack(pady=10)
+    btn_row = ttk.Frame(body)
+    btn_row.pack(pady=10, padx=12)
     for text, val in [('CSV', 'csv'), ('Excel (.xlsx)', 'xlsx'), ('PDF (HTML)', 'pdf')]:
         ttk.Radiobutton(btn_row, text=text, variable=fmt_var,
                         value=val).pack(side=tk.LEFT, padx=8)
@@ -72,10 +61,8 @@ def export_data(parent, title, headers, rows, default_name='export'):
         else:
             _save_pdf(top, title, headers, rows, default_name)
 
-    bf = ttk.Frame(dlg)
-    bf.pack(pady=4)
-    ttk.Button(bf, text="Export", command=_do_export).pack(side=tk.LEFT, padx=6)
-    ttk.Button(bf, text="Cancel", command=dlg.destroy).pack(side=tk.LEFT, padx=6)
+    ttk.Button(dlg.footer, text="Export", command=_do_export).pack(side=tk.LEFT, padx=6)
+    ttk.Button(dlg.footer, text="Cancel", command=dlg.destroy).pack(side=tk.LEFT, padx=6)
 
 
 # ── Export All Combined ───────────────────────────────────────────────────────
@@ -87,31 +74,22 @@ def export_all_combined(parent, sections):
     Excel: one sheet per section.
     HTML: one page with all sections.
     """
-    top = parent.winfo_toplevel()
-    dlg = tk.Toplevel(top)
-    dlg.title("Export All Data")
-    dlg.resizable(False, False)
-    dlg.transient(top)
-    dlg.grab_set()
-    dlg.lift()
-    dlg.focus_force()
-    _apply_icon(dlg)
-    dlg.update_idletasks()
-    w, h = 360, 200
-    x = (dlg.winfo_screenwidth()  - w) // 2
-    y = (dlg.winfo_screenheight() - h) // 2
-    dlg.geometry(f"{w}x{h}+{x}+{y}")
+    from core.scroll_manager import open_dialog
 
-    ttk.Label(dlg, text="Export All Data",
-              font=('Segoe UI', 12, 'bold')).pack(pady=(16, 4))
+    top = parent.winfo_toplevel()
+    dlg = open_dialog(top, "Export All Data", width=380, height=220, resizable=False)
+    body = dlg.content
+
+    ttk.Label(body, text="Export All Data",
+              font=('Segoe UI', 12, 'bold')).pack(pady=(12, 4), padx=12)
     total = sum(len(r) for _, _, r in sections)
-    ttk.Label(dlg, text=f"{len(sections)} sections  •  {total} total records",
-              foreground='gray').pack(pady=(0, 8))
-    ttk.Label(dlg, text="Choose format:").pack()
+    ttk.Label(body, text=f"{len(sections)} sections  •  {total} total records",
+              foreground='gray').pack(pady=(0, 8), padx=12)
+    ttk.Label(body, text="Choose format:").pack(padx=12)
 
     fmt_var = tk.StringVar(value='xlsx')
-    btn_row = ttk.Frame(dlg)
-    btn_row.pack(pady=8)
+    btn_row = ttk.Frame(body)
+    btn_row.pack(pady=8, padx=12)
     for text, val in [('CSV', 'csv'), ('Excel (.xlsx)', 'xlsx'), ('PDF (HTML)', 'pdf')]:
         ttk.Radiobutton(btn_row, text=text, variable=fmt_var,
                         value=val).pack(side=tk.LEFT, padx=8)
@@ -126,10 +104,8 @@ def export_all_combined(parent, sections):
         else:
             _save_all_pdf(top, sections)
 
-    bf = ttk.Frame(dlg)
-    bf.pack(pady=4)
-    ttk.Button(bf, text="Export", command=_do_export).pack(side=tk.LEFT, padx=6)
-    ttk.Button(bf, text="Cancel", command=dlg.destroy).pack(side=tk.LEFT, padx=6)
+    ttk.Button(dlg.footer, text="Export", command=_do_export).pack(side=tk.LEFT, padx=6)
+    ttk.Button(dlg.footer, text="Cancel", command=dlg.destroy).pack(side=tk.LEFT, padx=6)
 
 
 def _save_all_csv(parent, sections):

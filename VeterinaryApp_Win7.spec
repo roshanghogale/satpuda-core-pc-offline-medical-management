@@ -2,25 +2,41 @@
 # Single-file EXE — Windows 7 / 8 / 8.1  (Python 3.8, 32-bit)
 # Build with:  py -3.8-32 -m PyInstaller VeterinaryApp_Win7.spec --noconfirm
 
+import sys
+sys.path.insert(0, SPECPATH)
+from pyinstaller_tk_bundle import tcl_tk_datas_and_binaries
+
+_tcl_datas, _tcl_binaries = tcl_tk_datas_and_binaries()
+
 block_cipher = None
 
 a = Analysis(
     ['main.py'],
     pathex=['.'],
-    binaries=[],
+    binaries=_tcl_binaries,
     datas=[
-        ('config/theme_config.txt',   '.'),
-        ('config/layout_config.txt',  '.'),
-        ('config/font_size.txt',      '.'),
-        ('config/sample_import.json', '.'),
+        ('config/theme_config.txt',   'config'),
+        ('config/layout_config.txt',  'config'),
+        ('config/font_size.txt',      'config'),
+        ('config/sample_import.json', 'config'),
         ('config/backup_creds.dat',   'config'),
+        ('config/backup_config.dat',  'config'),
+        ('config/backup_slots.dat',   'config'),
+        ('config/expiry.dat',         'config'),
+        ('config/activation.dat',     'config'),
+        ('config/app_mode.txt',       'config'),
+        ('config/import_learned.json',  'config'),
+        ('config/bill_print_settings.json', 'config'),
         ('assets',          'assets'),
-        ('web_app/index.html', 'web_app'),
+        ('web_app',         'web_app'),
         ('core',            'core'),
         ('ui',              'ui'),
         ('widgets',         'widgets'),
-    ],
+        ('oauth_client.json',   '.'),
+        ('service_account.json', '.'),
+    ] + _tcl_datas,
     hiddenimports=[
+        '_tkinter',
         # ttkbootstrap
         'ttkbootstrap',
         'ttkbootstrap.constants',
@@ -64,19 +80,48 @@ a = Analysis(
         'googleapiclient', 'googleapiclient.discovery', 'googleapiclient.http',
         'google.auth', 'google.oauth2', 'google.oauth2.service_account',
         'google.auth.transport.requests',
-        # App modules
-        'core.alert_colors', 'core.customer_service', 'core.font_config',
+        # App modules — correct subpackage paths
+        'core.alert_colors', 'core.app_setup', 'core.app_version',
+        'core.backup_manager', 'core.github_updater',
+        'core.billing_service', 'core.calc_engine', 'core.custom_themes',
+        'core.customer_service',
+        'core.db_setup', 'core.export_manager', 'core.font_config',
         'core.font_updater', 'core.input_controller', 'core.layout_config',
-        'core.scroll_manager', 'core.export_manager', 'core.license_manager',
-        'ui.billing', 'ui.customers', 'ui.import_purchases', 'ui.inventory',
-        'ui.purchase', 'ui.purchase_history', 'ui.sales_history',
-        'ui.settings', 'ui.shelf_management',
+        'core.license_manager', 'core.window_icon', 'core.purchase_calculator',         'core.purchase_importer', 'core.purchase_invoice_engine',
+        'core.purchase_service', 'core.web_purchase_server', 'core.web_purchase_save',
+        'core.general_product_service', 'core.column_config',
+        'core.master_medicine_service', 'core.medicine_type_detector',
+        'core.startup_alerts',
+        'core.scroll_manager', 'core.themed_messagebox',
+        'ui.billing', 'ui.billing.billing', 'ui.billing.billing_form',
+        'ui.billing.billing_nav', 'ui.billing.bill_edit',
+        'ui.inventory', 'ui.inventory.inventory', 'ui.inventory.inventory_dialogs',
+        'ui.purchase', 'ui.purchase.purchase', 'ui.purchase.purchase_form',
+        'ui.purchase.purchase_nav', 'ui.purchase.purchase_history',
+        'ui.purchase.purchase_history_edit',
+        'ui.returns', 'ui.returns.sales_return', 'ui.returns.purchase_return',
+        'ui.sales', 'ui.sales.sales_history', 'ui.sales.sales_history_actions',
+        'ui.sales.sales_history_exports',
+        'ui.settings', 'ui.settings.settings', 'ui.settings.import_purchase_dialog',
+        'ui.settings.settings_tabs', 'ui.settings.settings_tabs.database_tab',
+        'ui.settings.settings_tabs.doctors_tab', 'ui.settings.settings_tabs.layout_tab',
+        'ui.settings.settings_tabs.ledger_tab', 'ui.settings.settings_tabs.misc_tabs',
+        'ui.settings.settings_tabs.payment_tab', 'ui.settings.settings_tabs.pharmacy_tab',
+        'ui.settings.settings_tabs.suppliers_tab',
+        'ui.settings.settings_tabs.customer_payment_tab',
+        'ui.settings.settings_tabs.appearance_scroll',
+        'ui.settings.settings_tabs.contacts_tab',
+        'ui.settings.settings_tabs.updates_tab',
+        'ui.general_products', 'ui.general_products.general_products_page',
+        'ui.shared', 'ui.shared.customers', 'ui.shared.home_page',
+        'ui.shared.import_from_mobile', 'ui.shared.import_purchases',
+        'ui.shared.shelf_management',
         'widgets.activation_dialog', 'widgets.bill_edit', 'widgets.bill_preview',
         'widgets.searchable_combo', 'widgets.two_step_medicine_combo',
     ],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=['rthook_windows_icon.py'],
     excludes=['matplotlib', 'numpy', 'pandas', 'scipy', 'wx', 'PyQt5', 'PyQt6'],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
@@ -97,7 +142,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,          # UPX compression reduces file size — helps on older systems
+    upx=False,         # UPX breaks Tcl/Tk one-file extraction on some PCs
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,

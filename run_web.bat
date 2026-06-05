@@ -1,6 +1,9 @@
 @echo off
 cd /d "%~dp0purchase-entry-web"
 
+REM ── Ensure npm/node are on PATH (NVM vars don’t expand on double-click) ───────
+set "PATH=%PATH%;C:\nvm4w\nodejs;C:\Users\rosha\AppData\Roaming\npm"
+
 set "SILENT=%~1"
 
 if /i "%SILENT%"=="silent" goto :build

@@ -46,7 +46,8 @@ def open_edit_dialog(parent, conn, medicine_id, refresh_callback):
                  manufacturer or '', schedule or '']
 
     dlg = open_dialog(parent, "Edit Medicine", width=480, height=580, resizable=False)
-    dlg.grid_columnconfigure(1, weight=1)
+    body = dlg.content
+    body.grid_columnconfigure(1, weight=1)
 
     from core.layout_config import load_layout, _DEFAULT_MED_TYPES, _DEFAULT_SCHEDULES
     layout = load_layout()
@@ -57,13 +58,13 @@ def open_edit_dialog(parent, conn, medicine_id, refresh_callback):
               'Unit','MRP','Rate','Manufacturer','Schedule']
     fields = {}
     for i, label in enumerate(labels):
-        ttk.Label(dlg, text=f"{label}:").grid(row=i, column=0, sticky=tk.W, padx=12, pady=5)
+        ttk.Label(body, text=f"{label}:").grid(row=i, column=0, sticky=tk.W, padx=12, pady=5)
         if label == 'Type':
-            fields[label] = SearchableCombo(dlg, values=med_types, width=30)
+            fields[label] = SearchableCombo(body, values=med_types, width=30)
         elif label == 'Schedule':
-            fields[label] = SearchableCombo(dlg, values=schedules, width=30)
+            fields[label] = SearchableCombo(body, values=schedules, width=30)
         else:
-            fields[label] = ttk.Entry(dlg, width=34)
+            fields[label] = ttk.Entry(body, width=34)
         fields[label].grid(row=i, column=1, padx=12, pady=5, sticky=tk.EW)
         v = db_values[i]
         if hasattr(fields[label], 'set'):
@@ -107,11 +108,9 @@ def open_edit_dialog(parent, conn, medicine_id, refresh_callback):
             w.bind('<Return>', lambda e: save())
     dlg.bind('<Escape>', lambda e: dlg.destroy())
 
-    bf = ttk.Frame(dlg)
-    bf.grid(row=len(labels), column=0, columnspan=2, pady=12)
-    sb = ttk.Button(bf, text="Save Changes", command=save)
+    sb = ttk.Button(dlg.footer, text="Save Changes", command=save)
     sb.pack(side=tk.LEFT, padx=8)
-    cb = ttk.Button(bf, text="Cancel", command=dlg.destroy)
+    cb = ttk.Button(dlg.footer, text="Cancel", command=dlg.destroy)
     cb.pack(side=tk.LEFT, padx=8)
     sb.bind('<Return>', lambda e: save())
     cb.bind('<Return>', lambda e: dlg.destroy())
@@ -130,8 +129,9 @@ def open_view_dialog(parent, conn, medicine_id):
                  manufacturer or '', schedule or '']
 
     dlg = open_dialog(parent, f"Medicine Details - {name}", width=660, height=580, resizable=False)
+    body = dlg.content
 
-    info_frame = ttk.LabelFrame(dlg, text="Medicine Information")
+    info_frame = ttk.LabelFrame(body, text="Medicine Information")
     info_frame.pack(fill=tk.X, padx=10, pady=5)
     info_labels = ['Name','Type','Batch No','Expiry Date','Current Stock',
                    'Unit','MRP','Rate','Manufacturer','Schedule']
@@ -143,7 +143,7 @@ def open_view_dialog(parent, conn, medicine_id):
             row=i//2, column=(i%2)*2+1, sticky=tk.W, padx=5, pady=2)
 
     # Purchase history
-    pf = ttk.LabelFrame(dlg, text="Purchase History")
+    pf = ttk.LabelFrame(body, text="Purchase History")
     pf.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
     pt = ttk.Treeview(pf, columns=('Date','Supplier','Qty','Rate','Amount'),
                       show='headings', height=4, style='Large.Treeview')
@@ -162,7 +162,7 @@ def open_view_dialog(parent, conn, medicine_id):
         pt.insert('', tk.END, values=r)
 
     # Sales history
-    sf = ttk.LabelFrame(dlg, text="Sales History")
+    sf = ttk.LabelFrame(body, text="Sales History")
     sf.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
     st = ttk.Treeview(sf, columns=('Date','Customer','Qty','Rate','Amount'),
                       show='headings', height=4, style='Large.Treeview')
@@ -178,6 +178,8 @@ def open_view_dialog(parent, conn, medicine_id):
     """, (medicine_id,))
     for r in cursor.fetchall():
         st.insert('', tk.END, values=r)
+
+    ttk.Button(dlg.footer, text="Close", command=dlg.destroy).pack(side=tk.RIGHT, padx=8)
 
 
 def delete_medicine(conn, medicine_id, medicine_name, batch_no, refresh_callback):

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import {
-  getSuppliers, upsertSupplier, saveSuppliers,
+  getSuppliers, upsertSupplier, saveSupplierToServer, saveSuppliers,
   getConfigs, saveConfig,
   ALL_MEDICINE_FIELDS, DEFAULT_FIELD_ORDER
 } from '../store.js'
@@ -56,9 +56,13 @@ export default function SupplierConfigPage() {
     if (selected === name) { setSelected(null); setForm(EMPTY_SUP); setIsNew(false) }
   }
 
-  function saveSupplier() {
+  async function saveSupplier() {
     if (!form.name.trim()) { formRefs.current['name']?.focus(); return }
     upsertSupplier(form)
+    const res = await saveSupplierToServer(form)
+    if (!res?.ok) {
+      alert(res?.error || 'Could not save supplier to database.')
+    }
     const next = reload()
     setSelected(form.name)
     setIsNew(false)

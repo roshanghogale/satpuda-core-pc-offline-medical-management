@@ -21,9 +21,10 @@ def view_bill_details(parent, conn, sale_id, tree_values, sales_data):
     cursor = conn.cursor()
     dlg = open_dialog(parent, f"Bill Details - {tree_values[0]} ({tree_values[1]})",
                       width=880, height=660, resizable=False)
+    body = dlg.content
 
     # Header
-    hf = ttk.LabelFrame(dlg, text="Bill Information")
+    hf = ttk.LabelFrame(body, text="Bill Information")
     hf.pack(fill=tk.X, padx=10, pady=5)
 
     sale_row = next((s for s in sales_data if s[15] == sale_id), None)
@@ -37,7 +38,7 @@ def view_bill_details(parent, conn, sale_id, tree_values, sales_data):
             row=i//3, column=(i%3)*2+1, sticky=tk.W, padx=5, pady=2)
 
     # Items
-    items_frame = ttk.LabelFrame(dlg, text="Bill Items")
+    items_frame = ttk.LabelFrame(body, text="Bill Items")
     items_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
     cols = ('Medicine','Batch','Type','Qty','Rate','GST%','Amount')
     it = ttk.Treeview(items_frame, columns=cols, show='headings', height=4, style='Large.Treeview')
@@ -54,7 +55,7 @@ def view_bill_details(parent, conn, sale_id, tree_values, sales_data):
         it.insert('', tk.END, values=row)
 
     # Summary
-    sf = ttk.LabelFrame(dlg, text="Bill Summary")
+    sf = ttk.LabelFrame(body, text="Bill Summary")
     sf.pack(fill=tk.X, padx=10, pady=5)
     cash_paid = online_paid = 0
     if sale_row:
@@ -69,13 +70,15 @@ def view_bill_details(parent, conn, sale_id, tree_values, sales_data):
         ttk.Label(sf, text=f"₹{val}").grid(
             row=i//3, column=(i%3)*2+1, sticky=tk.W, padx=5, pady=2)
 
+    ttk.Button(dlg.footer, text="Close", command=dlg.destroy).pack(side=tk.RIGHT, padx=6)
+
 
 def edit_bill(parent, conn, sale_id, tree_values, refresh_callback):
     from widgets.bill_edit import BillEditPage
     edit_window = open_dialog(
         parent, f"Edit Bill - {tree_values[0]} - {tree_values[2]}",
         width=1200, height=800, resizable=False)
-    BillEditPage(edit_window, conn, sale_id, refresh_callback)
+    BillEditPage(edit_window.content, conn, sale_id, refresh_callback)
     edit_window.protocol("WM_DELETE_WINDOW",
                          lambda: [edit_window.destroy(), refresh_callback()])
 
@@ -100,8 +103,9 @@ def delete_bill(conn, sale_id, tree_values, refresh_callback):
 
         cursor.execute("SELECT medicine_id, qty FROM sales_items WHERE sale_id=?", (sale_id,))
         for med_id, qty in cursor.fetchall():
+            restore_qty = abs(float(qty or 0))
             cursor.execute(
-                "UPDATE medicines SET stock_qty=stock_qty+? WHERE id=?", (qty, med_id))
+                "UPDATE medicines SET stock_qty=stock_qty+? WHERE id=?", (restore_qty, med_id))
 
         cursor.execute("DELETE FROM sales_items WHERE sale_id=?", (sale_id,))
         cursor.execute("DELETE FROM sales WHERE id=?", (sale_id,))

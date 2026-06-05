@@ -12,6 +12,7 @@ from core.font_config import *
 from core.alert_colors import get_alert_color
 from core.scroll_manager import make_scrollable, open_dialog
 from core.calc_engine import calc_return_refund
+from core.layout_config import is_strip_count_type, parse_tablets_per_stripe
 from widgets.searchable_combo import SearchableCombo
 
 
@@ -340,13 +341,9 @@ class PurchaseReturnPage:
         medicines.unit is set by purchase.py as plain int string e.g. '10'.
         For non-tablet types always returns 1.
         """
-        if med_type.lower() not in ('tablet', 'bolus'):
+        if not is_strip_count_type(med_type):
             return 1
-        nums = re.findall(r'\d+', str(unit_str or ''))
-        try:
-            return max(1, int(nums[0])) if nums else 1
-        except (ValueError, IndexError):
-            return 1
+        return parse_tablets_per_stripe(unit_str)
 
     def _already_returned(self, purchase_id, medicine_id):
         """
@@ -381,7 +378,7 @@ class PurchaseReturnPage:
             med_name, batch, orig_qty, rate, med_type, med_id, unit = row
             orig_qty  = float(orig_qty)
             tps       = self._get_tps(unit, med_type)
-            is_tablet = med_type.lower() in ('tablet', 'bolus')
+            is_tablet = is_strip_count_type(med_type)
 
             # How many strips/units already returned for THIS purchase + medicine
             already   = self._already_returned(self._purchase_id, med_id)
@@ -418,7 +415,7 @@ class PurchaseReturnPage:
         idx = self.orig_tree.index(sel[0])
         d   = self._orig_items_data[idx]
 
-        is_tablet  = d['med_type'].lower() in ('tablet', 'bolus')
+        is_tablet  = is_strip_count_type(d['med_type'])
         unit_label = "strips" if is_tablet else "units"
         remaining  = d['remaining']
         tps        = d['tps']
@@ -441,6 +438,7 @@ class PurchaseReturnPage:
 
         dlg = open_dialog(self.parent, f"Return — {d['name']}",
                           width=360, height=175, resizable=False)
+        body = dlg.content
 
         # Show clear info to user
         if is_tablet:
@@ -448,10 +446,10 @@ class PurchaseReturnPage:
         else:
             info = f"Returnable: {remaining:.0f} {unit_label}"
 
-        ttk.Label(dlg, text=info,
+        ttk.Label(body, text=info,
                   font=(FONT_FAMILY, FONT_SIZE_LABELS)).pack(pady=(12, 4))
 
-        qty_entry = ttk.Entry(dlg, width=14)
+        qty_entry = ttk.Entry(body, width=14)
         qty_entry.pack(pady=4)
         qty_entry.insert(0, str(int(remaining)))
         qty_entry.select_range(0, tk.END)
@@ -500,11 +498,9 @@ class PurchaseReturnPage:
 
         qty_entry.bind('<Return>', lambda e: _confirm())
         dlg.bind('<Escape>', lambda e: dlg.destroy())
-        btn_f = ttk.Frame(dlg)
-        btn_f.pack(pady=8)
-        ok_btn = ttk.Button(btn_f, text="Add", command=_confirm)
+        ok_btn = ttk.Button(dlg.footer, text="Add", command=_confirm)
         ok_btn.pack(side=tk.LEFT, padx=6)
-        ca_btn = ttk.Button(btn_f, text="Cancel", command=dlg.destroy)
+        ca_btn = ttk.Button(dlg.footer, text="Cancel", command=dlg.destroy)
         ca_btn.pack(side=tk.LEFT, padx=6)
         ok_btn.bind('<Return>', lambda e: _confirm())
         ca_btn.bind('<Return>', lambda e: dlg.destroy())

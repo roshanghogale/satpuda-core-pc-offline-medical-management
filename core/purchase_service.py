@@ -8,12 +8,29 @@ Called by ui/purchase.py and ui/purchase_history.py.
 import sqlite3
 from datetime import datetime
 
+from core.app_setup import load_app_mode
+from core.layout_config import is_strip_count_type, parse_tablets_per_stripe
+from core.master_medicine_service import lookup_master_details, upsert_master_medicine
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def expiry_to_db(expiry_mmyy: str) -> str:
-    """Convert MM/YY or MM/YYYY → YYYY-MM-01 for DB storage."""
-    month, year = expiry_mmyy.split('/')
+    """Convert MM/YY or MM/YYYY → YYYY-MM-01 for DB storage. Empty/invalid → ''."""
+    raw = (expiry_mmyy or '').strip()
+    if not raw:
+        return ''
+    if len(raw) == 10 and raw[4] == '-':
+        parts = raw.split('-')
+        if len(parts) >= 2:
+            return f"{parts[0]}-{parts[1].zfill(2)}-01"
+    if '/' not in raw:
+        return ''
+    parts = raw.split('/')
+    if len(parts) < 2:
+        return ''
+    month = parts[0].zfill(2)
+    year = parts[1]
     if len(year) == 2:
         year = '20' + year
     return f"{year}-{month}-01"
@@ -179,8 +196,31 @@ def get_or_create_medicine(conn, name, med_type, batch, expiry_mmyy,
         (name, batch, db_expiry))
     row = cur.fetchone()
     if row:
-        cur.execute("UPDATE medicines SET content_drug=? WHERE id=?",
-                    (content_drug, row[0]))
+        cur.execute(
+            """
+            UPDATE medicines
+            SET type=?,
+                manufacturer=?,
+                hsn_code=?,
+                schedule=?,
+                content_drug=?,
+                rate=?,
+                mrp=?,
+                gst_percent=?
+            WHERE id=?
+            """,
+            (med_type, manufacturer, hsn_code, schedule, content_drug, rate, mrp, gst_pct, row[0]))
+        if load_app_mode() == 'medical':
+            try:
+                upsert_master_medicine(
+                    name=name,
+                    manufacturer=manufacturer,
+                    mrp=mrp,
+                    content_drug=content_drug,
+                    med_type=med_type,
+                )
+            except Exception:
+                pass
         return row[0]
 
     cur.execute("""
@@ -190,7 +230,53 @@ def get_or_create_medicine(conn, name, med_type, batch, expiry_mmyy,
         VALUES (?,?,?,?,?,?,?,?,?,?,?,'',0)
     """, (name, med_type, batch, db_expiry, gst_pct, mrp, rate,
           manufacturer, hsn_code, schedule, content_drug))
-    return cur.lastrowid
+    med_id = cur.lastrowid
+    if load_app_mode() == 'medical':
+        try:
+            upsert_master_medicine(
+                name=name,
+                manufacturer=manufacturer,
+                mrp=mrp,
+                content_drug=content_drug,
+                med_type=med_type,
+            )
+        except Exception:
+            pass
+    return med_id
+
+
+def lookup_last_purchase_details(conn, medicine_name: str) -> dict:
+    """Return medicine fields from the most recent saved purchase line for this name."""
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT pi.rate, pi.mrp,
+                   COALESCE(pi.gst_pct, pi.gst_value, 0),
+                   COALESCE(pi.manufacturer, ''), COALESCE(pi.hsn_code, ''),
+                   COALESCE(pi.type, ''), COALESCE(pi.schedule, ''),
+                   COALESCE(m.content_drug, '')
+            FROM purchase_items pi
+            JOIN medicines m ON pi.medicine_id = m.id
+            JOIN purchases p ON pi.purchase_id = p.id
+            WHERE m.name = ?
+            ORDER BY p.purchase_date DESC, p.id DESC, pi.id DESC
+            LIMIT 1
+        """, (medicine_name,))
+    except sqlite3.Error:
+        return {}
+    row = cur.fetchone()
+    if not row:
+        return {}
+    return {
+        'type': row[5] or '',
+        'manufacturer': row[3] or '',
+        'hsn_code': row[4] or '',
+        'gst_percent': row[2] or 0,
+        'mrp': row[1] or 0,
+        'rate': row[0] if row[0] is not None else 0,
+        'schedule': row[6] or '',
+        'content_drug': row[7] or '',
+    }
 
 
 def lookup_medicine_details(conn, medicine_name: str) -> dict:
@@ -198,6 +284,8 @@ def lookup_medicine_details(conn, medicine_name: str) -> dict:
     cur.execute("PRAGMA table_info(medicines)")
     cols = [c[1] for c in cur.fetchall()]
     has_cd = 'content_drug' in cols
+
+    result = {}
 
     if has_cd:
         cur.execute("""
@@ -211,7 +299,7 @@ def lookup_medicine_details(conn, medicine_name: str) -> dict:
         """, (medicine_name,))
     row = cur.fetchone()
     if row:
-        return {
+        result = {
             'type': row[0] or '', 'manufacturer': row[1] or '',
             'hsn_code': row[2] or '', 'gst_percent': row[3] or 0,
             'mrp': row[4] or 0, 'rate': row[5] or 0,
@@ -219,37 +307,48 @@ def lookup_medicine_details(conn, medicine_name: str) -> dict:
             'content_drug': (row[7] if has_cd and len(row) > 7 else '') or '',
         }
 
-    try:
-        cur.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='medicines_master'")
-        if cur.fetchone():
-            cur.execute("""
-                SELECT med_type,manufacturer,mrp,content_drug
-                FROM medicines_master WHERE name=? LIMIT 1
-            """, (medicine_name,))
-            m = cur.fetchone()
+    if not result and load_app_mode() == 'medical':
+        try:
+            m = lookup_master_details(medicine_name)
             if m:
-                return {
-                    'type': m[0] or '', 'manufacturer': m[1] or '',
-                    'hsn_code': '', 'gst_percent': 0,
-                    'mrp': float(m[2] or 0), 'rate': 0,
-                    'schedule': '', 'content_drug': m[3] or '',
+                result = {
+                    'type': m.get('type', '') or '',
+                    'manufacturer': m.get('manufacturer', '') or '',
+                    'hsn_code': '',
+                    'gst_percent': 0,
+                    'mrp': float(m.get('mrp', 0) or 0),
+                    'rate': 0,
+                    'schedule': '',
+                    'content_drug': m.get('content_drug', '') or '',
                 }
-    except sqlite3.Error:
-        pass
-    return {}
+        except Exception:
+            pass
+
+    last = lookup_last_purchase_details(conn, medicine_name)
+    if last:
+        if not result:
+            result = dict(last)
+        else:
+            result['rate'] = last.get('rate', result.get('rate', 0))
+            for key in ('type', 'manufacturer', 'hsn_code', 'gst_percent', 'mrp', 'schedule', 'content_drug'):
+                if last.get(key) not in (None, '', 0):
+                    result[key] = last[key]
+
+    return result
 
 
 # ── Stock helpers ─────────────────────────────────────────────────────────────
 
 def _get_unit_value(item) -> str:
-    t = item['type'].lower()
-    if t in ('tablet', 'bolus'):
+    t = item['type']
+    if is_strip_count_type(t):
         return str(item.get('tablets_per_stripe', 1))
     if t == 'injection - vial':
         return 'Vial'
     qty_raw = str(item.get('quantity_value', '1')).strip()
     unit_suffix = item.get('auto_unit', '')
+    if any(sep in qty_raw.lower() for sep in ('*', 'x', '×')):
+        return qty_raw
     if any(qty_raw.lower().endswith(s) for s in ('ml', 'gm', 'g', 'l', 'kg', 'doses', 'vial')):
         return qty_raw
     return f"{qty_raw}{unit_suffix}" if unit_suffix else qty_raw
@@ -257,7 +356,7 @@ def _get_unit_value(item) -> str:
 
 def _get_stock_increase(item) -> float:
     """Stock added when a purchase is saved (tablets stored as individual tablets)."""
-    if item['type'].lower() in ('tablet', 'bolus'):
+    if is_strip_count_type(item['type']):
         return item.get('total_tablets', 0) + item.get('free_tablets', 0)
     return item['qty'] + item['free_qty']
 
@@ -267,7 +366,7 @@ def _get_stock_decrease(item) -> float:
     Stock to subtract when a purchase is deleted or reversed.
     Mirrors _get_stock_increase exactly so the net is always zero.
     """
-    if item['type'].lower() in ('tablet', 'bolus'):
+    if is_strip_count_type(item['type']):
         # Derive total_tablets from qty × tablets_per_strip stored in medicines.unit
         tps = item.get('tablets_per_stripe') or item.get('tps') or 1
         try:
@@ -299,11 +398,8 @@ def _reverse_stock_for_purchase(cur, purchase_id: int):
             'qty':      float(qty or 0),
             'free_qty': float(free_qty or 0),
         }
-        if (med_type or '').lower() in ('tablet', 'bolus'):
-            import re as _re
-            nums = _re.findall(r'\d+', str(unit_str or ''))
-            tps = int(nums[0]) if nums else 1
-            item['tablets_per_stripe'] = tps
+        if is_strip_count_type(med_type or ''):
+            item['tablets_per_stripe'] = parse_tablets_per_stripe(unit_str)
         decrease = _get_stock_decrease(item)
         cur.execute(
             "UPDATE medicines SET stock_qty = MAX(0, stock_qty - ?) WHERE id=?",
@@ -330,6 +426,11 @@ def save_purchase(conn, supplier_id: int, purchase_date_str: str,
     purchase_no = f"PUR{datetime.now().strftime('%Y%m%d%H%M%S')}"
     entry_paid  = round(float(calc_result.get('amount_paid', 0)), 2)
 
+    gst_calc_method = (
+        calc_result.get('gst_calc_method')
+        or 'discount_before_gst'
+    )
+
     cur.execute("""
         INSERT INTO purchases (
             purchase_no, supplier_id, purchase_date, bill_number,
@@ -338,19 +439,20 @@ def save_purchase(conn, supplier_id: int, purchase_date_str: str,
             amount_paid, amount_paid_at_entry,
             previous_due, previous_credit, due, current_credit, total_due,
             bill_cleared, account_cleared,
-            due_amount, credit_amount
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            due_amount, credit_amount, gst_calc_method
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, (
         purchase_no, supplier_id, purchase_date, bill_number,
         calc_result['subtotal'], calc_result['total_gst'],
         calc_result['cgst'], calc_result['sgst'], calc_result['total_amount'],
         calc_result['overall_discount'], calc_result['rounding'],
         calc_result['need_to_pay'], calc_result['final_amount'],
-        entry_paid, entry_paid,                          # amount_paid + amount_paid_at_entry
+        entry_paid, entry_paid,
         calc_result['previous_due'], calc_result['previous_credit'],
         calc_result['due'], calc_result['current_credit'], calc_result['total_due'],
         calc_result['bill_cleared'], calc_result['account_cleared'],
         calc_result['due'], calc_result['current_credit'],
+        gst_calc_method,
     ))
     purchase_id = cur.lastrowid
 
@@ -380,6 +482,11 @@ def update_purchase(conn, purchase_id: int, supplier_id: int,
     # ── PHASE 2.2: reverse old stock before touching items ────────────────
     _reverse_stock_for_purchase(cur, purchase_id)
 
+    gst_calc_method = (
+        calc_result.get('gst_calc_method')
+        or 'discount_before_gst'
+    )
+
     cur.execute("""
         UPDATE purchases SET
             supplier_id=?, purchase_date=?, bill_number=?,
@@ -388,7 +495,7 @@ def update_purchase(conn, purchase_id: int, supplier_id: int,
             amount_paid=?, amount_paid_at_entry=?,
             previous_due=?, previous_credit=?, due=?, current_credit=?, total_due=?,
             bill_cleared=?, account_cleared=?,
-            due_amount=?, credit_amount=?
+            due_amount=?, credit_amount=?, gst_calc_method=?
         WHERE id=?
     """, (
         supplier_id, purchase_date, bill_number,
@@ -401,6 +508,7 @@ def update_purchase(conn, purchase_id: int, supplier_id: int,
         calc_result['due'], calc_result['current_credit'], calc_result['total_due'],
         calc_result['bill_cleared'], calc_result['account_cleared'],
         calc_result['due'], calc_result['current_credit'],
+        gst_calc_method,
         purchase_id,
     ))
 

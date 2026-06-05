@@ -22,12 +22,12 @@ def main():
     folder_id  = sys.argv[1].strip()
     store_name = sys.argv[2].strip()
 
-    from core.backup_manager import write_backup_config
-    write_backup_config(folder_id, store_name)
-    print(f"backup_config.dat written successfully.")
+    from core.backup_manager import write_bundled_backup_config
+    write_bundled_backup_config(folder_id, store_name)
+    print("backup_config.dat written for EXE bundle (config/backup_config.dat).")
     print(f"  Store : {store_name}")
     print(f"  Folder: {folder_id}")
-    print("Backups will start silently on next app launch.")
+    print("Rebuild the EXE so this store is embedded. Backups work on any PC after that.")
 
 if __name__ == '__main__':
     main()

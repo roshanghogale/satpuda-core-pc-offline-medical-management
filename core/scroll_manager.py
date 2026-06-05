@@ -22,6 +22,7 @@ except ImportError:
 # Widget classes that should NOT be intercepted for page-level scrolling
 # (they handle their own internal scroll)
 _TREEVIEW_CLASSES = {'Treeview'}
+_LISTBOX_CLASSES = {'Listbox'}
 _INPUT_CLASSES    = {'Entry', 'TEntry', 'TCombobox', 'Text', 'Spinbox', 'TSpinbox'}
 
 
@@ -38,10 +39,23 @@ def _should_scroll_page(widget):
         cls = widget.winfo_class()
     except Exception:
         return True
-    # Treeview scrolls its own rows — let it handle the event
-    if cls in _TREEVIEW_CLASSES:
+    if cls in _TREEVIEW_CLASSES or cls in _LISTBOX_CLASSES:
         return False
     return True
+
+
+def _canvas_needs_scroll(canvas, inner_frame):
+    try:
+        canvas.update_idletasks()
+        inner_frame.update_idletasks()
+        bbox = canvas.bbox('all')
+        if bbox:
+            content_h = bbox[3] - bbox[1]
+            if content_h > max(canvas.winfo_height(), 1):
+                return True
+        return inner_frame.winfo_reqheight() > max(canvas.winfo_height(), 1)
+    except Exception:
+        return False
 
 
 def make_scrollable(parent, horizontal=False):
@@ -59,6 +73,8 @@ def make_scrollable(parent, horizontal=False):
     """
     container = ttk.Frame(parent)
     container.pack(fill=tk.BOTH, expand=True)
+    container.grid_rowconfigure(0, weight=1)
+    container.grid_columnconfigure(0, weight=1)
 
     canvas = tk.Canvas(container, highlightthickness=0)
     vsb = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
@@ -73,42 +89,52 @@ def make_scrollable(parent, horizontal=False):
     inner = ttk.Frame(canvas)
     win_id = canvas.create_window((0, 0), window=inner, anchor="nw")
 
-    # Track scrollbar visibility to avoid redundant pack/forget calls
     _vsb_shown = [False]
     _hsb_shown = [False]
 
+    def _content_height():
+        try:
+            inner.update_idletasks()
+            canvas.update_idletasks()
+            bbox = canvas.bbox('all')
+            if bbox:
+                return bbox[3] - bbox[1]
+            return inner.winfo_reqheight()
+        except Exception:
+            return 0
+
     def _update_scrollbars():
-        ch = canvas.winfo_height()
-        cw = canvas.winfo_width()
-        ih = inner.winfo_reqheight()
+        ch = max(canvas.winfo_height(), 1)
+        cw = max(canvas.winfo_width(), 1)
+        content_h = _content_height()
         iw = inner.winfo_reqwidth()
 
-        need_v = ih > ch
+        need_v = content_h > ch
         if need_v != _vsb_shown[0]:
             _vsb_shown[0] = need_v
             if need_v:
-                vsb.pack(side="right", fill="y")
+                vsb.grid(row=0, column=1, sticky='ns')
             else:
-                vsb.pack_forget()
-                canvas.yview_moveto(0)  # reset scroll position when not needed
+                vsb.grid_remove()
+                canvas.yview_moveto(0)
 
         if hsb is not None:
             need_h = iw > cw
             if need_h != _hsb_shown[0]:
                 _hsb_shown[0] = need_h
                 if need_h:
-                    hsb.pack(side="bottom", fill="x")
+                    hsb.grid(row=1, column=0, sticky='ew')
                 else:
-                    hsb.pack_forget()
+                    hsb.grid_remove()
                     canvas.xview_moveto(0)
 
     def _on_inner_configure(event):
-        canvas.configure(scrollregion=canvas.bbox("all"))
+        canvas.configure(scrollregion=canvas.bbox('all'))
         _update_scrollbars()
 
     def _on_canvas_configure(event):
-        # Make inner frame fill canvas width (never height — that breaks scrolling)
-        canvas.itemconfig(win_id, width=event.width)
+        # Width only — setting height on the window item breaks scrolling on Windows.
+        canvas.itemconfig(win_id, width=max(event.width, 1))
         _update_scrollbars()
 
     inner.bind("<Configure>", _on_inner_configure)
@@ -120,7 +146,7 @@ def make_scrollable(parent, horizontal=False):
         try:
             if not inner.winfo_exists():
                 return
-            if inner.winfo_reqheight() > canvas.winfo_height():
+            if _canvas_needs_scroll(canvas, inner):
                 canvas.yview_scroll(int(-1 * delta), "units")
         except Exception:
             pass
@@ -145,50 +171,93 @@ def make_scrollable(parent, horizontal=False):
     inner.bind("<Button-4>",   _on_mousewheel_linux_up)
     inner.bind("<Button-5>",   _on_mousewheel_linux_down)
 
-    # Bind scroll on every child widget as it is mapped, so scrolling works
-    # regardless of which child the cursor is over.
-    def _bind_child_scroll(widget):
-        try:
-            if _widget_class(widget) not in _TREEVIEW_CLASSES:
-                widget.bind("<MouseWheel>", _on_mousewheel_win,        add='+')
-                widget.bind("<Button-4>",   _on_mousewheel_linux_up,   add='+')
-                widget.bind("<Button-5>",   _on_mousewheel_linux_down, add='+')
-        except Exception:
-            pass
-
-    def _is_descendant(w):
-        """Return True if widget w is a descendant of inner."""
-        try:
-            parent = w
-            inner_id = str(inner)
-            while parent is not None:
-                if str(parent) == inner_id:
-                    return True
-                try:
-                    parent = parent.nametowidget(parent.winfo_parent())
-                except Exception:
-                    break
-        except Exception:
-            pass
-        return False
-
-    def _on_map(event):
-        try:
-            if not inner.winfo_exists():
-                return
-            w = event.widget
-            if _is_descendant(w):
-                _bind_child_scroll(w)
-        except Exception:
-            pass
-
-    inner.bind('<Map>', _on_map, add='+')
-
-    # Store canvas reference on inner for scroll_to_widget helper
     inner._canvas = canvas
+    canvas._inner_frame = inner
+    inner._canvas_win_id = win_id
+    inner._scroll_container = container
+    inner._update_scrollbars = _update_scrollbars
 
-    canvas.pack(side="left", fill="both", expand=True)
+    # Wheel on container catches events over any child in the scroll area.
+    container.bind('<MouseWheel>', _on_mousewheel_win)
+    container.bind('<Button-4>', _on_mousewheel_linux_up)
+    container.bind('<Button-5>', _on_mousewheel_linux_down)
+
+    canvas.grid(row=0, column=0, sticky='nsew')
+    bind_scroll_descendants(inner, force=True)
     return inner
+
+
+def refresh_scroll_region(inner_frame):
+    """Recompute scrollregion and scrollbar visibility (e.g. after showing a panel)."""
+    canvas = getattr(inner_frame, '_canvas', None)
+    if canvas is None:
+        return
+    try:
+        inner_frame.update_idletasks()
+        bbox = canvas.bbox('all')
+        if bbox:
+            canvas.configure(scrollregion=bbox)
+        updater = getattr(inner_frame, '_update_scrollbars', None)
+        if updater:
+            updater()
+    except Exception:
+        pass
+
+
+def bind_scroll_descendants(inner_frame, force=False):
+    """
+    Mouse-wheel bind on descendants (for pages without GlobalInputController).
+    Pass force=True after showing hidden panels (e.g. Appearance sections).
+    """
+    if getattr(inner_frame, '_scroll_descendants_bound', False) and not force:
+        return
+    canvas = getattr(inner_frame, '_canvas', None)
+    if canvas is None:
+        return
+    inner_frame._scroll_descendants_bound = True
+
+    def _scroll_canvas(delta):
+        try:
+            if not inner_frame.winfo_exists():
+                return
+            if _canvas_needs_scroll(canvas, inner_frame):
+                canvas.yview_scroll(int(-1 * delta), 'units')
+        except Exception:
+            pass
+
+    def _on_mousewheel_win(event):
+        if _should_scroll_page(event.widget):
+            _scroll_canvas(event.delta / 120)
+
+    def _on_mousewheel_linux_up(event):
+        if _should_scroll_page(event.widget):
+            _scroll_canvas(1)
+
+    def _on_mousewheel_linux_down(event):
+        if _should_scroll_page(event.widget):
+            _scroll_canvas(-1)
+
+    def _walk(widget):
+        try:
+            if not widget.winfo_exists():
+                return
+            if _widget_class(widget) not in _TREEVIEW_CLASSES and _widget_class(widget) not in _LISTBOX_CLASSES:
+                if not getattr(widget, '_page_scroll_wheel', False):
+                    widget.bind('<MouseWheel>', _on_mousewheel_win, add='+')
+                    widget.bind('<Button-4>', _on_mousewheel_linux_up, add='+')
+                    widget.bind('<Button-5>', _on_mousewheel_linux_down, add='+')
+                    widget._page_scroll_wheel = True
+        except Exception:
+            pass
+        for child in widget.winfo_children():
+            _walk(child)
+
+    container = getattr(inner_frame, '_scroll_container', None)
+    if container is not None:
+        _walk(container)
+    else:
+        _walk(inner_frame)
+    refresh_scroll_region(inner_frame)
 
 
 def scroll_to_widget(inner_frame, widget):
@@ -227,14 +296,23 @@ def scroll_to_widget(inner_frame, widget):
 
 
 def _apply_icon(window):
-    """Apply satpuda_logo.ico to any Tk/Toplevel window (title bar + taskbar)."""
+    """Apply satpuda_logo to any Tk/Toplevel window (title bar + taskbar)."""
     try:
-        from core.license_manager import get_icon_path
-        ico = get_icon_path()
-        if os.path.exists(ico):
-            window.iconbitmap(ico)
+        from core.window_icon import apply_window_icon
+        master = None
+        try:
+            master = window.winfo_toplevel()
+        except Exception:
+            pass
+        apply_window_icon(window, master=master or window)
     except Exception:
-        pass
+        try:
+            from core.license_manager import get_icon_path
+            ico = get_icon_path()
+            if os.path.exists(ico):
+                window.iconbitmap(ico)
+        except Exception:
+            pass
 
 
 def _apply_dialog_theme(dlg):
@@ -247,47 +325,197 @@ def _apply_dialog_theme(dlg):
         pass
 
 
+def make_dialog_scrollable(parent):
+    """
+    Scrollable body for a dialog. Pack/grid widgets into the returned inner frame.
+    Footer buttons should go in dlg.footer (see open_dialog), not inside this frame.
+    """
+    parent.grid_rowconfigure(0, weight=1)
+    parent.grid_columnconfigure(0, weight=1)
+
+    canvas = tk.Canvas(parent, highlightthickness=0, borderwidth=0)
+    vsb = ttk.Scrollbar(parent, orient='vertical', command=canvas.yview)
+    canvas.configure(yscrollcommand=vsb.set)
+    canvas.grid(row=0, column=0, sticky='nsew')
+    vsb.grid(row=0, column=1, sticky='ns')
+
+    inner = ttk.Frame(canvas, padding=2)
+    win_id = canvas.create_window((0, 0), window=inner, anchor='nw')
+    inner._dialog_canvas = canvas
+    inner._dialog_win_id = win_id
+
+    def _on_inner_configure(_event=None):
+        try:
+            canvas.configure(scrollregion=canvas.bbox('all'))
+            ch = max(canvas.winfo_height(), 1)
+            iw = inner.winfo_reqwidth()
+            canvas.itemconfig(win_id, width=max(iw, canvas.winfo_width()))
+            content_h = inner.winfo_reqheight()
+            if content_h <= ch:
+                vsb.grid_remove()
+                canvas.yview_moveto(0)
+            else:
+                vsb.grid(row=0, column=1, sticky='ns')
+        except Exception:
+            pass
+
+    def _on_canvas_configure(event):
+        try:
+            canvas.itemconfig(win_id, width=event.width)
+        except Exception:
+            pass
+
+    inner.bind('<Configure>', _on_inner_configure)
+    canvas.bind('<Configure>', _on_canvas_configure)
+
+    def _wheel(event):
+        try:
+            if inner.winfo_reqheight() <= max(canvas.winfo_height(), 1):
+                return
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
+        except Exception:
+            pass
+
+    def _bind_wheel(w):
+        try:
+            w.bind('<MouseWheel>', _wheel, add='+')
+            w.bind('<Button-4>', lambda e: canvas.yview_scroll(-1, 'units'), add='+')
+            w.bind('<Button-5>', lambda e: canvas.yview_scroll(1, 'units'), add='+')
+        except Exception:
+            pass
+        for ch in w.winfo_children():
+            _bind_wheel(ch)
+
+    inner.bind('<Map>', lambda e: (_on_inner_configure(), _bind_wheel(inner)))
+    return inner
+
+
+def finalize_dialog_geometry(dlg, width=None, height=None, resizable=True):
+    """Size dialog to fit content + footer, never taller/wider than the screen."""
+    from core.window_icon import center_window_on_screen, get_screen_work_area
+
+    dlg.update_idletasks()
+    max_w, max_h, _sw, _sh = get_screen_work_area(dlg)
+
+    req_w = max(dlg.winfo_reqwidth(), 280)
+    req_h = max(dlg.winfo_reqheight(), 120)
+
+    if width:
+        w = min(max(int(width), 280), max_w)
+    else:
+        w = min(req_w, max_w)
+
+    if height:
+        h = min(int(height), max_h)
+    else:
+        h = min(req_h, max_h)
+
+    center_window_on_screen(dlg, w, h)
+    if resizable:
+        dlg.minsize(min(280, w), min(120, h))
+        dlg.maxsize(max_w, max_h)
+    else:
+        dlg.minsize(w, h)
+        dlg.maxsize(w, h)
+
+
+def ensure_toplevel_fits_screen(
+    win, width=None, height=None, resizable=None, footer_px=56,
+):
+    """Apply standard screen limits to any Toplevel (legacy / custom dialogs)."""
+    win.update_idletasks()
+    from core.window_icon import get_screen_work_area, center_window_on_screen
+
+    max_w, max_h, _sw, _sh = get_screen_work_area(win)
+    req_w = max(win.winfo_reqwidth(), 280)
+    req_h = max(win.winfo_reqheight(), 120) + int(footer_px or 0)
+
+    w = min(width if width else req_w, max_w)
+    if height:
+        h = min(int(height), max_h)
+    else:
+        h = min(req_h, max_h)
+
+    center_window_on_screen(win, w, h)
+    if resizable is None:
+        try:
+            resizable = bool(win.resizable()[0])
+        except Exception:
+            resizable = True
+    if resizable:
+        win.minsize(min(280, w), min(120, h))
+        win.maxsize(max_w, max_h)
+    else:
+        win.minsize(w, h)
+        win.maxsize(w, h)
+
+
+def _show_dialog_modal(dlg, parent):
+    try:
+        from core.window_icon import show_modal_toplevel
+        show_modal_toplevel(dlg, parent)
+    except Exception:
+        try:
+            dlg.transient(parent.winfo_toplevel())
+            dlg.lift()
+            dlg.focus_force()
+            dlg.grab_set()
+        except Exception:
+            pass
+
+
 def open_dialog(parent, title, width=None, height=None, resizable=True):
     """
-    Create a standard modal Toplevel dialog.
-    Every dialog gets the Satpuda Core icon in the top-left corner.
+    Standard modal dialog: scrollable content (dlg.content) + fixed footer (dlg.footer).
+
+    Place lists, inputs, and trees in dlg.content. Place action buttons in dlg.footer
+    so they stay visible. Geometry accounts for both and never exceeds screen height.
     """
     dlg = tk.Toplevel(parent)
     dlg.title(title)
     dlg.resizable(resizable, resizable)
     _apply_dialog_theme(dlg)
-
-    # Set window icon
     _apply_icon(dlg)
 
+    dlg.grid_rowconfigure(0, weight=1)
+    dlg.grid_rowconfigure(1, weight=0)
+    dlg.grid_columnconfigure(0, weight=1)
+
+    body_wrap = ttk.Frame(dlg)
+    body_wrap.grid(row=0, column=0, sticky='nsew')
+    body_wrap.grid_rowconfigure(0, weight=1)
+    body_wrap.grid_columnconfigure(0, weight=1)
+
+    content = make_dialog_scrollable(body_wrap)
+
+    footer_shell = ttk.Frame(dlg)
+    footer_shell.grid(row=1, column=0, sticky='ew')
+    ttk.Separator(footer_shell, orient='horizontal').pack(fill=tk.X)
+    footer = ttk.Frame(footer_shell, padding=(10, 8))
+    footer.pack(fill=tk.X)
+
+    dlg.content = content
+    dlg.body = content
+    dlg.footer = footer
+    dlg._dialog_width = width
+    dlg._dialog_height = height
+    dlg._dialog_resizable = resizable
+
     def _finalise():
-        dlg.update_idletasks()
-        sw = dlg.winfo_screenwidth()
-        sh = dlg.winfo_screenheight()
-        max_w = int(sw * 0.90)
-        max_h = int(sh * 0.90)
-
-        w = min(width  if width  else dlg.winfo_reqwidth(),  max_w)
-        h = min(height if height else dlg.winfo_reqheight(), max_h)
-
-        x = (sw - w) // 2
-        y = (sh - h) // 2
-        dlg.geometry(f"{w}x{h}+{x}+{y}")
-
-        if not resizable:
-            dlg.minsize(w, h)
-            dlg.maxsize(w, h)
-
+        finalize_dialog_geometry(
+            dlg, dlg._dialog_width, dlg._dialog_height, dlg._dialog_resizable,
+        )
+        _show_dialog_modal(dlg, parent)
         try:
-            dlg.grab_set()
-        except Exception:
-            pass
-        try:
-            dlg.focus_force()
+            inner = dlg.content
+            canvas = getattr(inner, '_dialog_canvas', None)
+            if canvas:
+                inner.event_generate('<Configure>')
         except Exception:
             pass
 
-    dlg.after(10, _finalise)
+    dlg.after(1, _finalise)
+    dlg.after(120, _finalise)
     dlg.bind('<Escape>', lambda e: dlg.destroy())
     return dlg
 

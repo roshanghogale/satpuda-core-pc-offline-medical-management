@@ -116,26 +116,48 @@ def calc_purchase_summary(items: list, overall_discount: float = 0,
     Returns: subtotal_no_gst, total_gst, cgst, sgst, discount_amount,
              total_amount (after overall discount + rounding)
     """
-    subtotal_no_gst = 0.0
-    total_gst = 0.0
+    gross_subtotal = 0.0
+    prepared = []
 
     for item in items:
         qty = float(item.get('qty', 0))
         rate = float(item.get('rate', 0))
-        gst_pct = float(item.get('gst_value', 0))
-        item_disc = float(item.get('item_discount', 0))
+        gst_pct = float(item.get('gst_pct', item.get('gst_value', 0)))
+        item_disc = float(item.get('discount_pct', item.get('item_discount', 0)))
 
         base = qty * rate
-        discounted = base * (1 - item_disc / 100)
-        subtotal_no_gst += discounted
-        gst_amt = discounted * gst_pct / 100
-        total_gst += gst_amt
-        item['amount'] = round(discounted + gst_amt, 2)
+        taxable_before_overall = base * (1 - item_disc / 100)
+        gross_subtotal += taxable_before_overall
+        prepared.append((item, taxable_before_overall, gst_pct))
 
-    subtotal_with_gst = subtotal_no_gst + total_gst
-    discount_amount = overall_discount          # rupee amount, not percent
-    pre_round = subtotal_with_gst - discount_amount
-    total_amount = round(pre_round + rounding, 2)
+    discount_amount = round(min(max(float(overall_discount or 0), 0.0), gross_subtotal), 4)
+    remaining_discount = discount_amount
+    taxable_rows = [row for row in prepared if row[1] > 0]
+    last_taxable = taxable_rows[-1] if taxable_rows else None
+    total_gst = 0.0
+
+    for row in prepared:
+        item, taxable_before_overall, gst_pct = row
+        if gross_subtotal > 0 and taxable_before_overall > 0:
+            if row is last_taxable:
+                item_discount = remaining_discount
+            else:
+                item_discount = round(
+                    discount_amount * taxable_before_overall / gross_subtotal, 4)
+                remaining_discount = round(remaining_discount - item_discount, 4)
+        else:
+            item_discount = 0.0
+
+        taxable = round(max(0.0, taxable_before_overall - item_discount), 4)
+        gst_amt = round(taxable * gst_pct / 100, 4)
+        total_gst += round(gst_amt, 2)
+
+        item['taxable'] = round(taxable, 2)
+        item['gst_amt'] = round(gst_amt, 2)
+        item['amount'] = round(taxable + gst_amt, 2)
+
+    subtotal_no_gst = round(gross_subtotal - discount_amount, 2)
+    total_amount = round(subtotal_no_gst + total_gst + rounding, 2)
     cgst = sgst = round(total_gst / 2, 2)
 
     return {

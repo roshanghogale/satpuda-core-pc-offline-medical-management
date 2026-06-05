@@ -21,8 +21,8 @@ import hashlib
 import subprocess
 
 # ── Master credentials (hardcoded, compiled into exe) ─────────────────────────
-_MASTER_USERNAME = "RoshanMedicalManagerUserName"
-_MASTER_PASSWORD = "RoshanMedicalManagerPassword"
+_MASTER_USERNAME = "satpudacoreusername"
+_MASTER_PASSWORD = "satpuda core"
 
 # Fernet secret — 32-url-safe-base64 bytes, fixed forever
 _SECRET = b"Vm9ldGVyaW5hcnlBcHBTZWNyZXRLZXkyMDI2IQ=="
@@ -42,10 +42,16 @@ def _appdata_dir():
 
 def get_icon_path() -> str:
     """Return absolute path to satpuda_logo.ico — works in both exe and dev mode."""
-    if getattr(sys, 'frozen', False):
-        return os.path.join(sys._MEIPASS, 'assets', 'satpuda_logo.ico')
-    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                        'assets', 'satpuda_logo.ico')
+    try:
+        from core.window_icon import get_icon_path as _path
+        return _path()
+    except Exception:
+        if getattr(sys, 'frozen', False):
+            return os.path.join(sys._MEIPASS, 'assets', 'satpuda_logo.ico')
+        return os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            'assets', 'satpuda_logo.ico',
+        )
 
 def _activation_path():
     return os.path.join(_appdata_dir(), 'activation.dat')

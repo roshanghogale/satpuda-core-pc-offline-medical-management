@@ -3,6 +3,7 @@ import tkinter as tk
 # ── Widget classification ─────────────────────────────────────────────────────
 
 _TREEVIEW_CLASSES = frozenset({'Treeview'})
+_LISTBOX_CLASSES = frozenset({'Listbox'})
 
 _INPUT_CLASSES = frozenset({
     'Entry', 'TEntry', 'TCombobox', 'Text', 'Spinbox', 'TSpinbox', 'Listbox'
@@ -49,6 +50,7 @@ class GlobalInputController:
         self._root       = root
         self._main_frame = main_frame
         self._canvas     = None
+        self._f2_handler = None
         self._install_bindings()
 
     # ── Public API ────────────────────────────────────────────────────────
@@ -65,6 +67,10 @@ class GlobalInputController:
         Pass None to revert to main_frame.
         """
         self._active_frame = frame
+
+    def set_f2_handler(self, handler):
+        """Optional page-specific F2 action (e.g. Purchase → Import Bill). Pass None for default."""
+        self._f2_handler = handler
 
     # ── Binding installation ──────────────────────────────────────────────
 
@@ -100,6 +106,8 @@ class GlobalInputController:
         if cls in _TREEVIEW_CLASSES:
             if not _treeview_at_edge(source_widget, delta):
                 return
+        if cls in _LISTBOX_CLASSES:
+            return
         self._scroll_canvas(delta)
 
     def _scroll_canvas(self, delta):
@@ -107,10 +115,12 @@ class GlobalInputController:
         if canvas is None:
             return
         try:
-            children = canvas.winfo_children()
-            inner_h = children[0].winfo_reqheight() if children else 0
-            if inner_h > canvas.winfo_height():
-                canvas.yview_scroll(int(-1 * delta), 'units')
+            inner = getattr(canvas, '_inner_frame', None)
+            if inner is not None:
+                from core.scroll_manager import _canvas_needs_scroll
+                if not _canvas_needs_scroll(canvas, inner):
+                    return
+            canvas.yview_scroll(int(-1 * delta), 'units')
         except Exception:
             pass
 
@@ -133,6 +143,12 @@ class GlobalInputController:
     # ── F2 → focus first visible Treeview ────────────────────────────────
 
     def _on_f2(self, event):
+        if self._f2_handler:
+            try:
+                result = self._f2_handler(event)
+                return result if result else 'break'
+            except Exception:
+                return 'break'
         frame = self._resolve_active_frame()
         tree = self._find_first_treeview(frame)
         if tree is None:

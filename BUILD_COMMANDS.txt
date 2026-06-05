@@ -1,0 +1,101 @@
+============================================================
+  SATPUDA CORE - MANUAL BUILD COMMANDS
+  Run these in Command Prompt (cmd.exe) one by one
+============================================================
+
+IMPORTANT: Open Command Prompt and navigate to the project folder first:
+  cd /d "C:\Users\rosha\Downloads\the final version WITH THEMES newest\the final version WITH THEMES\mac2"
+
+
+============================================================
+  STEP 0 — Store backup (once per store EXE build)
+============================================================
+
+Copy config\store_backup.build.example to config\store_backup.build
+Edit folder_id and store_name, then either:
+
+  python embed_store_backup.py
+
+or let build_exe.bat run it automatically.
+
+This writes config\backup_config.dat which is bundled inside the EXE.
+Backups then work on any new PC without entering settings again.
+
+
+============================================================
+  STEP 1 — Install Python packages
+============================================================
+
+pip install --upgrade pyinstaller cryptography reportlab openpyxl ttkbootstrap pillow google-api-python-client google-auth
+
+
+============================================================
+  STEP 2 — Build Web App
+============================================================
+
+cd "C:\Users\rosha\Downloads\the final version WITH THEMES newest\the final version WITH THEMES\mac2\purchase-entry-web"
+
+npm install
+
+npm run build
+
+copy /Y "dist\index.html" "..\web_app\index.html"
+
+xcopy /Y /E /Q "dist\assets\*" "..\web_app\assets\"
+
+cd ..
+
+
+============================================================
+  STEP 3 — Clean previous build output
+============================================================
+
+rmdir /s /q dist
+rmdir /s /q build
+
+
+============================================================
+  STEP 4 — Build SatpudaCore.exe  (Windows 8 / 10 / 11, 64-bit)
+============================================================
+
+pyinstaller VeterinaryApp.spec --noconfirm
+
+  Output: dist\SatpudaCore.exe
+
+
+============================================================
+  STEP 5 — Install Python 3.8 packages  (for Win7 EXE)
+============================================================
+
+py -3.8-32 -m pip install --upgrade pyinstaller cryptography reportlab openpyxl ttkbootstrap pillow google-api-python-client google-auth
+
+
+============================================================
+  STEP 6 — Build SatpudaCore_Win7.exe  (Windows 7 / 8 / 8.1, 32-bit)
+============================================================
+
+py -3.8-32 -m PyInstaller VeterinaryApp_Win7.spec --noconfirm
+
+  Output: dist\SatpudaCore_Win7.exe
+
+
+============================================================
+  FINAL OUTPUT
+============================================================
+
+  dist\SatpudaCore.exe         — Windows 8 / 10 / 11  (64-bit)  ~121 MB
+  dist\SatpudaCore_Win7.exe    — Windows 7 / 8 / 8.1  (32-bit)  ~110 MB
+
+
+============================================================
+  NOTES
+============================================================
+
+- Steps 1-4 only need Python 3.13 (already installed)
+- Steps 5-6 need Python 3.8 32-bit (already installed at C:\Users\rosha\AppData\Local\Programs\Python\Python38-32)
+- Step 2 (web build) is optional if web_app folder already has index.html
+- Step 3 (clean) is optional but recommended to avoid stale build artifacts
+- If pyinstaller is not found, add to PATH:
+    set PATH=%PATH%;C:\Users\rosha\AppData\Local\Programs\Python\Python313\Scripts
+- If npm is not found, add to PATH:
+    set PATH=%PATH%;C:\nvm4w\nodejs

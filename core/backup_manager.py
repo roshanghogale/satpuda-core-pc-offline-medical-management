@@ -19,14 +19,20 @@ import threading
 import logging
 from datetime import datetime
 
-def _get_secret() -> bytes:
-    """Derive encryption key from machine UUID + app name (not hardcoded)."""
+_BACKUP_SECRET_STATIC = b'SatpudaCoreBackupSecret_2026'
+
+def _legacy_machine_secret() -> bytes:
+    """Legacy machine-bound secret kept only for backward decryption compatibility."""
     try:
         import uuid
         machine_id = str(uuid.getnode()).encode()
     except Exception:
         machine_id = b'SatpudaVetApp'
     return machine_id + b'_SatpudaCoreVet2026'
+
+def _get_secret() -> bytes:
+    """Primary backup secret (portable across devices)."""
+    return _BACKUP_SECRET_STATIC
 _MAX_BACKUPS = 5
 _last_backup_time = None   # datetime of last successful backup
 _DEDUP_MINUTES    = 5      # skip on-open backup if app was just closed within this window
@@ -131,18 +137,141 @@ _load_slots()
 
 
 # Paths
-def _creds_path():
-    """backup_creds.dat - encrypted OAuth2 token JSON, bundled with app."""
+def _bundled_creds_path():
     if getattr(sys, 'frozen', False):
-        bundled = os.path.join(sys._MEIPASS, 'config', 'backup_creds.dat')
-        if os.path.exists(bundled):
-            return bundled
-    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                        'config', 'backup_creds.dat')
+        p = os.path.join(sys._MEIPASS, 'config', 'backup_creds.dat')
+        if os.path.exists(p):
+            return p
+    p = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'config', 'backup_creds.dat',
+    )
+    return p if os.path.exists(p) else ''
+
+
+def _oauth_token_valid(token_data: dict) -> bool:
+    return bool(
+        token_data
+        and (token_data.get('refresh_token') or token_data.get('token'))
+        and token_data.get('client_id')
+        and token_data.get('client_secret')
+    )
+
+
+def seed_bundled_backup_files(force: bool = False):
+    """
+    Copy backup_creds.dat and backup_config.dat from the EXE bundle into AppData
+  when missing or unreadable (fixes new PC + old machine-bound encrypted files).
+    """
+    from core.license_manager import _appdata_dir
+    appdata = _appdata_dir()
+    os.makedirs(appdata, exist_ok=True)
+
+    pairs = (
+        ('backup_creds.dat', _bundled_creds_path),
+        ('backup_config.dat', _bundled_config_path),
+    )
+    for fname, bundled_fn in pairs:
+        bundled = bundled_fn() if callable(bundled_fn) else bundled_fn
+        if not bundled or not os.path.exists(bundled):
+            continue
+        dst = os.path.join(appdata, fname)
+        valid = False
+        if not force and os.path.exists(dst):
+            try:
+                with open(dst, 'rb') as f:
+                    raw = f.read()
+                if fname == 'backup_creds.dat':
+                    valid = _oauth_token_valid(_read_token_bytes(raw))
+                else:
+                    valid = bool(_decrypt_dict(raw).get('folder_id'))
+            except Exception:
+                valid = False
+        if force or not valid:
+            try:
+                shutil.copy2(bundled, dst)
+                _logger.info(f"Seeded {fname} from bundle -> {dst}")
+            except Exception as e:
+                _logger.error(f"Failed to seed {fname}: {e}")
+
+
+def _read_token_bytes(data: bytes) -> dict:
+    raw = _decrypt_bytes(data)
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw.decode())
+    except Exception:
+        return {}
+
+
+def _creds_path():
+    """First readable backup_creds.dat (AppData, then EXE bundle, then project)."""
+    from core.license_manager import _appdata_dir
+    candidates = [
+        os.path.join(_appdata_dir(), 'backup_creds.dat'),
+        _bundled_creds_path() or '',
+        os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            'config', 'backup_creds.dat',
+        ),
+    ]
+    for path in candidates:
+        if not path or not os.path.exists(path):
+            continue
+        try:
+            with open(path, 'rb') as f:
+                if _oauth_token_valid(_read_token_bytes(f.read())):
+                    return path
+        except Exception:
+            continue
+    return candidates[0] if candidates[0] else ''
 
 def _config_path():
     from core.license_manager import _appdata_dir
     return os.path.join(_appdata_dir(), 'backup_config.dat')
+
+
+def _auto_backup_pref_path() -> str:
+    from core.license_manager import _appdata_dir
+    return os.path.join(_appdata_dir(), 'backup_auto_enabled.txt')
+
+
+def is_auto_backup_enabled() -> bool:
+    """When False, skip backup on open, close, and hourly scheduler."""
+    path = _auto_backup_pref_path()
+    if not os.path.exists(path):
+        return False
+    try:
+        with open(path, encoding='utf-8') as f:
+            return f.read().strip().lower() in ('1', 'true', 'yes', 'on')
+    except Exception:
+        return False
+
+
+def set_auto_backup_enabled(enabled: bool) -> None:
+    path = _auto_backup_pref_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write('1' if enabled else '0')
+
+
+def _project_config_path():
+    """config/backup_config.dat in the project — embedded into the EXE at build time."""
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'config', 'backup_config.dat',
+    )
+
+
+def _bundled_config_path():
+    """Shipped inside the EXE (PyInstaller) or project config when running from source."""
+    if getattr(sys, 'frozen', False):
+        bundled = os.path.join(sys._MEIPASS, 'config', 'backup_config.dat')
+        if os.path.exists(bundled):
+            return bundled
+    proj = _project_config_path()
+    return proj if os.path.exists(proj) else ''
 
 def _db_path():
     if getattr(sys, 'frozen', False):
@@ -152,22 +281,24 @@ def _db_path():
 
 
 # Encryption
-def _get_fernet():
+def _get_fernet(secret: bytes):
     try:
         from cryptography.fernet import Fernet
-        raw = hashlib.sha256(_get_secret()).digest()
+        raw = hashlib.sha256(secret).digest()
         key = base64.urlsafe_b64encode(raw)
         return Fernet(key)
     except Exception:
         return None
 
 def _decrypt_bytes(data: bytes) -> bytes:
-    f = _get_fernet()
-    if f:
+    for secret in (_get_secret(), _legacy_machine_secret()):
+        f = _get_fernet(secret)
+        if not f:
+            continue
         try:
             return f.decrypt(data)
         except Exception:
-            return b''
+            continue
     return b''
 
 def _decrypt_dict(data: bytes) -> dict:
@@ -180,47 +311,96 @@ def _decrypt_dict(data: bytes) -> dict:
         return {}
 
 def _encrypt_dict(d: dict) -> bytes:
-    f = _get_fernet()
+    f = _get_fernet(_get_secret())
     if f:
         return f.encrypt(json.dumps(d).encode())
     return json.dumps(d).encode()
 
 
-# Public: write backup_config.dat
-def write_backup_config(folder_id: str, store_name: str):
-    data = {
-        'folder_id':    folder_id,
-        'store_name':   store_name,
+def _backup_config_payload(folder_id: str, store_name: str) -> dict:
+    return {
+        'folder_id':    (folder_id or '').strip(),
+        'store_name':   (store_name or '').strip(),
         'backup_count': _MAX_BACKUPS,
     }
-    path = _config_path()
+
+
+def _write_config_file(path: str, folder_id: str, store_name: str):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'wb') as f:
+        f.write(_encrypt_dict(_backup_config_payload(folder_id, store_name)))
+
+
+# Public: write backup_config.dat (AppData — legacy / optional override)
+def write_backup_config(folder_id: str, store_name: str):
     try:
-        with open(path, 'wb') as f:
-            f.write(_encrypt_dict(data))
+        _write_config_file(_config_path(), folder_id, store_name)
         _logger.info(f"backup_config.dat written for store: {store_name}")
     except Exception as e:
         _logger.error(f"Failed to write backup_config.dat: {e}")
 
-def _read_backup_config() -> dict:
-    path = _config_path()
-    if not os.path.exists(path):
-        return {}
+
+def write_bundled_backup_config(folder_id: str, store_name: str):
+    """Write config/backup_config.dat before building the EXE (bundled into the installer)."""
+    path = _project_config_path()
     try:
-        with open(path, 'rb') as f:
-            return _decrypt_dict(f.read())
-    except Exception:
-        return {}
+        _write_config_file(path, folder_id, store_name)
+        _logger.info(f"Bundled backup_config.dat written: {store_name}")
+        print(f"Written: {path}")
+    except Exception as e:
+        _logger.error(f"Failed to write bundled backup_config.dat: {e}")
+        raise
+
+
+def get_backup_config_status() -> dict:
+    """Return {configured, folder_id, store_name, creds_ok} for UI."""
+    cfg = _read_backup_config()
+    folder_id = (cfg.get('folder_id') or '').strip()
+    store_name = (cfg.get('store_name') or '').strip()
+    creds = _read_oauth_token()
+    creds_ok = _oauth_token_valid(creds)
+    return {
+        'configured': bool(folder_id and store_name and creds_ok),
+        'folder_id': folder_id,
+        'store_name': store_name,
+        'creds_ok': creds_ok,
+    }
+
+
+def _read_backup_config() -> dict:
+    """AppData override first, then EXE-bundled config (works on any new PC)."""
+    for path in (_config_path(), _bundled_config_path() or ''):
+        if not path or not os.path.exists(path):
+            continue
+        try:
+            with open(path, 'rb') as f:
+                cfg = _decrypt_dict(f.read())
+            if cfg.get('folder_id'):
+                return cfg
+        except Exception:
+            continue
+    return {}
 
 def _read_oauth_token() -> dict:
-    path = _creds_path()
-    if not os.path.exists(path):
-        return {}
-    try:
-        with open(path, 'rb') as f:
-            raw = _decrypt_bytes(f.read())
-        return json.loads(raw.decode()) if raw else {}
-    except Exception:
-        return {}
+    from core.license_manager import _appdata_dir
+    for path in (
+        os.path.join(_appdata_dir(), 'backup_creds.dat'),
+        _bundled_creds_path() or '',
+        os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            'config', 'backup_creds.dat',
+        ),
+    ):
+        if not path or not os.path.exists(path):
+            continue
+        try:
+            with open(path, 'rb') as f:
+                token = _read_token_bytes(f.read())
+            if _oauth_token_valid(token):
+                return token
+        except Exception:
+            continue
+    return {}
 
 
 # Internet check - tries multiple hosts/ports in case one is blocked
@@ -425,6 +605,11 @@ def _do_backup(force: bool = False, trigger: str = 'open', on_error=None):
     trigger      → 'open' | 'close' | 'hourly'  — determines which slot to fill.
     """
     global _last_backup_time
+    if getattr(sys, 'frozen', False):
+        try:
+            seed_bundled_backup_files()
+        except Exception:
+            pass
     tmp_dir = None
     try:
 
@@ -496,20 +681,27 @@ def _do_backup(force: bool = False, trigger: str = 'open', on_error=None):
 # Public API
 def run_backup_on_open(on_error=None):
     """On app open: respects dedup window, fills open1/open2 slot."""
+    if not is_auto_backup_enabled():
+        return
     t = threading.Thread(target=lambda: _do_backup(force=False, trigger='open', on_error=on_error), daemon=True)
     t.start()
 
 def run_backup_silently(on_error=None):
     """Hourly scheduler: always runs. Hourly files get no slot — they are
     eligible for mid-day cleanup once today has more than 4 files."""
+    if not is_auto_backup_enabled():
+        return
     t = threading.Thread(target=lambda: _do_backup(force=True, trigger='hourly', on_error=on_error), daemon=True)
     t.start()
 
-def run_backup_now():
-    """Non-blocking backup for app close and manual trigger — fills close slot.
+def run_backup_now(manual: bool = False):
+    """Backup on close (when auto enabled) or manual 'Backup Now' from settings.
     Waits up to 20 seconds for the backup thread to finish before returning.
     """
+    if not manual and not is_auto_backup_enabled():
+        return
+    trigger = 'manual' if manual else 'close'
     t = threading.Thread(
-        target=lambda: _do_backup(force=True, trigger='close'), daemon=True)
+        target=lambda: _do_backup(force=True, trigger=trigger), daemon=True)
     t.start()
     t.join(timeout=20)

@@ -7,17 +7,16 @@ from tkinter import messagebox
 import sqlite3
 from core.font_config import *
 from core.layout_config import DOCTORS_ROWS
+from core.column_config import apply_column_visibility, all_column_names
 from core.scroll_manager import make_scrollable, open_dialog
 from core.themed_messagebox import showinfo, showwarning, showerror, askyesno
 
 
 class DoctorsTab:
-    def __init__(self, notebook, conn):
+    def __init__(self, parent, conn):
         self.conn = conn
         self.cursor = conn.cursor()
-        outer = ttk.Frame(notebook)
-        notebook.add(outer, text="Doctors")
-        frame = make_scrollable(outer)
+        frame = make_scrollable(parent)
         self._build(frame)
         self.load()
 
@@ -59,13 +58,14 @@ class DoctorsTab:
         list_frame = ttk.LabelFrame(frame, text="Doctors List  (Right-click to Edit / Delete)")
         list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
-        columns = ('Name', 'Registration No', 'Phone', 'Created Date')
-        self.tree = ttk.Treeview(list_frame, columns=columns, show='headings',
+        self._all_columns = tuple(all_column_names('doctors'))
+        self.tree = ttk.Treeview(list_frame, columns=self._all_columns, show='headings',
                                  height=DOCTORS_ROWS, style='Large.Treeview')
         col_widths = {'Name': 180, 'Registration No': 160, 'Phone': 120, 'Created Date': 150}
-        for col in columns:
+        for col in self._all_columns:
             self.tree.heading(col, text=col)
             self.tree.column(col, width=col_widths.get(col, 150))
+        apply_column_visibility(self.tree, 'doctors', self._all_columns)
 
         sb = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
@@ -155,20 +155,21 @@ class DoctorsTab:
             return
 
         dlg = open_dialog(self.tree, "Edit Doctor", width=500, height=290, resizable=False)
-        dlg.grid_columnconfigure(1, weight=1)
+        body = dlg.content
+        body.grid_columnconfigure(1, weight=1)
 
-        ttk.Label(dlg, text="Doctor Name:").grid(row=0, column=0, padx=12, pady=10, sticky=tk.W)
-        name_e = ttk.Entry(dlg, width=34)
+        ttk.Label(body, text="Doctor Name:").grid(row=0, column=0, padx=12, pady=10, sticky=tk.W)
+        name_e = ttk.Entry(body, width=34)
         name_e.grid(row=0, column=1, padx=12, pady=10, sticky=tk.EW)
         name_e.insert(0, doctor_row[0])
 
-        ttk.Label(dlg, text="Registration No:").grid(row=1, column=0, padx=12, pady=10, sticky=tk.W)
-        reg_e = ttk.Entry(dlg, width=34)
+        ttk.Label(body, text="Registration No:").grid(row=1, column=0, padx=12, pady=10, sticky=tk.W)
+        reg_e = ttk.Entry(body, width=34)
         reg_e.grid(row=1, column=1, padx=12, pady=10, sticky=tk.EW)
         reg_e.insert(0, doctor_row[1] or '')
 
-        ttk.Label(dlg, text="Phone:").grid(row=2, column=0, padx=12, pady=10, sticky=tk.W)
-        phone_e = ttk.Entry(dlg, width=34)
+        ttk.Label(body, text="Phone:").grid(row=2, column=0, padx=12, pady=10, sticky=tk.W)
+        phone_e = ttk.Entry(body, width=34)
         phone_e.grid(row=2, column=1, padx=12, pady=10, sticky=tk.EW)
         phone_e.insert(0, doctor_row[2] or '')
 
@@ -202,11 +203,9 @@ class DoctorsTab:
         phone_e.bind('<Up>',     lambda e: reg_e.focus())
         dlg.bind('<Escape>', lambda e: dlg.destroy())
 
-        bf = ttk.Frame(dlg)
-        bf.grid(row=3, column=0, columnspan=2, pady=12)
-        sb = ttk.Button(bf, text="Save Changes", command=save)
+        sb = ttk.Button(dlg.footer, text="Save Changes", command=save)
         sb.pack(side=tk.LEFT, padx=8)
-        cb = ttk.Button(bf, text="Cancel", command=dlg.destroy)
+        cb = ttk.Button(dlg.footer, text="Cancel", command=dlg.destroy)
         cb.pack(side=tk.LEFT, padx=8)
         sb.bind('<Return>', lambda e: save())
         cb.bind('<Return>', lambda e: dlg.destroy())

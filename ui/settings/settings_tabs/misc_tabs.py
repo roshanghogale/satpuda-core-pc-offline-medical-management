@@ -10,6 +10,54 @@ from core.layout_config import load_layout, _DEFAULT_MED_TYPES
 from core.scroll_manager import make_scrollable
 
 
+class AppModeTab:
+    """Settings tab to switch between Medical and Veterinary mode."""
+
+    def __init__(self, notebook):
+        from core.app_setup import load_app_mode, save_app_mode
+        self._save_app_mode = save_app_mode
+
+        frame = ttk.Frame(notebook)
+        notebook.add(frame, text="🏥 App Mode")
+        inner = make_scrollable(frame)
+
+        ttk.Label(inner, text="Application Mode",
+                  font=(FONT_FAMILY, FONT_SIZE_SECTION_TITLE, 'bold')).pack(pady=(20, 6))
+
+        self._mode_var = tk.StringVar(value=load_app_mode())
+
+        desc = {
+            'medical':     ("💊 Medical",
+                            "Medicine names are loaded from the bundled master database\n"
+                            "(387k medicines from Excel). New medicines are also saved\n"
+                            "to the master list for future suggestions."),
+            'veterinary':  ("🐾 Veterinary",
+                            "No master medicine database. The Purchase page shows only\n"
+                            "medicines already added to your inventory. You can type any\n"
+                            "new name freely — it will be added when you save the purchase."),
+        }
+
+        for mode, (label, detail) in desc.items():
+            rf = ttk.LabelFrame(inner, text=label)
+            rf.pack(fill=tk.X, padx=40, pady=8)
+            ttk.Radiobutton(rf, text=label, variable=self._mode_var, value=mode,
+                            command=self._on_change).pack(anchor=tk.W, padx=10, pady=(6, 2))
+            ttk.Label(rf, text=detail,
+                      font=(FONT_FAMILY, FONT_SIZE_SUPPORTING_TEXT),
+                      justify=tk.LEFT).pack(anchor=tk.W, padx=28, pady=(0, 8))
+
+        self._status = ttk.Label(inner, text="",
+                                 font=(FONT_FAMILY, FONT_SIZE_LABELS, 'bold'))
+        self._status.pack(pady=10)
+
+    def _on_change(self):
+        mode = self._mode_var.get()
+        self._save_app_mode(mode)
+        label = "Medical 💊" if mode == 'medical' else "Veterinary 🐾"
+        self._status.config(text=f"✔ Mode set to {label}. Restart the app to apply.",
+                            foreground='green')
+
+
 class ThresholdsTab:
     def __init__(self, notebook, conn):
         self.conn = conn
@@ -114,7 +162,7 @@ class ShortcutsTab:
     def _build(self, inner):
         sections = [
             ("Global (work on every page)", [
-                ("1 – 7",          "Navigate to page: 1=Sales, 2=Purchase, 3=Inventory, 4=Sales History, 5=Purchase History, 6=Customers, 7=Settings"),
+                ("1 – 7",          "Navigate: 1=Sales, 2=Purchase, 3=Inventory, 4=Sales History, 5=Purchase History, 6=Settings, 7=Returns (Customers: Settings → Contacts)"),
                 ("Alt",            "Jump focus to the first input field on the current page"),
                 ("F2",             "Jump focus into the list/table on the current page"),
                 ("F5 / Ctrl+G",    "Generate Bill (Billing) / Save Purchase (Purchase)"),
@@ -151,7 +199,7 @@ class ShortcutsTab:
                 ("Double-click", "Edit quantity / discount of a medicine in the list"),
             ]),
             ("Purchase Page", [
-                ("F2",            "Jump into the Purchase Items list"),
+                ("F2",            "Import purchase bill (PDF / Excel)"),
                 ("F5 / Ctrl+G",  "Save Purchase"),
                 ("F6",           "Jump to Amount Paid field"),
                 ("Enter (list)", "Load selected item back into the form for editing"),
@@ -162,11 +210,11 @@ class ShortcutsTab:
             ("Settings Page", [
                 ("Ctrl+Tab",       "Switch to the next Settings tab"),
                 ("Ctrl+Shift+Tab", "Switch to the previous Settings tab"),
-                ("F2",             "Jump into the list on the active tab (Doctors / Suppliers)"),
+                ("F2",             "Jump into the list on the active tab (Contacts → Doctors / Suppliers)"),
                 ("Enter (list)",  "Show action menu: Edit / Delete"),
                 ("Escape (list)", "Return focus to the add form"),
                 ("Enter (form)",  "Move to next field in add/edit forms"),
-                ("Up / Down",     "Navigate between fields in forms and My Layout spinboxes"),
+                ("Up / Down",     "Navigate between fields in forms and Appearance spinboxes"),
             ]),
         ]
         for section_title, rows in sections:

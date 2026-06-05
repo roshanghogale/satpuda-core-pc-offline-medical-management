@@ -1,12 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
-# SatpudaCore — complete single-file EXE build spec
+# SatpudaCore — complete single-file EXE build spec  (Windows 8 / 10 / 11, 64-bit)
+
+import sys
+sys.path.insert(0, SPECPATH)
+from pyinstaller_tk_bundle import tcl_tk_datas_and_binaries
+
+_tcl_datas, _tcl_binaries = tcl_tk_datas_and_binaries()
 
 block_cipher = None
 
 a = Analysis(
     ['main.py'],
     pathex=['.'],
-    binaries=[],
+    binaries=_tcl_binaries,
     datas=[
         # ── Config files (copied to AppData on first run) ──────────────────
         ('config/theme_config.txt',    'config'),
@@ -18,16 +24,25 @@ a = Analysis(
         ('config/backup_slots.dat',    'config'),
         ('config/expiry.dat',          'config'),
         ('config/activation.dat',      'config'),
+        ('config/app_mode.txt',         'config'),
+        ('config/import_learned.json',  'config'),
+        ('config/bill_print_settings.json', 'config'),
         # ── Assets (images, fonts, icons, Excel master) ────────────────────
         ('assets',                     'assets'),
+        ('assets/NirmalaUI.ttf',        'assets'),
+        ('assets/NirmalaUI_Bold.ttf',   'assets'),
         # ── Web app ────────────────────────────────────────────────────────
         ('web_app',                    'web_app'),
         # ── Source packages (needed for dynamic imports) ───────────────────
         ('core',                       'core'),
         ('ui',                         'ui'),
         ('widgets',                    'widgets'),
-    ],
+        # ── OAuth / service account credentials ────────────────────────────
+        ('oauth_client.json',          '.'),
+        ('service_account.json',       '.'),
+    ] + _tcl_datas,
     hiddenimports=[
+        '_tkinter',
         # ── ttkbootstrap ───────────────────────────────────────────────────
         'ttkbootstrap',
         'ttkbootstrap.constants',
@@ -82,8 +97,11 @@ a = Analysis(
         'core.alert_colors',
         'core.app_setup',
         'core.backup_manager',
+        'core.app_version',
+        'core.github_updater',
         'core.billing_service',
         'core.calc_engine',
+        'core.custom_themes',
         'core.customer_service',
         'core.db_setup',
         'core.export_manager',
@@ -92,9 +110,20 @@ a = Analysis(
         'core.input_controller',
         'core.layout_config',
         'core.license_manager',
+        'core.window_icon',
         'core.purchase_calculator',
+        'core.purchase_importer',
+        'core.purchase_invoice_engine',
         'core.purchase_service',
+        'core.web_purchase_server',
+        'core.web_purchase_save',
+        'core.general_product_service',
+        'core.column_config',
+        'core.master_medicine_service',
+        'core.medicine_type_detector',
+        'core.startup_alerts',
         'core.scroll_manager',
+        'core.themed_messagebox',
         # ── ui modules ─────────────────────────────────────────────────────
         'ui',
         'ui.billing',
@@ -120,6 +149,7 @@ a = Analysis(
         'ui.sales.sales_history_exports',
         'ui.settings',
         'ui.settings.settings',
+        'ui.settings.import_purchase_dialog',
         'ui.settings.settings_tabs',
         'ui.settings.settings_tabs.database_tab',
         'ui.settings.settings_tabs.doctors_tab',
@@ -130,6 +160,11 @@ a = Analysis(
         'ui.settings.settings_tabs.pharmacy_tab',
         'ui.settings.settings_tabs.suppliers_tab',
         'ui.settings.settings_tabs.customer_payment_tab',
+        'ui.settings.settings_tabs.appearance_scroll',
+        'ui.settings.settings_tabs.contacts_tab',
+        'ui.settings.settings_tabs.updates_tab',
+        'ui.general_products',
+        'ui.general_products.general_products_page',
         'ui.shared',
         'ui.shared.customers',
         'ui.shared.home_page',
@@ -141,12 +176,16 @@ a = Analysis(
         'widgets.activation_dialog',
         'widgets.bill_edit',
         'widgets.bill_preview',
+        'core.bill_config',
+        'core.bill_page_config', 'core.bill_print_settings',
+        'core.bill_render_utils',
+        'bill_templates', 'bill_templates.classic', 'bill_templates.legacy',
         'widgets.searchable_combo',
         'widgets.two_step_medicine_combo',
     ],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=['rthook_windows_icon.py'],
     excludes=['matplotlib', 'numpy', 'pandas', 'scipy', 'wx', 'PyQt5', 'PyQt6',
               'IPython', 'notebook', 'pytest'],
     win_no_prefer_redirects=False,

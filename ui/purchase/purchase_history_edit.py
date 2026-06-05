@@ -25,7 +25,8 @@ def open_edit_window(parent, conn, purchase_id, bill_label, refresh_callback):
         width=1400, height=900, resizable=False)
     edit_window.state('zoomed')
 
-    page = PurchasePage(edit_window, conn)
+    page = PurchasePage(edit_window.content, conn)
+    page._editing_purchase_id = purchase_id
     edit_window.update_idletasks()
 
     _load_for_edit(conn, page, purchase_id)
@@ -54,7 +55,8 @@ def _load_for_edit(conn, page, purchase_id):
         SELECT bill_number, COALESCE(overall_discount,0), COALESCE(rounding,0),
                COALESCE(amount_paid_at_entry, amount_paid, 0), COALESCE(previous_due,0),
                COALESCE(previous_credit,0), COALESCE(due,0),
-               COALESCE(current_credit,0), purchase_date
+               COALESCE(current_credit,0), purchase_date,
+               COALESCE(need_to_pay,0), COALESCE(total_amount,0)
         FROM purchases WHERE id=?
     """, (purchase_id,))
     hdr = cur.fetchone()
@@ -62,7 +64,14 @@ def _load_for_edit(conn, page, purchase_id):
         return
 
     (bill_number, overall_disc, rounding, amount_paid,
-     prev_due, prev_credit, due, cur_credit, pur_date) = hdr
+     prev_due, prev_credit, due, cur_credit, pur_date,
+     need_to_pay, total_amount) = hdr
+
+    # Reconstruct opening balance (excludes this bill) — fixes inflated previous_due
+    if total_amount is not None and need_to_pay is not None:
+        reconstructed = round(float(need_to_pay) - float(total_amount) + float(prev_credit), 2)
+        if reconstructed >= 0 and abs(reconstructed - float(prev_due)) > 0.02:
+            prev_due = reconstructed
 
     if sup:
         page.supplier_name.set(sup[0])
@@ -124,7 +133,13 @@ def _load_for_edit(conn, page, purchase_id):
     page.amount_paid.delete(0, tk.END)
     page.amount_paid.insert(0, str(amount_paid))
 
+    page._edit_payment_snapshot = {
+        'previous_due': float(prev_due),
+        'previous_credit': float(prev_credit),
+    }
+
     page.update_items_tree()
+    page.sync_overall_discount_fields('rupees')
     page.calculate_total()
 
 
@@ -133,9 +148,10 @@ def _save_edit(conn, page, purchase_id, bill_label, edit_window, refresh_callbac
     try:
         overall_discount = float(page.overall_discount.get() or 0)
         rounding         = float(page.rounding_entry.get() or 0)
-        previous_due     = float(page.previous_due_var.get() or 0)
-        previous_credit  = float(page.previous_credit_var.get() or 0)
         amount_paid      = float(page.amount_paid.get() or 0)
+        snap = getattr(page, '_edit_payment_snapshot', None) or {}
+        previous_due = float(snap.get('previous_due', page.previous_due_var.get() or 0))
+        previous_credit = float(snap.get('previous_credit', page.previous_credit_var.get() or 0))
     except ValueError:
         showerror("Invalid Input", "Please check payment fields.")
         return
@@ -166,6 +182,8 @@ def _save_edit(conn, page, purchase_id, bill_label, edit_window, refresh_callbac
             page.purchase_items,
         )
         showinfo("Success", f"Purchase {bill_label} updated successfully!")
+        page._editing_purchase_id = None
+        page._edit_payment_snapshot = None
         edit_window.destroy()
         refresh_callback()
     except Exception as e:
@@ -188,6 +206,19 @@ def delete_purchase(conn, purchase_id, bill_label, refresh_callback):
         cur.execute("SELECT supplier_id FROM purchases WHERE id=?", (purchase_id,))
         sup_row = cur.fetchone()
         supplier_id = sup_row[0] if sup_row else None
+
+        # Capture medicine/batch rows before delete so we can clean inventory rows.
+        cur.execute("""
+            SELECT DISTINCT
+                pi.medicine_id,
+                COALESCE(pi.batch_no, ''),
+                COALESCE(m.name, ''),
+                COALESCE(pi.expiry_date, '')
+            FROM purchase_items pi
+            JOIN medicines m ON pi.medicine_id = m.id
+            WHERE pi.purchase_id=?
+        """, (purchase_id,))
+        touched_rows = cur.fetchall()
 
         # Validate stock won't go negative
         cur.execute("""
@@ -217,6 +248,30 @@ def delete_purchase(conn, purchase_id, bill_label, refresh_callback):
 
         cur.execute("DELETE FROM purchase_items WHERE purchase_id=?", (purchase_id,))
         cur.execute("DELETE FROM purchases WHERE id=?", (purchase_id,))
+
+        # Remove inventory rows when no purchase exists for same medicine+batch.
+        # This keeps inventory clean instead of leaving dead rows at stock 0.
+        for med_id, batch_no, med_name, expiry_db in touched_rows:
+            cur.execute("""
+                SELECT 1
+                FROM purchase_items
+                WHERE medicine_id=? AND COALESCE(batch_no,'')=?
+                LIMIT 1
+            """, (med_id, batch_no))
+            still_exists = cur.fetchone() is not None
+            if still_exists:
+                continue
+
+            # Guardrail: keep medicine row if sales history still references it.
+            cur.execute("SELECT 1 FROM sales_items WHERE medicine_id=? LIMIT 1", (med_id,))
+            has_sales_history = cur.fetchone() is not None
+            if has_sales_history:
+                continue
+
+            cur.execute("""
+                DELETE FROM medicines
+                WHERE id=? AND COALESCE(batch_no,'')=? AND COALESCE(name,'')=? AND COALESCE(expiry_date,'')=?
+            """, (med_id, batch_no, med_name, expiry_db))
         conn.commit()
 
         if supplier_id:

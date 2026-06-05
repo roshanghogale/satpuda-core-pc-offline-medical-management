@@ -10,9 +10,11 @@ except ImportError:
 
 from core.alert_colors import get_alert_color
 from core.font_config import *
-from core.layout_config import INVENTORY_ROWS, load_layout, _DEFAULT_MED_TYPES, _DEFAULT_SCHEDULES
+from core.layout_config import INVENTORY_ROWS, load_layout, _DEFAULT_MED_TYPES, _DEFAULT_SCHEDULES, is_strip_count_type, parse_tablets_per_stripe
+from core.column_config import apply_column_visibility
 from core.scroll_manager import make_scrollable
 from core.export_manager import export_data
+from core.column_config import export_table
 from widgets.searchable_combo import SearchableCombo
 from ui.inventory.inventory_dialogs import open_edit_dialog, open_view_dialog, delete_medicine
 
@@ -130,20 +132,20 @@ class InventoryPage:
             ttk.Label(sf, textvariable=var, **kw).grid(row=0, column=col*2+1, padx=8, pady=5)
 
     def _build_tree(self, tf):
+        all_cols = ('Name','Type','Batch','Expiry','Days Left','Stock','Unit','MRP','Rate','Manufacturer','Schedule','Location')
         if self.show_location:
-            cols = ('Name','Type','Batch','Expiry','Days Left','Stock','Unit','MRP','Rate','Manufacturer','Schedule','Location')
-            widths = {'Name':150,'Type':80,'Batch':100,'Expiry':80,'Days Left':75,
-                      'Stock':70,'Unit':60,'MRP':70,'Rate':70,'Manufacturer':120,'Schedule':80,'Location':100}
+            cols = all_cols
         else:
-            cols = ('Name','Type','Batch','Expiry','Days Left','Stock','Unit','MRP','Rate','Manufacturer','Schedule')
-            widths = {'Name':150,'Type':80,'Batch':100,'Expiry':80,'Days Left':75,
-                      'Stock':70,'Unit':60,'MRP':70,'Rate':70,'Manufacturer':120,'Schedule':80}
+            cols = tuple(c for c in all_cols if c != 'Location')
+        widths = {'Name':150,'Type':80,'Batch':100,'Expiry':80,'Days Left':75,
+                  'Stock':70,'Unit':60,'MRP':70,'Rate':70,'Manufacturer':120,'Schedule':80,'Location':100}
 
         self.inventory_tree = ttk.Treeview(tf, columns=cols, show='headings',
                                            height=INVENTORY_ROWS, style='Large.Treeview')
         for col in cols:
             self.inventory_tree.heading(col, text=col)
             self.inventory_tree.column(col, width=widths.get(col, 100))
+        apply_column_visibility(self.inventory_tree, 'inventory', cols)
 
         vsb = ttk.Scrollbar(tf, orient=tk.VERTICAL,   command=self.inventory_tree.yview)
         hsb = ttk.Scrollbar(tf, orient=tk.HORIZONTAL, command=self.inventory_tree.xview)
@@ -284,14 +286,14 @@ class InventoryPage:
 
     def _is_low_stock(self, qty, med_type):
         threshold = self._get_setting(f'low_stock_{med_type.lower()}', 10)
-        if med_type.lower() in ('tablet', 'bolus'):
+        if is_strip_count_type(med_type):
             try:
                 self.cursor.execute(
                     "SELECT unit FROM medicines WHERE type=? AND unit IS NOT NULL LIMIT 1",
                     (med_type,))
                 r = self.cursor.fetchone()
                 if r:
-                    ups = float(r[0]) if r[0] else 1
+                    ups = parse_tablets_per_stripe(r[0])
                     return 0 < qty / ups < threshold
             except Exception:
                 pass
@@ -327,10 +329,13 @@ class InventoryPage:
 
     def _fmt_unit(self, unit, med_type):
         if not unit: return ''
-        if str(med_type).lower() in ('tablet', 'bolus'):
-            try: return f"{int(float(unit))}'S"
-            except Exception: return str(unit)
-        return str(unit)
+        text = str(unit).strip()
+        if any(sep in text for sep in ('*', 'x', 'X', '×')):
+            return text
+        if is_strip_count_type(str(med_type)):
+            try: return f"{parse_tablets_per_stripe(text)}'S"
+            except Exception: return text
+        return text
 
     def _fmt_location(self, location):
         import re
@@ -377,25 +382,36 @@ class InventoryPage:
     def _export_menu(self):
         from core.scroll_manager import open_dialog
         dlg = open_dialog(self.parent, "Export Inventory Reports",
-                          width=320, height=240, resizable=False)
+                          width=320, height=280, resizable=False)
+        body = dlg.content
         for label, cmd in [
+            ("Current View (filtered)", self._export_current_view),
             ("Stock Statement (all)",  self._export_stock_statement),
             ("Near Expiry Report",     self._export_near_expiry),
             ("Expired Stock Report",   self._export_expired),
             ("Schedule-wise Stock",    self._export_schedule_stock),
         ]:
-            ttk.Button(dlg, text=label, width=36,
+            ttk.Button(body, text=label, width=36,
                        command=lambda c=cmd, d=dlg: [d.destroy(), c()]
                        ).pack(pady=3, padx=10)
+
+    def _export_current_view(self):
+        from core.column_config import export_tree_current_view
+        cols, rows = export_tree_current_view(self.inventory_tree)
+        if not rows:
+            messagebox.showinfo("No Records", "No medicines visible in the current list.")
+            return
+        export_data(self.parent, 'Inventory - Current View', cols, rows, 'inventory_current_view')
 
     def _export_stock_statement(self):
         self.cursor.execute("""
             SELECT name,type,batch_no,expiry_date,stock_qty,unit,mrp,rate,manufacturer,schedule
             FROM medicines ORDER BY name
         """)
-        export_data(self.parent, 'Stock Statement',
-                    ['Name','Type','Batch','Expiry','Stock','Unit','MRP','Rate','Manufacturer','Schedule'],
-                    self.cursor.fetchall(), 'stock_statement')
+        export_table(self.parent, 'Stock Statement',
+                     ['Name', 'Type', 'Batch', 'Expiry', 'Stock', 'Unit', 'MRP', 'Rate',
+                      'Manufacturer', 'Schedule'],
+                     self.cursor.fetchall(), 'stock_statement', 'inventory', 'stock_statement')
 
     def _export_near_expiry(self):
         threshold = (datetime.now() + timedelta(days=90)).strftime('%Y-%m-%d')
@@ -407,9 +423,9 @@ class InventoryPage:
         rows = self.cursor.fetchall()
         if not rows:
             messagebox.showinfo("No Records", "No medicines expiring within 90 days."); return
-        export_data(self.parent, 'Near Expiry Report',
-                    ['Name','Type','Batch','Expiry','Stock','Manufacturer'],
-                    rows, 'near_expiry_report')
+        export_table(self.parent, 'Near Expiry Report',
+                     ['Name', 'Type', 'Batch', 'Expiry', 'Stock', 'Manufacturer'],
+                     rows, 'near_expiry_report', 'inventory', 'near_expiry')
 
     def _export_expired(self):
         today = datetime.now().strftime('%Y-%m-%d')
@@ -420,18 +436,18 @@ class InventoryPage:
         rows = self.cursor.fetchall()
         if not rows:
             messagebox.showinfo("No Records", "No expired medicines found."); return
-        export_data(self.parent, 'Expired Stock Report',
-                    ['Name','Type','Batch','Expiry','Stock','Manufacturer'],
-                    rows, 'expired_stock_report')
+        export_table(self.parent, 'Expired Stock Report',
+                     ['Name', 'Type', 'Batch', 'Expiry', 'Stock', 'Manufacturer'],
+                     rows, 'expired_stock_report', 'inventory', 'expired_stock')
 
     def _export_schedule_stock(self):
         self.cursor.execute("""
             SELECT COALESCE(schedule,'Non-Scheduled'),name,batch_no,expiry_date,stock_qty,mrp
             FROM medicines ORDER BY 1,name
         """)
-        export_data(self.parent, 'Schedule-wise Stock',
-                    ['Schedule','Name','Batch','Expiry','Stock','MRP'],
-                    self.cursor.fetchall(), 'schedule_wise_stock')
+        export_table(self.parent, 'Schedule-wise Stock',
+                     ['Schedule', 'Name', 'Batch', 'Expiry', 'Stock', 'MRP'],
+                     self.cursor.fetchall(), 'schedule_wise_stock', 'inventory', 'schedule_wise_stock')
 
     # ── Keyboard nav ──────────────────────────────────────────────────────
 

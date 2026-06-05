@@ -15,23 +15,13 @@ except ImportError:
 from core.font_config import *
 from core.scroll_manager import make_scrollable, open_dialog
 
-_BANNER_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-    'assets', 'home_banner.png'
-)
-
-
-def _get_banner_path():
-    """Works in both dev mode and frozen EXE."""
-    import sys
-    if getattr(sys, 'frozen', False):
-        return os.path.join(sys._MEIPASS, 'assets', 'home_banner.png')
-    return _BANNER_PATH
+from core.layout_config import get_home_banner_path, get_home_banner_size
+from core.column_config import is_quick_access_visible
 
 
 def build_home(main_frame, conn, nav_click_fn, open_billing_fn,
-               open_purchase_fn, open_inventory_fn, open_customers_fn,
-               open_ledger_fn, input_ctrl, register_canvas_fn):
+               open_purchase_fn, open_inventory_fn, open_contacts_fn,
+               open_ledger_fn, open_general_products_fn, input_ctrl, register_canvas_fn):
     """Build and pack the home dashboard into main_frame."""
     inner = make_scrollable(main_frame)
     inner.configure(padding=(10, 10))
@@ -118,7 +108,7 @@ def build_home(main_frame, conn, nav_click_fn, open_billing_fn,
     # ── Popup list dialog helper ──────────────────────────────────────────
     def _show_list_dialog(title, cols, col_widths, rows):
         dlg = open_dialog(main_frame, title, width=820, height=480, resizable=True)
-        frm = ttk.Frame(dlg)
+        frm = dlg.content
         frm.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         tree = ttk.Treeview(frm, columns=cols, show='headings',
                             height=18, style='Large.Treeview')
@@ -131,8 +121,9 @@ def build_home(main_frame, conn, nav_click_fn, open_billing_fn,
         vsb.pack(side=tk.RIGHT, fill=tk.Y)
         for r in rows:
             tree.insert('', tk.END, values=r)
-        ttk.Label(dlg, text=f"{len(rows)} record(s)",
-                  font=(FONT_FAMILY, FONT_SIZE_DEFAULT)).pack(pady=(0, 6))
+        ttk.Label(dlg.footer, text=f"{len(rows)} record(s)",
+                  font=(FONT_FAMILY, FONT_SIZE_DEFAULT)).pack(side=tk.LEFT, padx=8)
+        ttk.Button(dlg.footer, text="Close", command=dlg.destroy).pack(side=tk.RIGHT, padx=8)
 
     # ── Bills & Outstanding dropdown ──────────────────────────────────────
     def _bills_menu(event=None):
@@ -168,10 +159,8 @@ def build_home(main_frame, conn, nav_click_fn, open_billing_fn,
 
         m.add_command(label="🧾 Today's Bills",          command=_today_bills)
         m.add_command(label="💰 Outstanding Customer Due", command=_outstanding)
-        try:
-            w = btn_row.nametowidget(event.widget) if event else bills_btn
-        except Exception:
-            w = bills_btn
+        if not bills_btn:
+            return
         m.post(bills_btn.winfo_rootx(),
                bills_btn.winfo_rooty() + bills_btn.winfo_height())
 
@@ -236,11 +225,14 @@ def build_home(main_frame, conn, nav_click_fn, open_billing_fn,
         m.add_command(label="⚠️ Low Stock / Out of Stock",       command=_low_stock)
         m.add_command(label=f"📅 Near Expiry (within {near_days}d)", command=_near_expiry)
         m.add_command(label="❌ Expired / Return",                command=_expired)
+        if not stock_btn:
+            return
         m.post(stock_btn.winfo_rootx(),
                stock_btn.winfo_rooty() + stock_btn.winfo_height())
 
-    # ── Render all buttons vertically ─────────────────────────────────────
-    def _make_btn(parent, text, cmd, style):
+    def _make_btn(parent, text, cmd, style, key):
+        if not is_quick_access_visible(key):
+            return None
         try:
             b = ttk.Button(parent, text=text, command=cmd,
                            bootstyle=style, width=22)
@@ -249,19 +241,38 @@ def build_home(main_frame, conn, nav_click_fn, open_billing_fn,
         b.pack(fill=tk.X, pady=2)
         return b
 
-    _make_btn(btn_row, '➕ New Bill',           open_billing_fn,             'success')
-    _make_btn(btn_row, '📦 New Purchase',       open_purchase_fn,            'primary')
-    _make_btn(btn_row, '🔍 Search Medicine',    open_inventory_fn,           'info')
-    _make_btn(btn_row, '👤 Search Customer',    open_customers_fn,           'secondary')
-    _make_btn(btn_row, '📊 Ledger',             open_ledger_fn,              'danger')
-    ttk.Separator(btn_row, orient='horizontal').pack(fill=tk.X, pady=4)
-    _make_btn(btn_row, '📊 Export Sales',       lambda: _export('sales'),    'success')
-    _make_btn(btn_row, '📦 Export Purchases',   lambda: _export('purchases'),'primary')
-    _make_btn(btn_row, '🗃 Export Inventory',   lambda: _export('inventory'),'info')
-    _make_btn(btn_row, '📁 Export All',         lambda: _export('all'),      'warning')
-    ttk.Separator(btn_row, orient='horizontal').pack(fill=tk.X, pady=4)
-    bills_btn = _make_btn(btn_row, '🧾 Bills & Due ▾',    _bills_menu, 'secondary')
-    stock_btn = _make_btn(btn_row, '📦 Stock & Expiry ▾', _stock_menu, 'warning')
+    def _sep_if_needed():
+        ttk.Separator(btn_row, orient='horizontal').pack(fill=tk.X, pady=4)
+
+    primary_btns = [
+        _make_btn(btn_row, '➕ New Bill', open_billing_fn, 'success', 'new_bill'),
+        _make_btn(btn_row, '📦 New Purchase', open_purchase_fn, 'primary', 'new_purchase'),
+        _make_btn(btn_row, '🔍 Search Medicine', open_inventory_fn, 'info', 'search_medicine'),
+        _make_btn(btn_row, '👤 Contacts', open_contacts_fn, 'secondary', 'contacts'),
+        _make_btn(btn_row, '📊 Ledger', open_ledger_fn, 'danger', 'ledger'),
+    ]
+    export_btns = [
+        _make_btn(btn_row, '📊 Export Sales', lambda: _export('sales'), 'success', 'export_sales'),
+        _make_btn(btn_row, '📦 Export Purchases', lambda: _export('purchases'), 'primary', 'export_purchases'),
+        _make_btn(btn_row, '🗃 Export Inventory', lambda: _export('inventory'), 'info', 'export_inventory'),
+        _make_btn(btn_row, '📁 Export All', lambda: _export('all'), 'warning', 'export_all'),
+    ]
+    if any(primary_btns) and any(export_btns):
+        _sep_if_needed()
+    bills_btn = _make_btn(btn_row, '🧾 Bills & Due ▾', _bills_menu, 'secondary', 'bills_due')
+    stock_btn = _make_btn(btn_row, '📦 Stock & Expiry ▾', _stock_menu, 'warning', 'stock_expiry')
+    dropdown_btns = [b for b in (bills_btn, stock_btn) if b]
+    if (any(primary_btns) or any(export_btns)) and dropdown_btns:
+        _sep_if_needed()
+    general_btn = _make_btn(
+        btn_row, '🏷 General Products', open_general_products_fn, 'info', 'general_products',
+    )
+    if not any(primary_btns + export_btns + dropdown_btns + [general_btn]):
+        ttk.Label(
+            btn_row,
+            text='No quick actions enabled.\nEnable buttons in Settings → Appearance.',
+            font=(FONT_FAMILY, FONT_SIZE_DEFAULT),
+        ).pack(pady=8)
 
     # ── Banner (fills remaining space to the right) ───────────────────────
     banner_frame = ttk.LabelFrame(body, text='')
@@ -269,12 +280,13 @@ def build_home(main_frame, conn, nav_click_fn, open_billing_fn,
 
     try:
         from PIL import Image, ImageTk
-        img = Image.open(_get_banner_path())
-        # Scale to fill available width; height follows aspect ratio
-        target_w = 1000
-        ratio    = target_w / img.width
-        target_h = int(img.height * ratio)
-        img      = img.resize((target_w, target_h), Image.LANCZOS)
+        banner_path = get_home_banner_path()
+        target_w, target_h = get_home_banner_size()
+        img = Image.open(banner_path)
+        if target_h <= 0:
+            ratio = target_w / max(img.width, 1)
+            target_h = max(1, int(img.height * ratio))
+        img = img.resize((target_w, target_h), Image.LANCZOS)
         _banner_photo = ImageTk.PhotoImage(img)
         banner_lbl = tk.Label(banner_frame, image=_banner_photo, bd=0)
         banner_lbl.image = _banner_photo
@@ -293,7 +305,7 @@ def build_home(main_frame, conn, nav_click_fn, open_billing_fn,
                     ttk.Label(fb, text=line,
                               font=(FONT_FAMILY, FONT_SIZE_DEFAULT)).pack()
         else:
-            ttk.Label(fb, text=f'Banner not found: {_get_banner_path()}',
+            ttk.Label(fb, text=f'Banner not found: {get_home_banner_path()}',
                       font=(FONT_FAMILY, FONT_SIZE_DEFAULT),
                       foreground='red').pack()
 

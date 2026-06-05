@@ -395,11 +395,12 @@ class SalesReturnPage:
 
         dlg = open_dialog(self.parent, f"Return — {med_name}",
                           width=340, height=175, resizable=False)
-        ttk.Label(dlg,
+        body = dlg.content
+        ttk.Label(body,
                   text=f"Returnable: {int(remaining)}  "
                        f"(Sold: {int(orig_qty)}, Already returned: {int(orig_qty - remaining)})",
                   font=(FONT_FAMILY, FONT_SIZE_LABELS)).pack(pady=(12, 4))
-        qty_entry = ttk.Entry(dlg, width=14)
+        qty_entry = ttk.Entry(body, width=14)
         qty_entry.pack(pady=4)
         qty_entry.insert(0, str(int(remaining)))
         qty_entry.select_range(0, tk.END)
@@ -435,11 +436,9 @@ class SalesReturnPage:
 
         qty_entry.bind('<Return>', lambda e: _confirm())
         dlg.bind('<Escape>', lambda e: dlg.destroy())
-        btn_f = ttk.Frame(dlg)
-        btn_f.pack(pady=8)
-        ok_btn = ttk.Button(btn_f, text="Add", command=_confirm)
+        ok_btn = ttk.Button(dlg.footer, text="Add", command=_confirm)
         ok_btn.pack(side=tk.LEFT, padx=6)
-        ca_btn = ttk.Button(btn_f, text="Cancel", command=dlg.destroy)
+        ca_btn = ttk.Button(dlg.footer, text="Cancel", command=dlg.destroy)
         ca_btn.pack(side=tk.LEFT, padx=6)
         ok_btn.bind('<Return>', lambda e: _confirm())
         ca_btn.bind('<Return>', lambda e: dlg.destroy())

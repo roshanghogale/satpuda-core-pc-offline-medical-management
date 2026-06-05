@@ -20,17 +20,6 @@ as long as you don't revoke access.
 import os
 import sys
 import json
-import hashlib
-import base64
-
-_SECRET = b"Vm9ldGVyaW5hcnlBcHBTZWNyZXRLZXkyMDI2IQ=="
-
-def encrypt_data(data: dict) -> bytes:
-    from cryptography.fernet import Fernet
-    raw = hashlib.sha256(_SECRET).digest()
-    key = base64.urlsafe_b64encode(raw)
-    f   = Fernet(key)
-    return f.encrypt(json.dumps(data).encode())
 
 def main():
     client_file = 'oauth_client.json'
@@ -70,7 +59,9 @@ def main():
     os.makedirs(os.path.dirname(dst), exist_ok=True)
 
     with open(dst, 'wb') as f:
-        f.write(encrypt_data(token_data))
+        # Use the same encryption path as backup_manager so the app can decrypt it.
+        from core.backup_manager import _encrypt_dict
+        f.write(_encrypt_dict(token_data))
 
     print(f"Done! backup_creds.dat saved to: {dst}")
     print()

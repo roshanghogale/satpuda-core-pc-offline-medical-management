@@ -11,7 +11,8 @@ except ImportError:
 
 from core.alert_colors import get_alert_color
 from core.font_config import *
-from core.layout_config import SALES_HISTORY_ROWS, SCHEDULES
+from core.layout_config import SALES_HISTORY_ROWS, get_configured_schedules
+from core.column_config import apply_column_visibility, all_column_names
 from core.scroll_manager import make_scrollable
 from widgets.searchable_combo import SearchableCombo
 
@@ -72,7 +73,7 @@ class SalesHistoryPage:
 
         ttk.Label(ff, text="Schedule:").grid(row=1, column=4, padx=5, pady=5)
         self.schedule_filter = SearchableCombo(
-            ff, values=[s for s in SCHEDULES if s] + ['Non-Scheduled'], width=15)
+            ff, values=get_configured_schedules() + ['Non-Scheduled'], width=15)
         self.schedule_filter.grid(row=1, column=5, padx=5, pady=5)
 
         self.apply_btn = ttk.Button(ff, text="Apply Filter", command=self.apply_filter)
@@ -89,16 +90,19 @@ class SalesHistoryPage:
         tf = ttk.Frame(main_frame)
         tf.pack(fill=tk.BOTH, expand=True, pady=5)
 
-        cols = ('Bill No','Date','Customer','Phone','Total Amount','Amount Paid',
-                'Cash Paid','Online Paid','Previous Due','Due Amount','Credit Amount','Total Due')
-        widths = {'Bill No':100,'Date':100,'Customer':150,'Phone':120,
-                  'Total Amount':100,'Amount Paid':100,'Cash Paid':90,'Online Paid':90,
-                  'Previous Due':100,'Due Amount':100,'Credit Amount':100,'Total Due':100}
-        self.sales_tree = ttk.Treeview(tf, columns=cols, show='headings',
+        self._all_columns = tuple(all_column_names('sales_history'))
+        widths = {
+            'Bill No': 100, 'Date': 100, 'Customer': 150, 'Phone': 120,
+            'Doctor': 120, 'Schedule': 90,
+            'Total Amount': 100, 'Amount Paid': 100, 'Cash Paid': 90, 'Online Paid': 90,
+            'Previous Due': 100, 'Due Amount': 100, 'Credit Amount': 100, 'Total Due': 100,
+        }
+        self.sales_tree = ttk.Treeview(tf, columns=self._all_columns, show='headings',
                                        height=SALES_HISTORY_ROWS, style='Large.Treeview')
-        for col in cols:
+        for col in self._all_columns:
             self.sales_tree.heading(col, text=col)
             self.sales_tree.column(col, width=widths.get(col, 100))
+        apply_column_visibility(self.sales_tree, 'sales_history', self._all_columns)
 
         vsb = ttk.Scrollbar(tf, orient=tk.VERTICAL,   command=self.sales_tree.yview)
         hsb = ttk.Scrollbar(tf, orient=tk.HORIZONTAL, command=self.sales_tree.xview)
@@ -187,7 +191,10 @@ class SalesHistoryPage:
                    COALESCE(s.cash_paid,0), COALESCE(s.online_paid,0),
                    s.previous_due, COALESCE(s.due_amount,0), COALESCE(s.credit_amount,0),
                    COALESCE(s.total_due,0), s.bill_cleared, s.account_cleared,
-                   s.bill_no, s.id, s.doctor_name
+                   s.bill_no, s.id, s.doctor_name,
+                   (SELECT GROUP_CONCAT(DISTINCT NULLIF(m.schedule,''))
+                    FROM sales_items si JOIN medicines m ON si.medicine_id=m.id
+                    WHERE si.sale_id=s.id) AS bill_schedules
             FROM sales s JOIN customers c ON s.customer_id=c.id
             ORDER BY s.bill_date DESC, s.created_at DESC
         """)
@@ -209,7 +216,10 @@ class SalesHistoryPage:
                        COALESCE(s.cash_paid,0), COALESCE(s.online_paid,0),
                        s.previous_due, COALESCE(s.due_amount,0), COALESCE(s.credit_amount,0),
                        COALESCE(s.total_due,0), s.bill_cleared, s.account_cleared,
-                       s.bill_no, s.id, s.doctor_name
+                       s.bill_no, s.id, s.doctor_name,
+                       (SELECT GROUP_CONCAT(DISTINCT NULLIF(m2.schedule,''))
+                        FROM sales_items si2 JOIN medicines m2 ON si2.medicine_id=m2.id
+                        WHERE si2.sale_id=s.id) AS bill_schedules
                    FROM sales s
                    JOIN customers c ON s.customer_id=c.id
                    JOIN sales_items si ON s.id=si.sale_id
@@ -220,7 +230,10 @@ class SalesHistoryPage:
                        COALESCE(s.cash_paid,0), COALESCE(s.online_paid,0),
                        s.previous_due, COALESCE(s.due_amount,0), COALESCE(s.credit_amount,0),
                        COALESCE(s.total_due,0), s.bill_cleared, s.account_cleared,
-                       s.bill_no, s.id, s.doctor_name
+                       s.bill_no, s.id, s.doctor_name,
+                       (SELECT GROUP_CONCAT(DISTINCT NULLIF(m.schedule,''))
+                        FROM sales_items si JOIN medicines m ON si.medicine_id=m.id
+                        WHERE si.sale_id=s.id) AS bill_schedules
                    FROM sales s JOIN customers c ON s.customer_id=c.id WHERE 1=1"""
         params = []
         if fd:  q += ' AND s.bill_date>=?';         params.append(fd)
@@ -248,8 +261,12 @@ class SalesHistoryPage:
                     else ['bill_cleared'] if bc == 1 and ac == 0
                     else ['has_due'] if total_due > 0 else [])
             display_due = 0 if ac == 1 else total_due
-            vals = (bill_no, sale[0], sale[1], sale[2], sale[3], sale[5],
-                    sale[6], sale[7], sale[8], sale[9], sale[10], display_due)
+            doctor = sale[16] or ''
+            schedule = (sale[17] or '') if len(sale) > 17 else ''
+            vals = (
+                bill_no, sale[0], sale[1], sale[2], doctor, schedule,
+                sale[3], sale[5], sale[6], sale[7], sale[8], sale[9], sale[10], display_due,
+            )
             self.sales_tree.insert('', tk.END, iid=str(sale_id), values=vals, tags=tags)
         pass  # tags configured once in _build_ui
 
@@ -277,23 +294,25 @@ class SalesHistoryPage:
             "SELECT COALESCE(SUM(total_due),0) FROM customers WHERE total_due > 0")
         actual_due = self.cursor.fetchone()[0] or 0
 
-        # Total standalone payments — respect active date filter
-        if fd and td:
-            self.cursor.execute(
-                "SELECT COALESCE(SUM(amount),0) FROM customer_payments "
-                "WHERE payment_date >= ? AND payment_date <= ?", (fd, td))
-        elif fd:
-            self.cursor.execute(
-                "SELECT COALESCE(SUM(amount),0) FROM customer_payments "
-                "WHERE payment_date >= ?", (fd,))
-        elif td:
-            self.cursor.execute(
-                "SELECT COALESCE(SUM(amount),0) FROM customer_payments "
-                "WHERE payment_date <= ?", (td,))
-        else:
-            self.cursor.execute(
-                "SELECT COALESCE(SUM(amount),0) FROM customer_payments")
-        total_standalone_paid = self.cursor.fetchone()[0] or 0
+        total_standalone_paid = 0.0
+        if data:
+            # Standalone customer payments — respect active date filter
+            if fd and td:
+                self.cursor.execute(
+                    "SELECT COALESCE(SUM(amount),0) FROM customer_payments "
+                    "WHERE payment_date >= ? AND payment_date <= ?", (fd, td))
+            elif fd:
+                self.cursor.execute(
+                    "SELECT COALESCE(SUM(amount),0) FROM customer_payments "
+                    "WHERE payment_date >= ?", (fd,))
+            elif td:
+                self.cursor.execute(
+                    "SELECT COALESCE(SUM(amount),0) FROM customer_payments "
+                    "WHERE payment_date <= ?", (td,))
+            else:
+                self.cursor.execute(
+                    "SELECT COALESCE(SUM(amount),0) FROM customer_payments")
+            total_standalone_paid = self.cursor.fetchone()[0] or 0
 
         # Add per-item discounts to total discount
         all_ids = [str(s[15]) for s in data]
@@ -340,7 +359,7 @@ class SalesHistoryPage:
         today_online = sum(s[7] for s in today_data)
         month_rev    = sum(s[3] for s in month_data)
 
-        total_billing_paid = sum(s[5] for s in data)
+        total_billing_paid = sum(s[5] for s in data) if data else 0.0
         total_paid_all = round(total_billing_paid + total_standalone_paid, 2)
 
         self.total_bills_var.set(str(n))
@@ -411,12 +430,11 @@ class SalesHistoryPage:
 
     def _export_current_view(self):
         from core.export_manager import export_data
-        cols = self.sales_tree['columns']
-        rows = [self.sales_tree.item(iid)['values']
-                for iid in self.sales_tree.get_children()]
+        from core.column_config import export_tree_current_view
+        cols, rows = export_tree_current_view(self.sales_tree)
         if not rows:
             showinfo("No Records", "No data visible."); return
-        export_data(self.parent, 'Sales - Current View', list(cols), rows, 'sales_current_view')
+        export_data(self.parent, 'Sales - Current View', cols, rows, 'sales_current_view')
 
     # ── Keyboard nav ──────────────────────────────────────────────────────
 

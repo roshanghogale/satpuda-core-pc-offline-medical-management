@@ -1,59 +1,58 @@
 .page { display: flex; flex-direction: column; gap: 12px; }
-.pageTitle { font-size: 15px; font-weight: 700; color: #e94560; }
+.pageTitle { font-size: 15px; font-weight: 700; color: #2563eb; }
 
 .layout { display: flex; gap: 14px; align-items: flex-start; }
 
-/* sidebar */
 .sidebar {
   width: 210px; flex-shrink: 0;
-  background: #16213e; border: 1px solid #1a4a7a; border-radius: 6px;
+  background: #ffffff; border: 1px solid #d0d7de; border-radius: 6px;
   overflow: hidden;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 .sidebarHeader {
   display: flex; align-items: center; justify-content: space-between;
-  background: #0f3460; padding: 8px 10px;
-  font-size: 11px; font-weight: 700; color: #a0c4e8;
+  background: #f8fafc; padding: 8px 10px;
+  font-size: 11px; font-weight: 700; color: #374151;
   text-transform: uppercase; letter-spacing: 0.5px;
+  border-bottom: 1px solid #e5e7eb;
 }
 .newBtn {
-  background: #e94560; border: none; color: #fff;
+  background: #2563eb; border: none; color: #fff;
   padding: 3px 10px; border-radius: 3px; cursor: pointer; font-size: 11px; font-weight: 600;
 }
-.newBtn:hover { background: #c73652; }
+.newBtn:hover { background: #1d4ed8; }
 .supItem {
   display: flex; align-items: center; justify-content: space-between;
-  border-bottom: 1px solid #1a2a3a; padding: 0 6px 0 0;
+  border-bottom: 1px solid #f3f4f6; padding: 0 6px 0 0;
 }
 .supItemName {
-  flex: 1; padding: 8px 12px; cursor: pointer; font-size: 12px; color: #a0b4c8;
+  flex: 1; padding: 8px 12px; cursor: pointer; font-size: 12px; color: #4b5563;
 }
-.supItem:hover .supItemName { color: #fff; }
-.supActive { background: #0f3460 !important; }
-.supActive .supItemName { color: #e94560 !important; font-weight: 600; }
+.supItem:hover .supItemName { color: #111827; }
+.supActive { background: #eff6ff !important; }
+.supActive .supItemName { color: #2563eb !important; font-weight: 600; }
 .delBtn {
   background: none; border: none; cursor: pointer; font-size: 13px;
-  opacity: 0.4; padding: 4px;
+  opacity: 0.5; padding: 4px;
 }
 .delBtn:hover { opacity: 1; }
-.empty { padding: 16px 12px; font-size: 12px; color: #607080; }
+.empty { padding: 16px 12px; font-size: 12px; color: #6b7280; }
 
-/* right panel */
 .right { flex: 1; display: flex; flex-direction: column; gap: 12px; }
 
-/* cards */
 .card {
-  background: #16213e; border: 1px solid #1a4a7a;
+  background: #ffffff; border: 1px solid #d0d7de;
   border-radius: 6px; padding: 14px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 .cardTitle {
-  font-size: 12px; font-weight: 700; color: #e94560;
+  font-size: 12px; font-weight: 700; color: #2563eb;
   text-transform: uppercase; letter-spacing: 0.5px;
   margin-bottom: 12px; padding-bottom: 6px;
-  border-bottom: 1px solid #1a4a7a;
+  border-bottom: 1px solid #e5e7eb;
 }
-.cardHint { color: #607080; font-weight: 400; text-transform: none; font-size: 11px; }
+.cardHint { color: #6b7280; font-weight: 400; text-transform: none; font-size: 11px; }
 
-/* form */
 .formGrid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -61,45 +60,43 @@
   margin-bottom: 12px;
 }
 .formField { display: flex; flex-direction: column; gap: 3px; }
-.formField label { font-size: 11px; color: #7a9ab5; font-weight: 600; }
+.formField label { font-size: 11px; color: #4b5563; font-weight: 600; }
 .input {
-  background: #0d1b2a; border: 1px solid #1a4a7a; color: #e0e0e0;
+  background: #ffffff; border: 1px solid #d0d7de; color: #1f2937;
   padding: 5px 8px; border-radius: 4px; font-size: 12px; width: 100%;
   outline: none; transition: border-color 0.15s;
 }
-.input:focus { border-color: #e94560; }
+.input:focus { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15); }
 
-/* field list */
 .fieldList { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
 .fieldRow {
   display: flex; align-items: center; gap: 8px;
-  background: #0d1b2a; border: 1px solid #1a4a7a; border-radius: 4px;
+  background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 4px;
   padding: 6px 10px; cursor: grab; user-select: none;
 }
-.fieldRow:hover { background: #0f2030; border-color: #3a7abf; }
-.dragHandle { color: #3a7abf; font-size: 14px; }
-.fieldPos { width: 20px; text-align: center; font-size: 11px; color: #e94560; font-weight: 700; }
-.fieldLabel { flex: 1; font-size: 12px; color: #e0e0e0; font-weight: 600; }
-.fieldKey { font-size: 10px; color: #607080; font-family: monospace; }
+.fieldRow:hover { background: #eff6ff; border-color: #93c5fd; }
+.dragHandle { color: #9ca3af; font-size: 14px; }
+.fieldPos { width: 20px; text-align: center; font-size: 11px; color: #2563eb; font-weight: 700; }
+.fieldLabel { flex: 1; font-size: 12px; color: #1f2937; font-weight: 600; }
+.fieldKey { font-size: 10px; color: #6b7280; font-family: monospace; }
 .arrows { display: flex; gap: 3px; }
 .arrows button {
-  background: #1a4a7a; border: 1px solid #3a7abf; color: #a0c4e8;
+  background: #f3f4f6; border: 1px solid #d0d7de; color: #374151;
   width: 24px; height: 24px; border-radius: 3px; cursor: pointer; font-size: 12px;
 }
-.arrows button:hover:not(:disabled) { background: #0f3460; color: #fff; }
+.arrows button:hover:not(:disabled) { background: #eff6ff; color: #1d4ed8; }
 .arrows button:disabled { opacity: 0.3; cursor: default; }
 
-/* actions */
 .cfgActions { display: flex; gap: 10px; }
 .resetBtn {
-  background: #1a4a7a; border: 1px solid #3a7abf; color: #a0c4e8;
+  background: #f3f4f6; border: 1px solid #d0d7de; color: #374151;
   padding: 7px 16px; border-radius: 4px; cursor: pointer; font-size: 12px;
 }
-.resetBtn:hover { background: #0f3460; }
+.resetBtn:hover { background: #e5e7eb; }
 .saveBtn {
-  background: #e94560; border: none; color: #fff;
+  background: #2563eb; border: none; color: #fff;
   padding: 7px 20px; border-radius: 4px; cursor: pointer;
   font-size: 12px; font-weight: 600; transition: all 0.15s;
 }
-.saveBtn:hover { background: #c73652; }
-.saved { background: #1a6a3a !important; color: #2ecc71 !important; }
+.saveBtn:hover { background: #1d4ed8; }
+.saved { background: #dcfce7 !important; color: #166534 !important; }
