@@ -74,4 +74,9 @@ def tcl_tk_datas_and_binaries():
         if os.path.isfile(src):
             binaries.append((src, os.path.join('tcl', sub).replace('\\', '/')))
 
+    for name in ('_sqlite3.pyd', 'sqlite3.dll'):
+        src = os.path.join(dll_dir, name)
+        if os.path.isfile(src):
+            binaries.append((src, '.'))
+
     return datas, binaries

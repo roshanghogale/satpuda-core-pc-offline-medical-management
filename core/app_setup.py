@@ -272,28 +272,28 @@ def set_window_icon(root):
 # ── Restart helper ────────────────────────────────────────────────────────────
 
 def restart_app(root=None):
-    import subprocess
+    """Restart the app. Frozen EXE must exit immediately so the child can extract."""
     if getattr(sys, 'frozen', False):
-        args = [sys.executable]
-    else:
-        args = [sys.executable, os.path.abspath(sys.argv[0])] + sys.argv[1:]
-    try:
-        # Ensure the restarted frozen app does not inherit stale PyInstaller
-        # Tcl/Tk environment variables.
-        env = os.environ.copy()
-        env.pop("TCL_LIBRARY", None)
-        env.pop("TK_LIBRARY", None)
-        subprocess.Popen(args, env=env, cwd=os.path.dirname(os.path.abspath(sys.executable)))
-    except Exception:
+        from core.frozen_bootstrap import relaunch_executable
+        relaunch_executable(root)
+        return
+
+    import subprocess
+    args = [sys.executable, os.path.abspath(sys.argv[0])] + sys.argv[1:]
+    if root is not None:
         try:
-            subprocess.Popen(args)
+            root._style = type('_S', (), {'instance': None})()
         except Exception:
             pass
-    if root is not None:
-        # Patch out ttkbootstrap's destroy hook to avoid _style AttributeError
-        try: root._style = type('_S', (), {'instance': None})()
-        except Exception: pass
-        try: root.destroy()
-        except Exception: pass
-        try: root.quit()
-        except Exception: pass
+        try:
+            root.quit()
+        except Exception:
+            pass
+        try:
+            root.destroy()
+        except Exception:
+            pass
+    try:
+        subprocess.Popen(args)
+    except Exception:
+        pass

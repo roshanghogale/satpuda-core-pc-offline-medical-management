@@ -15,26 +15,8 @@ from ui.settings.settings_tabs.updates_tab import UpdatesTab
 
 
 def _restart_app(root=None):
-    import sys, os, subprocess
-    if getattr(sys, 'frozen', False):
-        args = [sys.executable]
-    else:
-        args = [sys.executable, os.path.abspath(sys.argv[0])] + sys.argv[1:]
-    if root is not None:
-        try: root.quit()
-        except Exception: pass
-        try: root.destroy()
-        except Exception: pass
-    try:
-        from core.frozen_bootstrap import clean_env_for_child_process
-
-        env = clean_env_for_child_process()
-        subprocess.Popen(args, env=env)
-    except Exception:
-        try:
-            subprocess.Popen(args)
-        except Exception:
-            pass
+    from core.app_setup import restart_app
+    restart_app(root)
 
 
 class DatabaseTab:

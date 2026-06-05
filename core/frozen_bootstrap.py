@@ -57,7 +57,10 @@ def prepare_frozen_runtime() -> None:
     if sys.platform == 'win32':
         try:
             import ctypes
-            for name in ('tcl86t.dll', 'tk86t.dll', 'tcl86.dll', 'tk86.dll'):
+            for name in (
+                'tcl86t.dll', 'tk86t.dll', 'tcl86.dll', 'tk86.dll',
+                'sqlite3.dll', 'python313.dll',
+            ):
                 dll_path = os.path.join(base, name)
                 if os.path.isfile(dll_path):
                     ctypes.WinDLL(dll_path)
@@ -66,16 +69,25 @@ def prepare_frozen_runtime() -> None:
 
 
 def clean_env_for_child_process() -> dict:
-    """Drop stale PyInstaller Tcl/Tk paths before spawning a restarted EXE."""
+    """Drop stale PyInstaller paths before spawning a restarted EXE."""
     env = os.environ.copy()
-    env.pop('TCL_LIBRARY', None)
-    env.pop('TK_LIBRARY', None)
+    for key in (
+        'TCL_LIBRARY',
+        'TK_LIBRARY',
+        'PYTHONHOME',
+        'PYTHONPATH',
+        'PYTHONEXECUTABLE',
+        '_MEIPASS',
+        '_MEIPASS2',
+    ):
+        env.pop(key, None)
 
     cleaned: list[str] = []
     for part in env.get('PATH', '').split(os.pathsep):
         if not part:
             continue
-        if '_MEI' in part.upper():
+        upper = part.upper()
+        if '_MEI' in upper or '_MEIPASS' in upper:
             continue
         if part not in cleaned:
             cleaned.append(part)

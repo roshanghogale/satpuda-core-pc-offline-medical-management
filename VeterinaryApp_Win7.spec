@@ -56,7 +56,7 @@ a = Analysis(
         'PIL._imaging', 'PIL._imagingtk', 'PIL.ImageColor',
         'PIL.ImageFilter', 'PIL.ImageOps',
         # stdlib
-        'sqlite3', 'tkinter', 'tkinter.ttk', 'tkinter.messagebox',
+        '_sqlite3', 'sqlite3', 'tkinter', 'tkinter.ttk', 'tkinter.messagebox',
         'tkinter.filedialog', 'tkinter.simpledialog',
         'csv', 'json', 'shutil', 'tempfile', 'math', 'datetime',
         'hashlib', 'subprocess', 'uuid', 'webbrowser', 'base64',

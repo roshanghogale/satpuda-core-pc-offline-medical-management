@@ -37,7 +37,10 @@ if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
 
     try:
         import ctypes
-        for name in ('tcl86t.dll', 'tk86t.dll', 'tcl86.dll', 'tk86.dll'):
+        for name in (
+            'tcl86t.dll', 'tk86t.dll', 'tcl86.dll', 'tk86.dll',
+            'sqlite3.dll', 'python313.dll',
+        ):
             dll_path = os.path.join(base, name)
             if os.path.isfile(dll_path):
                 ctypes.WinDLL(dll_path)
