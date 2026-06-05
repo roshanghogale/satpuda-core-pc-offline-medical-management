@@ -13,13 +13,16 @@ from core.scroll_manager import make_scrollable
 class AppModeTab:
     """Settings tab to switch between Medical and Veterinary mode."""
 
-    def __init__(self, notebook):
+    def __init__(self, notebook=None, parent=None):
         from core.app_setup import load_app_mode, save_app_mode
         self._save_app_mode = save_app_mode
 
-        frame = ttk.Frame(notebook)
-        notebook.add(frame, text="🏥 App Mode")
-        inner = make_scrollable(frame)
+        if parent is not None:
+            inner = parent
+        else:
+            frame = ttk.Frame(notebook)
+            notebook.add(frame, text="🏥 App Mode")
+            inner = make_scrollable(frame)
 
         ttk.Label(inner, text="Application Mode",
                   font=(FONT_FAMILY, FONT_SIZE_SECTION_TITLE, 'bold')).pack(pady=(20, 6))
@@ -59,12 +62,15 @@ class AppModeTab:
 
 
 class ThresholdsTab:
-    def __init__(self, notebook, conn):
+    def __init__(self, notebook=None, conn=None, parent=None):
         self.conn = conn
         self.cursor = conn.cursor()
-        outer = ttk.Frame(notebook)
-        notebook.add(outer, text="Thresholds")
-        frame = make_scrollable(outer)
+        if parent is not None:
+            frame = parent
+        else:
+            outer = ttk.Frame(notebook)
+            notebook.add(outer, text="Thresholds")
+            frame = make_scrollable(outer)
         self._build(frame)
         self._load()
 

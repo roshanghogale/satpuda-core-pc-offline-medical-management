@@ -635,10 +635,10 @@ class VeterinaryManagementSystem:
                     if askyesno(
                         "Update Available",
                         f"A new version is available.\n\n{notes}\n\n"
-                        "Open Settings → Updates to download and install now?",
+                        "Open Settings → Database → Management to install now?",
                         parent=self.root,
                     ):
-                        self.open_settings("Updates")
+                        self.open_settings("Database")
 
                 self.root.after(0, _prompt)
             except Exception:

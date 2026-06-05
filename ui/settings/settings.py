@@ -8,11 +8,10 @@ from ui.settings.settings_tabs.pharmacy_tab   import PharmacyTab
 from ui.settings.settings_tabs.contacts_tab   import ContactsTab
 from ui.settings.settings_tabs.layout_tab     import LayoutTab
 from ui.settings.settings_tabs.database_tab   import DatabaseTab
-from ui.settings.settings_tabs.payment_tab    import PaymentTab
+from ui.settings.settings_tabs.payment_combined_tab import PaymentCombinedTab
 from ui.settings.settings_tabs.ledger_tab     import LedgerTab
-from ui.settings.settings_tabs.misc_tabs      import ThresholdsTab, ShortcutsTab, AppModeTab
-from ui.settings.settings_tabs.updates_tab    import UpdatesTab
-from ui.settings.settings_tabs.customer_payment_tab import CustomerPaymentTab
+from ui.settings.settings_tabs.misc_tabs      import ShortcutsTab
+from core.scroll_manager import make_scrollable
 
 
 class SettingsPage:
@@ -36,40 +35,28 @@ class SettingsPage:
         from ui.shared.shelf_management import ShelfManagementPage
         ShelfManagementPage(shelf_frame, conn)
 
-        self._layout     = LayoutTab(notebook, root)
+        self._layout     = LayoutTab(notebook, root, conn=conn)
 
-        # Import Data tab
-        import_frame = ttk.Frame(notebook)
-        notebook.add(import_frame, text="📥 Import Data")
-        self._build_import_tab(import_frame)
+        # Import (purchase bills + mobile JSON)
+        import_outer = ttk.Frame(notebook)
+        notebook.add(import_outer, text="Import")
+        self._build_import_tab(import_outer)
 
-        # Import from Mobile tab
-        mobile_frame = ttk.Frame(notebook)
-        notebook.add(mobile_frame, text="📱 Import from Mobile")
-        from ui.shared.import_from_mobile import ImportFromMobilePage
-        ImportFromMobilePage(mobile_frame, conn)
-
-        self._thresholds = ThresholdsTab(notebook, conn)
         self._database   = DatabaseTab(notebook, conn, parent)
-        self._payment    = PaymentTab(notebook, conn)
-        self._cust_pay   = CustomerPaymentTab(notebook, conn)
+        self._payment    = PaymentCombinedTab(notebook, conn)
         self._ledger     = LedgerTab(notebook, conn)
-        self._app_mode   = AppModeTab(notebook)
-        self._updates    = UpdatesTab(notebook)
         self._shortcuts  = ShortcutsTab(notebook)
 
         # Ctrl+Tab navigation
         parent.after(200, lambda: self._setup_notebook_nav(notebook))
 
-    # ── Import Data tab (thin wrapper — delegates to ImportPurchasesPage) ─
+    # ── Import tab (purchase bills + mobile) ──────────────────────────────
 
-    def _build_import_tab(self, frame):
+    def _build_import_tab(self, outer):
         from ui.shared.import_purchases import ImportPurchasesPage
-        import tkinter as tk
-        try:
-            import ttkbootstrap as ttk
-        except ImportError:
-            from tkinter import ttk
+        from ui.shared.import_from_mobile import ImportFromMobilePage
+
+        frame = make_scrollable(outer)
 
         bill_bar = ttk.LabelFrame(frame, text="Import Purchase Bill")
         bill_bar.pack(fill=tk.X, padx=10, pady=(10, 4))
@@ -96,6 +83,11 @@ class SettingsPage:
                   foreground=get_muted_color()).pack(side=tk.LEFT, padx=12)
         ttk.Separator(frame, orient='horizontal').pack(fill=tk.X, padx=10, pady=4)
         ImportPurchasesPage(frame, self.conn)
+
+        ttk.Separator(frame, orient='horizontal').pack(fill=tk.X, padx=10, pady=12)
+        mobile_lf = ttk.LabelFrame(frame, text="Import from Mobile")
+        mobile_lf.pack(fill=tk.BOTH, expand=True, padx=10, pady=(4, 10))
+        ImportFromMobilePage(mobile_lf, self.conn)
 
     def _open_import_purchase_bill(self):
         root = self.parent.winfo_toplevel()

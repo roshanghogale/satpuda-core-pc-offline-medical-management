@@ -34,12 +34,15 @@ _NAV_SECTIONS = [
     ('units',        'Medicine Units'),
     ('schedules',    'Schedules'),
     ('med_types',    'Medicine Types'),
+    ('thresholds',   'Thresholds'),
+    ('app_mode',     'App Mode'),
 ]
 
 
 class LayoutTab:
-    def __init__(self, notebook, parent_root):
+    def __init__(self, notebook, parent_root, conn=None):
         self._root = parent_root
+        self._conn = conn
         self._panels = {}
         self._nav_buttons = {}
         self._active_section = None
@@ -148,6 +151,19 @@ class LayoutTab:
         self._build_units_panel()
         self._build_schedules_panel()
         self._build_med_types_panel()
+        if self._conn is not None:
+            self._build_thresholds_panel()
+            self._build_app_mode_panel()
+
+    def _build_thresholds_panel(self):
+        from ui.settings.settings_tabs.misc_tabs import ThresholdsTab
+        frame = self._panel('thresholds')
+        ThresholdsTab(conn=self._conn, parent=frame)
+
+    def _build_app_mode_panel(self):
+        from ui.settings.settings_tabs.misc_tabs import AppModeTab
+        frame = self._panel('app_mode')
+        AppModeTab(parent=frame)
 
     # ── Theme ─────────────────────────────────────────────────────────────
 

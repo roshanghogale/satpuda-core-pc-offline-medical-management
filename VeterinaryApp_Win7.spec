@@ -112,6 +112,7 @@ a = Analysis(
         'ui.settings.settings_tabs.appearance_scroll',
         'ui.settings.settings_tabs.contacts_tab',
         'ui.settings.settings_tabs.updates_tab',
+        'ui.settings.settings_tabs.payment_combined_tab',
         'ui.general_products', 'ui.general_products.general_products_page',
         'ui.shared', 'ui.shared.customers', 'ui.shared.home_page',
         'ui.shared.import_from_mobile', 'ui.shared.import_purchases',

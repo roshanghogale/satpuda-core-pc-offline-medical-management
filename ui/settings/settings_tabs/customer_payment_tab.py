@@ -21,15 +21,19 @@ from widgets.searchable_combo import SearchableCombo
 
 
 class CustomerPaymentTab:
-    def __init__(self, notebook, conn):
+    def __init__(self, conn, notebook=None, parent=None):
         self.conn   = conn
         self.cursor = conn.cursor()
         self._editing_id = None   # None = new, int = editing existing
 
-        outer = ttk.Frame(notebook)
-        notebook.add(outer, text="Customer Payment")
-        frame = make_scrollable(outer)
-        self._build(frame, outer)
+        if parent is not None:
+            self.outer = parent
+            frame = make_scrollable(parent)
+        else:
+            self.outer = ttk.Frame(notebook)
+            notebook.add(self.outer, text="Customer Payment")
+            frame = make_scrollable(self.outer)
+        self._build(frame, self.outer)
 
     def _build(self, frame, outer):
         # -- Entry form -------------------------------------------------------

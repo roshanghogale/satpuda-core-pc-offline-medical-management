@@ -11,6 +11,7 @@ from datetime import date
 from core.font_config import *
 from core.alert_colors import get_alert_color
 from core.scroll_manager import make_scrollable, open_dialog
+from ui.settings.settings_tabs.updates_tab import UpdatesTab
 
 
 def _restart_app(root=None):
@@ -41,6 +42,18 @@ class DatabaseTab:
         self._build(frame)
 
     def _build(self, frame):
+        mgmt = ttk.LabelFrame(frame, text="Management")
+        mgmt.pack(fill=tk.X, padx=10, pady=10)
+        ttk.Label(
+            mgmt,
+            text="Check for app updates from GitHub Releases. Install replaces only the EXE — "
+                 "your database, activation, and backups stay on this PC.",
+            wraplength=560,
+            justify=tk.LEFT,
+            font=(FONT_FAMILY, FONT_SIZE_SUPPORTING_TEXT),
+        ).pack(anchor=tk.W, padx=12, pady=(8, 4))
+        UpdatesTab.embed(mgmt, self._parent)
+
         # Export
         ef = ttk.LabelFrame(frame, text="Export Data")
         ef.pack(fill=tk.X, padx=10, pady=10)

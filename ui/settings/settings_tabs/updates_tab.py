@@ -12,37 +12,50 @@ from core.themed_messagebox import showinfo, showwarning, showerror, askyesno
 
 
 class UpdatesTab:
-    def __init__(self, notebook):
-        self._notebook = notebook
+    """Standalone Updates tab, or embed via UpdatesTab.embed(parent, root)."""
+
+    def __init__(self, notebook=None, parent=None, root=None, embedded=False):
+        self._root_widget = root or parent or notebook
+        self._embedded = embedded
         self._pending_info = None
         self._downloaded_path = ""
 
-        outer = ttk.Frame(notebook)
-        notebook.add(outer, text="Updates")
-        frame = make_scrollable(outer)
-        self._build(frame)
+        if parent is not None:
+            frame = parent
+        else:
+            outer = ttk.Frame(notebook)
+            notebook.add(outer, text="Updates")
+            frame = make_scrollable(outer)
+        self._build(frame, compact=embedded)
 
-    def _build(self, frame):
-        ttk.Label(
-            frame,
-            text="Application Updates",
-            font=(FONT_FAMILY, FONT_SIZE_SECTION_TITLE, "bold"),
-        ).pack(pady=(16, 6))
+    @classmethod
+    def embed(cls, parent, root_widget):
+        return cls(parent=parent, root=root_widget, embedded=True)
 
-        ttk.Label(
-            frame,
-            text=(
-                f"{APP_NAME} checks GitHub Releases for a newer version. "
-                "Updating replaces only the program EXE — your database, activation, "
-                "and backup settings stay on this PC."
-            ),
-            wraplength=620,
-            justify=tk.LEFT,
-            font=(FONT_FAMILY, FONT_SIZE_SUPPORTING_TEXT),
-        ).pack(padx=20, pady=(0, 12), anchor=tk.W)
+    def _build(self, frame, compact=False):
+        if not compact:
+            ttk.Label(
+                frame,
+                text="Application Updates",
+                font=(FONT_FAMILY, FONT_SIZE_SECTION_TITLE, "bold"),
+            ).pack(pady=(16, 6))
+
+        pad = 12 if compact else 20
+        if not compact:
+            ttk.Label(
+                frame,
+                text=(
+                    f"{APP_NAME} checks GitHub Releases for a newer version. "
+                    "Updating replaces only the program EXE — your database, activation, "
+                    "and backup settings stay on this PC."
+                ),
+                wraplength=620,
+                justify=tk.LEFT,
+                font=(FONT_FAMILY, FONT_SIZE_SUPPORTING_TEXT),
+            ).pack(padx=pad, pady=(0, 12), anchor=tk.W)
 
         info = ttk.LabelFrame(frame, text="Version")
-        info.pack(fill=tk.X, padx=20, pady=8)
+        info.pack(fill=tk.X, padx=pad, pady=8)
         try:
             from core.github_updater import expected_exe_name, platform_label
             plat = platform_label()
@@ -78,7 +91,7 @@ class UpdatesTab:
         ).pack(anchor=tk.W, padx=12, pady=(0, 10))
 
         actions = ttk.Frame(frame)
-        actions.pack(fill=tk.X, padx=20, pady=8)
+        actions.pack(fill=tk.X, padx=pad, pady=8)
         self._check_btn = ttk.Button(
             actions, text="Check for Updates", command=self._check_updates
         )
@@ -95,33 +108,34 @@ class UpdatesTab:
         ).pack(side=tk.LEFT)
 
         self._progress = ttk.Progressbar(frame, mode="indeterminate", length=420)
-        self._progress.pack(padx=20, pady=(4, 8), anchor=tk.W)
+        self._progress.pack(padx=pad, pady=(4, 8), anchor=tk.W)
 
         notes = ttk.LabelFrame(frame, text="Release Notes")
-        notes.pack(fill=tk.BOTH, expand=True, padx=20, pady=8)
+        notes.pack(fill=tk.BOTH, expand=bool(not compact), padx=pad, pady=8)
         self._notes = tk.Text(
             notes,
-            height=14,
+            height=6 if compact else 14,
             wrap=tk.WORD,
             font=(FONT_FAMILY, FONT_SIZE_SUPPORTING_TEXT),
             state=tk.DISABLED,
         )
         self._notes.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
 
-        ttk.Label(
-            frame,
-            text=(
-                "Publishing: attach BOTH SatpudaCore.exe (Win 10/11) and SatpudaCore_Win7.exe "
-                "to each GitHub Release. This PC downloads only the EXE that matches its build."
-            ),
-            wraplength=620,
-            justify=tk.LEFT,
-            font=(FONT_FAMILY, FONT_SIZE_SUPPORTING_TEXT),
-            foreground="#666",
-        ).pack(padx=20, pady=(8, 16), anchor=tk.W)
+        if not compact:
+            ttk.Label(
+                frame,
+                text=(
+                    "Publishing: attach BOTH SatpudaCore.exe (Win 10/11) and SatpudaCore_Win7.exe "
+                    "to each GitHub Release. This PC downloads only the EXE that matches its build."
+                ),
+                wraplength=620,
+                justify=tk.LEFT,
+                font=(FONT_FAMILY, FONT_SIZE_SUPPORTING_TEXT),
+                foreground="#666",
+            ).pack(padx=pad, pady=(8, 16), anchor=tk.W)
 
     def _parent(self):
-        return self._notebook.winfo_toplevel()
+        return self._root_widget.winfo_toplevel()
 
     def _set_notes(self, text: str) -> None:
         self._notes.config(state=tk.NORMAL)
