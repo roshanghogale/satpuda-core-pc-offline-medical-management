@@ -158,10 +158,51 @@ def _oauth_token_valid(token_data: dict) -> bool:
     )
 
 
+def _oauth_client_id_from_bytes(data: bytes) -> str:
+    return (_read_token_bytes(data).get('client_id') or '').strip()
+
+
+def _should_reseed_backup_file(fname: str, bundled: str, dst: str, force: bool) -> bool:
+    """Decide whether AppData should be replaced from the EXE bundle."""
+    if force or not os.path.exists(dst):
+        return True
+    try:
+        with open(bundled, 'rb') as bf, open(dst, 'rb') as df:
+            bundled_raw, dst_raw = bf.read(), df.read()
+    except Exception:
+        return True
+
+    if fname == 'backup_creds.dat':
+        if not _oauth_token_valid(_read_token_bytes(dst_raw)):
+            return True
+        bundled_id = _oauth_client_id_from_bytes(bundled_raw)
+        dst_id = _oauth_client_id_from_bytes(dst_raw)
+        # EXE was rebuilt with a new OAuth client — replace stale AppData creds.
+        if bundled_id and dst_id and bundled_id != dst_id:
+            _logger.info(
+                f"Replacing stale backup_creds.dat (OAuth client changed) -> {dst}"
+            )
+            return True
+        return False
+
+    if not _decrypt_dict(dst_raw).get('folder_id'):
+        return True
+    bundled_cfg = _decrypt_dict(bundled_raw)
+    dst_cfg = _decrypt_dict(dst_raw)
+    bundled_id = (bundled_cfg.get('folder_id') or '').strip()
+    dst_id = (dst_cfg.get('folder_id') or '').strip()
+    if bundled_id and dst_id and bundled_id != dst_id:
+        _logger.info(
+            f"Replacing stale backup_config.dat (folder ID changed in EXE) -> {dst}"
+        )
+        return True
+    return False
+
+
 def seed_bundled_backup_files(force: bool = False):
     """
     Copy backup_creds.dat and backup_config.dat from the EXE bundle into AppData
-  when missing or unreadable (fixes new PC + old machine-bound encrypted files).
+    when missing, unreadable, or superseded by a newer EXE build.
     """
     from core.license_manager import _appdata_dir
     appdata = _appdata_dir()
@@ -176,23 +217,13 @@ def seed_bundled_backup_files(force: bool = False):
         if not bundled or not os.path.exists(bundled):
             continue
         dst = os.path.join(appdata, fname)
-        valid = False
-        if not force and os.path.exists(dst):
-            try:
-                with open(dst, 'rb') as f:
-                    raw = f.read()
-                if fname == 'backup_creds.dat':
-                    valid = _oauth_token_valid(_read_token_bytes(raw))
-                else:
-                    valid = bool(_decrypt_dict(raw).get('folder_id'))
-            except Exception:
-                valid = False
-        if force or not valid:
-            try:
-                shutil.copy2(bundled, dst)
-                _logger.info(f"Seeded {fname} from bundle -> {dst}")
-            except Exception as e:
-                _logger.error(f"Failed to seed {fname}: {e}")
+        if not _should_reseed_backup_file(fname, bundled, dst, force):
+            continue
+        try:
+            shutil.copy2(bundled, dst)
+            _logger.info(f"Seeded {fname} from bundle -> {dst}")
+        except Exception as e:
+            _logger.error(f"Failed to seed {fname}: {e}")
 
 
 def _read_token_bytes(data: bytes) -> dict:
@@ -331,11 +362,26 @@ def _write_config_file(path: str, folder_id: str, store_name: str):
         f.write(_encrypt_dict(_backup_config_payload(folder_id, store_name)))
 
 
+def _exe_appdata_config_path() -> str:
+    """Frozen EXE always reads backup_config.dat from LOCALAPPDATA\\VeterinaryApp."""
+    base = os.path.join(
+        os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
+        'VeterinaryApp',
+    )
+    return os.path.join(base, 'backup_config.dat')
+
+
 # Public: write backup_config.dat (AppData — legacy / optional override)
 def write_backup_config(folder_id: str, store_name: str):
     try:
         _write_config_file(_config_path(), folder_id, store_name)
         _logger.info(f"backup_config.dat written for store: {store_name}")
+        # Dev mode uses project config/; the EXE uses LOCALAPPDATA. Mirror on save so both match.
+        if not getattr(sys, 'frozen', False):
+            exe_cfg = _exe_appdata_config_path()
+            if os.path.normcase(exe_cfg) != os.path.normcase(_config_path()):
+                _write_config_file(exe_cfg, folder_id, store_name)
+                _logger.info(f"Mirrored backup_config.dat to {exe_cfg}")
     except Exception as e:
         _logger.error(f"Failed to write backup_config.dat: {e}")
 
@@ -696,7 +742,7 @@ def run_backup_silently(on_error=None):
 
 def run_backup_now(manual: bool = False):
     """Backup on close (when auto enabled) or manual 'Backup Now' from settings.
-    Waits up to 20 seconds for the backup thread to finish before returning.
+    Waits up to 90 seconds for the backup thread to finish before returning.
     """
     if not manual and not is_auto_backup_enabled():
         return
@@ -704,4 +750,17 @@ def run_backup_now(manual: bool = False):
     t = threading.Thread(
         target=lambda: _do_backup(force=True, trigger=trigger), daemon=True)
     t.start()
-    t.join(timeout=20)
+    t.join(timeout=90)
+
+
+def last_backup_log_message() -> str:
+    """Return the last non-empty line from backup_log.txt, or empty string."""
+    try:
+        path = _log_path()
+        if not os.path.exists(path):
+            return ''
+        with open(path, encoding='utf-8') as f:
+            lines = [l.strip() for l in f if l.strip()]
+        return lines[-1] if lines else ''
+    except Exception:
+        return ''

@@ -470,10 +470,11 @@ class VeterinaryManagementSystem:
         pur_btn.pack(side=tk.LEFT, padx=6, pady=4)
         _show('sales')
 
-    def open_settings(self, select_tab=None, contacts_sub=None):
+    def open_settings(self, select_tab=None, contacts_sub=None, management_sub=None):
         self.clear_main_frame()
         from ui.settings import SettingsPage
         page = SettingsPage(self.main_frame, self.conn)
+        self._settings_page = page
         if select_tab:
             nb = page._notebook
             for i in range(nb.index('end')):
@@ -482,6 +483,8 @@ class VeterinaryManagementSystem:
                     break
         if contacts_sub:
             page.open_contacts(contacts_sub)
+        if management_sub:
+            page.open_management(management_sub)
         self._update_settings_canvas(page)
         page._notebook.bind('<<NotebookTabChanged>>',
                             lambda e: self._update_settings_canvas(page))
@@ -493,6 +496,8 @@ class VeterinaryManagementSystem:
             tab_text   = settings_page._notebook.tab(tab_id, 'text')
             if tab_text == 'Appearance':
                 settings_page._layout.sync_input_canvas()
+            elif tab_text == 'Management':
+                settings_page._database.sync_input_canvas()
             else:
                 canvas = self._find_tab_canvas(tab_widget)
                 self.input_ctrl.set_active_canvas(canvas)
@@ -681,10 +686,10 @@ class VeterinaryManagementSystem:
                     if askyesno(
                         "Update Available",
                         f"A new version is available.\n\n{notes}\n\n"
-                        "Open Settings → Database → Management to install now?",
+                        "Open Settings → Management → App Updates to install now?",
                         parent=self.root,
                     ):
-                        self.open_settings("Database")
+                        self.open_settings("Management", management_sub='updates')
 
                 self.root.after(0, _prompt)
             except Exception:

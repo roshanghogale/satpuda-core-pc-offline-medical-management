@@ -10,7 +10,8 @@ import json
 from datetime import date
 from core.font_config import *
 from core.alert_colors import get_alert_color
-from core.scroll_manager import make_scrollable, open_dialog
+from core.scroll_manager import open_dialog
+from ui.settings.settings_tabs.appearance_scroll import AppearanceScrollPane
 from ui.settings.settings_tabs.updates_tab import UpdatesTab
 
 
@@ -19,18 +20,100 @@ def _restart_app(root=None):
     restart_app(root)
 
 
+_NAV_SECTIONS = [
+    ('updates', 'App Updates'),
+    ('export',  'Export Data'),
+    ('backup',  'Google Drive Backup'),
+    ('admin',   'Administrator'),
+    ('danger',  'Danger Zone'),
+]
+
+
 class DatabaseTab:
+    TAB_NAME = "Management"
+
     def __init__(self, notebook, conn, parent_widget):
         self.conn = conn
         self.cursor = conn.cursor()
         self._parent = parent_widget
-        outer = ttk.Frame(notebook)
-        notebook.add(outer, text="Database")
-        frame = make_scrollable(outer)
-        self._build(frame)
+        self._panels = {}
+        self._nav_buttons = {}
+        self._active_section = None
 
-    def _build(self, frame):
-        mgmt = ttk.LabelFrame(frame, text="Management")
+        outer = ttk.Frame(notebook)
+        notebook.add(outer, text=self.TAB_NAME)
+
+        shell = ttk.Frame(outer)
+        shell.pack(fill=tk.BOTH, expand=True)
+
+        nav_outer = ttk.LabelFrame(shell, text="Sections")
+        nav_outer.pack(side=tk.LEFT, fill=tk.Y, padx=(8, 4), pady=8)
+        nav_scroll = ttk.Frame(nav_outer)
+        nav_scroll.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+
+        for section_id, label in _NAV_SECTIONS:
+            btn = ttk.Button(
+                nav_scroll, text=label, width=22,
+                command=lambda k=section_id: self._show_section(k),
+            )
+            btn.pack(fill=tk.X, pady=2)
+            self._nav_buttons[section_id] = btn
+
+        right_col = ttk.Frame(shell)
+        right_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(4, 8), pady=8)
+        self._scroller = AppearanceScrollPane(right_col)
+        self._content_host = self._scroller.frame
+
+        self._build_all_panels()
+        self._show_section('updates')
+
+    def _panel(self, section_id):
+        wrapper = ttk.Frame(self._content_host)
+        self._panels[section_id] = wrapper
+        return wrapper
+
+    def sync_input_canvas(self):
+        app = getattr(self._parent.winfo_toplevel(), '_main_app', None)
+        if not app or not hasattr(app, 'input_ctrl'):
+            return
+        app.input_ctrl.set_active_canvas(self._scroller.canvas)
+
+    def show_section(self, section_id):
+        """Public: switch to a Management subsection (e.g. from update prompt)."""
+        self._show_section(section_id)
+
+    def _show_section(self, section_id):
+        if section_id not in self._panels:
+            return
+        for frame in self._panels.values():
+            frame.pack_forget()
+        panel = self._panels[section_id]
+        panel.pack(side=tk.TOP, fill=tk.X, anchor='n')
+        self._active_section = section_id
+
+        def _after_show():
+            self._scroller.bind_wheel_recursive()
+            self._scroller.refresh()
+            self._scroller.scroll_to_top()
+
+        panel.after_idle(_after_show)
+        self.sync_input_canvas()
+        for key, btn in self._nav_buttons.items():
+            try:
+                btn.configure(bootstyle='primary' if key == section_id else 'secondary')
+            except Exception:
+                pass
+
+    def _build_all_panels(self):
+        self._build_updates_panel()
+        self._build_export_panel()
+        self._build_backup_panel()
+        self._build_admin_panel()
+        self._build_danger_panel()
+
+    def _build_updates_panel(self):
+        frame = self._panel('updates')
+        mgmt = ttk.LabelFrame(frame, text="App Updates")
         mgmt.pack(fill=tk.X, padx=10, pady=10)
         ttk.Label(
             mgmt,
@@ -42,7 +125,8 @@ class DatabaseTab:
         ).pack(anchor=tk.W, padx=12, pady=(8, 4))
         UpdatesTab.embed(mgmt, self._parent)
 
-        # Export
+    def _build_export_panel(self):
+        frame = self._panel('export')
         ef = ttk.LabelFrame(frame, text="Export Data")
         ef.pack(fill=tk.X, padx=10, pady=10)
         ttk.Label(ef, text="Export data to CSV files you can open in Excel.").pack(pady=(8, 4))
@@ -53,7 +137,8 @@ class DatabaseTab:
         ttk.Button(br, text="Export Inventory", command=self.export_inventory).pack(side=tk.LEFT, padx=8)
         ttk.Button(br, text="Export All",       command=self.export_all).pack(side=tk.LEFT, padx=8)
 
-        # Backup
+    def _build_backup_panel(self):
+        frame = self._panel('backup')
         bf = ttk.LabelFrame(frame, text="Google Drive Backup")
         bf.pack(fill=tk.X, padx=10, pady=10)
         self._backup_status_var = tk.StringVar(value="")
@@ -88,6 +173,8 @@ class DatabaseTab:
         ).pack(padx=10, pady=(0, 10), anchor='w')
         self._refresh_backup_info()
 
+    def _build_admin_panel(self):
+        frame = self._panel('admin')
         admin = ttk.LabelFrame(frame, text="Administrator")
         admin.pack(fill=tk.X, padx=10, pady=10)
         ttk.Label(
@@ -99,7 +186,8 @@ class DatabaseTab:
             anchor=tk.W, padx=10, pady=(0, 10)
         )
 
-        # Danger zone
+    def _build_danger_panel(self):
+        frame = self._panel('danger')
         wf = ttk.LabelFrame(frame, text="Danger Zone")
         wf.pack(fill=tk.X, padx=10, pady=10)
         ttk.Label(wf, text="Delete All Tables",
@@ -124,24 +212,34 @@ class DatabaseTab:
 
         def _run():
             try:
-                from core.backup_manager import run_backup_now
+                from core.backup_manager import run_backup_now, last_backup_log_message
                 run_backup_now(manual=True)
-                try:
-                    from core.backup_manager import _log_path
-                    lines = [l.strip() for l in open(_log_path(), encoding='utf-8') if l.strip()]
-                    last = lines[-1] if lines else ""
-                    if "Backup OK" in last:
-                        msg = "Backup successful!"
-                    elif "no internet" in last.lower():
-                        msg = "No internet connection."
-                    elif "backup_config.dat missing" in last.lower():
-                        msg = "Backup not configured."
-                    elif "backup_creds.dat missing" in last.lower() or "invalid" in last.lower():
-                        msg = "Backup credentials missing/invalid."
+                last = last_backup_log_message()
+                if "Backup OK" in last:
+                    msg = "Backup successful!"
+                elif "no internet" in last.lower():
+                    msg = "No internet connection."
+                elif "backup_config.dat missing" in last.lower():
+                    msg = "Backup not configured."
+                elif "backup_creds.dat missing" in last.lower():
+                    msg = "Backup credentials missing/invalid."
+                elif "Backup Drive error" in last:
+                    if "disabled_client" in last.lower():
+                        msg = (
+                            "Google OAuth client is disabled. Run generate_oauth_token.py, "
+                            "rebuild the EXE, then delete %LOCALAPPDATA%\\VeterinaryApp\\backup_creds.dat "
+                            "and restart."
+                        )
+                    elif "404" in last or "not found" in last.lower():
+                        msg = "Drive folder not found. Check the folder ID in Administrator settings."
+                    elif "403" in last:
+                        msg = "No access to Drive folder. Share it with the backup Google account."
                     else:
-                        msg = "Backup failed. Check backup_log.txt."
-                except Exception:
-                    msg = "Done. Check backup_log.txt."
+                        msg = "Drive backup failed. See backup_log.txt for details."
+                elif "Backup failed" in last:
+                    msg = "Backup failed. Check backup_log.txt."
+                else:
+                    msg = "Backup finished. Check backup_log.txt if unsure."
             except Exception as e:
                 msg = f"Error: {e}"
             self._parent.after(0, lambda: self._backup_status_var.set(msg))

@@ -188,6 +188,16 @@ class SettingsPage:
         if hasattr(self, "_contacts"):
             self._contacts.select_subtab(subtab)
 
+    def open_management(self, section: str = "updates"):
+        """Open Settings → Management → section (updates / export / backup / admin / danger)."""
+        nb = self._notebook
+        for i in range(nb.index("end")):
+            if nb.tab(i, "text") == "Management":
+                nb.select(i)
+                break
+        if hasattr(self, "_database"):
+            self._database.show_section(section)
+
     def _setup_notebook_nav(self, notebook):
         def _next(e):
             notebook.select((notebook.index('current') + 1) % notebook.index('end'))
