@@ -6,7 +6,7 @@ import sys
 sys.path.insert(0, SPECPATH)
 from pyinstaller_tk_bundle import tcl_tk_datas_and_binaries
 
-_, _tcl_binaries = tcl_tk_datas_and_binaries()
+_tcl_datas, _tcl_binaries = tcl_tk_datas_and_binaries()
 
 block_cipher = None
 
@@ -34,7 +34,7 @@ a = Analysis(
         ('widgets',         'widgets'),
         ('oauth_client.json',   '.'),
         ('service_account.json', '.'),
-    ],
+    ] + _tcl_datas,
     hiddenimports=[
         '_tkinter',
         # ttkbootstrap
