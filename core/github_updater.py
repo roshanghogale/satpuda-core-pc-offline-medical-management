@@ -270,6 +270,9 @@ def apply_downloaded_update(new_exe_path: str, parent=None) -> None:
         [
             "@echo off",
             "setlocal",
+            "set TCL_LIBRARY=",
+            "set TK_LIBRARY=",
+            "set PYTHONHOME=",
             f'ping 127.0.0.1 -n 3 > nul',
             f'if exist "{backup_exe}" del /f /q "{backup_exe}"',
             f'move /Y "{current_exe}" "{backup_exe}"',

@@ -278,9 +278,17 @@ def restart_app(root=None):
     else:
         args = [sys.executable, os.path.abspath(sys.argv[0])] + sys.argv[1:]
     try:
-        subprocess.Popen(args)
+        # Ensure the restarted frozen app does not inherit stale PyInstaller
+        # Tcl/Tk environment variables.
+        env = os.environ.copy()
+        env.pop("TCL_LIBRARY", None)
+        env.pop("TK_LIBRARY", None)
+        subprocess.Popen(args, env=env, cwd=os.path.dirname(os.path.abspath(sys.executable)))
     except Exception:
-        pass
+        try:
+            subprocess.Popen(args)
+        except Exception:
+            pass
     if root is not None:
         # Patch out ttkbootstrap's destroy hook to avoid _style AttributeError
         try: root._style = type('_S', (), {'instance': None})()

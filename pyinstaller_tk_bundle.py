@@ -54,8 +54,19 @@ def tcl_tk_datas_and_binaries():
         ext = getattr(_tkinter, '__file__', None)
         if ext and os.path.isfile(ext):
             binaries.append((ext, '.'))
+            try:
+                from PyInstaller.depend import bindepend
+                for _name, lib_path in bindepend.get_imports(ext):
+                    if lib_path and os.path.isfile(lib_path):
+                        binaries.append((lib_path, '.'))
+            except Exception:
+                pass
     except ImportError:
         pass
+
+    py_dll = os.path.join(sys.base_prefix, f'python{sys.version_info.major}{sys.version_info.minor}.dll')
+    if os.path.isfile(py_dll):
+        binaries.append((py_dll, '.'))
 
     tcl_root = os.path.join(sys.base_prefix, 'tcl')
     for sub, dll_name in (('dde1.4', 'tcldde14.dll'), ('reg1.3', 'tclreg13.dll')):

@@ -4,12 +4,19 @@ os.environ['PYTHONWARNINGS'] = 'ignore'
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", message=".*Task policy set failed.*")
 
+from core.frozen_bootstrap import prepare_frozen_runtime
+
 
 def _setup_exe_environment():
-    if not getattr(sys, 'frozen', False):
+    """Prepare AppData and ensure the frozen runtime is configured once."""
+    if not getattr(sys, "frozen", False):
         return
+
+    prepare_frozen_runtime()
+
     app_data = os.path.join(
-        os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'VeterinaryApp')
+        os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "VeterinaryApp"
+    )
     os.makedirs(app_data, exist_ok=True)
     base_dir = sys._MEIPASS
     if base_dir not in sys.path:
@@ -17,38 +24,53 @@ def _setup_exe_environment():
     # Seed AppData from the EXE bundle only when a file is missing (first install).
     # Never overwrite existing files — updates must preserve activation, expiry,
     # backup_config, theme, and all other per-store settings.
-    for fname in ('theme_config.txt', 'layout_config.txt', 'font_size.txt',
-                  'expiry.dat', 'backup_creds.dat', 'sample_import.json',
-                  'backup_config.dat', 'backup_slots.dat', 'app_mode.txt',
-                  'activation.dat'):
+    for fname in (
+        "theme_config.txt",
+        "layout_config.txt",
+        "font_size.txt",
+        "expiry.dat",
+        "backup_creds.dat",
+        "sample_import.json",
+        "backup_config.dat",
+        "backup_slots.dat",
+        "app_mode.txt",
+        "activation.dat",
+    ):
         dst = os.path.join(app_data, fname)
         if os.path.exists(dst):
             continue
-        src_config = os.path.join(base_dir, 'config', fname)
-        src_root   = os.path.join(base_dir, fname)
+        src_config = os.path.join(base_dir, "config", fname)
+        src_root = os.path.join(base_dir, fname)
         src = src_config if os.path.exists(src_config) else src_root
         if os.path.exists(src):
             shutil.copy2(src, dst)
-        elif fname in ('theme_config.txt', 'font_size.txt', 'layout_config.txt'):
-            defaults = {'theme_config.txt': 'superhero',
-                        'font_size.txt': '10', 'layout_config.txt': '{}'}
-            open(dst, 'w').write(defaults.get(fname, ''))
+        elif fname in ("theme_config.txt", "font_size.txt", "layout_config.txt"):
+            defaults = {
+                "theme_config.txt": "superhero",
+                "font_size.txt": "10",
+                "layout_config.txt": "{}",
+            }
+            open(dst, "w").write(defaults.get(fname, ""))
     try:
         from core.backup_manager import seed_bundled_backup_files
+
         seed_bundled_backup_files()
     except Exception:
         pass
     try:
         from core.window_icon import _ensure_cached_ico
+
         _ensure_cached_ico()
     except Exception:
         pass
     os.chdir(app_data)
 
+
 _setup_exe_environment()
 
 try:
     from core.window_icon import init_process_app_id
+
     init_process_app_id()
 except Exception:
     pass

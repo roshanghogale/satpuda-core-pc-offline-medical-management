@@ -26,9 +26,15 @@ def _restart_app(root=None):
         try: root.destroy()
         except Exception: pass
     try:
-        subprocess.Popen(args)
+        from core.frozen_bootstrap import clean_env_for_child_process
+
+        env = clean_env_for_child_process()
+        subprocess.Popen(args, env=env)
     except Exception:
-        pass
+        try:
+            subprocess.Popen(args)
+        except Exception:
+            pass
 
 
 class DatabaseTab:
