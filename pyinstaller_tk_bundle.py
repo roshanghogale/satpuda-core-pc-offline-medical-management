@@ -44,10 +44,18 @@ def tcl_tk_datas_and_binaries():
         pass
 
     dll_dir = os.path.join(sys.base_prefix, 'DLLs')
-    for dll_name in ('tcl86t.dll', 'tk86t.dll'):
+    for dll_name in ('tcl86t.dll', 'tk86t.dll', 'tcl86.dll', 'tk86.dll'):
         src = os.path.join(dll_dir, dll_name)
         if os.path.isfile(src):
             binaries.append((src, '.'))
+
+    try:
+        import _tkinter
+        ext = getattr(_tkinter, '__file__', None)
+        if ext and os.path.isfile(ext):
+            binaries.append((ext, '.'))
+    except ImportError:
+        pass
 
     tcl_root = os.path.join(sys.base_prefix, 'tcl')
     for sub, dll_name in (('dde1.4', 'tcldde14.dll'), ('reg1.3', 'tclreg13.dll')):

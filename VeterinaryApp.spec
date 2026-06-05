@@ -5,7 +5,7 @@ import sys
 sys.path.insert(0, SPECPATH)
 from pyinstaller_tk_bundle import tcl_tk_datas_and_binaries
 
-_tcl_datas, _tcl_binaries = tcl_tk_datas_and_binaries()
+_, _tcl_binaries = tcl_tk_datas_and_binaries()
 
 block_cipher = None
 
@@ -40,7 +40,7 @@ a = Analysis(
         # ── OAuth / service account credentials ────────────────────────────
         ('oauth_client.json',          '.'),
         ('service_account.json',       '.'),
-    ] + _tcl_datas,
+    ],
     hiddenimports=[
         '_tkinter',
         # ── ttkbootstrap ───────────────────────────────────────────────────
@@ -186,7 +186,7 @@ a = Analysis(
     ],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=['rthook_windows_icon.py'],
+    runtime_hooks=['rthook_tkinter_win.py', 'rthook_windows_icon.py'],
     excludes=['matplotlib', 'numpy', 'pandas', 'scipy', 'wx', 'PyQt5', 'PyQt6',
               'IPython', 'notebook', 'pytest'],
     win_no_prefer_redirects=False,
@@ -219,13 +219,13 @@ exe = EXE(
     entitlements_file=None,
     icon='assets/satpuda_logo.ico',
     version_info={
-        'version': (1, 0, 0, 0),
+        'version': (1, 0, 1, 0),
         'company_name': 'Satpuda Medical',
         'file_description': 'Satpuda Core — Billing. Management. Simplified.',
         'internal_name': 'SatpudaCore',
         'legal_copyright': 'Satpuda Medical',
         'original_filename': 'SatpudaCore.exe',
         'product_name': 'Satpuda Core',
-        'product_version': '1.0.0.0',
+        'product_version': '1.0.1.0',
     },
 )
