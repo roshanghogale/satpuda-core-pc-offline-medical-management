@@ -19,6 +19,7 @@ from core.purchase_service import (
     get_supplier_due, save_purchase as svc_save_purchase,
     lookup_medicine_details,
 )
+from core.keyboard_registry import KeyboardRegistry, PageBindings
 from ui.purchase.purchase_nav  import PurchaseNavMixin
 from ui.purchase.purchase_form import PurchaseFormMixin
 
@@ -45,9 +46,16 @@ class PurchasePage(PurchaseNavMixin, PurchaseFormMixin):
         self._sched_unit = {t: cfg.get(f'unit_{t}', '')  for t in self._med_types}
 
         self._build_interface()
-        self._bind_shortcuts()
+        self._register_keyboard()
         self._init_master_dropdown_state()
-        self.parent.after(150, lambda: self.supplier_name.focus())
+        self.parent.after(150, self._focus_supplier_name)
+
+    def _focus_supplier_name(self):
+        try:
+            if self.supplier_name.winfo_exists():
+                self.supplier_name.focus()
+        except tk.TclError:
+            pass
 
     # ── shortcuts ─────────────────────────────────────────────────────────
 
@@ -55,18 +63,20 @@ class PurchasePage(PurchaseNavMixin, PurchaseFormMixin):
         self.open_import_purchase_bill()
         return 'break'
 
-    def _bind_shortcuts(self):
-        root = self.parent.winfo_toplevel()
-        root.bind('<F5>',        lambda e: self.save_purchase())
-        root.bind('<Control-g>', lambda e: self.save_purchase())
-        root.bind('<Control-G>', lambda e: self.save_purchase())
-        root.bind('<F6>',        lambda e: self.amount_paid.focus())
-        root.bind('<End>',       lambda e: self._focus_payment_field())
-        root.bind('<F2>',        self._f2_import_bill, add='+')
-        ctrl = getattr(root, '_input_ctrl', None)
-        if ctrl:
-            ctrl.set_f2_handler(self._f2_import_bill)
+    def _register_keyboard(self):
         self.parent.after(100, self._setup_arrow_nav)
+        bindings = KeyboardRegistry.make_bindings(
+            page_id='purchase',
+            first_focus=self._focus_supplier_name,
+            on_f5=self._save_purchase_shortcut,
+            on_f6=self._focus_overall_discount,
+            on_end=self._focus_payment_field,
+            on_ctrl_shift_c=self._clear_form_shortcut,
+            f2_target=self.items_tree,
+            on_shift_f2=self._f2_import_bill,
+        )
+        self._inner_frame._keyboard_bindings = bindings
+        KeyboardRegistry.register_page(self._inner_frame, bindings)
 
     def open_import_purchase_bill(self):
         from core.purchase_import_flow import import_purchase_bill_direct
@@ -121,15 +131,31 @@ class PurchasePage(PurchaseNavMixin, PurchaseFormMixin):
 
     # ── medicine name search ──────────────────────────────────────────────
 
+    def _main_app_root(self):
+        """Main Tk root (not a nested Toplevel such as edit purchase)."""
+        w = self.parent
+        while w is not None:
+            try:
+                top = w.winfo_toplevel()
+                if getattr(top, "_main_app", None) is not None:
+                    return top
+            except Exception:
+                pass
+            try:
+                w = w.master
+            except tk.TclError:
+                break
+        return self.parent.winfo_toplevel()
+
     def _init_master_dropdown_state(self):
-        root = self.parent.winfo_toplevel()
+        main_root = self._main_app_root()
         mode = load_app_mode()
-        self._master_ready = bool(getattr(root, "_master_ready", mode != "medical"))
+        self._master_ready = bool(getattr(main_root, "_master_ready", mode != "medical"))
         if mode == "medical" and not self._master_ready:
             self._set_medicine_dropdown_enabled(False, "Loading medicines...")
         else:
             self._set_medicine_dropdown_enabled(True)
-        root.bind("<<MasterMedicineReady>>", self._on_master_ready, add="+")
+        main_root.bind("<<MasterMedicineReady>>", self._on_master_ready, add="+")
 
     def _on_master_ready(self, event=None):
         self._master_ready = True
@@ -157,6 +183,8 @@ class PurchasePage(PurchaseNavMixin, PurchaseFormMixin):
         self.medicine_name.update_list()
 
     def _reload_medicine_names(self):
+        if getattr(self.medicine_name, '_suppress_focus_list', False):
+            return
         self.medicine_name.entry.bind('<KeyRelease>', self._master_search, add='+')
         if getattr(self, '_med_search_pending', None):
             try:
@@ -222,7 +250,10 @@ class PurchasePage(PurchaseNavMixin, PurchaseFormMixin):
                         break
 
             self.medicine_name.values = names
-            self.medicine_name.update_list()
+            if getattr(self.medicine_name, '_suppress_focus_list', False):
+                self.medicine_name.hide_list()
+            else:
+                self.medicine_name.update_list()
         except Exception:
             pass
 
@@ -364,24 +395,25 @@ class PurchasePage(PurchaseNavMixin, PurchaseFormMixin):
             showerror("Invalid Input", "Please enter valid rate, MRP and GST.")
             return None
 
-    def remove_selected_item(self):
+    def remove_selected_item(self, event=None):
         sel = self.items_tree.selection()
         if not sel:
-            return
+            return 'break'
         idx = self.items_tree.index(sel[0])
         if 0 <= idx < len(self.purchase_items):
             removed = self.purchase_items.pop(idx)
             self.update_items_tree()
             self.calculate_total()
             showinfo("Removed", f"Removed {removed['name']} from list.")
+        return 'break'
 
     def edit_selected_item(self, event=None):
         sel = self.items_tree.selection()
         if not sel:
-            return
+            return 'break'
         idx = self.items_tree.index(sel[0])
         if not (0 <= idx < len(self.purchase_items)):
-            return
+            return 'break'
         item = self.purchase_items[idx]
         self.editing_item_index = idx
 
@@ -419,6 +451,10 @@ class PurchasePage(PurchaseNavMixin, PurchaseFormMixin):
                 self.vaccine_unit_var.set(item.get('auto_unit', 'ml'))
 
         self.add_btn.config(text="Update Medicine")
+        self.medicine_name.hide_list()
+        self.medicine_type.hide_list()
+        self._focus_medicine_combo()
+        return 'break'
 
     # ── calculate — single source of truth via PurchaseCalculator ─────────
 
@@ -766,6 +802,10 @@ class PurchasePage(PurchaseNavMixin, PurchaseFormMixin):
 
     # ── save ──────────────────────────────────────────────────────────────
 
+    def _save_purchase_shortcut(self, event=None):
+        self.save_purchase()
+        return 'break'
+
     def save_purchase(self):
         if not self.supplier_name.get().strip():
             showwarning("Missing", "Please enter supplier name.")
@@ -806,15 +846,22 @@ class PurchasePage(PurchaseNavMixin, PurchaseFormMixin):
     # ── validation ────────────────────────────────────────────────────────
 
     def _validate_medicine_fields(self):
+        from core.focus_chain import safe_focus
+
+        def _warn(msg, widget):
+            showwarning("Missing", msg, parent=self.parent,
+                        focus_after=lambda w=widget: safe_focus(w))
+            return False
+
         if not self.medicine_name.get().strip():
-            showwarning("Missing", "Please enter medicine name."); return False
+            return _warn("Please enter medicine name.", self.medicine_name)
         if not self.medicine_type.get():
-            showwarning("Missing", "Please select medicine type."); return False
+            return _warn("Please select medicine type.", self.medicine_type)
         if not self.batch_no.get().strip():
-            showwarning("Missing", "Please enter batch number."); return False
+            return _warn("Please enter batch number.", self.batch_no)
         expiry = self.expiry_date.get().strip()
         if not expiry:
-            showwarning("Missing", "Please enter expiry date (MM/YY)."); return False
+            return _warn("Please enter expiry date (MM/YY).", self.expiry_date)
         try:
             if '/' not in expiry:
                 raise ValueError
@@ -824,7 +871,11 @@ class PurchasePage(PurchaseNavMixin, PurchaseFormMixin):
             if not (1 <= int(month) <= 12):
                 raise ValueError
         except ValueError:
-            showwarning("Invalid Format", "Expiry must be MM/YY (e.g. 12/26).")
+            showwarning(
+                "Invalid Format", "Expiry must be MM/YY (e.g. 12/26).",
+                parent=self.parent,
+                focus_after=lambda: safe_focus(self.expiry_date),
+            )
             return False
         return True
 
@@ -849,6 +900,10 @@ class PurchasePage(PurchaseNavMixin, PurchaseFormMixin):
                         w.insert(0, "0")
         except tk.TclError:
             pass
+
+    def _clear_form_shortcut(self, event=None):
+        self.clear_form()
+        return 'break'
 
     def clear_form(self):
         for attr in ('supplier_address','supplier_phone','supplier_gstin',

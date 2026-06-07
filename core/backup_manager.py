@@ -47,8 +47,18 @@ _DEDUP_MINUTES    = 5      # skip on-open backup if app was just closed within t
 _slots: dict = {}
 
 def _slots_path():
-    from core.license_manager import _appdata_dir
-    return os.path.join(_appdata_dir(), 'backup_slots.dat')
+    try:
+        from core.store_manager import get_active_slots_path
+        return get_active_slots_path()
+    except Exception:
+        from core.license_manager import _appdata_dir
+        return os.path.join(_appdata_dir(), 'backup_slots.dat')
+
+
+def reload_slots_for_active_store():
+    """Reload backup slot state after switching stores."""
+    global _slots
+    _load_slots()
 
 def _load_slots():
     global _slots
@@ -192,10 +202,18 @@ def _should_reseed_backup_file(fname: str, bundled: str, dst: str, force: bool) 
     bundled_id = (bundled_cfg.get('folder_id') or '').strip()
     dst_id = (dst_cfg.get('folder_id') or '').strip()
     if bundled_id and dst_id and bundled_id != dst_id:
-        _logger.info(
-            f"Replacing stale backup_config.dat (folder ID changed in EXE) -> {dst}"
-        )
-        return True
+        # Update folder ID only — keep the active/local store name.
+        keep_name = get_backup_store_name(dst_cfg)
+        try:
+            _write_config_file(dst, bundled_id, keep_name)
+            _logger.info(
+                f"Updated backup_config.dat folder ID from EXE bundle; "
+                f"kept store name: {keep_name}"
+            )
+        except Exception as e:
+            _logger.error(f"Failed to merge backup_config.dat: {e}")
+            return True
+        return False
     return False
 
 
@@ -305,10 +323,14 @@ def _bundled_config_path():
     return proj if os.path.exists(proj) else ''
 
 def _db_path():
-    if getattr(sys, 'frozen', False):
-        return os.path.join(os.path.dirname(sys.executable), 'veterinary.db')
-    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                        'veterinary.db')
+    try:
+        from core.store_manager import get_active_db_path
+        return get_active_db_path()
+    except Exception:
+        if getattr(sys, 'frozen', False):
+            return os.path.join(os.path.dirname(sys.executable), 'veterinary.db')
+        return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            'veterinary.db')
 
 
 # Encryption
@@ -398,11 +420,45 @@ def write_bundled_backup_config(folder_id: str, store_name: str):
         raise
 
 
+def get_backup_store_name(cfg: dict = None) -> str:
+    """Drive subfolder name — uses the active store when multi-store is enabled."""
+    try:
+        from core.store_manager import get_active_display_name, has_registry
+        if has_registry():
+            name = (get_active_display_name() or '').strip()
+            if name:
+                return name
+    except Exception:
+        pass
+    if cfg is None:
+        cfg = _read_backup_config()
+    return (cfg.get('store_name') or '').strip() or 'UnknownStore'
+
+
+def sync_backup_config_to_active_store():
+    """Keep backup_config.dat store_name aligned with the active store."""
+    try:
+        from core.store_manager import get_active_display_name, has_registry
+        if not has_registry():
+            return
+        name = (get_active_display_name() or '').strip()
+        if not name:
+            return
+        cfg = _read_backup_config()
+        folder_id = (cfg.get('folder_id') or '').strip()
+        if not folder_id:
+            return
+        if (cfg.get('store_name') or '').strip() != name:
+            write_backup_config(folder_id, name)
+    except Exception as e:
+        _logger.error(f"sync_backup_config_to_active_store failed: {e}")
+
+
 def get_backup_config_status() -> dict:
     """Return {configured, folder_id, store_name, creds_ok} for UI."""
     cfg = _read_backup_config()
     folder_id = (cfg.get('folder_id') or '').strip()
-    store_name = (cfg.get('store_name') or '').strip()
+    store_name = get_backup_store_name(cfg)
     creds = _read_oauth_token()
     creds_ok = _oauth_token_valid(creds)
     return {
@@ -488,8 +544,16 @@ def _get_drive_service(token_data: dict):
     return build('drive', 'v3', credentials=creds, cache_discovery=False)
 
 
+def _drive_subfolder_name(store_name: str) -> str:
+    try:
+        from core.store_manager import display_name_key
+        return display_name_key(store_name)
+    except Exception:
+        return f"Store_{store_name.replace(' ', '_')}"
+
+
 def _ensure_store_subfolder(service, parent_folder_id: str, store_name: str) -> str:
-    safe_name = f"Store_{store_name.replace(' ', '_')}"
+    safe_name = _drive_subfolder_name(store_name)
     q = (f"'{parent_folder_id}' in parents "
          f"and name='{safe_name}' "
          f"and mimeType='application/vnd.google-apps.folder' "
@@ -632,7 +696,7 @@ def _do_pendrive_backup(gz_path: str, filename: str, store_name: str, protected:
     drive = _detect_pendrive()
     if not drive:
         return
-    safe_name = f"Store_{store_name.replace(' ', '_')}"
+    safe_name = _drive_subfolder_name(store_name)
     dest_dir = os.path.join(drive, 'SatpudaCore_Backup', safe_name)
     try:
         os.makedirs(dest_dir, exist_ok=True)
@@ -676,7 +740,7 @@ def _do_backup(force: bool = False, trigger: str = 'open', on_error=None):
             _logger.warning("Backup skipped - veterinary.db not found.")
             return
 
-        store_name = cfg.get('store_name', 'UnknownStore')
+        store_name = get_backup_store_name(cfg)
         ts         = datetime.now().strftime('%Y-%m-%d_%H-%M')
         filename   = f"SatpudaCore_{ts}.db.gz"
 
@@ -722,6 +786,148 @@ def _do_backup(force: bool = False, trigger: str = 'open', on_error=None):
     finally:
         if tmp_dir:
             shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def _find_store_subfolder_id(service, parent_folder_id: str, store_name: str) -> str:
+    safe_name = _drive_subfolder_name(store_name)
+    q = (f"'{parent_folder_id}' in parents "
+         f"and name='{safe_name}' "
+         f"and mimeType='application/vnd.google-apps.folder' "
+         f"and trashed=false")
+    res = service.files().list(q=q, fields='files(id)').execute()
+    files = res.get('files', [])
+    return files[0]['id'] if files else ''
+
+
+def restore_latest_backup_from_drive(store_name: str) -> tuple:
+    """Download the most recent Drive backup for store_name.
+    Returns (True, dest_db_path) or (False, error_message)."""
+    cfg = _read_backup_config()
+    if not cfg or not cfg.get('folder_id'):
+        return False, 'Backup is not configured. Set the Drive folder ID in Administrator settings.'
+
+    if not _is_internet_available():
+        return False, 'No internet connection. Connect and try again.'
+
+    token_data = _read_oauth_token()
+    if not token_data or not token_data.get('refresh_token'):
+        return False, 'Backup credentials are missing or invalid.'
+
+    tmp_dir = None
+    try:
+        service = _get_drive_service(token_data)
+        subfolder_id = _find_store_subfolder_id(service, cfg['folder_id'], store_name)
+        if not subfolder_id:
+            return False, (
+                f'No backup folder found on Drive for store "{store_name}".\n'
+                f'Expected folder: {_drive_subfolder_name(store_name)}'
+            )
+
+        res = service.files().list(
+            q=f"'{subfolder_id}' in parents and trashed=false and name contains 'SatpudaCore_'",
+            fields='files(id, name)',
+            orderBy='name desc',
+        ).execute()
+        files = [f for f in res.get('files', []) if f.get('name', '').endswith('.db.gz')]
+        if not files:
+            return False, (
+                f'No backup files found in Drive folder for store "{store_name}".\n'
+                'Ask the admin device to run at least one backup first.'
+            )
+
+        latest = files[0]['name']
+        tmp_dir = tempfile.mkdtemp()
+        gz_path = os.path.join(tmp_dir, latest)
+        db_path = os.path.join(tmp_dir, 'veterinary.db')
+
+        from googleapiclient.http import MediaIoBaseDownload
+        import io
+        request = service.files().get_media(fileId=files[0]['id'])
+        with open(gz_path, 'wb') as fh:
+            downloader = MediaIoBaseDownload(fh, request)
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
+
+        with gzip.open(gz_path, 'rb') as f_in, open(db_path, 'wb') as f_out:
+            shutil.copyfileobj(f_in, f_out)
+
+        if not os.path.isfile(db_path) or os.path.getsize(db_path) < 100:
+            return False, 'Downloaded backup file is empty or corrupt.'
+
+        _logger.info(f"Restore OK - {latest} for store {store_name}")
+        return True, {
+            'db_path': db_path,
+            'backup_file': latest,
+            'store_name': store_name,
+            'tmp_dir': tmp_dir,
+        }
+    except Exception as e:
+        _logger.error(f"Restore failed: {e}")
+        if tmp_dir:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        return False, str(e)
+
+
+def restore_latest_backup_to_store(store_name: str, store_key: str, *, close_conn=None) -> tuple:
+    """Restore Drive backup into the store's local veterinary.db.
+    Pass close_conn (sqlite3.Connection) so the file can be replaced on Windows."""
+    ok, result = restore_latest_backup_from_drive(store_name)
+    if not ok:
+        return False, result
+
+    tmp_dir = result.get('tmp_dir')
+    try:
+        from core.store_manager import get_store_db_path, get_store_dir
+        get_store_dir(store_key)
+        dest = get_store_db_path(store_key)
+
+        if close_conn is not None:
+            try:
+                close_conn.close()
+            except Exception:
+                pass
+
+        shutil.copy2(result['db_path'], dest)
+        msg = (
+            f"Store: {store_name}\n"
+            f"Backup file: {result.get('backup_file', '')}\n"
+            f"Local database: {dest}"
+        )
+        return True, msg
+    except Exception as e:
+        return False, str(e)
+    finally:
+        if tmp_dir:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def sync_active_store_from_drive(*, close_conn=None) -> tuple:
+    """One-click sync: replace the active store DB with the latest Drive backup."""
+    try:
+        from core.store_manager import get_active_store, get_active_display_name, has_registry
+    except Exception as e:
+        return False, str(e)
+
+    if not has_registry():
+        return False, 'No store is configured on this device.'
+
+    store = get_active_store()
+    if not store:
+        name = get_active_display_name()
+        if not name:
+            return False, 'No active store. Open Store Management and select a store.'
+        store = {'display_name': name, 'store_key': None}
+
+    display_name = store.get('display_name', '')
+    store_key = store.get('store_key')
+    if not store_key:
+        from core.store_manager import display_name_key
+        store_key = display_name_key(display_name)
+
+    return restore_latest_backup_to_store(
+        display_name, store_key, close_conn=close_conn,
+    )
 
 
 # Public API

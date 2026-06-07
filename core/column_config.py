@@ -230,6 +230,18 @@ _DEFAULT_QUICK_ACCESS = {
     for key, _ in QUICK_ACCESS_BUTTONS
 }
 
+DASHBOARD_SECTIONS = [
+    ('home_dashboard', 'Home — Dashboard stats'),
+    ('inventory_summary', 'Inventory — Summary bar'),
+    ('sales_summary', 'Sales History — Summary bar'),
+    ('purchase_summary', 'Purchase History — Summary bar'),
+]
+
+_DEFAULT_DASHBOARD_SECTIONS = {
+    key: True
+    for key, _ in DASHBOARD_SECTIONS
+}
+
 
 def all_column_names(page_key):
     return [col for col, _ in TABLE_COLUMNS.get(page_key, [])]
@@ -448,19 +460,23 @@ def prompt_export_columns(parent, page_key, report_key, headers):
     ).pack(padx=12, pady=(10, 6), anchor='w')
 
     vars_map = {}
+    checkbuttons = []
     chk_frame = ttk.Frame(body)
     chk_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=4)
     for col in headers:
         var = tk.BooleanVar(value=saved.get(col, True))
         vars_map[col] = var
-        ttk.Checkbutton(chk_frame, text=col, variable=var).pack(anchor=tk.W, pady=2)
+        cb = ttk.Checkbutton(chk_frame, text=col, variable=var)
+        cb.pack(anchor=tk.W, pady=2)
+        checkbuttons.append(cb)
 
     remember = tk.BooleanVar(value=True)
-    ttk.Checkbutton(
+    remember_cb = ttk.Checkbutton(
         body,
         text="Remember these columns for this report",
         variable=remember,
-    ).pack(anchor=tk.W, padx=12, pady=(4, 8))
+    )
+    remember_cb.pack(anchor=tk.W, padx=12, pady=(4, 8))
 
     result = {'cancelled': True}
 
@@ -474,8 +490,10 @@ def prompt_export_columns(parent, page_key, report_key, headers):
 
     btn_row = ttk.Frame(body)
     btn_row.pack(fill=tk.X, padx=12, pady=(0, 4))
-    ttk.Button(btn_row, text="Select all", command=select_all).pack(side=tk.LEFT, padx=(0, 6))
-    ttk.Button(btn_row, text="Clear all", command=clear_all).pack(side=tk.LEFT)
+    select_all_btn = ttk.Button(btn_row, text="Select all", command=select_all)
+    select_all_btn.pack(side=tk.LEFT, padx=(0, 6))
+    clear_all_btn = ttk.Button(btn_row, text="Clear all", command=clear_all)
+    clear_all_btn.pack(side=tk.LEFT)
 
     def on_ok():
         picked = {col: var.get() for col, var in vars_map.items()}
@@ -495,13 +513,22 @@ def prompt_export_columns(parent, page_key, report_key, headers):
         dlg.destroy()
 
     try:
-        ttk.Button(dlg.footer, text="Continue", command=on_ok, bootstyle='primary').pack(
-            side=tk.LEFT, padx=4)
-        ttk.Button(dlg.footer, text="Cancel", command=on_cancel, bootstyle='secondary').pack(
-            side=tk.RIGHT, padx=4)
+        continue_btn = ttk.Button(dlg.footer, text="Continue", command=on_ok, bootstyle='primary')
+        continue_btn.pack(side=tk.LEFT, padx=4)
+        cancel_btn = ttk.Button(dlg.footer, text="Cancel", command=on_cancel, bootstyle='secondary')
+        cancel_btn.pack(side=tk.RIGHT, padx=4)
     except Exception:
-        ttk.Button(dlg.footer, text="Continue", command=on_ok).pack(side=tk.LEFT, padx=4)
-        ttk.Button(dlg.footer, text="Cancel", command=on_cancel).pack(side=tk.RIGHT, padx=4)
+        continue_btn = ttk.Button(dlg.footer, text="Continue", command=on_ok)
+        continue_btn.pack(side=tk.LEFT, padx=4)
+        cancel_btn = ttk.Button(dlg.footer, text="Cancel", command=on_cancel)
+        cancel_btn.pack(side=tk.RIGHT, padx=4)
+
+    from core.dialog_keyboard import wire_dialog_arrow_nav
+    wire_dialog_arrow_nav(
+        checkbuttons + [remember_cb, select_all_btn, clear_all_btn, continue_btn, cancel_btn],
+        dlg,
+        initial_focus=checkbuttons[0] if checkbuttons else continue_btn,
+    )
 
     dlg.wait_window()
     if result.get('cancelled'):
@@ -519,3 +546,15 @@ def get_quick_access_settings():
 
 def is_quick_access_visible(button_key):
     return get_quick_access_settings().get(button_key, True)
+
+
+def get_dashboard_section_settings():
+    cfg = load_layout()
+    saved = cfg.get('dashboard_sections') or {}
+    out = dict(_DEFAULT_DASHBOARD_SECTIONS)
+    out.update(saved)
+    return out
+
+
+def is_dashboard_section_visible(section_key):
+    return get_dashboard_section_settings().get(section_key, True)

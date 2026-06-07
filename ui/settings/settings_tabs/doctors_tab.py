@@ -13,10 +13,14 @@ from core.themed_messagebox import showinfo, showwarning, showerror, askyesno
 
 
 class DoctorsTab:
-    def __init__(self, parent, conn):
+    def __init__(self, parent, conn, embedded=False):
         self.conn = conn
         self.cursor = conn.cursor()
-        frame = make_scrollable(parent)
+        if embedded:
+            frame = ttk.Frame(parent)
+            frame.pack(fill=tk.BOTH, expand=True)
+        else:
+            frame = make_scrollable(parent)
         self._build(frame)
         self.load()
 
@@ -72,14 +76,17 @@ class DoctorsTab:
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         sb.pack(side=tk.RIGHT, fill=tk.Y)
 
-        self._menu = tk.Menu(list_frame, tearoff=0)
-        self._menu.add_command(label="Edit Doctor",   command=self.edit)
-        self._menu.add_command(label="Delete Doctor", command=self.delete)
-        self.tree.bind("<Button-3>",         self._show_menu)
-        self.tree.bind("<Button-2>",         self._show_menu)
-        self.tree.bind("<Control-Button-1>", self._show_menu)
-        self.tree.bind('<Return>', lambda e: self._tree_menu())
-        self.tree.bind('<Escape>', lambda e: self.doctor_name.focus())
+        from core.tree_action_menu import setup_tree_actions
+        self._action_menu = setup_tree_actions(
+            list_frame,
+            self.tree,
+            [
+                ("Edit Doctor", self.edit),
+                ("Delete Doctor", self.delete),
+            ],
+            escape_to=self.doctor_name,
+        )
+        self._menu = self._action_menu.ctx_menu
 
     def _show_menu(self, event):
         if self.tree.selection():

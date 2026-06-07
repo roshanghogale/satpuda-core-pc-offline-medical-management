@@ -154,13 +154,13 @@ exe = EXE(
     entitlements_file=None,
     icon='assets/satpuda_logo.ico',
     version_info={
-        'version': (1, 0, 2, 0),
+        'version': (1, 0, 3, 0),
         'company_name': 'Satpuda Medical',
         'file_description': 'Satpuda Core — Billing. Management. Simplified.',
         'internal_name': 'SatpudaCore',
         'legal_copyright': 'Satpuda Medical',
         'original_filename': 'SatpudaCore_Win7.exe',
         'product_name': 'Satpuda Core',
-        'product_version': '1.0.2.0',
+        'product_version': '1.0.3.0',
     },
 )

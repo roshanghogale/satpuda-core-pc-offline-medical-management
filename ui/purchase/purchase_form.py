@@ -114,6 +114,17 @@ class PurchaseFormMixin:
         self.bill_number = ttk.Entry(sf, width=25)
         self.bill_number.grid(row=6, column=1, padx=5, pady=2)
 
+        from core.focus_chain import wire_entry_filter_chain
+        wire_entry_filter_chain(
+            self.supplier_address,
+            self.supplier_phone,
+            self.supplier_gstin,
+            self.supplier_dl,
+            self.purchase_date,
+            self.bill_number,
+            last_action=lambda: self.medicine_name.entry.focus_set(),
+        )
+
         self.load_suppliers()
 
     # ── medicine panel ────────────────────────────────────────────────────
@@ -323,12 +334,20 @@ class PurchaseFormMixin:
         sb.pack(side=tk.RIGHT, fill=tk.Y)
 
         self.context_menu = tk.Menu(self.parent, tearoff=0)
-        self.context_menu.add_command(label="Remove Item", command=self.remove_selected_item)
-        self.items_tree.bind("<Button-3>", self.show_context_menu)
-        self.items_tree.bind("<Delete>",   lambda e: self.remove_selected_item())
-        self.items_tree.bind("<Double-1>", self.edit_selected_item)
-        self.items_tree.bind("<Return>",   lambda e: self.edit_selected_item())
-        self.items_tree.bind("<Escape>",   lambda e: self.medicine_name.focus())
+        if not getattr(self, '_items_tree_keys_wired', False):
+            from core.tree_action_menu import setup_tree_actions
+            setup_tree_actions(
+                self.parent,
+                self.items_tree,
+                [
+                    ("Edit Item", self.edit_selected_item),
+                    ("Remove Item", self.remove_selected_item),
+                ],
+                on_double=self.edit_selected_item,
+                on_delete=lambda e: self.remove_selected_item(),
+                escape_to=self.medicine_name.entry,
+            )
+            self._items_tree_keys_wired = True
 
     # ── summary / payment section ─────────────────────────────────────────
 
@@ -359,12 +378,21 @@ class PurchaseFormMixin:
                                    font=(FONT_FAMILY, FONT_SIZE_LABELS, 'bold'))
         self.due_label.grid(row=0, column=9, sticky=tk.W, padx=4, pady=2)
 
-        self.clear_btn = ttk.Button(tf, text="Clear", command=self.clear_form)
-        self.clear_btn.grid(row=0, column=10, padx=10, pady=2)
+        action_col = ttk.Frame(tf)
+        action_col.grid(row=0, column=10, rowspan=4, padx=10, pady=2, sticky=tk.N)
+        self.clear_btn = ttk.Button(action_col, text="Clear", command=self.clear_form)
+        self.clear_btn.pack(fill=tk.X, pady=(0, 4))
+        self.save_btn = ttk.Button(action_col, text="Save Purchase (F5)", command=self.save_purchase)
+        try:
+            self.save_btn.configure(bootstyle='primary')
+        except Exception:
+            pass
+        self.save_btn.pack(fill=tk.X, pady=(0, 4))
         self.import_bill_btn = ttk.Button(
-            tf, text="Import Bill (F2)", command=self.open_import_purchase_bill,
+            action_col, text="Import Purchase (Shift+F2)",
+            command=self.open_import_purchase_bill,
         )
-        self.import_bill_btn.grid(row=0, column=11, padx=4, pady=2)
+        self.import_bill_btn.pack(fill=tk.X)
 
         # ── Row 1: Need to Pay | Final Amount | Current Credit ────────────
         ttk.Label(tf, text="Need to Pay:",
@@ -428,9 +456,6 @@ class PurchaseFormMixin:
         self.amount_paid.grid(row=3, column=1, padx=4, pady=2)
         self.amount_paid.insert(0, "0.00")
         self.amount_paid.bind('<FocusIn>', lambda e: e.widget.select_range(0, tk.END))
-
-        self.save_btn = ttk.Button(tf, text="Save Purchase", command=self.save_purchase)
-        self.save_btn.grid(row=3, column=2, padx=10, pady=2)
 
         self.import_bill_info_var = tk.StringVar(value="")
         ttk.Label(

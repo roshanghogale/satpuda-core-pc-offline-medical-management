@@ -228,7 +228,8 @@ class BillEditPage:
             w.bind('<Down>', lambda e, i=i: nav[(i+1)%n].focus(), add='+')
         self.save_btn.bind('<Return>',   lambda e: self._save_bill())
         self.cancel_btn.bind('<Return>', lambda e: self.parent.destroy())
-        self.parent.bind('<Escape>', lambda e: self.parent.destroy())
+        from core.dialog_escape import bind_escape_to_close
+        bind_escape_to_close(self.parent, on_close=self.parent.destroy)
 
         self._update_tree()
         self._calculate_total()

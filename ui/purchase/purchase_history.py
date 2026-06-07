@@ -26,7 +26,7 @@ import logging
 from core.alert_colors import get_alert_color
 from core.font_config import *
 from core.layout_config import PURCHASE_HISTORY_ROWS, SCHEDULES
-from core.column_config import apply_column_visibility, all_column_names
+from core.column_config import apply_column_visibility, all_column_names, is_dashboard_section_visible
 from core.scroll_manager import make_scrollable, open_dialog
 from core.export_manager import export_data
 from core.column_config import export_table
@@ -47,6 +47,21 @@ class PurchaseHistoryPage:
         self.load_purchase_history()
         self.parent.after(100, self._setup_arrow_nav)
         self.parent.after(200, self.from_date.focus)
+        self._register_keyboard()
+
+    def _register_keyboard(self):
+        from core.keyboard_registry import KeyboardRegistry, PageBindings
+        bindings = PageBindings(
+            page_id='purchase_history',
+            first_focus=lambda: self.from_date.focus_set(),
+            on_ctrl_f=lambda: self.supplier_filter.entry.focus_set(),
+            on_ctrl_enter=self.apply_filter,
+            on_ctrl_shift_c=self._clear_filter_shortcut,
+            on_ctrl_e=self._export_menu,
+            f2_target=self.purchase_tree,
+        )
+        self._inner_frame._keyboard_bindings = bindings
+        KeyboardRegistry.register_page(self._inner_frame, bindings)
 
     # ── UI ────────────────────────────────────────────────────────────────
 
@@ -91,15 +106,26 @@ class PurchaseHistoryPage:
 
         self.apply_btn = ttk.Button(ff, text="Apply Filter", command=self.apply_filter)
         self.apply_btn.grid(row=0, column=6, padx=10, pady=5)
-        ttk.Button(ff, text="Clear Filter", command=self.clear_filter).grid(
-            row=1, column=6, padx=5, pady=5)
+        self.clear_btn = ttk.Button(ff, text="Clear Filter", command=self.clear_filter)
+        self.clear_btn.grid(row=1, column=6, padx=5, pady=5)
         try:
-            ttk.Button(ff, text="📤 Export", command=self._export_menu,
-                       bootstyle="info").grid(row=0, column=7, padx=10, pady=5,
-                                              rowspan=2, sticky='ns')
+            self.export_btn = ttk.Button(ff, text="📤 Export", command=self._export_menu,
+                                         bootstyle="info")
         except Exception:
-            ttk.Button(ff, text="📤 Export", command=self._export_menu).grid(
-                row=0, column=7, padx=10, pady=5, rowspan=2, sticky='ns')
+            self.export_btn = ttk.Button(ff, text="📤 Export", command=self._export_menu)
+        self.export_btn.grid(row=0, column=7, padx=10, pady=5, rowspan=2, sticky='ns')
+        self.supplier_filter.bind_apply_on_select(self.apply_filter)
+        self.due_filter.bind_apply_on_select(self.apply_filter)
+        self.schedule_filter.bind_apply_on_select(self.apply_filter)
+        self.fy_filter.bind_apply_on_select(self._apply_fy_filter)
+
+        from core.focus_chain import wire_combo_filter_chain, wire_entry_filter_chain
+        wire_entry_filter_chain(self.from_date, self.to_date,
+                                last_action=lambda: self.fy_filter.focus())
+        wire_combo_filter_chain(
+            self.fy_filter, self.supplier_filter, self.due_filter, self.schedule_filter,
+        )
+        self.schedule_filter.next_focus_widget = lambda: self.apply_btn.focus_set()
 
         # Tree — Phase 3: removed "Paid via Payment" column
         tf = ttk.Frame(main_frame)
@@ -133,17 +159,22 @@ class PurchaseHistoryPage:
         self.purchase_tree.tag_configure('account_cleared', background=_clr['cleared_bg'], foreground=_clr['cleared_fg'])
         self.purchase_tree.tag_configure('has_due',         background=_clr['due_bg'],     foreground=_clr['due_fg'])
 
-        self._ctx = tk.Menu(self.parent, tearoff=0)
-        self._ctx.add_command(label="Edit Purchase",   command=self.edit_purchase)
-        self._ctx.add_command(label="Delete Purchase", command=self.delete_purchase)
-        for ev in ("<Button-3>", "<Button-2>", "<Control-Button-1>"):
-            self.purchase_tree.bind(ev, self._show_ctx)
-        self.purchase_tree.bind("<Double-1>", self.edit_purchase)
+        from core.tree_action_menu import setup_tree_actions
+        self._action_menu = setup_tree_actions(
+            self.parent,
+            self.purchase_tree,
+            [
+                ("Edit Purchase", self.edit_purchase),
+                ("Delete Purchase", self.delete_purchase),
+            ],
+            on_double=self.edit_purchase,
+            on_delete=lambda e: self.delete_purchase(),
+            escape_to=self.from_date,
+        )
+        self._ctx = self._action_menu.ctx_menu
 
         # Summary — Phase 7: uses suppliers table for due/credit
-        sf = ttk.LabelFrame(main_frame, text="Purchase Summary")
-        sf.pack(fill=tk.X, pady=5)
-
+        self._show_summary = is_dashboard_section_visible('purchase_summary')
         self.total_purchases_var = tk.StringVar()
         self.total_amount_var    = tk.StringVar()
         self.total_entry_paid_var= tk.StringVar()
@@ -161,13 +192,16 @@ class PurchaseHistoryPage:
             ("Total Credit (All Time):",self.total_credit_var,   'success'),
             ("Total Items:",           self.total_items_var,     None),
         ]
-        for col, (lbl, var, color) in enumerate(summary_fields):
-            ttk.Label(sf, text=lbl).grid(row=0, column=col * 2, padx=8, pady=5)
-            kw = {'font': (FONT_FAMILY, FONT_SIZE_LABELS, 'bold')}
-            if color:
-                kw['foreground'] = get_alert_color(color)
-            ttk.Label(sf, textvariable=var, **kw).grid(
-                row=0, column=col * 2 + 1, padx=8, pady=5)
+        if self._show_summary:
+            sf = ttk.LabelFrame(main_frame, text="Purchase Summary")
+            sf.pack(fill=tk.X, pady=5)
+            for col, (lbl, var, color) in enumerate(summary_fields):
+                ttk.Label(sf, text=lbl).grid(row=0, column=col * 2, padx=8, pady=5)
+                kw = {'font': (FONT_FAMILY, FONT_SIZE_LABELS, 'bold')}
+                if color:
+                    kw['foreground'] = get_alert_color(color)
+                ttk.Label(sf, textvariable=var, **kw).grid(
+                    row=0, column=col * 2 + 1, padx=8, pady=5)
 
     # ── Data loading ──────────────────────────────────────────────────────
 
@@ -352,18 +386,23 @@ class PurchaseHistoryPage:
     def clear_filter(self):
         self.from_date.delete(0, tk.END)
         self.to_date.delete(0, tk.END)
-        self.supplier_filter.set('')
-        self.due_filter.set('')
-        self.schedule_filter.set('')
-        self.fy_filter.set('')
+        for combo in (self.supplier_filter, self.due_filter,
+                      self.schedule_filter, self.fy_filter):
+            try:
+                combo.hide_list()
+                combo.set('')
+            except Exception:
+                pass
         self.load_purchase_history()
 
+    def _clear_filter_shortcut(self, event=None):
+        self.clear_filter()
+        return 'break'
+
     def update_summary(self, data=None):
-        """
-        Phase 7: summary uses:
-          - filtered purchases for total_amount, entry_paid, returns, items
-          - suppliers table for total_due / total_credit (always global)
-        """
+        """Phase 7: summary uses filtered purchases and suppliers table balances."""
+        if not getattr(self, '_show_summary', True):
+            return
         if data is None:
             data = self.purchase_data
 
@@ -430,19 +469,14 @@ class PurchaseHistoryPage:
     # ── Exports ───────────────────────────────────────────────────────────
 
     def _export_menu(self):
-        dlg = open_dialog(self.parent, "Export Purchase Reports",
-                          width=320, height=280, resizable=False)
-        body = dlg.content
-        for label, cmd in [
+        from core.export_manager import show_export_option_dialog
+        show_export_option_dialog(self.parent, "Export Purchase Reports", [
             ("Current View",        self._export_current_view),
             ("Purchase Register",   self._export_purchase_register),
             ("Monthly Summary",     self._export_monthly_summary),
             ("Supplier Due Report", self._export_supplier_due),
             ("GST Purchase Report", self._export_gst_purchase),
-        ]:
-            ttk.Button(body, text=label, width=36,
-                       command=lambda c=cmd, d=dlg: [d.destroy(), c()]
-                       ).pack(pady=4, padx=10)
+        ], width=320)
 
     def _get_date_range(self):
         return self.from_date.get().strip(), self.to_date.get().strip()
@@ -554,57 +588,15 @@ class PurchaseHistoryPage:
     # ── Keyboard nav ──────────────────────────────────────────────────────
 
     def _setup_arrow_nav(self):
-        nav = [self.from_date, self.to_date,
-               self.supplier_filter.entry, self.due_filter.entry,
-               self.schedule_filter.entry, self.apply_btn]
-        n = len(nav)
-        plain = {0, 1}
-        btns  = {5}
-
-        def make_next(i):
-            def h(event):
-                if event.keysym == 'Right':
-                    try:
-                        if event.widget.index(tk.INSERT) < len(event.widget.get()):
-                            return None
-                    except Exception:
-                        pass
-                nav[(i + 1) % n].focus()
-                return 'break'
-            return h
-
-        def make_prev(i):
-            def h(event):
-                if event.keysym == 'Left':
-                    try:
-                        if event.widget.index(tk.INSERT) > 0:
-                            return None
-                    except Exception:
-                        pass
-                nav[(i - 1) % n].focus()
-                return 'break'
-            return h
-
-        for i, w in enumerate(nav):
-            if i in plain or i in btns:
-                w.bind('<Up>',   make_prev(i), add='+')
-                w.bind('<Down>', make_next(i), add='+')
-            w.bind('<Left>',  make_prev(i), add='+')
-            w.bind('<Right>', make_next(i), add='+')
-        self.purchase_tree.bind('<Return>', lambda e: self._tree_menu())
-
-    def _tree_menu(self):
-        sel = self.purchase_tree.selection()
-        if not sel:
-            return
-        try:
-            bbox = self.purchase_tree.bbox(sel[0])
-            if bbox:
-                self._ctx.post(
-                    self.purchase_tree.winfo_rootx() + bbox[0],
-                    self.purchase_tree.winfo_rooty() + bbox[1] + bbox[3])
-        except Exception:
-            pass
+        from core.focus_chain import wire_focus_ring
+        wire_focus_ring([
+            self.from_date, self.to_date, self.fy_filter.entry,
+            self.supplier_filter.entry, self.due_filter.entry,
+            self.schedule_filter.entry, self.apply_btn, self.clear_btn,
+            self.export_btn,
+        ])
+        self.from_date.bind('<Return>', lambda e: self.to_date.focus(), add='+')
+        self.to_date.bind('<Return>', lambda e: self.apply_filter(), add='+')
 
     # ── FY filter ─────────────────────────────────────────────────────────
 

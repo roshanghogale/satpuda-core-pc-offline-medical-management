@@ -67,6 +67,8 @@ class ImportPurchaseDialog(tk.Toplevel):
         self._build_ui(scroll_body)
         self._enable_drag_drop()
         self.after(80, lambda: ensure_toplevel_fits_screen(self, width=1050, height=720, resizable=True))
+        from core.dialog_escape import bind_escape_to_close
+        bind_escape_to_close(self, on_close=self.destroy)
         self.grab_set()
         self.focus_set()
 
@@ -494,6 +496,8 @@ class _EditImportedItemDialog(tk.Toplevel):
 
         self._build_ui(scroll_body)
         self.after(50, lambda: ensure_toplevel_fits_screen(self, width=520, height=430, resizable=True))
+        from core.dialog_escape import bind_escape_to_close
+        bind_escape_to_close(self, on_close=self.destroy)
         self.focus_set()
 
     def _build_ui(self, frame):

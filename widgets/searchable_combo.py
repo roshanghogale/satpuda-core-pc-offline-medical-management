@@ -12,6 +12,7 @@ class SearchableCombo(ttk.Frame):
         self.list_visible = False
         self.ignore_next_enter = False
         self._listbox_navigated = False
+        self.apply_on_select = None
 
         self.entry = ttk.Entry(self, textvariable=self.var, width=width)
         self.entry.pack(fill=tk.X)
@@ -47,6 +48,17 @@ class SearchableCombo(ttk.Frame):
 
     # ── lifecycle ──────────────────────────────────────────────────────────
 
+    def bind_apply_on_select(self, callback):
+        """Call ``callback`` after a value is chosen (Enter or click in list)."""
+        self.apply_on_select = callback
+
+    def _fire_apply(self):
+        if callable(self.apply_on_select):
+            try:
+                self.apply_on_select()
+            except Exception:
+                pass
+
     def _hide_on_page_change(self, event=None):
         self.hide_list()
 
@@ -76,6 +88,9 @@ class SearchableCombo(ttk.Frame):
         return None
 
     def on_focus_in(self, event):
+        if getattr(self, '_suppress_focus_list', False):
+            self.hide_list()
+            return
         if self.values:
             self.after(10, self._show_all_on_focus)
 
@@ -129,6 +144,7 @@ class SearchableCombo(ttk.Frame):
             self.hide_list()
             if self._entry_exists():
                 self.entry.event_generate('<<ComboboxSelected>>')
+            self._fire_apply()
         else:
             self.hide_list()
             if typed:
@@ -139,6 +155,7 @@ class SearchableCombo(ttk.Frame):
                     self.var.set(match)
                     if self._entry_exists():
                         self.entry.event_generate('<<ComboboxSelected>>')
+                    self._fire_apply()
 
         try:
             if hasattr(self, 'next_focus_widget') and self.next_focus_widget:
@@ -166,6 +183,7 @@ class SearchableCombo(ttk.Frame):
         self.select_item(move_focus=False)
         if self._entry_exists():
             self.entry.event_generate('<<ComboboxSelected>>')
+        self._fire_apply()
         try:
             if hasattr(self, 'next_focus_widget') and self.next_focus_widget:
                 self.after(10, self.next_focus_widget)
@@ -179,6 +197,7 @@ class SearchableCombo(ttk.Frame):
         self.select_item(move_focus=False)
         if self._entry_exists():
             self.entry.event_generate('<<ComboboxSelected>>')
+        self._fire_apply()
         try:
             if hasattr(self, 'next_focus_widget') and self.next_focus_widget:
                 self.after(10, self.next_focus_widget)
@@ -191,6 +210,7 @@ class SearchableCombo(ttk.Frame):
         self.select_item(move_focus=False)
         if self._entry_exists():
             self.entry.event_generate('<<ComboboxSelected>>')
+        self._fire_apply()
 
     def on_listbox_focus_out(self, event):
         """When listbox loses focus, hide unless focus went back to entry."""
@@ -307,10 +327,11 @@ class SearchableCombo(ttk.Frame):
         return self.var.get()
 
     def set(self, value):
-        self.selected_flag = False   # don't block update_list after clear
+        text = str(value or '')
+        # Non-empty programmatic set must not open the dropdown via text trace.
+        self.selected_flag = bool(text.strip())
         self.var.set(value)
-        if not value:
-            self.hide_list()
+        self.hide_list()
 
     def configure(self, **kwargs):
         if 'values' in kwargs:
@@ -319,8 +340,16 @@ class SearchableCombo(ttk.Frame):
     def bind(self, event, callback):
         self.entry.bind(event, callback)
 
-    def focus(self):
-        self.entry.focus()
+    def focus(self, *, open_dropdown=False):
+        try:
+            if self.winfo_exists() and self.entry.winfo_exists():
+                if not open_dropdown:
+                    self._suppress_focus_list = True
+                    self.after(80, lambda: setattr(self, '_suppress_focus_list', False))
+                    self.hide_list()
+                self.entry.focus_set()
+        except tk.TclError:
+            pass
 
     def destroy(self):
         self.hide_list()

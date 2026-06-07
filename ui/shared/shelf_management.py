@@ -135,10 +135,16 @@ class ShelfManagementPage:
         self._tree.bind('<F2>', lambda e: self._rename_selected())
         self._tree.bind('<Delete>', lambda e: self._delete_selected())
 
-        # Right-click context menu
-        self._ctx_menu = tk.Menu(self.parent, tearoff=0)
-        self._tree.bind('<Button-3>', self._show_context_menu)
-        self._tree.bind('<Button-2>', self._show_context_menu)
+        from core.tree_action_menu import setup_tree_actions
+        self._action_menu = setup_tree_actions(
+            self.parent,
+            self._tree,
+            actions=[],
+            actions_factory=self._context_action_items,
+            on_double=self._on_tree_double,
+            escape_to=self._name_entry,
+        )
+        self._ctx_menu = self._action_menu.ctx_menu
 
         # ── Show-location checkbox ────────────────────────────────────────
         self._show_loc_var = tk.BooleanVar()
@@ -179,6 +185,23 @@ class ShelfManagementPage:
         self._btn_add_box.config(state=state_box)
         self._btn_delete.config(state=state_action)
         self._btn_rename.config(state=state_action)
+
+    def _context_action_items(self):
+        """Same options as the right-click menu (for Enter key popup)."""
+        t = self._selected_type
+        items = []
+        if t == "rack":
+            items.append(("+ Add Section", self._add_section))
+        elif t == "section":
+            items.append(("+ Add Box", self._add_box))
+        if t is not None:
+            if items:
+                items.append("---")
+            items.extend([
+                ("Rename", self._rename_selected),
+                ("Delete", self._delete_selected),
+            ])
+        return items
 
     def _show_context_menu(self, event):
         """Show right-click context menu on the tree."""

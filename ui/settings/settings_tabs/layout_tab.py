@@ -15,11 +15,13 @@ from core.layout_config import (
     copy_custom_home_banner,
 )
 from core.column_config import (
-    TABLE_COLUMNS, PAGE_LABELS, QUICK_ACCESS_BUTTONS, default_column_visibility,
+    TABLE_COLUMNS, PAGE_LABELS, QUICK_ACCESS_BUTTONS, DASHBOARD_SECTIONS,
+    default_column_visibility,
     EXPORT_REPORTS, EXPORT_PAGE_LABELS, default_export_column_visibility,
     _normalize_page_export_saved,
 )
 from ui.settings.settings_tabs.appearance_scroll import AppearanceScrollPane
+from core.settings_section_nav import wire_settings_section_nav, bindings_for_sectioned_tab
 from core.app_setup import AVAILABLE_THEMES, load_theme, save_theme, restart_app as _restart_app
 
 
@@ -29,6 +31,7 @@ _NAV_SECTIONS = [
     ('font',         'Font Size'),
     ('banner',       'Home Banner'),
     ('quick_access', 'Quick Access'),
+    ('dashboard',    'Dashboard Sections'),
     ('columns',      'Column Visibility'),
     ('rows',         'Table Row Counts'),
     ('units',        'Medicine Units'),
@@ -40,6 +43,8 @@ _NAV_SECTIONS = [
 
 
 class LayoutTab:
+    TAB_NAME = 'Appearance'
+
     def __init__(self, notebook, parent_root, conn=None):
         self._root = parent_root
         self._conn = conn
@@ -48,7 +53,8 @@ class LayoutTab:
         self._active_section = None
 
         outer = ttk.Frame(notebook)
-        notebook.add(outer, text="Appearance")
+        self.outer = outer
+        notebook.add(outer, text=self.TAB_NAME)
 
         shell = ttk.Frame(outer)
         shell.pack(fill=tk.BOTH, expand=True)
@@ -103,6 +109,16 @@ class LayoutTab:
 
         first = 'font' if not TTKBOOTSTRAP_AVAILABLE else 'theme'
         self._show_section(first)
+        section_ids = [s[0] for s in _NAV_SECTIONS if s[0] != 'theme' or TTKBOOTSTRAP_AVAILABLE]
+        wire_settings_section_nav(self, self._nav_buttons, section_ids, self._show_section)
+
+    def _focus_sidebar(self):
+        buttons = list(self._nav_buttons.values())
+        if buttons:
+            buttons[0].focus_set()
+
+    def get_keyboard_bindings(self):
+        return bindings_for_sectioned_tab(self)
 
     def _panel(self, section_id):
         """Section root frame inside the scrollable area."""
@@ -146,6 +162,7 @@ class LayoutTab:
         self._build_font_panel()
         self._build_banner_panel()
         self._build_quick_access_panel()
+        self._build_dashboard_panel()
         self._build_columns_panel()
         self._build_rows_panel()
         self._build_units_panel()
@@ -314,6 +331,30 @@ class LayoutTab:
             var = tk.BooleanVar(value=qa_saved.get(key, True))
             self._qa_vars[key] = var
             ttk.Checkbutton(qg, text=label, variable=var).grid(
+                row=i // 2, column=i % 2, sticky=tk.W, padx=12, pady=4)
+
+    # ── Dashboard sections ────────────────────────────────────────────────
+
+    def _build_dashboard_panel(self):
+        frame = self._panel('dashboard')
+        saved = self._saved
+
+        df = ttk.LabelFrame(frame, text="Summary & Dashboard Panels")
+        df.pack(fill=tk.X, padx=12, pady=12)
+        ttk.Label(
+            df,
+            text="Show or hide the stats summary bars on Home and history pages.",
+            justify=tk.LEFT, wraplength=520,
+        ).pack(padx=12, pady=(10, 8), anchor='w')
+
+        dash_saved = saved.get('dashboard_sections') or {}
+        self._dash_vars = {}
+        dg = ttk.Frame(df)
+        dg.pack(fill=tk.X, padx=12, pady=(0, 12))
+        for i, (key, label) in enumerate(DASHBOARD_SECTIONS):
+            var = tk.BooleanVar(value=dash_saved.get(key, True))
+            self._dash_vars[key] = var
+            ttk.Checkbutton(dg, text=label, variable=var).grid(
                 row=i // 2, column=i % 2, sticky=tk.W, padx=12, pady=4)
 
     # ── Column visibility ─────────────────────────────────────────────────
@@ -704,6 +745,7 @@ class LayoutTab:
             data['home_banner_use_default'] = bool(self._banner_default_var.get())
             data['home_banner_path'] = '' if self._banner_default_var.get() else self._banner_path_var.get().strip()
             data['quick_access'] = {k: v.get() for k, v in self._qa_vars.items()}
+            data['dashboard_sections'] = {k: v.get() for k, v in self._dash_vars.items()}
             col_vis = {}
             for page_key, cols in self._col_vars.items():
                 page_vis = {col: var.get() for col, var in cols.items()}

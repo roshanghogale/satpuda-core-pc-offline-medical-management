@@ -8,7 +8,8 @@ from core.themed_messagebox import showinfo, showwarning, showerror, askyesno
 from core.calc_engine import calc_bill_summary, calc_payment_result, auto_round
 from core.customer_service import get_or_create_customer, get_customer_names
 from core.billing_service import save_new_bill
-from widgets.bill_preview import show_bill_preview
+from core.bill_output import open_bill_for_print
+from core.keyboard_registry import KeyboardRegistry, PageBindings
 from ui.billing.billing_nav  import BillingNavMixin
 from ui.billing.billing_form import BillingFormMixin
 
@@ -28,31 +29,39 @@ class BillingPage(BillingNavMixin, BillingFormMixin):
         self._customer_id  = None
 
         self._build_interface()
-        self._bind_shortcuts()
-        self.parent.after(150, self.customer_name.focus)
+        self._register_keyboard()
+        self.parent.after(150, self._focus_customer_name)
 
-    # ── Shortcuts ─────────────────────────────────────────────────────────
+    def _focus_customer_name(self):
+        try:
+            if self.customer_name.winfo_exists():
+                self.customer_name.focus()
+        except tk.TclError:
+            pass
 
-    def _bind_shortcuts(self):
-        root = self.parent.winfo_toplevel()
-        root.bind('<F5>',        lambda e: self.generate_bill())
-        root.bind('<Control-g>', lambda e: self.generate_bill())
-        root.bind('<Control-G>', lambda e: self.generate_bill())
-        root.bind('<Control-p>', lambda e: self._print_last_bill())
-        root.bind('<Control-P>', lambda e: self._print_last_bill())
-        root.bind('<F6>',        lambda e: self.cash_paid.focus())
-        root.bind('<End>',       lambda e: self._focus_payment_field())
+    def _register_keyboard(self):
         self.parent.after(100, self._setup_arrow_nav)
+        bindings = KeyboardRegistry.make_bindings(
+            page_id='billing',
+            first_focus=self._focus_customer_name,
+            on_f5=self._save_sales_shortcut,
+            on_f6=self._focus_overall_discount,
+            on_end=self._focus_payment_field,
+            on_ctrl_p=self._print_last_bill,
+            on_ctrl_shift_c=self._clear_form_shortcut,
+            f2_target=self.medicine_tree,
+        )
+        self._inner_frame._keyboard_bindings = bindings
+        KeyboardRegistry.register_page(self._inner_frame, bindings)
 
     def _rebind_mousewheel(self):
         pass  # scroll_manager handles this
 
     def _print_last_bill(self):
         if self._last_bill_no and self._last_sale_id:
-            show_bill_preview(self.parent, self.conn,
-                              self._last_bill_no, self._last_sale_id)
+            open_bill_for_print(self.conn, self._last_bill_no, self._last_sale_id)
         else:
-            showinfo("No Bill", "No bill generated yet in this session.", parent=self.parent)
+            showinfo("No Bill", "No sale saved yet in this session.", parent=self.parent)
 
     # ── Calculate ─────────────────────────────────────────────────────────
 
@@ -108,7 +117,11 @@ class BillingPage(BillingNavMixin, BillingFormMixin):
 
     # ── Generate bill ─────────────────────────────────────────────────────
 
-    def generate_bill(self):
+    def _save_sales_shortcut(self, event=None):
+        self.save_sales()
+        return 'break'
+
+    def save_sales(self):
         self.cursor.execute("SELECT * FROM pharmacy_profile LIMIT 1")
         if not self.cursor.fetchone():
             showwarning("Setup Required",
@@ -152,17 +165,22 @@ class BillingPage(BillingNavMixin, BillingFormMixin):
             self.customer_name.configure(values=get_customer_names(self.conn))
             self._last_bill_no = bill_no
             self._last_sale_id = sale_id
-            showinfo("Success",
-                     f"Bill {bill_no} generated!  [F5=New Bill | Ctrl+P=Print]",
-                     parent=self.parent)
-            show_bill_preview(self.parent, self.conn, bill_no, sale_id)
+            open_bill_for_print(self.conn, bill_no, sale_id)
             self.clear_form()
 
         except Exception as e:
             self.conn.rollback()
-            showerror("Error", f"Failed to generate bill: {e}", parent=self.parent)
+            showerror("Error", f"Failed to save sale: {e}", parent=self.parent)
+
+    def generate_bill(self):
+        """Alias for keyboard registry / legacy callers."""
+        return self.save_sales()
 
     # ── Clear ─────────────────────────────────────────────────────────────
+
+    def _clear_form_shortcut(self, event=None):
+        self.clear_form()
+        return 'break'
 
     def clear_form(self):
         self.customer_name.set('')

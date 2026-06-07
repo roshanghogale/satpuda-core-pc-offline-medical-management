@@ -131,7 +131,18 @@ class GeneralProductsPage:
         vsb.pack(side=tk.RIGHT, fill=tk.Y)
 
         self.tree.bind('<<TreeviewSelect>>', self._on_select)
-        self.tree.bind('<Double-1>', lambda e: self._load_selected())
+
+        from core.tree_action_menu import setup_tree_actions
+        setup_tree_actions(
+            parent,
+            self.tree,
+            [
+                ("Load to Form", self._load_selected),
+                ("Delete Product", self._delete),
+            ],
+            on_double=self._load_selected,
+            escape_to=self.name_entry,
+        )
 
         self.count_var = tk.StringVar(value='0 items')
         ttk.Label(

@@ -3,78 +3,22 @@ try:
     import ttkbootstrap as ttk
 except ImportError:
     from tkinter import ttk
-from tkinter import messagebox
-from core.themed_messagebox import showinfo, showwarning, showerror, askyesno
 from core.font_config import *
-from core.layout_config import load_layout, _DEFAULT_MED_TYPES
-from core.scroll_manager import make_scrollable
-
-
-class AppModeTab:
-    """Settings tab to switch between Medical and Veterinary mode."""
-
-    def __init__(self, notebook=None, parent=None):
-        from core.app_setup import load_app_mode, save_app_mode
-        self._save_app_mode = save_app_mode
-
-        if parent is not None:
-            inner = parent
-        else:
-            frame = ttk.Frame(notebook)
-            notebook.add(frame, text="🏥 App Mode")
-            inner = make_scrollable(frame)
-
-        ttk.Label(inner, text="Application Mode",
-                  font=(FONT_FAMILY, FONT_SIZE_SECTION_TITLE, 'bold')).pack(pady=(20, 6))
-
-        self._mode_var = tk.StringVar(value=load_app_mode())
-
-        desc = {
-            'medical':     ("💊 Medical",
-                            "Medicine names are loaded from the bundled master database\n"
-                            "(387k medicines from Excel). New medicines are also saved\n"
-                            "to the master list for future suggestions."),
-            'veterinary':  ("🐾 Veterinary",
-                            "No master medicine database. The Purchase page shows only\n"
-                            "medicines already added to your inventory. You can type any\n"
-                            "new name freely — it will be added when you save the purchase."),
-        }
-
-        for mode, (label, detail) in desc.items():
-            rf = ttk.LabelFrame(inner, text=label)
-            rf.pack(fill=tk.X, padx=40, pady=8)
-            ttk.Radiobutton(rf, text=label, variable=self._mode_var, value=mode,
-                            command=self._on_change).pack(anchor=tk.W, padx=10, pady=(6, 2))
-            ttk.Label(rf, text=detail,
-                      font=(FONT_FAMILY, FONT_SIZE_SUPPORTING_TEXT),
-                      justify=tk.LEFT).pack(anchor=tk.W, padx=28, pady=(0, 8))
-
-        self._status = ttk.Label(inner, text="",
-                                 font=(FONT_FAMILY, FONT_SIZE_LABELS, 'bold'))
-        self._status.pack(pady=10)
-
-    def _on_change(self):
-        mode = self._mode_var.get()
-        self._save_app_mode(mode)
-        label = "Medical 💊" if mode == 'medical' else "Veterinary 🐾"
-        self._status.config(text=f"✔ Mode set to {label}. Restart the app to apply.",
-                            foreground='green')
+from core.themed_messagebox import showinfo, showwarning, showerror, askyesno
+from ui.settings.settings_tabs.appearance_scroll import AppearanceScrollPane
 
 
 class ThresholdsTab:
-    def __init__(self, notebook=None, conn=None, parent=None):
+    """Low-stock / near-expiry thresholds per medicine type (embedded panel)."""
+
+    def __init__(self, parent, conn):
         self.conn = conn
         self.cursor = conn.cursor()
-        if parent is not None:
-            frame = parent
-        else:
-            outer = ttk.Frame(notebook)
-            notebook.add(outer, text="Thresholds")
-            frame = make_scrollable(outer)
-        self._build(frame)
+        self._build(parent)
         self._load()
 
     def _build(self, frame):
+        from core.layout_config import load_layout, _DEFAULT_MED_TYPES
         medicine_types = load_layout().get('med_types', list(_DEFAULT_MED_TYPES))
         self.low_stock_entries = {}
         self.near_expiry_entries = {}
@@ -84,9 +28,9 @@ class ThresholdsTab:
         lf = ttk.LabelFrame(frame, text="Low Stock Thresholds")
         lf.pack(fill=tk.X, padx=10, pady=5)
         for i, mt in enumerate(medicine_types):
-            ttk.Label(lf, text=f"{mt}:").grid(row=i//3, column=(i%3)*2, sticky=tk.W, padx=5, pady=5)
+            ttk.Label(lf, text=f"{mt}:").grid(row=i // 3, column=(i % 3) * 2, sticky=tk.W, padx=5, pady=5)
             e = ttk.Entry(lf, width=10)
-            e.grid(row=i//3, column=(i%3)*2+1, padx=5, pady=5)
+            e.grid(row=i // 3, column=(i % 3) * 2 + 1, padx=5, pady=5)
             e.insert(0, "10")
             self.low_stock_entries[mt.lower()] = e
             low_widgets.append(e)
@@ -94,16 +38,15 @@ class ThresholdsTab:
         nf = ttk.LabelFrame(frame, text="Near Expiry Thresholds (Months)")
         nf.pack(fill=tk.X, padx=10, pady=5)
         for i, mt in enumerate(medicine_types):
-            ttk.Label(nf, text=f"{mt}:").grid(row=i//3, column=(i%3)*2, sticky=tk.W, padx=5, pady=5)
+            ttk.Label(nf, text=f"{mt}:").grid(row=i // 3, column=(i % 3) * 2, sticky=tk.W, padx=5, pady=5)
             e = ttk.Entry(nf, width=10)
-            e.grid(row=i//3, column=(i%3)*2+1, padx=5, pady=5)
+            e.grid(row=i // 3, column=(i % 3) * 2 + 1, padx=5, pady=5)
             e.insert(0, "3")
             self.near_expiry_entries[mt.lower()] = e
             near_widgets.append(e)
 
         try:
-            save_btn = ttk.Button(frame, text="Save Thresholds",
-                                  command=self.save, style='Large.TButton')
+            save_btn = ttk.Button(frame, text="Save Thresholds", command=self.save, style='Large.TButton')
         except Exception:
             save_btn = ttk.Button(frame, text="Save Thresholds", command=self.save)
         save_btn.pack(pady=20)
@@ -114,10 +57,10 @@ class ThresholdsTab:
             if idx < len(all_w) - 1:
                 nxt = all_w[idx + 1]
                 w.bind('<Return>', lambda e, n=nxt: n.focus())
-                w.bind('<Down>',   lambda e, n=nxt: n.focus())
+                w.bind('<Down>', lambda e, n=nxt: n.focus())
             else:
                 w.bind('<Return>', lambda e: self.save())
-                w.bind('<Down>',   lambda e: save_btn.focus())
+                w.bind('<Down>', lambda e: save_btn.focus())
             if idx > 0:
                 prv = all_w[idx - 1]
                 w.bind('<Up>', lambda e, p=prv: p.focus())
@@ -158,69 +101,145 @@ class ThresholdsTab:
             showerror("Error", f"Failed to save thresholds: {e}")
 
 
+class AppModeTab:
+    """Application mode panel (embedded in Appearance → App Mode section)."""
+
+    def __init__(self, parent, conn=None):
+        from core.app_setup import load_app_mode, save_app_mode
+        self._save_app_mode = save_app_mode
+
+        ttk.Label(parent, text="Application Mode",
+                  font=(FONT_FAMILY, FONT_SIZE_SECTION_TITLE, 'bold')).pack(pady=(10, 6))
+
+        self._mode_var = tk.StringVar(value=load_app_mode())
+
+        desc = {
+            'medical': ("💊 Medical",
+                        "Medicine names are loaded from the bundled master database.\n"
+                        "New medicines are also saved to the master list for suggestions."),
+            'veterinary': ("🐾 Veterinary",
+                           "No master medicine database. Purchase shows only inventory medicines.\n"
+                           "You can type any new name — it is added when you save the purchase."),
+        }
+
+        for mode, (label, detail) in desc.items():
+            rf = ttk.LabelFrame(parent, text=label)
+            rf.pack(fill=tk.X, padx=20, pady=8)
+            ttk.Radiobutton(rf, text=label, variable=self._mode_var, value=mode,
+                            command=self._on_change).pack(anchor=tk.W, padx=10, pady=(6, 2))
+            ttk.Label(rf, text=detail,
+                      font=(FONT_FAMILY, FONT_SIZE_SUPPORTING_TEXT),
+                      justify=tk.LEFT).pack(anchor=tk.W, padx=28, pady=(0, 8))
+
+        self._status = ttk.Label(parent, text="",
+                                 font=(FONT_FAMILY, FONT_SIZE_LABELS, 'bold'))
+        self._status.pack(pady=10)
+
+    def _on_change(self):
+        mode = self._mode_var.get()
+        self._save_app_mode(mode)
+        label = "Medical 💊" if mode == 'medical' else "Veterinary 🐾"
+        self._status.config(text=f"✔ Mode set to {label}. Restart the app to apply.",
+                            foreground='green')
+
+
 class ShortcutsTab:
     def __init__(self, notebook):
         frame = ttk.Frame(notebook)
         notebook.add(frame, text="⌨ Shortcuts")
-        inner = make_scrollable(frame)
-        self._build(inner)
+        self._scroller = AppearanceScrollPane(frame)
+        self._build(self._scroller.frame)
+        frame.after_idle(lambda: (self._scroller.bind_wheel_recursive(), self._scroller.refresh()))
 
     def _build(self, inner):
         sections = [
-            ("Global (work on every page)", [
-                ("1 – 7",          "Navigate: 1=Sales, 2=Purchase, 3=Inventory, 4=Sales History, 5=Purchase History, 6=Settings, 7=Returns (Customers: Settings → Contacts)"),
-                ("Alt",            "Jump focus to the first input field on the current page"),
-                ("F2",             "Jump focus into the list/table on the current page"),
-                ("F5 / Ctrl+G",    "Generate Bill (Billing) / Save Purchase (Purchase)"),
-                ("F6",             "Jump to Cash Paid (Billing) / Amount Paid (Purchase)"),
-                ("Ctrl+P",         "Print last generated bill (Billing page only)"),
-                ("Tab",            "Move focus to the next input field"),
-                ("Shift+Tab",      "Move focus to the previous input field"),
-                ("Enter",          "Confirm / move to next field"),
-                ("Escape",         "Close dropdown / exit list / release focus to nav bar"),
-                ("Mouse Wheel",    "Scroll the page up or down"),
-                ("↑ / ↓ (no focus)", "Scroll the page up or down when no input is focused"),
+            ("Global Navigation", [
+                ("` or 0", "Home (press Escape first if typing in a field)"),
+                ("1", "Sales (Billing)"),
+                ("2", "Purchase"),
+                ("3", "Inventory"),
+                ("4", "Sales History"),
+                ("5", "Purchase History"),
+                ("6", "Returns — S = Sales Return, P = Purchase Return"),
+                ("7", "Settings — Ctrl+1…9 for tabs (see below)"),
             ]),
-            ("Arrow Keys — Field Navigation", [
-                ("↑ Up",   "Move to the previous input field"),
-                ("↓ Down", "Move to the next input field"),
-                ("← Left", "Move to the previous field (or cursor left inside text)"),
-                ("→ Right","Move to the next field (or cursor right inside text)"),
+            ("Global Actions", [
+                ("Alt", "Focus first input on the current page"),
+                ("F2", "Focus primary list / table"),
+                ("F3", "Focus secondary list (Returns sub-pages)"),
+                ("Shift+F2", "Import Purchase bill (Purchase page)"),
+                ("F5 / Ctrl+G", "Save Sales / Save Purchase / Save Return / Save Payment"),
+                ("F6", "Overall discount % (Sales & Purchase) · Clear (Returns)"),
+                ("End", "Cash Paid (Sales) · Amount Paid (Purchase)"),
+                ("Ctrl+P", "Print last saved sale (Sales page)"),
+                ("Ctrl+E", "Export (page-specific)"),
+                ("Ctrl+F", "Focus filter fields"),
+                ("Ctrl+Enter", "Apply filters"),
+                ("Ctrl+Shift+C", "Clear / refresh filters"),
+                ("Escape", "Close dropdown · exit list · release focus (number keys work again)"),
+                ("↑ / ↓ (no input)", "Scroll page"),
             ]),
-            ("Arrow Keys — Inside a List (after F2)", [
-                ("↑ Up",   "Select the row above"),
-                ("↓ Down", "Select the row below"),
-                ("Enter",  "Open action menu or edit the selected row"),
-                ("Delete", "Remove selected item (Purchase & Billing item lists)"),
-                ("Escape", "Leave the list, return focus to the first input field"),
+            ("Arrow / Enter Navigation", [
+                ("← → ↑ ↓", "Move between fields on the current page"),
+                ("Enter", "Next field · apply filter on dropdowns · add medicine · save"),
+                ("Tab / Shift+Tab", "Standard focus order"),
             ]),
-            ("Billing Page", [
-                ("F2",            "Jump into the Selected Medicines list"),
-                ("F5 / Ctrl+G",  "Generate Bill"),
-                ("F6",           "Jump to Cash Paid field"),
-                ("Ctrl+P",       "Print last bill (opens browser)"),
-                ("Enter (list)", "Open Edit Quantity/Discount dialog for selected medicine"),
-                ("Delete (list)","Remove selected medicine from bill"),
-                ("Escape (list)","Return focus to Medicine combo"),
-                ("Double-click", "Edit quantity / discount of a medicine in the list"),
+            ("Home", [
+                ("B", "New Bill (Sales)"),
+                ("P", "New Purchase"),
+                ("I", "Inventory"),
+                ("E", "Export menu dialog"),
+                ("Ctrl+E", "Export menu"),
+                ("F2", "Focus quick actions · list dialogs: F2 → table, Enter → close, Esc → close"),
             ]),
-            ("Purchase Page", [
-                ("F2",            "Import purchase bill (PDF / Excel)"),
-                ("F5 / Ctrl+G",  "Save Purchase"),
-                ("F6",           "Jump to Amount Paid field"),
-                ("Enter (list)", "Load selected item back into the form for editing"),
-                ("Delete (list)","Remove selected item from purchase"),
-                ("Escape (list)","Return focus to Medicine Name field"),
-                ("Double-click", "Edit selected purchase item"),
+            ("Sales / Billing", [
+                ("F5 / Ctrl+G", "Save Sales — saves, opens browser print (A5), clears form"),
+                ("F6", "Overall discount %"),
+                ("End", "Cash Paid"),
+                ("Ctrl+P", "Reprint last sale"),
+                ("F2", "Medicine items list"),
+                ("Enter on list", "Edit qty/disc · Delete removes row"),
+                ("Enter on medicine", "Add medicine → back to medicine search"),
             ]),
-            ("Settings Page", [
-                ("Ctrl+Tab",       "Switch to the next Settings tab"),
-                ("Ctrl+Shift+Tab", "Switch to the previous Settings tab"),
-                ("F2",             "Jump into the list on the active tab (Contacts → Doctors / Suppliers)"),
-                ("Enter (list)",  "Show action menu: Edit / Delete"),
-                ("Escape (list)", "Return focus to the add form"),
-                ("Enter (form)",  "Move to next field in add/edit forms"),
-                ("Up / Down",     "Navigate between fields in forms and Appearance spinboxes"),
+            ("Purchase", [
+                ("Shift+F2", "Import Purchase"),
+                ("F2", "Purchase items list"),
+                ("F5 / Ctrl+G", "Save Purchase"),
+                ("F6", "Overall discount %"),
+                ("End", "Amount Paid"),
+            ]),
+            ("Inventory / History", [
+                ("Ctrl+F", "Focus search / customer / supplier filter"),
+                ("Ctrl+Enter", "Apply filters"),
+                ("Enter on filter dropdown", "Apply filter after selecting value"),
+                ("Ctrl+Shift+C", "Clear filters (Inventory: refresh + clear)"),
+                ("Ctrl+E", "Export"),
+                ("F2", "Data table"),
+                ("Enter on table", "Keyboard action menu (↑↓ pick, Enter run, Esc close)"),
+                ("Delete", "Delete row (Inventory / Sales History)"),
+            ]),
+            ("Returns", [
+                ("S / P", "Sales Return / Purchase Return (when Returns hub focused)"),
+                ("F2", "Original bill items"),
+                ("F3", "Return items list"),
+                ("F5", "Save return"),
+                ("F6", "Clear form"),
+            ]),
+            ("Settings", [
+                ("Ctrl+1", "Pharmacy Profile"),
+                ("Ctrl+2", "Contacts"),
+                ("Ctrl+3", "Shelf Management"),
+                ("Ctrl+4", "Appearance"),
+                ("Ctrl+5", "Import"),
+                ("Ctrl+6", "Management"),
+                ("Ctrl+7", "Payment — S = Supplier, C = Customer payment"),
+                ("Ctrl+8", "Ledger — S = Supplier, C = Customer ledger"),
+                ("Ctrl+9", "This Shortcuts page"),
+                ("Ctrl+Tab", "Next settings tab"),
+                ("Ctrl+Shift+Tab", "Previous settings tab"),
+                ("F4", "Focus section sidebar (Pharmacy, Contacts, Import, Management, Appearance)"),
+                ("↑ ↓ Enter", "Move and select section buttons when sidebar focused"),
+                ("Alt+1…4", "Jump to section (on sectioned tabs)"),
             ]),
         ]
         for section_title, rows in sections:
@@ -234,4 +253,4 @@ class ShortcutsTab:
                           width=22, anchor='w').pack(side=tk.LEFT, padx=(4, 8))
                 ttk.Label(row_frame, text=desc,
                           font=(FONT_FAMILY, FONT_SIZE_LABELS),
-                          anchor='w').pack(side=tk.LEFT, fill=tk.X, expand=True)
+                          anchor='w', wraplength=720).pack(side=tk.LEFT, fill=tk.X, expand=True)

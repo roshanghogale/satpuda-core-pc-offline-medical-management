@@ -11,7 +11,7 @@ except ImportError:
 from core.alert_colors import get_alert_color
 from core.font_config import *
 from core.layout_config import INVENTORY_ROWS, load_layout, _DEFAULT_MED_TYPES, _DEFAULT_SCHEDULES, is_strip_count_type, parse_tablets_per_stripe
-from core.column_config import apply_column_visibility
+from core.column_config import apply_column_visibility, is_dashboard_section_visible
 from core.scroll_manager import make_scrollable
 from core.export_manager import export_data
 from core.column_config import export_table
@@ -32,6 +32,35 @@ class InventoryPage:
         self.load_inventory()
         self.parent.after(100, self._setup_arrow_nav)
         self.parent.after(200, self.search_entry.focus)
+        self._register_keyboard()
+
+    def _clear_filters(self):
+        for combo in (self.search_entry, self.type_filter, self.stock_filter,
+                      self.expiry_filter, self.schedule_filter):
+            try:
+                combo.hide_list()
+                combo.set('')
+            except Exception:
+                pass
+        self.load_inventory()
+
+    def _clear_filters_shortcut(self, event=None):
+        self._clear_filters()
+        return 'break'
+
+    def _register_keyboard(self):
+        from core.keyboard_registry import KeyboardRegistry, PageBindings
+        bindings = PageBindings(
+            page_id='inventory',
+            first_focus=lambda: self.search_entry.entry.focus_set(),
+            on_ctrl_f=lambda: self.search_entry.entry.focus_set(),
+            on_ctrl_enter=self.filter_inventory,
+            on_ctrl_shift_c=self._clear_filters_shortcut,
+            on_ctrl_e=self._export_current_view,
+            f2_target=self.inventory_tree,
+        )
+        self._inner_frame._keyboard_bindings = bindings
+        KeyboardRegistry.register_page(self._inner_frame, bindings)
 
     # ── UI ────────────────────────────────────────────────────────────────
 
@@ -53,37 +82,39 @@ class InventoryPage:
         self.search_entry.grid(row=0, column=1, padx=5, pady=5)
         self.search_entry.bind('<<ComboboxSelected>>', self.filter_inventory)
         self.search_entry.entry.bind('<KeyRelease>', self.filter_inventory)
+        self.search_entry.bind_apply_on_select(self.filter_inventory)
         self.search_entry.entry.bind('<FocusIn>', lambda e: self._load_names(), add='+')
         self.parent.after(0, self._load_names)
 
         ttk.Label(ff, text="Type:").grid(row=0, column=2, padx=5, pady=5)
         self.type_filter = SearchableCombo(ff, values=med_types, width=18)
         self.type_filter.grid(row=0, column=3, padx=5, pady=5)
-        self.type_filter.bind('<<ComboboxSelected>>', self.filter_inventory)
+        self.type_filter.bind_apply_on_select(self.filter_inventory)
 
         ttk.Label(ff, text="Stock Status:").grid(row=0, column=4, padx=5, pady=5)
         self.stock_filter = SearchableCombo(ff, values=['In Stock','Low Stock','Out of Stock'], width=14)
         self.stock_filter.grid(row=0, column=5, padx=5, pady=5)
-        self.stock_filter.bind('<<ComboboxSelected>>', self.filter_inventory)
+        self.stock_filter.bind_apply_on_select(self.filter_inventory)
 
         ttk.Label(ff, text="Expiry Status:").grid(row=1, column=0, padx=5, pady=5)
         self.expiry_filter = SearchableCombo(ff, values=['Near Expiry','Expired'], width=14)
         self.expiry_filter.grid(row=1, column=1, padx=5, pady=5)
-        self.expiry_filter.bind('<<ComboboxSelected>>', self.filter_inventory)
+        self.expiry_filter.bind_apply_on_select(self.filter_inventory)
 
         ttk.Label(ff, text="Schedule:").grid(row=1, column=2, padx=5, pady=5)
         self.schedule_filter = SearchableCombo(
             ff, values=schedules + ['Non-Scheduled'], width=14)
         self.schedule_filter.grid(row=1, column=3, padx=5, pady=5)
-        self.schedule_filter.bind('<<ComboboxSelected>>', self.filter_inventory)
+        self.schedule_filter.bind_apply_on_select(self.filter_inventory)
 
-        ttk.Button(ff, text="Refresh", command=self.load_inventory).grid(row=1, column=4, padx=10, pady=5)
+        self.refresh_btn = ttk.Button(ff, text="Refresh", command=self.load_inventory)
+        self.refresh_btn.grid(row=1, column=4, padx=10, pady=5)
         try:
-            ttk.Button(ff, text="📤 Export", command=self._export_menu,
-                       bootstyle="info").grid(row=1, column=5, padx=10, pady=5)
+            self.export_btn = ttk.Button(ff, text="📤 Export", command=self._export_menu,
+                                         bootstyle="info")
         except Exception:
-            ttk.Button(ff, text="📤 Export", command=self._export_menu).grid(
-                row=1, column=5, padx=10, pady=5)
+            self.export_btn = ttk.Button(ff, text="📤 Export", command=self._export_menu)
+        self.export_btn.grid(row=1, column=5, padx=10, pady=5)
 
         # Tree
         tf = ttk.Frame(main_frame)
@@ -98,38 +129,39 @@ class InventoryPage:
             self.show_location = False
 
         self._build_tree(tf)
+        self._wire_tree_keyboard()
 
-        # Context menu
-        self._ctx = tk.Menu(self.parent, tearoff=0)
-        self._ctx.add_command(label="Edit Medicine",  command=self.edit_medicine)
-        self._ctx.add_command(label="View Details",   command=self.view_details)
-        self._ctx.add_separator()
-        self._ctx.add_command(label="Delete Medicine",command=self.delete_medicine)
-        self.inventory_tree.bind("<Button-3>", self._show_ctx)
-        self.inventory_tree.bind("<Double-1>", self.view_details)
+        from core.focus_chain import wire_combo_filter_chain
+        wire_combo_filter_chain(
+            self.search_entry, self.type_filter, self.stock_filter,
+            self.expiry_filter, self.schedule_filter,
+        )
+        self.schedule_filter.next_focus_widget = lambda: self.refresh_btn.focus_set()
 
         # Summary
-        sf = ttk.LabelFrame(main_frame, text="Inventory Summary")
-        sf.pack(fill=tk.X, pady=5)
+        self._show_summary = is_dashboard_section_visible('inventory_summary')
         self.total_medicines_var = tk.StringVar()
         self.low_stock_var       = tk.StringVar()
         self.out_of_stock_var    = tk.StringVar()
         self.near_expiry_var     = tk.StringVar()
         self.expired_var         = tk.StringVar()
         self.total_value_var     = tk.StringVar()
-        for col, (lbl, var, color) in enumerate([
-            ('Total Medicines:', self.total_medicines_var, None),
-            ('Low Stock:',       self.low_stock_var,       'warning'),
-            ('Out of Stock:',    self.out_of_stock_var,    'danger'),
-            ('Near Expiry:',     self.near_expiry_var,     'warning'),
-            ('Expired:',         self.expired_var,         'danger'),
-            ('Total Value:',     self.total_value_var,     'success'),
-        ]):
-            ttk.Label(sf, text=lbl).grid(row=0, column=col*2, padx=8, pady=5)
-            kw = {'font': (FONT_FAMILY, FONT_SIZE_LABELS, 'bold')}
-            if color:
-                kw['foreground'] = get_alert_color(color)
-            ttk.Label(sf, textvariable=var, **kw).grid(row=0, column=col*2+1, padx=8, pady=5)
+        if self._show_summary:
+            sf = ttk.LabelFrame(main_frame, text="Inventory Summary")
+            sf.pack(fill=tk.X, pady=5)
+            for col, (lbl, var, color) in enumerate([
+                ('Total Medicines:', self.total_medicines_var, None),
+                ('Low Stock:',       self.low_stock_var,       'warning'),
+                ('Out of Stock:',    self.out_of_stock_var,    'danger'),
+                ('Near Expiry:',     self.near_expiry_var,     'warning'),
+                ('Expired:',         self.expired_var,         'danger'),
+                ('Total Value:',     self.total_value_var,     'success'),
+            ]):
+                ttk.Label(sf, text=lbl).grid(row=0, column=col*2, padx=8, pady=5)
+                kw = {'font': (FONT_FAMILY, FONT_SIZE_LABELS, 'bold')}
+                if color:
+                    kw['foreground'] = get_alert_color(color)
+                ttk.Label(sf, textvariable=var, **kw).grid(row=0, column=col*2+1, padx=8, pady=5)
 
     def _build_tree(self, tf):
         all_cols = ('Name','Type','Batch','Expiry','Days Left','Stock','Unit','MRP','Rate','Manufacturer','Schedule','Location')
@@ -167,6 +199,23 @@ class InventoryPage:
             self.inventory_tree.tag_configure('near_expiry',  background=clr['partial_bg'], foreground=clr['partial_fg'])
             break
 
+    def _wire_tree_keyboard(self):
+        from core.tree_action_menu import setup_tree_actions
+        self._action_menu = setup_tree_actions(
+            self.parent,
+            self.inventory_tree,
+            [
+                ("Edit Medicine", self.edit_medicine),
+                ("View Details", self.view_details),
+                "---",
+                ("Delete Medicine", self.delete_medicine),
+            ],
+            on_double=self.view_details,
+            on_delete=lambda e: self.delete_medicine(),
+            escape_to=self.search_entry.entry,
+        )
+        self._ctx = self._action_menu.ctx_menu
+
     # ── Data loading ──────────────────────────────────────────────────────
 
     def _load_names(self):
@@ -185,8 +234,7 @@ class InventoryPage:
             self.show_location = new_loc
             self.inventory_tree.destroy()
             self._build_tree(self._tree_frame)
-            self.inventory_tree.bind("<Button-3>", self._show_ctx)
-            self.inventory_tree.bind("<Double-1>", self.view_details)
+            self._wire_tree_keyboard()
 
         for item in self.inventory_tree.get_children():
             self.inventory_tree.delete(item)
@@ -261,6 +309,8 @@ class InventoryPage:
         self._insert_rows(starts + contains)
 
     def update_summary(self):
+        if not getattr(self, '_show_summary', True):
+            return
         n     = len(self.medicines_data)
         low   = sum(1 for m in self.medicines_data if self._is_low_stock(m[4], m[1] or ''))
         out   = sum(1 for m in self.medicines_data if m[4] == 0)
@@ -350,6 +400,10 @@ class InventoryPage:
     # ── Context menu / actions ────────────────────────────────────────────
 
     def _show_ctx(self, event):
+        row = self.inventory_tree.identify_row(event.y)
+        if row:
+            self.inventory_tree.selection_set(row)
+            self.inventory_tree.focus(row)
         if self.inventory_tree.selection():
             self._ctx.post(event.x_root, event.y_root)
 
@@ -380,20 +434,14 @@ class InventoryPage:
     # ── Exports ───────────────────────────────────────────────────────────
 
     def _export_menu(self):
-        from core.scroll_manager import open_dialog
-        dlg = open_dialog(self.parent, "Export Inventory Reports",
-                          width=320, height=280, resizable=False)
-        body = dlg.content
-        for label, cmd in [
+        from core.export_manager import show_export_option_dialog
+        show_export_option_dialog(self.parent, "Export Inventory Reports", [
             ("Current View (filtered)", self._export_current_view),
             ("Stock Statement (all)",  self._export_stock_statement),
             ("Near Expiry Report",     self._export_near_expiry),
             ("Expired Stock Report",   self._export_expired),
             ("Schedule-wise Stock",    self._export_schedule_stock),
-        ]:
-            ttk.Button(body, text=label, width=36,
-                       command=lambda c=cmd, d=dlg: [d.destroy(), c()]
-                       ).pack(pady=3, padx=10)
+        ], width=320)
 
     def _export_current_view(self):
         from core.column_config import export_tree_current_view
@@ -452,46 +500,12 @@ class InventoryPage:
     # ── Keyboard nav ──────────────────────────────────────────────────────
 
     def _setup_arrow_nav(self):
-        nav = [self.search_entry.entry, self.type_filter.entry,
-               self.stock_filter.entry, self.expiry_filter.entry,
-               self.schedule_filter.entry]
-        n = len(nav)
-
-        def make_next(i):
-            def h(event):
-                if event.keysym == 'Right':
-                    try:
-                        if event.widget.index(tk.INSERT) < len(event.widget.get()):
-                            return None
-                    except Exception: pass
-                nav[(i+1)%n].focus(); return 'break'
-            return h
-
-        def make_prev(i):
-            def h(event):
-                if event.keysym == 'Left':
-                    try:
-                        if event.widget.index(tk.INSERT) > 0:
-                            return None
-                    except Exception: pass
-                nav[(i-1)%n].focus(); return 'break'
-            return h
-
-        for i, w in enumerate(nav):
-            w.bind('<Left>',  make_prev(i), add='+')
-            w.bind('<Right>', make_next(i), add='+')
-        self.inventory_tree.bind('<Return>', lambda e: self._tree_menu())
-
-    def _tree_menu(self):
-        sel = self.inventory_tree.selection()
-        if not sel: return
-        try:
-            bbox = self.inventory_tree.bbox(sel[0])
-            if bbox:
-                self._ctx.post(
-                    self.inventory_tree.winfo_rootx() + bbox[0],
-                    self.inventory_tree.winfo_rooty() + bbox[1] + bbox[3])
-        except Exception: pass
+        from core.focus_chain import wire_focus_ring
+        wire_focus_ring([
+            self.search_entry.entry, self.type_filter.entry,
+            self.stock_filter.entry, self.expiry_filter.entry,
+            self.schedule_filter.entry, self.refresh_btn, self.export_btn,
+        ])
 
     def _apply_location_column_visibility(self):
         """Called by main.py when returning to inventory page."""

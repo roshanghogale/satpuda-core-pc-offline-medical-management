@@ -9,9 +9,12 @@ except ImportError:
 
 from ui.settings.settings_tabs.payment_tab import PaymentTab
 from ui.settings.settings_tabs.customer_payment_tab import CustomerPaymentTab
+from core.keyboard_registry import PageBindings
 
 
 class PaymentCombinedTab:
+    TAB_NAME = 'Payment'
+
     def __init__(self, notebook, conn):
         self.conn = conn
         self._active = None
@@ -56,6 +59,25 @@ class PaymentCombinedTab:
         self._customer = CustomerPaymentTab(conn, parent=self._customer_host)
         self._show("supplier")
 
+    def get_keyboard_bindings(self):
+        active = self._active
+
+        def _first():
+            if active is None:
+                return
+            if hasattr(active, 'pay_amount'):
+                active.pay_amount.focus_set()
+            elif hasattr(active, 'cash_entry'):
+                active.cash_entry.focus_set()
+
+        return PageBindings(
+            page_id='payment',
+            first_focus=_first,
+            on_f5=lambda: active._save() if active else None,
+            f2_target=getattr(active, 'hist_tree', None),
+            sub_keys={'s': lambda: self._show('supplier'), 'c': lambda: self._show('customer')},
+        )
+
     def _show(self, which: str):
         self._supplier_host.pack_forget()
         self._customer_host.pack_forget()
@@ -74,3 +96,6 @@ class PaymentCombinedTab:
             )
         except Exception:
             pass
+        refresh = getattr(self, '_keyboard_refresh', None)
+        if callable(refresh):
+            refresh()

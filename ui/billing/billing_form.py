@@ -116,11 +116,11 @@ class BillingFormMixin:
                   font=(FONT_FAMILY, 8)).grid(row=1, column=2, columnspan=2, sticky=tk.W, padx=5)
 
         try:
-            ttk.Button(mf, text="Add Medicine", command=self.add_medicine,
-                       bootstyle="success").grid(row=0, column=6, padx=5, pady=5)
+            self.add_medicine_btn = ttk.Button(
+                mf, text="Add Medicine", command=self.add_medicine, bootstyle="success")
         except Exception:
-            ttk.Button(mf, text="Add Medicine", command=self.add_medicine
-                       ).grid(row=0, column=6, padx=5, pady=5)
+            self.add_medicine_btn = ttk.Button(mf, text="Add Medicine", command=self.add_medicine)
+        self.add_medicine_btn.grid(row=0, column=6, padx=5, pady=5)
 
         # ── Medicine tree ─────────────────────────────────────────────────
         sf = ttk.LabelFrame(main_frame, text="Selected Medicines")
@@ -142,10 +142,7 @@ class BillingFormMixin:
         self.medicine_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         sb.pack(side=tk.RIGHT, fill=tk.Y)
 
-        self.medicine_tree.bind('<Double-1>', self.edit_quantity)
-        self.medicine_tree.bind('<Return>',   self.edit_quantity)
-        self.medicine_tree.bind('<Delete>',   lambda e: self._delete_selected_medicine())
-        self.medicine_tree.bind('<Escape>',   lambda e: self.medicine_combo.focus())
+        # Tree keys: Return/Delete/Escape/Double-1 wired in billing_nav.wire_tree_list
 
         # ── Summary ───────────────────────────────────────────────────────
         bottom = ttk.Frame(main_frame)
@@ -159,6 +156,7 @@ class BillingFormMixin:
         self.discount_pct.grid(row=0, column=1, padx=4, pady=2)
         self.discount_pct.insert(0, "0")
         self.discount_pct.bind('<KeyRelease>', self._on_disc_pct_change)
+        self.discount_pct.bind('<Return>', lambda e: self.discount.focus())
         self.discount_pct.bind('<FocusIn>', lambda e: e.widget.select_range(0, tk.END))
 
         ttk.Label(sumf, text="Overall Disc ₹:").grid(row=0, column=2, sticky=tk.W, padx=4, pady=2)
@@ -190,7 +188,7 @@ class BillingFormMixin:
         self.online_paid = ttk.Entry(sumf, width=9)
         self.online_paid.grid(row=0, column=9, padx=4, pady=2)
         self.online_paid.bind('<KeyRelease>', self.calculate_total)
-        self.online_paid.bind('<Return>', lambda e: self.generate_bill())
+        self.online_paid.bind('<Return>', lambda e: self.save_sales())
         self.online_paid.bind('<FocusIn>', lambda e: e.widget.select_range(0, tk.END))
 
         ttk.Label(sumf, text="Total Amount:").grid(row=0, column=10, sticky=tk.W, padx=8, pady=2)
@@ -236,14 +234,14 @@ class BillingFormMixin:
             self.clear_btn = ttk.Button(sumf, text="Clear Form",
                                         command=self.clear_form, bootstyle="warning")
             self.clear_btn.grid(row=2, column=8, padx=6, pady=4, sticky=tk.E)
-            self.generate_btn = ttk.Button(sumf, text="Generate Bill (F5)",
-                                           command=self.generate_bill, bootstyle="primary")
+            self.generate_btn = ttk.Button(sumf, text="Save Sales (F5)",
+                                           command=self.save_sales, bootstyle="primary")
             self.generate_btn.grid(row=2, column=9, columnspan=3, padx=6, pady=4, sticky=tk.EW)
         except Exception:
             self.clear_btn = ttk.Button(sumf, text="Clear Form", command=self.clear_form)
             self.clear_btn.grid(row=2, column=8, padx=6, pady=4, sticky=tk.E)
-            self.generate_btn = ttk.Button(sumf, text="Generate Bill (F5)",
-                                           command=self.generate_bill)
+            self.generate_btn = ttk.Button(sumf, text="Save Sales (F5)",
+                                           command=self.save_sales)
             self.generate_btn.grid(row=2, column=9, columnspan=3, padx=6, pady=4, sticky=tk.EW)
 
     def _focus_medicine_name(self):
@@ -529,6 +527,10 @@ class BillingFormMixin:
 
     def add_medicine_and_focus(self):
         self.add_medicine()
+        try:
+            self.medicine_combo.focus_step1()
+        except Exception:
+            pass
 
     def clear_medicine_fields(self):
         self.medicine_combo.set('')
@@ -550,7 +552,7 @@ class BillingFormMixin:
     def edit_quantity(self, event=None):
         sel = self.medicine_tree.selection()
         if not sel:
-            return
+            return 'break'
         values = self.medicine_tree.item(sel[0])['values']
 
         dlg = open_dialog(self.parent, "Edit Medicine", width=360, height=240, resizable=False)
@@ -566,8 +568,6 @@ class BillingFormMixin:
         qty_e = ttk.Entry(ff, width=14)
         qty_e.grid(row=0, column=1, padx=8, pady=6, sticky=tk.EW)
         qty_e.insert(0, str(values[3]))
-        qty_e.select_range(0, tk.END)
-        qty_e.focus()
 
         ttk.Label(ff, text="Discount ₹:").grid(row=1, column=0, sticky=tk.W, padx=8, pady=6)
         disc_e = ttk.Entry(ff, width=14)
@@ -611,6 +611,17 @@ class BillingFormMixin:
         cb.pack(side=tk.LEFT, padx=6)
         ub.bind('<Return>', lambda e: update())
         cb.bind('<Return>', lambda e: dlg.destroy())
+
+        def _focus_qty():
+            try:
+                qty_e.focus_set()
+                qty_e.select_range(0, tk.END)
+            except tk.TclError:
+                pass
+
+        dlg.after_idle(_focus_qty)
+        dlg.after(150, _focus_qty)
+        return 'break'
 
     def _delete_selected_medicine(self):
         sel = self.medicine_tree.selection()

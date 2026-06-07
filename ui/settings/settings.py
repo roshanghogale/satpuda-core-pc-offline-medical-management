@@ -11,7 +11,7 @@ from ui.settings.settings_tabs.database_tab   import DatabaseTab
 from ui.settings.settings_tabs.payment_combined_tab import PaymentCombinedTab
 from ui.settings.settings_tabs.ledger_tab     import LedgerTab
 from ui.settings.settings_tabs.misc_tabs      import ShortcutsTab
-from core.scroll_manager import make_scrollable
+from ui.settings.settings_tabs.import_tab     import ImportTab
 
 
 class SettingsPage:
@@ -36,150 +36,80 @@ class SettingsPage:
         ShelfManagementPage(shelf_frame, conn)
 
         self._layout     = LayoutTab(notebook, root, conn=conn)
-
-        # Import (purchase bills + mobile JSON)
-        import_outer = ttk.Frame(notebook)
-        notebook.add(import_outer, text="Import")
-        self._build_import_tab(import_outer)
-
+        self._import     = ImportTab(notebook, conn, parent)
         self._database   = DatabaseTab(notebook, conn, parent)
         self._payment    = PaymentCombinedTab(notebook, conn)
         self._ledger     = LedgerTab(notebook, conn)
         self._shortcuts  = ShortcutsTab(notebook)
 
+        for tab in (self._pharmacy, self._contacts, self._layout, self._import, self._database,
+                    self._payment, self._ledger):
+            tab._keyboard_refresh = self.refresh_keyboard_bindings
+
+        from core.settings_section_nav import bind_settings_page_keys
+        parent.after(100, lambda: bind_settings_page_keys(self))
+
         # Ctrl+Tab navigation
         parent.after(200, lambda: self._setup_notebook_nav(notebook))
+        self._tab_objects = {
+            'Pharmacy Profile': self._pharmacy,
+            'Contacts': self._contacts,
+            'Shelf Management': None,
+            'Appearance': self._layout,
+            'Import': self._import,
+            'Management': self._database,
+            'Payment': self._payment,
+            'Ledger': self._ledger,
+            '⌨ Shortcuts': self._shortcuts,
+        }
 
-    # ── Import tab (purchase bills + mobile) ──────────────────────────────
-
-    def _build_import_tab(self, outer):
-        from ui.shared.import_purchases import ImportPurchasesPage
-        from ui.shared.import_from_mobile import ImportFromMobilePage
-
-        frame = make_scrollable(outer)
-
-        bill_bar = ttk.LabelFrame(frame, text="Import Purchase Bill")
-        bill_bar.pack(fill=tk.X, padx=10, pady=(10, 4))
-        ttk.Button(
-            bill_bar,
-            text="Import Purchase Bill",
-            command=self._open_import_purchase_bill,
-        ).pack(side=tk.LEFT, padx=8, pady=8)
-        ttk.Label(bill_bar,
-            text="Pick a PDF, CSV or Excel bill — the Purchase page opens with rows filled in for you to verify and save.",
-            foreground='gray',
-        ).pack(side=tk.LEFT, padx=8, pady=8)
-
-        web_bar = ttk.Frame(frame)
-        web_bar.pack(fill=tk.X, padx=10, pady=(4, 4))
-        from core.font_config import FONT_FAMILY, FONT_SIZE_LABELS, FONT_SIZE_SUPPORTING_TEXT
-        ttk.Label(web_bar, text="Web Purchase Entry:",
-                  font=(FONT_FAMILY, FONT_SIZE_LABELS, 'bold')).pack(side=tk.LEFT, padx=(0, 8))
-        ttk.Button(web_bar, text="🌐 Open Web Purchase Entry",
-                   command=self._open_web_purchase).pack(side=tk.LEFT)
-        from core.alert_colors import get_muted_color
-        ttk.Label(web_bar, text="Enter purchases in the browser, copy JSON, paste below.",
-                  font=(FONT_FAMILY, FONT_SIZE_SUPPORTING_TEXT),
-                  foreground=get_muted_color()).pack(side=tk.LEFT, padx=12)
-        ttk.Separator(frame, orient='horizontal').pack(fill=tk.X, padx=10, pady=4)
-        ImportPurchasesPage(frame, self.conn)
-
-        ttk.Separator(frame, orient='horizontal').pack(fill=tk.X, padx=10, pady=12)
-        mobile_lf = ttk.LabelFrame(frame, text="Import from Mobile")
-        mobile_lf.pack(fill=tk.BOTH, expand=True, padx=10, pady=(4, 10))
-        ImportFromMobilePage(mobile_lf, self.conn)
-
-    def _open_import_purchase_bill(self):
-        root = self.parent.winfo_toplevel()
-        app = getattr(root, '_main_app', None)
-        purchase_page = None
-        if app is not None and hasattr(app, 'open_purchase'):
-            try:
-                if hasattr(app, 'nav_click') and 'Purchase' in getattr(app, 'nav_buttons', {}):
-                    app.nav_click(app.open_purchase, 'Purchase')
-                else:
-                    app.open_purchase()
-                purchase_page = getattr(app, '_purchase_page', None)
-            except Exception as e:
-                from tkinter import messagebox
-                messagebox.showerror(
-                    "Import Purchase Bill",
-                    f"Could not open the Purchase page:\n{e}",
-                    parent=root,
-                )
-                return
-
-        if purchase_page is None:
-            from tkinter import messagebox
-            messagebox.showerror(
-                "Import Purchase Bill",
-                "Purchase page is not available. Open Purchase once, then try again.",
-                parent=root,
-            )
-            return
-
-        from core.purchase_import_flow import import_purchase_bill_direct
-        import_purchase_bill_direct(root, purchase_page)
-
-    def _open_web_purchase(self):
-        import sys
-        import os
-        import webbrowser
-        import shutil
-        from tkinter import messagebox
-        from core.web_purchase_server import (
-            start_web_purchase_server, stop_web_purchase_server,
-            get_api_base_url, write_runtime_catalog,
-        )
-
-        web_root = None
-        if getattr(sys, 'frozen', False):
-            dst_dir = os.path.join(
-                os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
-                'VeterinaryApp', 'web_app',
-            )
-            os.makedirs(dst_dir, exist_ok=True)
-            src = os.path.join(sys._MEIPASS, 'web_app', 'index.html')
-            dst = os.path.join(dst_dir, 'index.html')
-            try:
-                shutil.copy2(src, dst)
-                src_meds = os.path.join(sys._MEIPASS, 'web_app', 'medicines.json')
-                if os.path.isfile(src_meds):
-                    shutil.copy2(src_meds, os.path.join(dst_dir, 'medicines.json'))
-                src_assets = os.path.join(sys._MEIPASS, 'web_app', 'assets')
-                dst_assets = os.path.join(dst_dir, 'assets')
-                if os.path.isdir(src_assets):
-                    if os.path.exists(dst_assets):
-                        shutil.rmtree(dst_assets)
-                    shutil.copytree(src_assets, dst_assets)
-            except Exception as e:
-                messagebox.showerror('Web App Error', f'Could not extract web app:\n{e}')
-                return
-            web_root = dst_dir
-        else:
-            web_root = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-                'web_app',
-            )
-
-        index = os.path.join(web_root, 'index.html')
-        if not os.path.isfile(index):
-            messagebox.showerror('Not Found', f'Web app not found at:\n{index}')
-            return
-
+    def refresh_keyboard_bindings(self):
+        from core.keyboard_registry import KeyboardRegistry, PageBindings
         try:
-            write_runtime_catalog(web_root, self.conn)
-            stop_web_purchase_server()
-            start_web_purchase_server(self.conn, web_root=web_root)
-            url = get_api_base_url() + '/'
-            webbrowser.open(url)
-        except Exception as e:
-            messagebox.showerror('Web App Error', f'Could not start web purchase server:\n{e}')
+            tab_id = self._notebook.select()
+            tab_text = self._notebook.tab(tab_id, 'text')
+            tab_widget = self._notebook.nametowidget(tab_id)
+        except Exception:
+            return
+        obj = self._tab_objects.get(tab_text)
+        if obj and hasattr(obj, 'get_keyboard_bindings'):
+            bindings = obj.get_keyboard_bindings()
+            KeyboardRegistry.register_page(tab_widget, bindings)
+        elif tab_text == 'Appearance' and hasattr(self._layout, 'get_keyboard_bindings'):
+            bindings = self._layout.get_keyboard_bindings()
+            KeyboardRegistry.register_page(tab_widget, bindings)
+        else:
+            bindings = PageBindings(page_id='settings')
+            KeyboardRegistry.register_page(tab_widget, bindings)
+        KeyboardRegistry.clear_sidebar_nav_mode()
+
+    def _current_tab_object(self):
+        try:
+            tab_text = self._notebook.tab(self._notebook.select(), 'text')
+            return self._tab_objects.get(tab_text)
+        except Exception:
+            return None
+
+    def focus_active_tab_sidebar(self) -> bool:
+        """F4 — focus section sidebar on the active settings tab."""
+        obj = self._current_tab_object()
+        if obj is None:
+            return False
+        buttons = getattr(obj, '_section_buttons', None)
+        if not buttons:
+            return False
+        focus_fn = getattr(obj, '_focus_sidebar', None)
+        if callable(focus_fn):
+            focus_fn()
+            return True
+        from core.settings_section_nav import focus_settings_sidebar
+        focus_settings_sidebar(obj)
+        return True
 
     # ── Keyboard navigation ───────────────────────────────────────────────
 
     def open_contacts(self, subtab: str = "Customers"):
-        """Open Settings → Contacts → subtab (Doctors / Customers / Suppliers)."""
+        """Open Settings → Contacts → section (Doctors / Customers / Suppliers)."""
         nb = self._notebook
         for i in range(nb.index("end")):
             if nb.tab(i, "text") == "Contacts":
@@ -197,6 +127,16 @@ class SettingsPage:
                 break
         if hasattr(self, "_database"):
             self._database.show_section(section)
+
+    def open_import(self, section: str = "purchase_bill"):
+        """Open Settings → Import → section."""
+        nb = self._notebook
+        for i in range(nb.index("end")):
+            if nb.tab(i, "text") == "Import":
+                nb.select(i)
+                break
+        if hasattr(self, "_import"):
+            self._import.show_section(section)
 
     def _setup_notebook_nav(self, notebook):
         def _next(e):

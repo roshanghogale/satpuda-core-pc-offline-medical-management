@@ -45,19 +45,23 @@ def _gst_line(ctx, settings) -> str:
 
 
 def _medicine_columns(settings):
-    cols = [
-        ("sr", "Sr.N", "c", "6%"),
-        ("name", "Name of Medicine", "l", "37%"),
-    ]
+    cols = []
+    if settings.get("show_sr_no", True):
+        cols.append(("sr", "Sr.N", "c", "6%"))
+    if settings.get("show_medicine_name", True):
+        cols.append(("name", "Name of Medicine", "l", "37%"))
     if settings.get("show_batch", True):
         cols.append(("batch", "Batch no", "c", "15%"))
     if settings.get("show_expiry", True):
         cols.append(("expiry", "Exp", "c", "8%"))
-    cols.extend([
-        ("qty", "QTY", "c", "7%"),
-        ("mrp", "MRP", "r", "13%"),
-        ("amount", "Amount", "r", "14%"),
-    ])
+    if settings.get("show_qty", True):
+        cols.append(("qty", "QTY", "c", "7%"))
+    if settings.get("show_mrp", True):
+        cols.append(("mrp", "MRP", "r", "13%"))
+    if settings.get("show_line_amount", True):
+        cols.append(("amount", "Amount", "r", "14%"))
+    if not cols:
+        cols = [("name", "Name of Medicine", "l", "100%")]
     return cols
 
 
@@ -102,11 +106,33 @@ def _medicine_table(ctx, settings) -> str:
 
 
 def _doctor_rows(ctx, settings) -> str:
-    if not settings.get("show_doctor", True):
-        return ""
-    return f"""
-          <tr><td>Dr.NAME</td><td>:</td><td>{esc(ctx.doctor_name)}</td></tr>
-          <tr><td>Dr.Reg.</td><td>:</td><td>{esc(ctx.cust_addr)}</td></tr>"""
+    rows = ""
+    if settings.get("show_doctor", True) and settings.get("show_doctor_name", True):
+        rows += f"""
+          <tr><td>Dr.NAME</td><td>:</td><td>{esc(ctx.doctor_name)}</td></tr>"""
+    if settings.get("show_doctor", True) and settings.get("show_doctor_reg", True):
+        rows += f"""
+          <tr><td>Dr.Reg.</td><td>:</td><td>{esc(ctx.doctor_reg)}</td></tr>"""
+    return rows
+
+
+def _meta_rows(ctx, settings) -> str:
+    rows = ""
+    if settings.get("show_bill_no", True):
+        rows += f"""
+              <tr><td>BILL NO.</td><td>:</td><td>{esc(ctx.bill_no)}</td></tr>"""
+    if settings.get("show_bill_date", True):
+        bill_date = ctx.bill_date_landscape or ctx.bill_date
+        rows += f"""
+              <tr><td>Date</td><td>:</td><td>{esc(bill_date)}</td></tr>"""
+    if settings.get("show_patient_name", True):
+        rows += f"""
+              <tr><td>Pt.NAME</td><td>:</td><td>{esc(ctx.cust_name)}</td></tr>"""
+    if settings.get("show_patient_address", True):
+        rows += f"""
+              <tr><td>Pt.ADD.</td><td>:</td><td>{esc(ctx.cust_addr)}</td></tr>"""
+    rows += _doctor_rows(ctx, settings)
+    return rows
 
 
 def _terms(settings) -> str:
@@ -121,21 +147,26 @@ def _signature(ctx, settings) -> str:
         <div class="sign-label">SIGN OF Q.P.</div>"""
 
 
-def _profile_lines(ctx) -> str:
+def _profile_lines(ctx, settings) -> str:
     fssai = getattr(ctx, "fssai", "")
     show_fssai = bool(getattr(ctx, "show_fssai_on_bill", False))
-    return "".join([
-        f'<div>{esc(ctx.address)}</div>' if ctx.address else "",
-        f'<div>E-Mail : {esc(ctx.email)}</div>' if ctx.email else "",
-        f'<div>Phone : {esc(ctx.phone)}</div>' if ctx.phone else "",
-        f'<div>GSTIN : {esc(ctx.gstin)}</div>' if ctx.gstin else "",
-        f'<div>DL.No. : {esc(ctx.dl_no)}</div>' if ctx.dl_no else "",
-        f'<div>FSSAI : {esc(fssai)}</div>' if show_fssai and fssai else "",
-    ])
+    lines = []
+    if settings.get("show_store_address", True) and ctx.address:
+        lines.append(f"<div>{esc(ctx.address)}</div>")
+    if settings.get("show_store_email", True) and ctx.email:
+        lines.append(f"<div>E-Mail : {esc(ctx.email)}</div>")
+    if settings.get("show_store_phone", True) and ctx.phone:
+        lines.append(f"<div>Phone : {esc(ctx.phone)}</div>")
+    if settings.get("show_store_gstin", True) and ctx.gstin:
+        lines.append(f"<div>GSTIN : {esc(ctx.gstin)}</div>")
+    if settings.get("show_store_dl", True) and ctx.dl_no:
+        lines.append(f"<div>DL.No. : {esc(ctx.dl_no)}</div>")
+    if settings.get("show_store_fssai", True) and show_fssai and fssai:
+        lines.append(f"<div>FSSAI : {esc(fssai)}</div>")
+    return "".join(lines)
 
 
 def _bill_copy(ctx, copy_label: str, settings) -> str:
-    bill_date = ctx.bill_date_landscape or ctx.bill_date
     blessing = getattr(ctx, "blessing_line", None) or settings.get(
         "blessing_line", "SHREE GANESHAY NAMAH"
     )
@@ -147,6 +178,35 @@ def _bill_copy(ctx, copy_label: str, settings) -> str:
     show_disc = settings.get("show_discount", True)
     less_value = ctx.discount if (show_disc and ctx.discount > 0) else 0.0
     copy_id_html = f'<div class="copy-id">{esc(copy_label)}</div>' if copy_label else ""
+    pay_mode = f"&nbsp; {esc(ctx.pay_mode).upper()}" if settings.get("show_pay_mode", True) else ""
+    blessing_html = (
+        f'<div class="inv-blessing">{esc(blessing)}</div>'
+        if settings.get("show_blessing", True)
+        else ""
+    )
+    store_name_html = (
+        f'<div class="shop-name">{esc(ctx.store_name.upper())}</div>'
+        if settings.get("show_store_name", True)
+        else ""
+    )
+    gst_strip = (
+        f'<div class="gst-strip">{esc(_gst_line(ctx, settings))}</div>'
+        if settings.get("show_gst_strip", True)
+        else '<div class="gst-strip"></div>'
+    )
+    totals_rows = ""
+    if less_value > 0:
+        totals_rows += f'<tr><td>LESS</td><td class="r">{less_value:.2f}</td></tr>'
+    totals_rows += gst_total_row
+    if settings.get("show_total", True):
+        totals_rows += (
+            f'<tr class="total"><td>Total</td><td class="r">{ctx.grand_total:.2f}</td></tr>'
+        )
+    wish_html = (
+        '<div class="wish">I WISH FOR YOUR <b>SPEEDY RECOVERY.</b></div>'
+        if settings.get("show_recovery_wish", True)
+        else ""
+    )
 
     return f"""
   <section class="copy-shell">
@@ -154,19 +214,14 @@ def _bill_copy(ctx, copy_label: str, settings) -> str:
     <div class="rotated-invoice">
       <div class="top-grid">
         <div class="shop-panel">
-          <div class="shop-name">{esc(ctx.store_name.upper())}</div>
-          {_profile_lines(ctx)}
+          {store_name_html}
+          {_profile_lines(ctx, settings)}
         </div>
         <div class="invoice-panel">
-          <div class="inv-blessing">{esc(blessing)}</div>
-          <div class="inv-title">GST INVOICE&nbsp; {esc(ctx.pay_mode).upper()}</div>
+          {blessing_html}
+          <div class="inv-title">GST INVOICE{pay_mode}</div>
           <table class="meta-table">
-            <tbody>
-              <tr><td>BILL NO.</td><td>:</td><td>{esc(ctx.bill_no)}</td></tr>
-              <tr><td>Date</td><td>:</td><td>{esc(bill_date)}</td></tr>
-              <tr><td>Pt.NAME</td><td>:</td><td>{esc(ctx.cust_name)}</td></tr>
-              <tr><td>Pt.ADD.</td><td>:</td><td>{esc(ctx.cust_addr)}</td></tr>
-              {_doctor_rows(ctx, settings)}
+            <tbody>{_meta_rows(ctx, settings)}
             </tbody>
           </table>
         </div>
@@ -175,16 +230,14 @@ def _bill_copy(ctx, copy_label: str, settings) -> str:
       <div class="table-zone">{_medicine_table(ctx, settings)}</div>
 
       <div class="bottom-zone">
-        <div class="gst-strip">{esc(_gst_line(ctx, settings))}</div>
+        {gst_strip}
         <div class="totals-cell">
           <table class="sum-table">
-            {f'<tr><td>LESS</td><td class="r">{less_value:.2f}</td></tr>' if less_value > 0 else ''}
-            {gst_total_row}
-            <tr class="total"><td>Total</td><td class="r">{ctx.grand_total:.2f}</td></tr>
+            {totals_rows}
           </table>
         </div>
         <div class="terms-cell">
-          <div class="wish">I WISH FOR YOUR <b>SPEEDY RECOVERY.</b></div>
+          {wish_html}
           {_terms(settings)}
         </div>
         <div class="signature-cell">{_signature(ctx, settings)}</div>

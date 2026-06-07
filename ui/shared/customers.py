@@ -15,10 +15,11 @@ from widgets.searchable_combo import SearchableCombo
 
 
 class CustomersPage:
-    def __init__(self, parent, conn):
+    def __init__(self, parent, conn, embedded=False):
         self.conn = conn
         self.cursor = conn.cursor()
         self.parent = parent
+        self._embedded = embedded
         self._all_data = []
 
         self._build_ui()
@@ -29,7 +30,11 @@ class CustomersPage:
     # ── UI ────────────────────────────────────────────────────────────────
 
     def _build_ui(self):
-        inner = make_scrollable(self.parent)
+        if self._embedded:
+            inner = ttk.Frame(self.parent)
+            inner.pack(fill=tk.BOTH, expand=True)
+        else:
+            inner = make_scrollable(self.parent)
         self._inner_frame = inner
         inner.configure(padding=(10, 10))
 
@@ -99,15 +104,18 @@ class CustomersPage:
         self.tree.tag_configure('has_due',    background=clr['due_bg'],     foreground=clr['due_fg'])
         self.tree.tag_configure('has_credit', background=clr['cleared_bg'], foreground=clr['cleared_fg'])
 
-        # Context menu
-        self.ctx_menu = tk.Menu(self.parent, tearoff=0)
-        self.ctx_menu.add_command(label="View Sales History",
-                                  command=self._view_history)
-        self.ctx_menu.add_command(label="Recalculate Due",
-                                  command=self._recalc_selected)
-        self.tree.bind('<Button-3>', self._show_ctx)
-        self.tree.bind('<Double-1>', self._view_history)
-        self.tree.bind('<Return>',   lambda e: self._view_history())
+        from core.tree_action_menu import setup_tree_actions
+        self._action_menu = setup_tree_actions(
+            self.parent,
+            self.tree,
+            [
+                ("View Sales History", self._view_history),
+                ("Recalculate Due", self._recalc_selected),
+            ],
+            on_double=self._view_history,
+            escape_to=self.search_entry.entry,
+        )
+        self.ctx_menu = self._action_menu.ctx_menu
 
         # Summary bar
         summary = ttk.LabelFrame(inner, text="Summary")
@@ -132,18 +140,12 @@ class CustomersPage:
     # ── Data ─────────────────────────────────────────────────────────────
 
     def _export_menu(self):
-        from core.scroll_manager import open_dialog
-        dlg = open_dialog(self.parent, "Export Customer Reports", width=320, height=160, resizable=False)
-        body = dlg.content
-        reports = [
+        from core.export_manager import show_export_option_dialog
+        show_export_option_dialog(self.parent, "Export Customer Reports", [
             ("Current View (filtered)", self._export_current_view),
             ("Customer List (all)",   self._export_customer_list),
             ("Customer Due List",     self._export_customer_due),
-        ]
-        for label, cmd in reports:
-            ttk.Button(body, text=label, width=36,
-                       command=lambda c=cmd, d=dlg: [d.destroy(), c()]
-                       ).pack(pady=4, padx=10)
+        ], width=320, height=200)
 
     def _export_current_view(self):
         from core.column_config import export_tree_current_view

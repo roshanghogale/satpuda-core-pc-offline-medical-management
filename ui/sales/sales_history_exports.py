@@ -50,9 +50,13 @@ def ask_schedules_for_report(parent, initial_filter=""):
 
     rb_frame = ttk.Frame(body)
     rb_frame.pack(fill=tk.X, padx=12, pady=4)
-    ttk.Radiobutton(rb_frame, text="All Schedules", variable=mode, value="all").pack(anchor=tk.W)
-    ttk.Radiobutton(rb_frame, text="Non-Scheduled only", variable=mode, value="non_scheduled").pack(anchor=tk.W)
-    ttk.Radiobutton(rb_frame, text="Selected schedules (check below):", variable=mode, value="selected").pack(anchor=tk.W)
+    rb_all = ttk.Radiobutton(rb_frame, text="All Schedules", variable=mode, value="all")
+    rb_all.pack(anchor=tk.W)
+    rb_non = ttk.Radiobutton(rb_frame, text="Non-Scheduled only", variable=mode, value="non_scheduled")
+    rb_non.pack(anchor=tk.W)
+    rb_sel = ttk.Radiobutton(rb_frame, text="Selected schedules (check below):", variable=mode, value="selected")
+    rb_sel.pack(anchor=tk.W)
+    mode_radios = [rb_all, rb_non, rb_sel]
 
     chk_outer = ttk.LabelFrame(body, text="Schedules (H, H1, X, …)")
     chk_outer.pack(fill=tk.BOTH, expand=True, padx=12, pady=8)
@@ -67,10 +71,13 @@ def ask_schedules_for_report(parent, initial_filter=""):
     scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
     chk_vars = {}
+    schedule_checks = []
     for sch in schedules:
         var = tk.BooleanVar(value=(mode.get() == "selected" and initial == sch))
         chk_vars[sch] = var
-        ttk.Checkbutton(inner, text=sch, variable=var).pack(anchor=tk.W, padx=8, pady=2)
+        cb = ttk.Checkbutton(inner, text=sch, variable=var)
+        cb.pack(anchor=tk.W, padx=8, pady=2)
+        schedule_checks.append(cb)
 
     if not schedules:
         ttk.Label(inner, text="No schedules in layout settings.", foreground="gray").pack(padx=8, pady=8)
@@ -86,8 +93,10 @@ def ask_schedules_for_report(parent, initial_filter=""):
 
     btn_row = ttk.Frame(body)
     btn_row.pack(fill=tk.X, padx=12, pady=(0, 4))
-    ttk.Button(btn_row, text="Select all listed", command=select_all_checks).pack(side=tk.LEFT, padx=(0, 6))
-    ttk.Button(btn_row, text="Clear checks", command=clear_checks).pack(side=tk.LEFT)
+    select_all_btn = ttk.Button(btn_row, text="Select all listed", command=select_all_checks)
+    select_all_btn.pack(side=tk.LEFT, padx=(0, 6))
+    clear_btn = ttk.Button(btn_row, text="Clear checks", command=clear_checks)
+    clear_btn.pack(side=tk.LEFT)
 
     def on_ok():
         m = mode.get()
@@ -112,11 +121,23 @@ def ask_schedules_for_report(parent, initial_filter=""):
         dlg.destroy()
 
     try:
-        ttk.Button(dlg.footer, text="Export Report", command=on_ok, bootstyle="primary").pack(side=tk.LEFT, padx=4)
-        ttk.Button(dlg.footer, text="Cancel", command=on_cancel, bootstyle="secondary").pack(side=tk.RIGHT, padx=4)
+        export_btn = ttk.Button(dlg.footer, text="Export Report", command=on_ok, bootstyle="primary")
+        export_btn.pack(side=tk.LEFT, padx=4)
+        cancel_btn = ttk.Button(dlg.footer, text="Cancel", command=on_cancel, bootstyle="secondary")
+        cancel_btn.pack(side=tk.RIGHT, padx=4)
     except Exception:
-        ttk.Button(dlg.footer, text="Export Report", command=on_ok).pack(side=tk.LEFT, padx=4)
-        ttk.Button(dlg.footer, text="Cancel", command=on_cancel).pack(side=tk.RIGHT, padx=4)
+        export_btn = ttk.Button(dlg.footer, text="Export Report", command=on_ok)
+        export_btn.pack(side=tk.LEFT, padx=4)
+        cancel_btn = ttk.Button(dlg.footer, text="Cancel", command=on_cancel)
+        cancel_btn.pack(side=tk.RIGHT, padx=4)
+
+    from core.dialog_keyboard import wire_dialog_arrow_nav, wire_radiobutton_values
+    wire_radiobutton_values(mode_radios, mode, ["all", "non_scheduled", "selected"])
+    wire_dialog_arrow_nav(
+        mode_radios + schedule_checks + [select_all_btn, clear_btn, export_btn, cancel_btn],
+        dlg,
+        initial_focus=mode_radios[0],
+    )
 
     dlg.wait_window()
     return None if result.get("cancelled") else result
@@ -137,9 +158,8 @@ def _schedule_sql_filter(choice):
 
 def export_menu(parent, cursor, from_date_fn, to_date_fn, schedule_filter_fn,
                 export_current_view_fn):
-    dlg = open_dialog(parent, "Export Sales Reports", width=320, height=400, resizable=False)
-    body = dlg.content
-    reports = [
+    from core.export_manager import show_export_option_dialog
+    show_export_option_dialog(parent, "Export Sales Reports", [
         ("Current View (with filters)",  export_current_view_fn),
         ("Sales Register (all bills)",   lambda: export_sales_register(parent, cursor, from_date_fn, to_date_fn)),
         ("Monthly Summary",              lambda: export_monthly_summary(parent, cursor, from_date_fn, to_date_fn)),
@@ -148,11 +168,7 @@ def export_menu(parent, cursor, from_date_fn, to_date_fn, schedule_filter_fn,
         ("Doctor-wise Sales",            lambda: export_doctor_sales(parent, cursor, from_date_fn, to_date_fn)),
         ("Payment Mode Report",          lambda: export_payment_mode(parent, cursor, from_date_fn, to_date_fn)),
         ("Schedule Report",              lambda: export_schedule_report(parent, cursor, from_date_fn, to_date_fn, schedule_filter_fn)),
-    ]
-    for label, cmd in reports:
-        ttk.Button(body, text=label, width=36,
-                   command=lambda c=cmd, d=dlg: [d.destroy(), c()]
-                   ).pack(pady=3, padx=10)
+    ], width=360, height=400)
 
 
 def export_sales_register(parent, cursor, from_date_fn, to_date_fn):
