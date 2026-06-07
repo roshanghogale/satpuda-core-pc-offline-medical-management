@@ -7,6 +7,12 @@ from pyinstaller_tk_bundle import tcl_tk_datas_and_binaries
 
 _tcl_datas, _tcl_binaries = tcl_tk_datas_and_binaries()
 
+try:
+    import certifi
+    _certifi_datas = [(certifi.where(), 'certifi')]
+except ImportError:
+    _certifi_datas = []
+
 block_cipher = None
 
 a = Analysis(
@@ -40,7 +46,7 @@ a = Analysis(
         # ── OAuth / service account credentials ────────────────────────────
         ('oauth_client.json',          '.'),
         ('service_account.json',       '.'),
-    ] + _tcl_datas,
+    ] + _tcl_datas + _certifi_datas,
     hiddenimports=[
         '_tkinter',
         # ── ttkbootstrap ───────────────────────────────────────────────────
@@ -77,6 +83,7 @@ a = Analysis(
         'cryptography.hazmat.primitives.kdf.pbkdf2',
         'cryptography.hazmat.backends',
         'cryptography.hazmat.backends.openssl',
+        'certifi',
         # ── openpyxl ───────────────────────────────────────────────────────
         'openpyxl', 'openpyxl.styles', 'openpyxl.utils',
         'openpyxl.writer.excel', 'openpyxl.reader.excel',

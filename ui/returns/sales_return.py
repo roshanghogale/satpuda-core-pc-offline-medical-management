@@ -111,8 +111,14 @@ class SalesReturnPage:
         self.orig_tree.configure(yscrollcommand=sb1.set)
         self.orig_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         sb1.pack(side=tk.RIGHT, fill=tk.Y)
-        self.orig_tree.bind('<Return>', self._add_return_item_dialog)
-        self.orig_tree.bind('<Double-1>', self._add_return_item_dialog)
+        from core.tree_action_menu import setup_tree_actions
+        setup_tree_actions(
+            orig_frame,
+            self.orig_tree,
+            [("Add to Return", self._add_return_item_dialog)],
+            on_double=self._add_return_item_dialog,
+            escape_to=self.bill_search.entry,
+        )
 
         # Add button below orig tree
         orig_btn_row = ttk.Frame(inner)
@@ -144,7 +150,13 @@ class SalesReturnPage:
         self.ret_tree.configure(yscrollcommand=sb2.set)
         self.ret_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         sb2.pack(side=tk.RIGHT, fill=tk.Y)
-        self.ret_tree.bind('<Delete>', lambda e: self._remove_return_item())
+        setup_tree_actions(
+            ret_frame,
+            self.ret_tree,
+            [("Remove from Return", self._remove_return_item)],
+            on_delete=lambda e: self._remove_return_item(),
+            escape_to=self.remove_btn,
+        )
 
         # Remove button below ret tree
         ret_btn_row = ttk.Frame(inner)
@@ -222,14 +234,17 @@ class SalesReturnPage:
     # ── Keyboard navigation ───────────────────────────────────────────────
 
     def _setup_nav(self):
-        root = self.parent.winfo_toplevel()
-
-        # F2 → focus orig_tree, F3 → focus ret_tree
-        # F5 → save, F6 → clear
-        root.bind('<F2>', lambda e: self._focus_tree(self.orig_tree), add='+')
-        root.bind('<F3>', lambda e: self._focus_tree(self.ret_tree),  add='+')
-        root.bind('<F5>', lambda e: self._save_return(),              add='+')
-        root.bind('<F6>', lambda e: self._clear(),                    add='+')
+        from core.keyboard_registry import KeyboardRegistry, PageBindings
+        bindings = PageBindings(
+            page_id='sales_return',
+            first_focus=lambda: self.bill_search.entry.focus_set(),
+            on_f5=self._save_return,
+            on_f6=self._clear,
+            f2_target=lambda: self._focus_tree(self.orig_tree),
+            f3_target=lambda: self._focus_tree(self.ret_tree),
+        )
+        self._inner_frame._keyboard_bindings = bindings
+        KeyboardRegistry.register_page(self._inner_frame, bindings)
 
         # Full linear nav order:
         # bill_search → load_btn → [orig_tree] → add_btn → [ret_tree] → remove_btn

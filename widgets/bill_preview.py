@@ -285,6 +285,8 @@ def _show_preview_window(parent, html_path, bill_no, template="classic"):
                         if os.path.exists(html_path) else None).start()
 
     win.protocol("WM_DELETE_WINDOW", on_close)
+    from core.dialog_escape import bind_escape_to_close
+    bind_escape_to_close(win, on_close=on_close)
     try:
         from core.scroll_manager import ensure_toplevel_fits_screen
         win.after(1, lambda: ensure_toplevel_fits_screen(win, width=560, height=380, resizable=True))

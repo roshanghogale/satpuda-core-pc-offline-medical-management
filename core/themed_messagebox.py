@@ -49,7 +49,27 @@ def _resolve_root(parent):
     return tk._default_root
 
 
-def _show(parent, title, message, kind, buttons):
+def _refocus_after(parent, focus_after):
+    if focus_after is None:
+        return
+    root = _resolve_root(parent)
+
+    def _do():
+        try:
+            if callable(focus_after):
+                focus_after()
+            else:
+                focus_after.focus_set()
+        except Exception:
+            pass
+
+    try:
+        root.after_idle(_do)
+    except Exception:
+        pass
+
+
+def _show(parent, title, message, kind, buttons, *, focus_after=None):
     if not _BOOT:
         if kind == 'info':
             return _mb.showinfo(title, message, parent=parent)
@@ -120,6 +140,9 @@ def _show(parent, title, message, kind, buttons):
     bf = ttk.Frame(footer_shell, padding=(12, 8))
     bf.pack(fill=tk.X)
 
+    default_val = buttons[0][1]
+    primary_btn = [None]
+
     def _click(val):
         result[0] = val
         try:
@@ -127,6 +150,10 @@ def _show(parent, title, message, kind, buttons):
         except Exception:
             pass
         dlg.destroy()
+
+    def _confirm(event=None):
+        _click(default_val)
+        return 'break'
 
     for i, (label, val, bstyle) in enumerate(buttons):
         try:
@@ -138,11 +165,19 @@ def _show(parent, title, message, kind, buttons):
         except Exception:
             b = ttk.Button(bf, text=label, width=10, command=lambda v=val: _click(v))
         b.pack(side=tk.RIGHT, padx=4)
-        if i == 0:
-            b.focus_set()
-            b.bind('<Return>', lambda e, v=val: _click(v))
 
-    dlg.bind('<Escape>', lambda e: _click(buttons[-1][1]))
+        def _btn_return(event, v=val):
+            _click(v)
+            return 'break'
+
+        b.bind('<Return>', _btn_return, add='+')
+        b.bind('<KP_Enter>', _btn_return, add='+')
+        if i == 0:
+            primary_btn[0] = b
+
+    from core.dialog_escape import bind_escape_to_close, bind_enter_to_confirm
+    bind_escape_to_close(dlg, on_close=lambda: _click(buttons[-1][1]))
+    bind_enter_to_confirm(dlg, on_confirm=_confirm)
 
     def _present():
         finalize_dialog_geometry(dlg, width=min(400, max_w), height=None, resizable=False)
@@ -155,33 +190,58 @@ def _show(parent, title, message, kind, buttons):
                 dlg.grab_set()
             except Exception:
                 pass
+        btn = primary_btn[0]
+        if btn is not None:
+            try:
+                btn.focus_set()
+                btn.focus_force()
+            except Exception:
+                pass
 
     dlg.after(1, _present)
     dlg.wait_window()
+    _refocus_after(parent, focus_after)
     return result[0]
 
 
-def showinfo(title, message, parent=None):
-    return _show(parent, title, message, 'info', [('OK', True, 'primary')])
+def showinfo(title, message, parent=None, *, focus_after=None):
+    return _show(parent, title, message, 'info', [('OK', True, 'primary')],
+                 focus_after=focus_after)
 
 
-def showwarning(title, message, parent=None):
-    return _show(parent, title, message, 'warning', [('OK', True, 'warning')])
+def showwarning(title, message, parent=None, *, focus_after=None):
+    return _show(parent, title, message, 'warning', [('OK', True, 'warning')],
+                 focus_after=focus_after)
 
 
-def showerror(title, message, parent=None):
-    return _show(parent, title, message, 'error', [('OK', True, 'danger')])
+def showerror(title, message, parent=None, *, focus_after=None):
+    return _show(parent, title, message, 'error', [('OK', True, 'danger')],
+                 focus_after=focus_after)
 
 
-def askyesno(title, message, parent=None):
+def askyesno(title, message, parent=None, *, focus_after=None):
     return _show(
         parent, title, message, 'question',
         [('Yes', True, 'primary'), ('No', False, 'secondary')],
+        focus_after=focus_after,
     )
 
 
-def askokcancel(title, message, parent=None):
+def askokcancel(title, message, parent=None, *, focus_after=None):
     return _show(
         parent, title, message, 'question',
         [('OK', True, 'primary'), ('Cancel', False, 'secondary')],
+        focus_after=focus_after,
     )
+
+
+def install_messagebox_patch():
+    """Route tkinter.messagebox through themed dialogs (Escape closes them)."""
+    if not _BOOT:
+        return
+    import tkinter.messagebox as mb
+    mb.showinfo = showinfo
+    mb.showwarning = showwarning
+    mb.showerror = showerror
+    mb.askyesno = askyesno
+    mb.askokcancel = askokcancel

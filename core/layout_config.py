@@ -181,6 +181,7 @@ def load_layout():
             result['column_visibility'] = data.get('column_visibility') or {}
             result['export_column_visibility'] = data.get('export_column_visibility') or {}
             result['quick_access'] = data.get('quick_access') or {}
+            result['dashboard_sections'] = data.get('dashboard_sections') or {}
             # Load units for ALL saved med_types and auto-append any new defaults
             saved_types = list(data.get('med_types', list(_DEFAULT_MED_TYPES)) or [])
             merged_types = list(saved_types)
@@ -200,6 +201,7 @@ def load_layout():
     result['column_visibility'] = {}
     result['export_column_visibility'] = {}
     result['quick_access'] = {}
+    result['dashboard_sections'] = {}
     for k, v in _SCHEDULE_UNIT_DEFAULTS.items():
         result[f'unit_{k}'] = v
     for k, v in _TYPE_QTY_DEFAULTS.items():

@@ -109,6 +109,15 @@ class PaymentTab:
         self.hist_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         sb.pack(side=tk.RIGHT, fill=tk.Y)
 
+        from core.tree_action_menu import setup_tree_actions
+        setup_tree_actions(
+            hf,
+            self.hist_tree,
+            [("Delete Selected Payment", self._delete)],
+            on_delete=lambda e: self._delete(),
+            escape_to=self.pay_supplier.entry,
+        )
+
         summary = ttk.Frame(frame)
         summary.pack(fill=tk.X, padx=10, pady=(0, 6))
         self.total_paid_var = tk.StringVar(value="Total Paid: ₹0.00")

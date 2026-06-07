@@ -43,18 +43,56 @@ class AppearanceScrollPane:
 
     def _on_frame_configure(self, event=None):
         self.canvas.configure(scrollregion=self.canvas.bbox('all'))
+        self._sync_scrollbar()
 
     def _on_canvas_configure(self, event):
         # Match content width to viewport only — never set height on the window item.
         self.canvas.itemconfig(self._win_id, width=event.width)
+        self._sync_scrollbar()
+
+    def _content_height(self):
+        try:
+            self.frame.update_idletasks()
+            bbox = self.canvas.bbox('all')
+            if not bbox:
+                return 0
+            return bbox[3] - bbox[1]
+        except Exception:
+            return 0
+
+    def _viewport_height(self):
+        try:
+            return max(self.canvas.winfo_height(), 1)
+        except Exception:
+            return 1
+
+    def _content_fits(self):
+        return self._content_height() <= self._viewport_height() + 4
+
+    def _sync_scrollbar(self):
+        """Hide scrollbar and lock scroll position when all content is visible."""
+        try:
+            if self._content_fits():
+                self.canvas.yview_moveto(0)
+                if self.vsb.winfo_ismapped():
+                    self.vsb.pack_forget()
+            else:
+                if not self.vsb.winfo_ismapped():
+                    self.vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        except Exception:
+            pass
 
     def _scroll(self, delta):
+        if self._content_fits():
+            return
         try:
             self.canvas.yview_scroll(int(-1 * delta), 'units')
         except Exception:
             pass
 
     def _on_mousewheel(self, event):
+        if self._content_fits():
+            return 'break'
         delta = getattr(event, 'delta', 0) or 0
         if delta:
             self._scroll(delta / 120)
@@ -97,6 +135,7 @@ class AppearanceScrollPane:
         if bbox:
             self.canvas.configure(scrollregion=bbox)
         self.canvas.update_idletasks()
+        self._sync_scrollbar()
 
     def scroll_to_top(self):
         try:

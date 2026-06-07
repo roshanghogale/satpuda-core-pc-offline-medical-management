@@ -12,7 +12,7 @@ except ImportError:
 from core.alert_colors import get_alert_color
 from core.font_config import *
 from core.layout_config import SALES_HISTORY_ROWS, get_configured_schedules
-from core.column_config import apply_column_visibility, all_column_names
+from core.column_config import apply_column_visibility, all_column_names, is_dashboard_section_visible
 from core.scroll_manager import make_scrollable
 from widgets.searchable_combo import SearchableCombo
 
@@ -35,6 +35,21 @@ class SalesHistoryPage:
         self.load_sales_history()
         self.parent.after(100, self._setup_arrow_nav)
         self.parent.after(200, self.from_date.focus)
+        self._register_keyboard()
+
+    def _register_keyboard(self):
+        from core.keyboard_registry import KeyboardRegistry, PageBindings
+        bindings = PageBindings(
+            page_id='sales_history',
+            first_focus=lambda: self.from_date.focus_set(),
+            on_ctrl_f=lambda: self.customer_filter.entry.focus_set(),
+            on_ctrl_enter=self.apply_filter,
+            on_ctrl_shift_c=self._clear_filter_shortcut,
+            on_ctrl_e=self._export_menu,
+            f2_target=self.sales_tree,
+        )
+        self._inner_frame._keyboard_bindings = bindings
+        KeyboardRegistry.register_page(self._inner_frame, bindings)
 
     # ── UI ────────────────────────────────────────────────────────────────
 
@@ -78,13 +93,26 @@ class SalesHistoryPage:
 
         self.apply_btn = ttk.Button(ff, text="Apply Filter", command=self.apply_filter)
         self.apply_btn.grid(row=0, column=6, padx=10, pady=5)
-        ttk.Button(ff, text="Clear Filter", command=self.clear_filter).grid(row=1, column=6, padx=5, pady=5)
+        self.clear_btn = ttk.Button(ff, text="Clear Filter", command=self.clear_filter)
+        self.clear_btn.grid(row=1, column=6, padx=5, pady=5)
         try:
-            ttk.Button(ff, text="📤 Export", command=self._export_menu,
-                       bootstyle="info").grid(row=0, column=7, padx=10, pady=5, rowspan=2, sticky='ns')
+            self.export_btn = ttk.Button(ff, text="📤 Export", command=self._export_menu,
+                                         bootstyle="info")
         except Exception:
-            ttk.Button(ff, text="📤 Export", command=self._export_menu).grid(
-                row=0, column=7, padx=10, pady=5, rowspan=2, sticky='ns')
+            self.export_btn = ttk.Button(ff, text="📤 Export", command=self._export_menu)
+        self.export_btn.grid(row=0, column=7, padx=10, pady=5, rowspan=2, sticky='ns')
+        self.customer_filter.bind_apply_on_select(self.apply_filter)
+        self.due_filter.bind_apply_on_select(self.apply_filter)
+        self.schedule_filter.bind_apply_on_select(self.apply_filter)
+        self.fy_filter.bind_apply_on_select(self._apply_fy_filter)
+
+        from core.focus_chain import wire_combo_filter_chain, wire_entry_filter_chain
+        wire_entry_filter_chain(self.from_date, self.to_date,
+                                last_action=lambda: self.fy_filter.focus())
+        wire_combo_filter_chain(
+            self.fy_filter, self.customer_filter, self.due_filter, self.schedule_filter,
+        )
+        self.schedule_filter.next_focus_widget = lambda: self.apply_btn.focus_set()
 
         # Tree
         tf = ttk.Frame(main_frame)
@@ -119,19 +147,25 @@ class SalesHistoryPage:
         self.sales_tree.tag_configure('bill_cleared',    background=_clr['partial_bg'], foreground=_clr['partial_fg'])
         self.sales_tree.tag_configure('has_due',         background=_clr['due_bg'],     foreground=_clr['due_fg'])
 
-        self._ctx = tk.Menu(self.parent, tearoff=0)
-        self._ctx.add_command(label="View Bill Details", command=self._view_bill)
-        self._ctx.add_command(label="Edit Bill",         command=self._edit_bill)
-        self._ctx.add_command(label="Print Bill",        command=self._print_bill)
-        self._ctx.add_separator()
-        self._ctx.add_command(label="Delete Bill",       command=self._delete_bill)
-        for ev in ("<Button-3>","<Button-2>","<Control-Button-1>"):
-            self.sales_tree.bind(ev, self._show_ctx)
-        self.sales_tree.bind("<Double-1>", self._view_bill)
+        from core.tree_action_menu import setup_tree_actions
+        self._action_menu = setup_tree_actions(
+            self.parent,
+            self.sales_tree,
+            [
+                ("View Bill Details", self._view_bill),
+                ("Edit Bill", self._edit_bill),
+                ("Print Bill", self._print_bill),
+                "---",
+                ("Delete Bill", self._delete_bill),
+            ],
+            on_double=self._view_bill,
+            on_delete=lambda e: self._delete_bill(),
+            escape_to=self.from_date,
+        )
+        self._ctx = self._action_menu.ctx_menu
 
         # Summary
-        sf = ttk.LabelFrame(main_frame, text="Sales Summary")
-        sf.pack(fill=tk.X, pady=5)
+        self._show_summary = is_dashboard_section_visible('sales_summary')
         self.total_bills_var    = tk.StringVar()
         self.total_sales_var    = tk.StringVar()
         self.total_due_var      = tk.StringVar()
@@ -160,17 +194,27 @@ class SalesHistoryPage:
                 ("Total Paid:",     self.total_paid_var,    'success')]
         row2 = [("Total Returns:",  self.total_returns_var, 'info')]
 
+        if self._show_summary:
+            sf = ttk.LabelFrame(main_frame, text="Sales Summary")
+            sf.pack(fill=tk.X, pady=5)
+
         for col, (lbl, var, color) in enumerate(row0):
+            if not self._show_summary:
+                continue
             ttk.Label(sf, text=lbl).grid(row=0, column=col*2, padx=6, pady=5)
             kw = {'font': (FONT_FAMILY, FONT_SIZE_LABELS, 'bold')}
             if color: kw['foreground'] = get_alert_color(color)
             ttk.Label(sf, textvariable=var, **kw).grid(row=0, column=col*2+1, padx=6, pady=5)
         for col, (lbl, var, color) in enumerate(row1):
+            if not self._show_summary:
+                continue
             ttk.Label(sf, text=lbl).grid(row=1, column=col*2, padx=6, pady=5)
             kw = {'font': (FONT_FAMILY, FONT_SIZE_LABELS, 'bold')}
             if color: kw['foreground'] = get_alert_color(color)
             ttk.Label(sf, textvariable=var, **kw).grid(row=1, column=col*2+1, padx=6, pady=5)
         for col, (lbl, var, color) in enumerate(row2):
+            if not self._show_summary:
+                continue
             ttk.Label(sf, text=lbl).grid(row=2, column=col*2, padx=6, pady=5)
             kw = {'font': (FONT_FAMILY, FONT_SIZE_LABELS, 'bold')}
             if color: kw['foreground'] = get_alert_color(color)
@@ -273,13 +317,22 @@ class SalesHistoryPage:
     def clear_filter(self):
         self.from_date.delete(0, tk.END)
         self.to_date.delete(0, tk.END)
-        self.customer_filter.set('')
-        self.due_filter.set('')
-        self.schedule_filter.set('')
-        self.fy_filter.set('')
+        for combo in (self.customer_filter, self.due_filter,
+                      self.schedule_filter, self.fy_filter):
+            try:
+                combo.hide_list()
+                combo.set('')
+            except Exception:
+                pass
         self.load_sales_history()
 
+    def _clear_filter_shortcut(self, event=None):
+        self.clear_filter()
+        return 'break'
+
     def update_summary(self, data=None, fd='', td=''):
+        if not getattr(self, '_show_summary', True):
+            return
         if data is None:
             data = self.sales_data
         today_d    = date.today()
@@ -439,49 +492,15 @@ class SalesHistoryPage:
     # ── Keyboard nav ──────────────────────────────────────────────────────
 
     def _setup_arrow_nav(self):
-        nav = [self.from_date, self.to_date,
-               self.customer_filter.entry, self.due_filter.entry,
-               self.schedule_filter.entry, self.apply_btn]
-        n = len(nav); plain = {0,1}; btns = {5}
-
-        def make_next(i):
-            def h(event):
-                if event.keysym == 'Right':
-                    try:
-                        if event.widget.index(tk.INSERT) < len(event.widget.get()):
-                            return None
-                    except Exception: pass
-                nav[(i+1)%n].focus(); return 'break'
-            return h
-
-        def make_prev(i):
-            def h(event):
-                if event.keysym == 'Left':
-                    try:
-                        if event.widget.index(tk.INSERT) > 0:
-                            return None
-                    except Exception: pass
-                nav[(i-1)%n].focus(); return 'break'
-            return h
-
-        for i, w in enumerate(nav):
-            if i in plain or i in btns:
-                w.bind('<Up>',   make_prev(i), add='+')
-                w.bind('<Down>', make_next(i), add='+')
-            w.bind('<Left>',  make_prev(i), add='+')
-            w.bind('<Right>', make_next(i), add='+')
-        self.sales_tree.bind('<Return>', lambda e: self._tree_menu())
-
-    def _tree_menu(self):
-        sel = self.sales_tree.selection()
-        if not sel: return
-        try:
-            bbox = self.sales_tree.bbox(sel[0])
-            if bbox:
-                self._ctx.post(
-                    self.sales_tree.winfo_rootx() + bbox[0],
-                    self.sales_tree.winfo_rooty() + bbox[1] + bbox[3])
-        except Exception: pass
+        from core.focus_chain import wire_focus_ring
+        wire_focus_ring([
+            self.from_date, self.to_date, self.fy_filter.entry,
+            self.customer_filter.entry, self.due_filter.entry,
+            self.schedule_filter.entry, self.apply_btn, self.clear_btn,
+            self.export_btn,
+        ])
+        self.from_date.bind('<Return>', lambda e: self.to_date.focus(), add='+')
+        self.to_date.bind('<Return>', lambda e: self.apply_filter(), add='+')
 
     # ── FY filter ─────────────────────────────────────────────────────────
 

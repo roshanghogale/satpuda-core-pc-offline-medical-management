@@ -263,6 +263,8 @@ def parse_marg_parakh_item_lines(raw_text: str) -> List[Dict[str, Any]]:
         idx -= 1
         batch = tokens[idx]
         idx -= 1
+        mfg = tokens[idx]
+        idx -= 1
         pack = tokens[idx]
         idx -= 1
         name = " ".join(tokens[2: idx + 1]).strip()
@@ -274,6 +276,7 @@ def parse_marg_parakh_item_lines(raw_text: str) -> List[Dict[str, Any]]:
             "source_row": row_no,
             "name": name,
             "pack": pack,
+            "manufacturer": mfg,
             "hsn_code": hsn,
             "batch": batch,
             "expiry": expiry_token,
@@ -399,9 +402,159 @@ def _extract_marg_supplier_address(text: str) -> str:
     return ", ".join(parts)
 
 
+_MARG_CUSTOMER_STORE = re.compile(
+    r"\s+(?=[A-Z][A-Z0-9\(\)\[\]\-\']{2,}\s+[A-Z][A-Z0-9\(\)\[\]\-\']{2,}\s+MEDICAL\s+STORES?\b)",
+    flags=re.IGNORECASE,
+)
+
+
+def _marg_supplier_left_column(line: str) -> str:
+    """Keep supplier (left) column from MARG two-column merged header lines."""
+    value = _clean_line(line)
+    if not value:
+        return ""
+    for pattern in (
+        r"\s+(?=SHOP\.NO\.)",
+        r"\s+(?=PHONE\s+NO\s*:)",
+        r"\s+(?=D\.?\s*L\.?\s*No\.?\s*:)",
+    ):
+        parts = re.split(pattern, value, maxsplit=1, flags=re.IGNORECASE)
+        if len(parts) > 1 and parts[0].strip():
+            value = parts[0].strip()
+    matches = list(_MARG_CUSTOMER_STORE.finditer(value))
+    if matches:
+        value = value[: matches[-1].start()].strip()
+    return value
+
+
+def _is_marg_side_by_side_header(text: str) -> bool:
+    lines = [_clean_line(raw) for raw in text.splitlines()[:12] if _clean_line(raw)]
+    if len(lines) < 5:
+        return False
+    if not re.search(r"GST\s+INVOICE", lines[1], flags=re.IGNORECASE):
+        return False
+    if re.search(r"Invoice\s+No\.", lines[2], flags=re.IGNORECASE):
+        body = lines[3:8]
+    else:
+        body = lines[2:7]
+    merged = " ".join(body).upper()
+    return bool(
+        re.search(r"SHOP\s+NO", merged)
+        and (
+            re.search(r"MEDICAL\s+STORE", merged)
+            or re.search(r"PHONE\s+NO\s*:", merged)
+        )
+    )
+
+
+def extract_marg_side_by_side_supplier(raw_text: str) -> Dict[str, str]:
+    """
+    MARG ERP Nano invoices often merge supplier + customer on one line.
+    Supplier is the left column; customer markers start the right column.
+    """
+    out: Dict[str, str] = {
+        "supplier_name": "",
+        "supplier_address": "",
+        "supplier_phone": "",
+        "supplier_gstin": "",
+        "supplier_dl": "",
+        "invoice_number": "",
+        "invoice_date": "",
+    }
+    header_lines: List[str] = []
+    for raw in (raw_text or "").splitlines():
+        line = _clean_line(raw)
+        if not line or line.upper().startswith("MARG ERP") or line.startswith("Continued"):
+            continue
+        if re.match(r"^MRP\s+HSN", line, flags=re.IGNORECASE):
+            break
+        header_lines.append(line)
+
+    if not header_lines:
+        return out
+
+    out["supplier_name"] = header_lines[0]
+    body_start = 3 if len(header_lines) > 2 and re.search(
+        r"Invoice\s+No\.", header_lines[2], flags=re.IGNORECASE
+    ) else 2
+
+    address_parts: List[str] = []
+    phones: List[str] = []
+    for line in header_lines[body_start:]:
+        left = _marg_supplier_left_column(line)
+        if not left:
+            continue
+        low = left.lower()
+
+        if re.match(r"^phone\s*:", left, flags=re.IGNORECASE):
+            raw_phones = re.sub(r"^phone\s*:\s*", "", left, flags=re.IGNORECASE)
+            for chunk in re.split(r"[,/|]", raw_phones):
+                digits = re.sub(r"\D", "", chunk)
+                if len(digits) >= 10:
+                    phone = digits[-10:]
+                    if phone not in phones:
+                        phones.append(phone)
+            continue
+
+        if re.match(r"^gstin\s*:", left, flags=re.IGNORECASE):
+            m = re.search(
+                r"([0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9])",
+                left,
+                flags=re.IGNORECASE,
+            )
+            if m:
+                out["supplier_gstin"] = m.group(1).upper()
+            continue
+
+        if re.match(r"^dl\.?\s*no", left, flags=re.IGNORECASE):
+            m = re.search(
+                r"DL\.?\s*No\.?\s*:\s*(.+?)(?:\s+D\.?\s*L\.|\s*$)",
+                left,
+                flags=re.IGNORECASE,
+            )
+            if m:
+                out["supplier_dl"] = _clean_line(m.group(1)).strip(" ,:-")
+            continue
+
+        if re.match(r"^fssai", left, flags=re.IGNORECASE):
+            continue
+
+        if re.search(r"shop\s+no|near\s+|apmc|busstop|complex|road", low):
+            address_parts.append(left)
+            continue
+
+        if re.search(r"\b\d{6}\b", left) and re.search(r"[A-Za-z]{3,}", left):
+            if "dl" not in low and "gstin" not in low:
+                address_parts.append(left)
+
+    if address_parts:
+        out["supplier_address"] = ", ".join(address_parts)
+    if phones:
+        out["supplier_phone"] = ", ".join(phones[:2])
+
+    inv = re.search(r"Invoice\s+No\.\s*:\s*([A-Z0-9\-]+)", raw_text or "", flags=re.IGNORECASE)
+    if inv:
+        out["invoice_number"] = inv.group(1).strip()
+    dt = re.search(
+        r"Date\s*:\s*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})",
+        raw_text or "",
+        flags=re.IGNORECASE,
+    )
+    if dt:
+        out["invoice_date"] = dt.group(1).replace("-", "/")
+    return out
+
+
 def enhance_marg_supplier_details(raw_text: str, details: Dict[str, str]) -> Dict[str, str]:
     out = dict(details or {})
     text = raw_text or ""
+
+    if _is_marg_side_by_side_header(text):
+        side = extract_marg_side_by_side_supplier(text)
+        for key, value in side.items():
+            if value:
+                out[key] = value
+        return out
 
     name = _build_marg_supplier_name(text)
     if name:

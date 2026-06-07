@@ -25,7 +25,7 @@ _DIV      = '#e2e8f0'
 
 _LEFT_W  = 340
 _RIGHT_W = 500
-_HEIGHT  = 610
+_HEIGHT  = 680
 
 # Font names after loading TTF
 _FONT_REG  = 'Nirmala UI'
@@ -70,8 +70,10 @@ def _F(size, bold=False):
 
 def show_activation_dialog(on_success_callback):
     from core.license_manager import attempt_activation, prepare_device_key, get_device_key_path
+    from core.store_manager import has_registry, setup_initial_store_on_activation, setup_satellite_store_from_restore
 
     _load_fonts()
+    _mode = ['activate']  # 'activate' | 'add_store'
 
     root = tk.Tk()
     root.title("Satpuda Core — Activation")
@@ -306,6 +308,15 @@ def show_activation_dialog(on_success_callback):
     u_ent = _field("Username",   "Enter your username")
     p_ent = _field("Password",   "Enter your password",  show='\u25cf')
     k_ent = _field("Device Key", "Enter your device key")
+    s_ent = _field("Store Name", "Enter initial store name")
+
+    hint_var = tk.StringVar(
+        value="First activation: enter your initial store name (becomes the backup folder name)."
+    )
+    tk.Label(right, textvariable=hint_var, font=_F(7),
+             bg=_RIGHT_BG, fg=_MUTED,
+             wraplength=FW, justify='center').place(relx=0.5, y=ry, anchor='n')
+    ry += 28
 
     # Error
     err_var = tk.StringVar()
@@ -416,6 +427,8 @@ def show_activation_dialog(on_success_callback):
                 btn_row, text="Close", command=key_dlg.destroy,
                 font=_F(9), bg=_CARD_BG, fg=_FG, relief='flat', bd=0, padx=14, pady=6
             ).pack(side=tk.LEFT, padx=6)
+            from core.dialog_escape import bind_escape_to_close
+            bind_escape_to_close(key_dlg, on_close=key_dlg.destroy)
 
         btn_row = tk.Frame(dlg, bg=_RIGHT_BG)
         btn_row.pack(pady=10)
@@ -430,21 +443,80 @@ def show_activation_dialog(on_success_callback):
 
         user_e.bind('<Return>', lambda e: (pass_e.focus_set(), "break")[1])
         pass_e.bind('<Return>', lambda e: (_open_key_dialog(), "break")[1])
+        from core.dialog_escape import bind_escape_to_close
+        bind_escape_to_close(dlg, on_close=dlg.destroy)
         user_e.focus_set()
+
+    def _finish_store_setup(store_name: str, *, satellite: bool):
+        from core.backup_manager import restore_latest_backup_from_drive
+        import shutil
+
+        store_name = (store_name or '').strip()
+        if not store_name:
+            err_var.set("Store name is required.")
+            return False
+        try:
+            if satellite:
+                ok, result = restore_latest_backup_from_drive(store_name)
+                if not ok:
+                    err_var.set(result)
+                    return False
+                tmp_db = result['db_path'] if isinstance(result, dict) else result
+                try:
+                    setup_satellite_store_from_restore(store_name, tmp_db)
+                finally:
+                    tmp_parent = os.path.dirname(tmp_db)
+                    if tmp_parent and os.path.isdir(tmp_parent):
+                        shutil.rmtree(tmp_parent, ignore_errors=True)
+            else:
+                setup_initial_store_on_activation(store_name)
+        except Exception as ex:
+            err_var.set(str(ex))
+            return False
+        return True
 
     def _activate():
         err_var.set('')
         u, p, k = _get(u_ent), _get(p_ent), _get(k_ent)
+        store_name = _get(s_ent)
         if not u or not p or not k:
-            err_var.set("All three fields are required.")
+            err_var.set("Username, password, and device key are required.")
             return
         ok, msg = attempt_activation(u, p, k)
-        if ok:
-            root.destroy()
-            on_success_callback()
-        else:
+        if not ok:
             err_var.set(msg)
             _shake(main)
+            return
+
+        satellite = _mode[0] == 'add_store'
+        needs_store = satellite or not has_registry()
+        if needs_store:
+            if not store_name:
+                err_var.set("Store name is required.")
+                return
+            if not _finish_store_setup(store_name, satellite=satellite):
+                return
+
+        root.destroy()
+        on_success_callback()
+
+    def _set_mode(mode):
+        _mode[0] = mode
+        if mode == 'add_store':
+            hint_var.set(
+                "Add store: enter the exact store name from the admin device. "
+                "The latest Drive backup will be restored."
+            )
+            btn.config(text="  Connect & Restore Store  ->")
+        else:
+            if has_registry():
+                hint_var.set("Re-activation: store setup is already configured on this device.")
+            else:
+                hint_var.set(
+                    "First activation: enter your initial store name "
+                    "(becomes the backup folder name)."
+                )
+            btn.config(text="  Activate Software  ->")
 
     btn = tk.Button(right,
                     text="  Activate Software  ->",
@@ -474,6 +546,23 @@ def show_activation_dialog(on_success_callback):
         pady=7,
         command=_admin_login_and_show_key
     )
+    add_store_btn = tk.Button(
+        right,
+        text="Add Store (restore from Drive)",
+        font=_F(9, True),
+        bg='#dbeafe',
+        fg=_ACCENT,
+        activebackground='#bfdbfe',
+        activeforeground=_ACCENT,
+        relief='flat',
+        bd=0,
+        cursor='hand2',
+        pady=7,
+        command=lambda: _set_mode('add_store'),
+    )
+    add_store_btn.place(x=FX, y=ry, width=FW)
+    ry += 40
+
     admin_btn.place(x=FX, y=ry, width=FW)
     ry += 40
 
@@ -493,7 +582,8 @@ def show_activation_dialog(on_success_callback):
 
     _next(u_ent, p_ent)
     _next(p_ent, k_ent)
-    k_ent.bind('<Return>', lambda e: _activate())
+    _next(k_ent, s_ent)
+    s_ent.bind('<Return>', lambda e: _activate())
 
     def _on_close():
         if messagebox.askyesno("Exit",
@@ -501,7 +591,8 @@ def show_activation_dialog(on_success_callback):
             root.destroy()
             sys.exit(0)
 
-    root.bind('<Escape>', lambda e: _on_close())
+    from core.dialog_escape import bind_escape_to_close
+    bind_escape_to_close(root, on_close=_on_close)
     root.protocol("WM_DELETE_WINDOW", _on_close)
     root.after(200, u_ent.focus)
     root.mainloop()

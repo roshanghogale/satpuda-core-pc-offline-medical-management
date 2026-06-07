@@ -142,6 +142,12 @@ def prepare_modal_toplevel(window, parent=None) -> None:
 
 def show_modal_toplevel(window, parent=None) -> None:
     """Make a built Toplevel visible, centered, and modal."""
+    if not callable(getattr(window, '_dialog_escape_close', None)):
+        try:
+            from core.dialog_escape import bind_escape_to_close
+            bind_escape_to_close(window)
+        except Exception:
+            pass
     prepare_modal_toplevel(window, parent)
     window.update_idletasks()
     try:

@@ -2,7 +2,6 @@
 ui/billing_nav.py
 ──────────────────
 Arrow-key navigation mixin for BillingPage.
-No UI building, no DB, no calculations.
 """
 import tkinter as tk
 try:
@@ -11,9 +10,15 @@ except ImportError:
     from tkinter import ttk
 
 from core.scroll_manager import scroll_to_widget
+from core.focus_chain import wire_focus_ring, safe_focus
 
 
 class BillingNavMixin:
+
+    def _bill_date_entry(self):
+        if hasattr(self.bill_date, 'entry'):
+            return self.bill_date.entry
+        return self.bill_date
 
     def _scroll_to_widget(self, widget):
         if hasattr(self, '_inner_frame'):
@@ -21,73 +26,54 @@ class BillingNavMixin:
 
     def _setup_arrow_nav(self):
         nav = [
-            self.customer_name.entry,        # 0
-            self.customer_phone,             # 1
-            self.customer_address,           # 2
-            self.doctor_name.entry,          # 3
-            self.doctor_phone,               # 4
-            self.medicine_combo.step1_entry, # 5
-            self.quantity,                   # 6
-            self.medicine_discount,          # 7
-            self.discount,                   # 8
-            self.rounding,                   # 9
-            self.cash_paid,                  # 10
-            self.online_paid,                # 11
-            self.clear_btn,                  # 12
-            self.generate_btn,               # 13
+            self.customer_name.entry,
+            self.customer_phone,
+            self.customer_address,
+            self.doctor_name.entry,
+            self.doctor_phone,
+            self._bill_date_entry(),
+            self.medicine_combo.step1_entry,
+            self.quantity,
+            self.medicine_discount,
+            self.add_medicine_btn,
+            self.discount_pct,
+            self.discount,
+            self.rounding,
+            self.cash_paid,
+            self.online_paid,
+            self.clear_btn,
+            self.generate_btn,
         ]
-        n = len(nav)
-        updown = {0, 1, 2, 4, 6, 7, 8, 9, 10, 11, 12, 13}
-
-        def make_next(i):
-            def handler(event):
-                if event.keysym == 'Right':
-                    try:
-                        w = event.widget
-                        if w.get() and w.index(tk.INSERT) < len(w.get()):
-                            return None
-                    except Exception:
-                        pass
-                target = nav[(i + 1) % n]
-                target.focus()
-                self._scroll_to_widget(target)
-                return 'break'
-            return handler
-
-        def make_prev(i):
-            def handler(event):
-                if event.keysym == 'Left':
-                    try:
-                        w = event.widget
-                        if w.get() and w.index(tk.INSERT) > 0:
-                            return None
-                    except Exception:
-                        pass
-                target = nav[(i - 1) % n]
-                target.focus()
-                self._scroll_to_widget(target)
-                return 'break'
-            return handler
-
-        for i, w in enumerate(nav):
-            if i in updown:
-                w.bind('<Up>',   make_prev(i), add='+')
-                w.bind('<Down>', make_next(i), add='+')
-            w.bind('<Left>',  make_prev(i), add='+')
-            w.bind('<Right>', make_next(i), add='+')
-
-        nav_ids = set(id(w) for w in nav)
-        self.parent.winfo_toplevel().bind(
-            '<FocusIn>',
-            lambda e: self._scroll_to_widget(e.widget) if id(e.widget) in nav_ids else None,
-            add='+')
+        wire_focus_ring(nav, scroll_to=self._scroll_to_widget)
 
         self.customer_name.entry.bind(
             '<Escape>', lambda e: self.customer_name.hide_list(), add='+')
         self.doctor_name.entry.bind(
             '<Escape>', lambda e: self.doctor_name.hide_list(), add='+')
 
+        from core.tree_action_menu import setup_tree_actions
+        setup_tree_actions(
+            self.parent,
+            self.medicine_tree,
+            [
+                ("Edit Quantity", self.edit_quantity),
+                ("Delete Line", self._delete_selected_medicine),
+            ],
+            on_double=self.edit_quantity,
+            on_delete=lambda e: self._delete_selected_medicine(),
+            escape_to=self.medicine_combo.step1_entry,
+        )
+
         self._bind_end_to_payment()
+
+    def _focus_overall_discount(self, event=None):
+        try:
+            self.discount_pct.focus_set()
+            self.discount_pct.select_range(0, tk.END)
+            self._scroll_to_widget(self.discount_pct)
+        except Exception:
+            pass
+        return 'break'
 
     def _focus_payment_field(self, event=None):
         try:
@@ -104,33 +90,17 @@ class BillingNavMixin:
         def handler(event):
             return self._focus_payment_field()
 
-        nav = [
-            self.customer_name.entry,
-            self.customer_phone,
-            self.customer_address,
-            self.doctor_name.entry,
-            self.doctor_phone,
-            self.medicine_combo.step1_entry,
-            self.quantity,
-            self.medicine_discount,
-            self.discount,
-            self.rounding,
-            self.clear_btn,
-            self.generate_btn,
-        ]
-        for w in nav:
+        for w in [
+            self.customer_name.entry, self.customer_phone, self.customer_address,
+            self.doctor_name.entry, self.doctor_phone, self._bill_date_entry(),
+            self.medicine_combo.step1_entry, self.quantity, self.medicine_discount,
+            self.add_medicine_btn, self.discount_pct, self.discount, self.rounding,
+            self.clear_btn, self.generate_btn,
+        ]:
             if w in skip:
                 continue
             try:
                 if w.winfo_exists():
                     w.bind('<End>', handler, add='+')
-            except Exception:
-                pass
-
-        combo = getattr(self.medicine_combo, 'step2_entry', None)
-        if combo is not None:
-            try:
-                if combo.winfo_exists():
-                    combo.bind('<End>', handler, add='+')
             except Exception:
                 pass

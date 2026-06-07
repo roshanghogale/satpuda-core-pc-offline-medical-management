@@ -348,8 +348,8 @@ def make_dialog_scrollable(parent):
         try:
             canvas.configure(scrollregion=canvas.bbox('all'))
             ch = max(canvas.winfo_height(), 1)
-            iw = inner.winfo_reqwidth()
-            canvas.itemconfig(win_id, width=max(iw, canvas.winfo_width()))
+            cw = max(canvas.winfo_width(), 1)
+            canvas.itemconfig(win_id, width=cw)
             content_h = inner.winfo_reqheight()
             if content_h <= ch:
                 vsb.grid_remove()
@@ -516,7 +516,9 @@ def open_dialog(parent, title, width=None, height=None, resizable=True):
 
     dlg.after(1, _finalise)
     dlg.after(120, _finalise)
-    dlg.bind('<Escape>', lambda e: dlg.destroy())
+
+    from core.dialog_escape import bind_escape_to_close
+    bind_escape_to_close(dlg)
     return dlg
 
 

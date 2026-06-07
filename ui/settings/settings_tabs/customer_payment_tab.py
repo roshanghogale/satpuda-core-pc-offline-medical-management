@@ -109,7 +109,19 @@ class CustomerPaymentTab:
         self.hist_tree.configure(yscrollcommand=sb.set)
         self.hist_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         sb.pack(side=tk.RIGHT, fill=tk.Y)
-        self.hist_tree.bind('<Double-1>', self._on_edit_select)
+
+        from core.tree_action_menu import setup_tree_actions
+        setup_tree_actions(
+            hf,
+            self.hist_tree,
+            [
+                ("Edit Payment", self._on_edit_select),
+                ("Delete Payment", self._delete),
+            ],
+            on_double=self._on_edit_select,
+            on_delete=lambda e: self._delete(),
+            escape_to=self.cust_combo.entry,
+        )
 
         # Summary bar
         sumbar = ttk.Frame(frame)

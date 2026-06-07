@@ -42,17 +42,18 @@ class PurchaseNavMixin:
             self.content_drug,        # 17
             self.item_discount,       # 18
             self.add_btn,             # 19
-            self.overall_discount,    # 20
-            self.rounding_entry,      # 21
-            self.amount_paid,         # 22
-            self.clear_btn,           # 23
-            self.save_btn,            # 24
+            self.overall_discount_pct, # 20
+            self.overall_discount,    # 21
+            self.rounding_entry,      # 22
+            self.amount_paid,         # 23
+            self.clear_btn,           # 24
+            self.save_btn,            # 25
         ]
         self._qty_attrs = ('stripes', 'tablets_per_stripe', 'free_stripes',
                            'quantity', 'units', 'free_items')
         self._medicine_type_entry = _e(self.medicine_type)
 
-        plain_static = {1,2,3,4,5,6,9,10,11,12,13,14,15,17,18,19,20,21,22,23,24}
+        plain_static = {1,2,3,4,5,6,9,10,11,12,13,14,15,17,18,19,20,21,22,23,24,25}
         self._bind_nav_on_list(self._nav_static, plain_static)
 
         for w in [self.supplier_name, self.medicine_name, self.medicine_type]:
@@ -64,6 +65,35 @@ class PurchaseNavMixin:
             '<FocusIn>', lambda e: self._scroll_to_widget(e.widget), add='+')
 
         self._bind_end_to_payment()
+
+    def _focus_medicine_combo(self, event=None):
+        try:
+            self.medicine_name.hide_list()
+            self.medicine_type.hide_list()
+            self.medicine_name.focus(open_dropdown=False)
+            entry = self.medicine_name.entry
+            self._scroll_to_widget(entry)
+            canvas = getattr(self._inner_frame, '_canvas', None)
+            if canvas is not None:
+                canvas.update_idletasks()
+                wy = entry.winfo_rooty() - canvas.winfo_rooty()
+                eh = max(entry.winfo_height(), 1)
+                ch = canvas.winfo_height()
+                if wy < 0 or wy + eh > ch:
+                    canvas.yview_moveto(0)
+                    self._scroll_to_widget(entry)
+        except Exception:
+            pass
+        return 'break'
+
+    def _focus_overall_discount(self, event=None):
+        try:
+            self.overall_discount_pct.focus_set()
+            self.overall_discount_pct.select_range(0, tk.END)
+            self._scroll_to_widget(self.overall_discount_pct)
+        except Exception:
+            pass
+        return 'break'
 
     def _focus_payment_field(self, event=None):
         try:

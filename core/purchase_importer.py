@@ -546,15 +546,15 @@ def extract_supplier_details(source_text: Any) -> Dict[str, str]:
         if m:
             result["supplier_name"] = _clean_cell(m.group(1))
 
-    gstin = _extract_gstin(text)
+    gstin = _extract_gstin(text, supplier_side=True)
     if gstin:
         result["supplier_gstin"] = gstin
 
-    phone = _extract_phone(text)
+    phone = _extract_phone(text, supplier_side=True)
     if phone:
         result["supplier_phone"] = phone
 
-    dl_numbers = _extract_dl_numbers(text)
+    dl_numbers = _extract_dl_numbers(text, supplier_side=True)
     if dl_numbers:
         result["supplier_dl"] = dl_numbers
 
@@ -563,7 +563,28 @@ def extract_supplier_details(source_text: Any) -> Dict[str, str]:
         result["supplier_address"] = address
 
     result["supplier_name"] = _sanitize_supplier_name(result.get("supplier_name", ""))
+    result["supplier_name"], city_suffix = _split_supplier_name_city(result["supplier_name"])
+    if city_suffix and result.get("supplier_address"):
+        if city_suffix.upper() not in result["supplier_address"].upper():
+            result["supplier_address"] = f"{city_suffix}, {result['supplier_address']}"
+    elif city_suffix:
+        result["supplier_address"] = city_suffix
     return result
+
+
+def _split_supplier_name_city(name: str) -> Tuple[str, str]:
+    """JAIN PHARMA,KHAMGAON -> (JAIN PHARMA, KHAMGAON)."""
+    value = _clean_cell(name)
+    if "," not in value:
+        return value, ""
+    left, right = value.split(",", 1)
+    left = left.strip()
+    right = _clean_cell(right)
+    if not right or re.search(r"\d{3,}", right):
+        return value, ""
+    if len(right) > 32 or len(right.split()) > 4:
+        return value, ""
+    return left, right
 
 
 def _sanitize_supplier_name(name: str) -> str:
@@ -708,6 +729,8 @@ def import_into_purchase_page(
             available_types=available_types,
         )
         med_type = _match_type(med_type or item.medicine_type, available_types)
+        manufacturer = item.manufacturer.strip() or _lookup_manufacturer(
+            purchase_page.conn, item.name.strip())
         medicine_id = get_or_create_medicine(
             purchase_page.conn,
             item.name.strip(),
@@ -717,7 +740,7 @@ def import_into_purchase_page(
             float(item.gst_pct or 0),
             float(item.mrp or 0),
             float(item.rate or 0),
-            item.manufacturer.strip(),
+            manufacturer,
             item.hsn_code.strip(),
             item.schedule.strip(),
             item.content_drug.strip(),
@@ -747,7 +770,7 @@ def import_into_purchase_page(
             "mrp": float(item.mrp or 0),
             "hsn_code": item.hsn_code.strip(),
             "pack": (item.pack or "").strip(),
-            "manufacturer": item.manufacturer.strip(),
+            "manufacturer": manufacturer,
             "schedule": item.schedule.strip(),
             "content_drug": item.content_drug.strip(),
             # Pre-GST goods value = rate × billed qty (free qty is bonus only)
@@ -2240,7 +2263,12 @@ def _parse_h_t_f_invoice(path: str, rows: Sequence[Sequence[Any]], ext: str) -> 
         pack = _clean_cell(_cell_at(row, 6))
         expiry = _normalize_compact_expiry(_cell_at(row, 9)) or normalize_expiry(_cell_at(row, 9))
         rate, mrp, qty, free_qty, amount, gst_pct, hsn_code = _edi_htf_line_amounts(row, edi_fmt)
-        mfg_col = 2 if edi_fmt == "marg" else 7
+        if edi_fmt == "marg":
+            manufacturer = _clean_cell(_cell_at(row, 7))
+        elif edi_fmt == "seema_legacy":
+            manufacturer = _clean_cell(_cell_at(row, 7))
+        else:
+            manufacturer = _clean_cell(_cell_at(row, 7))
         if edi_fmt == "seema":
             line_cd_pct = _to_float(_cell_at(row, 20))
             line_pd_pct = _to_float(_cell_at(row, 21))
@@ -2268,7 +2296,7 @@ def _parse_h_t_f_invoice(path: str, rows: Sequence[Sequence[Any]], ext: str) -> 
             gst_pct=gst_pct,
             mrp=mrp,
             hsn_code=hsn_code,
-            manufacturer=_clean_cell(_cell_at(row, mfg_col)),
+            manufacturer=manufacturer,
             pack=pack,
             amount=amount,
             source_row=row_no,
@@ -2490,6 +2518,26 @@ def _merge_broken_records(records: Sequence[Dict[str, Any]]) -> List[Dict[str, A
     return merge_multiline_item_records(records)
 
 
+def _lookup_manufacturer(conn, name: str) -> str:
+    """Fill missing MFG from existing inventory rows with the same product name."""
+    if conn is None or not (name or "").strip():
+        return ""
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT manufacturer FROM medicines
+            WHERE name=? AND COALESCE(manufacturer,'')!=''
+            ORDER BY id DESC LIMIT 1
+            """,
+            (name.strip(),),
+        )
+        row = cur.fetchone()
+        return _clean_cell(row[0]) if row else ""
+    except Exception:
+        return ""
+
+
 def _item_from_record(rec: Dict[str, Any]) -> ImportedPurchaseItem:
     rec = apply_record_pricing(dict(rec))
     name = _clean_cell(rec.get("name"))
@@ -2628,29 +2676,53 @@ def _extract_gstin(text: str, supplier_side: bool = False) -> str:
     return m.group(1).upper() if m else ""
 
 
+def _phones_from_text(raw: str) -> List[str]:
+    phones: List[str] = []
+    for chunk in re.split(r"[,/|]", raw or ""):
+        digits = re.sub(r"\D", "", chunk)
+        if len(digits) >= 10:
+            phone = digits[-10:]
+            if phone not in phones:
+                phones.append(phone)
+    return phones
+
+
 def _extract_phone(text: str, supplier_side: bool = False) -> str:
     scope = _supplier_header_scope(text) if supplier_side else text
     patterns = (
-        r"(?:PhoneNo|Contact No\.?|MOB(?:ile)?|Phone)\s*:?\s*(?:MOB:)?([0-9+\-\s,/]{10,30})",
+        r"(?:PhoneNo|Contact No\.?|MOB(?:ile)?|Phone|Ph\.)\s*:?\s*(?:MOB:)?([0-9+\-\s,/]{10,40})",
+        r"(?:PH\.)\s*([0-9+\-\s,/]{10,40})",
         r"\b(\d{10})\b",
     )
     phones: List[str] = []
     for pattern in patterns:
         for match in re.finditer(pattern, scope, flags=re.IGNORECASE):
-            digits = re.sub(r"\D", "", match.group(1))
-            if len(digits) >= 10:
-                phones.append(digits[-10:])
+            phones.extend(_phones_from_text(match.group(1)))
         if phones:
             break
-    unique: List[str] = []
-    for phone in phones:
-        if phone not in unique:
-            unique.append(phone)
-    return ", ".join(unique[:2])
+    if not phones:
+        for match in re.finditer(r"\b(\d{10})\b", scope):
+            phone = match.group(1)
+            if phone not in phones:
+                phones.append(phone)
+    return ", ".join(phones[:2])
 
 
 def _extract_dl_numbers(text: str, supplier_side: bool = False) -> str:
     scope = _supplier_header_scope(text) if supplier_side else text
+    if supplier_side:
+        for pattern in (
+            r"DL\.?\s*No\.?\s*:\s*([^\n|]+?)(?=\s+D\.?\s*L\.|\s*$|\s+MRP\b)",
+            r"Lic\.?\s*No\.?\s*:\s*([^\n|]+?)(?=\s*(?:PhoneNo|Phone|Contact|GSTIN|Email|\||$))",
+        ):
+            m = re.search(pattern, scope, flags=re.IGNORECASE)
+            if m:
+                value = _clean_cell(m.group(1))
+                value = re.sub(r"\s{2,}", " ", value)
+                value = value.strip(" ,:-")
+                value = re.sub(r"\s*,\s*Inv\..*$", "", value, flags=re.IGNORECASE).strip(" ,:-")
+                if len(value) >= 4:
+                    return value
     patterns = (
         r"(?:Lic\.?\s*No\.?|D\.\s*L\s*\.\s*No\.?)\s*:?\s*([^\n|]+?)(?=\s*(?:PhoneNo|Phone|Contact|GSTIN|Email|\||$))",
         r"DL\s*NO\.?\s*([^\n|]+?)(?=\s*(?:Inv\.|GSTIN|CONTACT|Date|Due Date|$))",
@@ -2689,9 +2761,11 @@ def _is_pipe_supplier_name_line(left: str) -> bool:
     low = left.lower()
     if any(token in low for token in ("hsn code", "name of product", "tax invoice")):
         return False
+    if re.match(r"^\s*to\s*,", low):
+        return False
     return bool(
         re.search(
-            r"(?:pharma|distributors?|veterinary|medical\s+(?:stores?|agency)|agencies?|chemist)",
+            r"(?:pharma|distributors?|veterinary|medical\s+agency|agencies?|chemist)",
             low,
             flags=re.IGNORECASE,
         )
@@ -2746,6 +2820,10 @@ def _is_pipe_address_line(left: str) -> bool:
             "umari",
             "shrawgi",
             "sant ",
+            "opposite",
+            "garden",
+            "bank",
+            "icici",
         )
     ):
         return True

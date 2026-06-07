@@ -6,21 +6,93 @@ except ImportError:
 from tkinter import messagebox
 import os
 from core.font_config import *
-from core.scroll_manager import make_scrollable
 from core.themed_messagebox import showinfo, showwarning, showerror, askyesno
+from ui.settings.settings_tabs.appearance_scroll import AppearanceScrollPane
+from core.settings_section_nav import wire_settings_section_nav, bindings_for_sectioned_tab
+
+
+_NAV_SECTIONS = [
+    ('profile', 'Pharmacy Profile'),
+    ('bill',    'Bill Print Style'),
+]
 
 
 class PharmacyTab:
+    TAB_NAME = 'Pharmacy Profile'
+
     def __init__(self, notebook, conn):
         self.conn = conn
         self.cursor = conn.cursor()
-        outer = ttk.Frame(notebook)
-        notebook.add(outer, text="Pharmacy Profile")
-        frame = make_scrollable(outer)
-        self._build(frame)
-        self._load()
+        self._panels = {}
+        self._nav_buttons = {}
 
-    def _build(self, frame):
+        outer = ttk.Frame(notebook)
+        self.outer = outer
+        notebook.add(outer, text=self.TAB_NAME)
+
+        shell = ttk.Frame(outer)
+        shell.pack(fill=tk.BOTH, expand=True)
+
+        nav_outer = ttk.LabelFrame(shell, text="Sections")
+        nav_outer.pack(side=tk.LEFT, fill=tk.Y, padx=(8, 4), pady=8)
+        nav_scroll = ttk.Frame(nav_outer)
+        nav_scroll.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+        for section_id, label in _NAV_SECTIONS:
+            btn = ttk.Button(
+                nav_scroll, text=label, width=22,
+                command=lambda k=section_id: self._show_section(k),
+            )
+            btn.pack(fill=tk.X, pady=2)
+            self._nav_buttons[section_id] = btn
+
+        right_col = ttk.Frame(shell)
+        right_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(4, 8), pady=8)
+        self._scroller = AppearanceScrollPane(right_col)
+        self._content_host = self._scroller.frame
+
+        self._build_profile_panel()
+        self._build_bill_panel()
+        self._active_section = 'profile'
+        self._show_section('profile')
+        self._load()
+        wire_settings_section_nav(
+            self, self._nav_buttons, [s[0] for s in _NAV_SECTIONS], self._show_section)
+
+    def get_keyboard_bindings(self):
+        return bindings_for_sectioned_tab(
+            self, first_focus=lambda: self.pharmacy_name.focus_set())
+
+    def _panel(self, section_id):
+        wrapper = ttk.Frame(self._content_host)
+        self._panels[section_id] = wrapper
+        return wrapper
+
+    def _show_section(self, section_id):
+        if section_id not in self._panels:
+            return
+        self._active_section = section_id
+        for frame in self._panels.values():
+            frame.pack_forget()
+        panel = self._panels[section_id]
+        panel.pack(side=tk.TOP, fill=tk.X, anchor='n')
+
+        def _after_show():
+            self._scroller.bind_wheel_recursive()
+            self._scroller.refresh()
+            self._scroller.scroll_to_top()
+
+        panel.after_idle(_after_show)
+        for key, btn in self._nav_buttons.items():
+            try:
+                btn.configure(bootstyle='primary' if key == section_id else 'secondary')
+            except Exception:
+                pass
+
+    def select_section(self, section_id: str = 'profile'):
+        self._show_section(section_id)
+
+    def _build_profile_panel(self):
+        frame = self._panel('profile')
         form = ttk.LabelFrame(frame, text="Pharmacy Information")
         form.pack(fill=tk.X, padx=10, pady=10)
 
@@ -94,58 +166,6 @@ class PharmacyTab:
         save_btn = ttk.Button(form, text="Save Profile", command=self.save)
         save_btn.grid(row=13, column=1, pady=10)
 
-        bill_frame = ttk.LabelFrame(frame, text="Sale Bill Print Style")
-        bill_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
-
-        ttk.Label(bill_frame, text="Bill template:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=4)
-        from core.bill_config import AVAILABLE_TEMPLATES, load_bill_print_settings
-        self._bill_templates = AVAILABLE_TEMPLATES
-        self.bill_template = ttk.Combobox(
-            bill_frame, width=36, state="readonly",
-            values=list(AVAILABLE_TEMPLATES.values()))
-        self.bill_template.grid(row=0, column=1, sticky=tk.W, padx=5, pady=4)
-
-        opts = ttk.Frame(bill_frame)
-        opts.grid(row=1, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
-        if not hasattr(self, 'bill_show_gst'):
-            from core.bill_config import load_bill_print_settings
-            _bs = load_bill_print_settings()
-            self.bill_show_gst = tk.BooleanVar(value=bool(_bs.get('show_gst', True)))
-        if not hasattr(self, 'bill_show_discount'):
-            from core.bill_config import load_bill_print_settings
-            self.bill_show_discount = tk.BooleanVar(
-                value=bool(load_bill_print_settings().get('show_discount', True)))
-        self.bill_show_batch = tk.BooleanVar(value=True)
-        self.bill_show_expiry = tk.BooleanVar(value=True)
-        self.bill_show_doctor = tk.BooleanVar(value=True)
-        self.bill_show_terms = tk.BooleanVar(value=True)
-        self.bill_show_signature = tk.BooleanVar(value=True)
-        for col, (var, label) in enumerate([
-            (self.bill_show_gst, "Print GST on bill"),
-            (self.bill_show_discount, "Print discount on bill"),
-            (self.bill_show_batch, "Batch column"),
-            (self.bill_show_expiry, "Expiry column"),
-            (self.bill_show_doctor, "Doctor block"),
-            (self.bill_show_terms, "Terms"),
-            (self.bill_show_signature, "Signature"),
-        ]):
-            ttk.Checkbutton(opts, variable=var, text=label).grid(
-                row=col // 3, column=col % 3, sticky=tk.W, padx=4, pady=2)
-
-        ttk.Label(bill_frame, text="Paper size:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=4)
-        self.bill_paper = ttk.Combobox(
-            bill_frame, width=12, state="readonly", values=["A5", "A4"])
-        self.bill_paper.grid(row=2, column=1, sticky=tk.W, padx=5, pady=4)
-        ttk.Label(
-            bill_frame,
-            text="A5 = 2 bills per sheet (classic). A4 = larger / optional 3 copies.",
-            font=(FONT_FAMILY, FONT_SIZE_SUPPORTING_TEXT),
-        ).grid(row=3, column=0, columnspan=2, sticky=tk.W, padx=5, pady=(0, 4))
-
-        ttk.Label(bill_frame, text="Copies (A4 only):").grid(row=4, column=0, sticky=tk.W, padx=5, pady=4)
-        self.bill_copies = ttk.Spinbox(bill_frame, from_=1, to=3, width=5)
-        self.bill_copies.grid(row=4, column=1, sticky=tk.W, padx=5, pady=4)
-
         # Navigation
         self.pharmacy_name.bind('<Return>', lambda e: self.pharmacy_address.focus())
         self.pharmacy_name.bind('<Down>',   lambda e: self.pharmacy_address.focus())
@@ -167,6 +187,68 @@ class PharmacyTab:
         self.pharmacy_fssai.bind('<Up>',     lambda e: self.pharmacy_dl.focus())
         save_btn.bind('<Return>', lambda e: self.save())
         save_btn.bind('<Up>',     lambda e: self.pharmacy_dl.focus())
+
+    def _build_bill_panel(self):
+        frame = self._panel('bill')
+        bill_frame = ttk.LabelFrame(frame, text="Sale Bill Print Style")
+        bill_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        ttk.Label(bill_frame, text="Bill template:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=4)
+        from core.bill_config import AVAILABLE_TEMPLATES, load_bill_print_settings, BILL_PRINT_FIELD_OPTIONS
+        self._bill_templates = AVAILABLE_TEMPLATES
+        self.bill_template = ttk.Combobox(
+            bill_frame, width=36, state="readonly",
+            values=list(AVAILABLE_TEMPLATES.values()))
+        self.bill_template.grid(row=0, column=1, sticky=tk.W, padx=5, pady=4)
+
+        from core.bill_config import DEFAULT_BILL_PRINT_SETTINGS
+        self._bill_field_vars = {}
+        opts_outer = ttk.LabelFrame(bill_frame, text="Show on printed bill")
+        opts_outer.grid(row=1, column=0, columnspan=2, sticky=tk.NSEW, padx=5, pady=4)
+        row_idx = 0
+        for _group_title, fields in BILL_PRINT_FIELD_OPTIONS:
+            group = ttk.Frame(opts_outer)
+            group.grid(row=row_idx, column=0, sticky=tk.W, padx=2, pady=(0, 4))
+            for col, (key, label) in enumerate(fields):
+                default = bool(DEFAULT_BILL_PRINT_SETTINGS.get(key, True))
+                var = tk.BooleanVar(value=default)
+                self._bill_field_vars[key] = var
+                ttk.Checkbutton(group, variable=var, text=label).grid(
+                    row=col // 3, column=col % 3, sticky=tk.W, padx=4, pady=1)
+            row_idx += 1
+
+        if hasattr(self, 'bill_show_gst'):
+            self._bill_field_vars['show_gst'] = self.bill_show_gst
+        elif 'show_gst' in self._bill_field_vars:
+            self.bill_show_gst = self._bill_field_vars['show_gst']
+        if hasattr(self, 'bill_show_discount'):
+            self._bill_field_vars['show_discount'] = self.bill_show_discount
+        elif 'show_discount' in self._bill_field_vars:
+            self.bill_show_discount = self._bill_field_vars['show_discount']
+
+        ttk.Label(bill_frame, text="Paper size:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=4)
+        self.bill_paper = ttk.Combobox(
+            bill_frame, width=12, state="readonly", values=["A5", "A4"])
+        self.bill_paper.grid(row=2, column=1, sticky=tk.W, padx=5, pady=4)
+        ttk.Label(
+            bill_frame,
+            text="A5 = 2 bills per sheet (classic). A4 = larger / optional 3 copies.",
+            font=(FONT_FAMILY, FONT_SIZE_SUPPORTING_TEXT),
+        ).grid(row=3, column=0, columnspan=2, sticky=tk.W, padx=5, pady=(0, 4))
+
+        ttk.Label(bill_frame, text="Copies (A4 only):").grid(row=4, column=0, sticky=tk.W, padx=5, pady=4)
+        self.bill_copies = ttk.Spinbox(bill_frame, from_=1, to=3, width=5)
+        self.bill_copies.grid(row=4, column=1, sticky=tk.W, padx=5, pady=4)
+
+        bill_save = ttk.Button(bill_frame, text="Save Bill Print Style", command=self._save_bill_only)
+        bill_save.grid(row=5, column=1, sticky=tk.W, padx=5, pady=10)
+
+    def _save_bill_only(self):
+        try:
+            self._collect_bill_settings()
+            showinfo("Success", "Bill print settings saved!")
+        except Exception as e:
+            showerror("Error", f"Failed to save bill settings: {e}")
 
     def _choose_logo(self):
         from tkinter import filedialog
@@ -217,13 +299,12 @@ class PharmacyTab:
     def _apply_bill_settings_to_ui(self, settings):
         key = settings.get("template", "classic")
         self.bill_template.set(self._template_label_from_key(key))
-        self.bill_show_gst.set(bool(settings.get("show_gst", True)))
-        self.bill_show_discount.set(bool(settings.get("show_discount", True)))
-        self.bill_show_batch.set(bool(settings.get("show_batch", True)))
-        self.bill_show_expiry.set(bool(settings.get("show_expiry", True)))
-        self.bill_show_doctor.set(bool(settings.get("show_doctor", True)))
-        self.bill_show_terms.set(bool(settings.get("show_terms", True)))
-        self.bill_show_signature.set(bool(settings.get("show_signature", True)))
+        for field_key, var in getattr(self, "_bill_field_vars", {}).items():
+            var.set(bool(settings.get(field_key, True)))
+        if hasattr(self, "bill_show_gst"):
+            self.bill_show_gst.set(bool(settings.get("show_gst", True)))
+        if hasattr(self, "bill_show_discount"):
+            self.bill_show_discount.set(bool(settings.get("show_discount", True)))
         paper = (settings.get("paper_size") or "A5").upper()
         self.bill_paper.set(paper if paper in ("A4", "A5") else "A5")
         self.bill_copies.delete(0, tk.END)
@@ -234,16 +315,15 @@ class PharmacyTab:
         merged = load_bill_print_settings()
         merged.update({
             "template": self._template_key_from_label(self.bill_template.get()),
-            "show_gst": self.bill_show_gst.get(),
-            "show_discount": self.bill_show_discount.get(),
-            "show_batch": self.bill_show_batch.get(),
-            "show_expiry": self.bill_show_expiry.get(),
-            "show_doctor": self.bill_show_doctor.get(),
-            "show_terms": self.bill_show_terms.get(),
-            "show_signature": self.bill_show_signature.get(),
             "paper_size": (self.bill_paper.get() or "A5").upper(),
             "copies": int(self.bill_copies.get() or 2),
         })
+        for field_key, var in getattr(self, "_bill_field_vars", {}).items():
+            merged[field_key] = bool(var.get())
+        if hasattr(self, "bill_show_gst"):
+            merged["show_gst"] = self.bill_show_gst.get()
+        if hasattr(self, "bill_show_discount"):
+            merged["show_discount"] = self.bill_show_discount.get()
         save_bill_print_settings(merged)
         return merged
 

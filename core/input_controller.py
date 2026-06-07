@@ -83,9 +83,7 @@ class GlobalInputController:
         self._root.bind_all('<Button-5>',   self._on_scroll_down_linux, add='+')
         self._root.bind_all('<Up>',         self._on_arrow_up,          add='+')
         self._root.bind_all('<Down>',       self._on_arrow_down,        add='+')
-        self._root.bind_all('<Alt_L>',       self._on_shift,             add='+')
-        self._root.bind_all('<Alt_R>',       self._on_shift,             add='+')
-        self._root.bind_all('<F2>',         self._on_f2,                add='+')
+        # Alt, F2, F3, F5, etc. handled by core.keyboard_registry
         self._root.bind_all('<Escape>',     self._on_escape_treeview,   add='+')
 
     # ── Mouse-wheel handlers ──────────────────────────────────────────────
@@ -127,16 +125,26 @@ class GlobalInputController:
     # ── Arrow-key page scroll ─────────────────────────────────────────────
 
     def _on_arrow_up(self, event):
+        from core.keyboard_registry import KeyboardRegistry
+        if KeyboardRegistry.consume_sidebar_nav_event(event):
+            return 'break'
         w = self._focused_widget()
         if w is not None and _is_treeview(w):
             return  # let Treeview handle Up natively
+        if w is not None and _widget_class(w) in _FOCUSABLE_CLASSES and _widget_class(w) not in _INPUT_CLASSES:
+            return  # buttons, etc. handle their own Up/Down
         if not self._is_input_focused():
             self._scroll_canvas(3)
 
     def _on_arrow_down(self, event):
+        from core.keyboard_registry import KeyboardRegistry
+        if KeyboardRegistry.consume_sidebar_nav_event(event):
+            return 'break'
         w = self._focused_widget()
         if w is not None and _is_treeview(w):
             return  # let Treeview handle Down natively
+        if w is not None and _widget_class(w) in _FOCUSABLE_CLASSES and _widget_class(w) not in _INPUT_CLASSES:
+            return  # buttons, etc. handle their own Up/Down
         if not self._is_input_focused():
             self._scroll_canvas(-3)
 
@@ -184,6 +192,11 @@ class GlobalInputController:
     # ── Escape → exit Treeview focus ─────────────────────────────────────
 
     def _on_escape_treeview(self, event):
+        from core.dialog_escape import close_active_dialog
+        if close_active_dialog(self._root):
+            from core.keyboard_registry import KeyboardRegistry
+            self._root.after_idle(KeyboardRegistry.finish_modal_session)
+            return 'break'
         w = self._focused_widget()
         if w is None or not _is_treeview(w):
             return  # not a Treeview — let main.py Escape handler run
@@ -191,7 +204,8 @@ class GlobalInputController:
             w.selection_remove(w.selection())
         except Exception:
             pass
-        self._focus_first_widget(self._resolve_active_frame())
+        from core.keyboard_registry import KeyboardRegistry
+        KeyboardRegistry.blur_to_nav()
         return 'break'
 
     # ── Alt → focus first input ─────────────────────────────────────────

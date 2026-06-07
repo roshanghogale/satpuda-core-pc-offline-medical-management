@@ -150,6 +150,8 @@ class ImportPurchasesPage:
         win.title("Import Purchases — Review")
         win.state('zoomed')          # maximised on Windows
         win.protocol('WM_DELETE_WINDOW', self._on_toplevel_close)
+        from core.dialog_escape import bind_escape_to_close
+        bind_escape_to_close(win, on_close=self._on_toplevel_close)
         self._toplevel = win
 
         # ── nav bar at top of Toplevel ────────────────────────────────────

@@ -85,8 +85,8 @@ def edit_bill(parent, conn, sale_id, tree_values, refresh_callback):
 
 def print_bill(parent, conn, sale_id, tree_values):
     bill_no = tree_values[0] if tree_values else str(sale_id)
-    from widgets.bill_preview import show_bill_preview
-    show_bill_preview(parent, conn, bill_no, sale_id)
+    from core.bill_output import open_bill_for_print
+    open_bill_for_print(conn, bill_no, sale_id)
 
 
 def delete_bill(conn, sale_id, tree_values, refresh_callback):

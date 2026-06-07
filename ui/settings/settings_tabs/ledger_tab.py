@@ -60,39 +60,71 @@ def _apply_tags(tree):
 # -- Main class ----------------------------------------------------------------
 
 class LedgerTab:
+    TAB_NAME = 'Ledger'
+
     def __init__(self, notebook, conn):
         self.conn   = conn
         self.cursor = conn.cursor()
+        self._kind = 'supplier'
         outer = ttk.Frame(notebook)
-        notebook.add(outer, text="Ledger")
+        self.outer = outer
+        notebook.add(outer, text=self.TAB_NAME)
         self._build(outer)
+
+    def get_keyboard_bindings(self):
+        from core.keyboard_registry import PageBindings
+        return PageBindings(
+            page_id='ledger',
+            sub_keys={'s': lambda: self._show('supplier'), 'c': lambda: self._show('customer')},
+            f2_target=getattr(self, '_ledger_tree', None),
+        )
 
     def _build(self, outer):
         btn_bar = ttk.Frame(outer)
         btn_bar.pack(fill=tk.X, padx=10, pady=10)
         try:
-            ttk.Button(btn_bar, text="Supplier Ledger",
-                       command=lambda: self._show('supplier'),
-                       bootstyle="primary", width=22).pack(side=tk.LEFT, padx=8)
-            ttk.Button(btn_bar, text="Customer Ledger",
-                       command=lambda: self._show('customer'),
-                       bootstyle="success", width=22).pack(side=tk.LEFT, padx=8)
+            self._btn_supplier = ttk.Button(
+                btn_bar, text="Supplier Ledger",
+                command=lambda: self._show('supplier'),
+                bootstyle="primary", width=22)
+            self._btn_customer = ttk.Button(
+                btn_bar, text="Customer Ledger",
+                command=lambda: self._show('customer'),
+                bootstyle="success", width=22)
         except Exception:
-            ttk.Button(btn_bar, text="Supplier Ledger",
-                       command=lambda: self._show('supplier'), width=22).pack(side=tk.LEFT, padx=8)
-            ttk.Button(btn_bar, text="Customer Ledger",
-                       command=lambda: self._show('customer'), width=22).pack(side=tk.LEFT, padx=8)
+            self._btn_supplier = ttk.Button(
+                btn_bar, text="Supplier Ledger",
+                command=lambda: self._show('supplier'), width=22)
+            self._btn_customer = ttk.Button(
+                btn_bar, text="Customer Ledger",
+                command=lambda: self._show('customer'), width=22)
+        self._btn_supplier.pack(side=tk.LEFT, padx=8)
+        self._btn_customer.pack(side=tk.LEFT, padx=8)
         self._container = ttk.Frame(outer)
         self._container.pack(fill=tk.BOTH, expand=True)
         self._show('supplier')
 
     def _show(self, kind):
+        self._kind = kind
         for w in self._container.winfo_children():
             w.destroy()
         if kind == 'supplier':
             self._build_supplier(self._container)
+            try:
+                self._btn_supplier.configure(bootstyle='primary')
+                self._btn_customer.configure(bootstyle='secondary')
+            except Exception:
+                pass
         else:
             self._build_customer(self._container)
+            try:
+                self._btn_customer.configure(bootstyle='success')
+                self._btn_supplier.configure(bootstyle='secondary')
+            except Exception:
+                pass
+        refresh = getattr(self, '_keyboard_refresh', None)
+        if callable(refresh):
+            refresh()
 
     # -- Supplier Ledger -------------------------------------------------------
 
@@ -132,6 +164,7 @@ class LedgerTab:
                 'Amount': 110, 'Paid': 90, 'Due': 90, 'Credit': 90,
                 'Running Balance': 120}
         _, tree = _build_ledger_tree(parent, cols, cw)
+        self._ledger_tree = tree
 
         summary = ttk.Frame(parent)
         summary.pack(fill=tk.X, padx=10, pady=(0, 6))
@@ -384,6 +417,7 @@ class LedgerTab:
                 'Amount': 110, 'Paid': 90, 'Due': 90, 'Credit': 90,
                 'Running Balance': 120}
         _, tree = _build_ledger_tree(parent, cols, cw)
+        self._ledger_tree = tree
 
         summary = ttk.Frame(parent)
         summary.pack(fill=tk.X, padx=10, pady=(0, 6))

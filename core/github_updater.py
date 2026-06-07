@@ -30,6 +30,9 @@ GITHUB_REPO = "satpuda-core-pc-offline-medical-management"
 GITHUB_API_LATEST = (
     f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
 )
+GITHUB_API_RELEASES = (
+    f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases"
+)
 GITHUB_RELEASES_PAGE = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases"
 
 EXE_MODERN = "SatpudaCore.exe"       # Windows 8 / 10 / 11 (64-bit)
@@ -147,6 +150,30 @@ def platform_label() -> str:
     return "Windows 7 / 8 / 8.1" if is_win7_build() else "Windows 10 / 11"
 
 
+def _ca_bundle_path() -> Optional[str]:
+    """Resolve CA bundle — critical for HTTPS in PyInstaller one-file EXEs."""
+    if getattr(sys, "frozen", False):
+        bundled = os.path.join(getattr(sys, "_MEIPASS", ""), "certifi", "cacert.pem")
+        if os.path.isfile(bundled):
+            return bundled
+    try:
+        import certifi
+        path = certifi.where()
+        if path and os.path.isfile(path):
+            return path
+    except Exception:
+        pass
+    return None
+
+
+def _ssl_context():
+    import ssl
+    cafile = _ca_bundle_path()
+    if cafile:
+        return ssl.create_default_context(cafile=cafile)
+    return ssl.create_default_context()
+
+
 def _api_request(url: str, timeout: int = 25) -> dict:
     req = urllib.request.Request(
         url,
@@ -155,8 +182,31 @@ def _api_request(url: str, timeout: int = 25) -> dict:
             "User-Agent": _USER_AGENT,
         },
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as resp:
         return json.loads(resp.read().decode("utf-8"))
+
+
+def _fetch_latest_release() -> dict:
+    """
+    Load the newest published release from GitHub.
+
+    Tries /releases/latest first, then falls back to the releases list
+    (some networks or API edge cases fail on the latest endpoint only).
+    """
+    try:
+        return _api_request(GITHUB_API_LATEST)
+    except urllib.error.HTTPError as exc:
+        if exc.code not in (404, 403):
+            raise
+    releases = _api_request(f"{GITHUB_API_RELEASES}?per_page=10")
+    if not isinstance(releases, list) or not releases:
+        raise urllib.error.HTTPError(
+            GITHUB_API_LATEST, 404, "No releases", hdrs=None, fp=None,
+        )
+    for rel in releases:
+        if not rel.get("draft") and not rel.get("prerelease"):
+            return rel
+    return releases[0]
 
 
 def _pick_asset(assets: List[dict]) -> Tuple[str, str]:
@@ -176,15 +226,30 @@ def _pick_asset(assets: List[dict]) -> Tuple[str, str]:
 def check_for_update(current: str = APP_VERSION) -> UpdateInfo:
     info = UpdateInfo(available=False, current_version=current)
     try:
-        payload = _api_request(GITHUB_API_LATEST)
+        payload = _fetch_latest_release()
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
             info.error = "No GitHub releases published yet."
+        elif exc.code == 403:
+            info.error = (
+                "GitHub rate limit reached. Try again in a few minutes, "
+                "or open the releases page in your browser."
+            )
         else:
             info.error = f"GitHub API error ({exc.code})."
         return info
-    except urllib.error.URLError:
-        info.error = "Could not reach GitHub. Check your internet connection."
+    except urllib.error.URLError as exc:
+        reason = getattr(exc, "reason", exc)
+        text = str(reason).lower()
+        if "certificate" in text or "ssl" in text:
+            info.error = (
+                "Secure connection to GitHub failed (SSL). "
+                "Check system date/time or open the releases page in your browser."
+            )
+        elif "timed out" in text or "timeout" in text:
+            info.error = "GitHub timed out. Check your internet connection and try again."
+        else:
+            info.error = "Could not reach GitHub. Check your internet connection."
         return info
     except Exception as exc:
         info.error = str(exc)
@@ -201,6 +266,8 @@ def check_for_update(current: str = APP_VERSION) -> UpdateInfo:
     if not latest:
         info.error = "Release has no version tag."
         return info
+
+    mark_checked_today()
 
     if not is_newer_version(latest, current):
         return info
@@ -220,7 +287,6 @@ def check_for_update(current: str = APP_VERSION) -> UpdateInfo:
             f"({platform_label()} build). Upload both {EXE_MODERN} and {EXE_WIN7} "
             f"when publishing. This PC needs {needed}, not {other}."
         )
-    mark_checked_today()
     return info
 
 
@@ -236,7 +302,7 @@ def download_update(
         info.download_url,
         headers={"User-Agent": _USER_AGENT},
     )
-    with urllib.request.urlopen(req, timeout=120) as resp:
+    with urllib.request.urlopen(req, timeout=120, context=_ssl_context()) as resp:
         total = int(resp.headers.get("Content-Length") or 0)
         read = 0
         chunk_size = 256 * 1024

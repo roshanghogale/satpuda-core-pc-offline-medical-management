@@ -30,11 +30,67 @@ def _apply_icon(window):
         pass
 
 
+# ── Export report picker (keyboard: ↑↓, Enter) ───────────────────────────────
+
+def show_export_option_dialog(parent, title, options, *, width=360, height=None):
+    """
+    Show a modal list of export actions.
+
+    options: sequence of (label, callable).
+    Navigate with ↑↓, confirm with Enter or double-click, cancel with Escape.
+    """
+    from core.scroll_manager import open_dialog
+    from core.font_config import FONT_FAMILY, FONT_SIZE_LABELS
+    from core.dialog_escape import bind_escape_to_close
+    from core.dialog_keyboard import wire_export_option_listbox
+
+    items = list(options or [])
+    if not items:
+        return
+
+    top = parent.winfo_toplevel()
+    n = len(items)
+    dlg_h = height or min(400, 96 + n * 28)
+    dlg = open_dialog(top, title, width=width, height=dlg_h, resizable=False)
+    body = dlg.content
+
+    lb = tk.Listbox(
+        body,
+        height=min(n, 14),
+        font=(FONT_FAMILY, FONT_SIZE_LABELS),
+        activestyle='dotbox',
+        exportselection=False,
+        takefocus=True,
+    )
+    lb.pack(fill=tk.BOTH, expand=True, padx=12, pady=12)
+    for label, _ in items:
+        lb.insert(tk.END, label)
+    lb.selection_set(0)
+    lb.activate(0)
+
+    def _run_selected():
+        sel = lb.curselection()
+        idx = int(sel[0]) if sel else 0
+        try:
+            dlg.grab_release()
+        except Exception:
+            pass
+        dlg.destroy()
+        try:
+            items[idx][1]()
+        except Exception:
+            pass
+
+    bind_escape_to_close(dlg)
+    wire_export_option_listbox(dlg, lb, _run_selected)
+
+
 # ── Format chooser dialog ─────────────────────────────────────────────────────
 
 def export_data(parent, title, headers, rows, default_name='export'):
     """Show format picker then save. rows = list of tuples/lists."""
     from core.scroll_manager import open_dialog
+    from core.dialog_keyboard import wire_export_format_dialog
 
     top = parent.winfo_toplevel()
     dlg = open_dialog(top, f"Export — {title}", width=360, height=200, resizable=False)
@@ -45,11 +101,14 @@ def export_data(parent, title, headers, rows, default_name='export'):
     ttk.Label(body, text="Choose format:").pack(padx=12)
 
     fmt_var = tk.StringVar(value='csv')
+    fmt_options = [('CSV', 'csv'), ('Excel (.xlsx)', 'xlsx'), ('PDF (HTML)', 'pdf')]
     btn_row = ttk.Frame(body)
     btn_row.pack(pady=10, padx=12)
-    for text, val in [('CSV', 'csv'), ('Excel (.xlsx)', 'xlsx'), ('PDF (HTML)', 'pdf')]:
-        ttk.Radiobutton(btn_row, text=text, variable=fmt_var,
-                        value=val).pack(side=tk.LEFT, padx=8)
+    radios = []
+    for text, val in fmt_options:
+        rb = ttk.Radiobutton(btn_row, text=text, variable=fmt_var, value=val)
+        rb.pack(side=tk.LEFT, padx=8)
+        radios.append(rb)
 
     def _do_export():
         fmt = fmt_var.get()
@@ -61,8 +120,13 @@ def export_data(parent, title, headers, rows, default_name='export'):
         else:
             _save_pdf(top, title, headers, rows, default_name)
 
-    ttk.Button(dlg.footer, text="Export", command=_do_export).pack(side=tk.LEFT, padx=6)
-    ttk.Button(dlg.footer, text="Cancel", command=dlg.destroy).pack(side=tk.LEFT, padx=6)
+    export_btn = ttk.Button(dlg.footer, text="Export", command=_do_export)
+    export_btn.pack(side=tk.LEFT, padx=6)
+    cancel_btn = ttk.Button(dlg.footer, text="Cancel", command=dlg.destroy)
+    cancel_btn.pack(side=tk.LEFT, padx=6)
+    wire_export_format_dialog(
+        dlg, radios, fmt_var, [v for _, v in fmt_options], export_btn, cancel_btn,
+    )
 
 
 # ── Export All Combined ───────────────────────────────────────────────────────
@@ -75,6 +139,7 @@ def export_all_combined(parent, sections):
     HTML: one page with all sections.
     """
     from core.scroll_manager import open_dialog
+    from core.dialog_keyboard import wire_export_format_dialog
 
     top = parent.winfo_toplevel()
     dlg = open_dialog(top, "Export All Data", width=380, height=220, resizable=False)
@@ -88,11 +153,14 @@ def export_all_combined(parent, sections):
     ttk.Label(body, text="Choose format:").pack(padx=12)
 
     fmt_var = tk.StringVar(value='xlsx')
+    fmt_options = [('CSV', 'csv'), ('Excel (.xlsx)', 'xlsx'), ('PDF (HTML)', 'pdf')]
     btn_row = ttk.Frame(body)
     btn_row.pack(pady=8, padx=12)
-    for text, val in [('CSV', 'csv'), ('Excel (.xlsx)', 'xlsx'), ('PDF (HTML)', 'pdf')]:
-        ttk.Radiobutton(btn_row, text=text, variable=fmt_var,
-                        value=val).pack(side=tk.LEFT, padx=8)
+    radios = []
+    for text, val in fmt_options:
+        rb = ttk.Radiobutton(btn_row, text=text, variable=fmt_var, value=val)
+        rb.pack(side=tk.LEFT, padx=8)
+        radios.append(rb)
 
     def _do_export():
         fmt = fmt_var.get()
@@ -104,8 +172,13 @@ def export_all_combined(parent, sections):
         else:
             _save_all_pdf(top, sections)
 
-    ttk.Button(dlg.footer, text="Export", command=_do_export).pack(side=tk.LEFT, padx=6)
-    ttk.Button(dlg.footer, text="Cancel", command=dlg.destroy).pack(side=tk.LEFT, padx=6)
+    export_btn = ttk.Button(dlg.footer, text="Export", command=_do_export)
+    export_btn.pack(side=tk.LEFT, padx=6)
+    cancel_btn = ttk.Button(dlg.footer, text="Cancel", command=dlg.destroy)
+    cancel_btn.pack(side=tk.LEFT, padx=6)
+    wire_export_format_dialog(
+        dlg, radios, fmt_var, [v for _, v in fmt_options], export_btn, cancel_btn,
+    )
 
 
 def _save_all_csv(parent, sections):

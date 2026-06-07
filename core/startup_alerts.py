@@ -221,12 +221,22 @@ def show_startup_alerts(root, conn):
 
         def _next():
             done["action"] = "next"
-            win.destroy()
+            _release_and_destroy()
 
         def _cancel():
             cancel_all["value"] = True
             done["action"] = "cancel"
-            win.destroy()
+            _release_and_destroy()
+
+        def _release_and_destroy():
+            try:
+                win.grab_release()
+            except Exception:
+                pass
+            try:
+                win.destroy()
+            except Exception:
+                pass
 
         def _export():
             try:
@@ -240,6 +250,8 @@ def show_startup_alerts(root, conn):
         ttk.Button(bf, text="Next", command=_next).pack(side=tk.RIGHT)
 
         win.protocol("WM_DELETE_WINDOW", _next)
+        from core.dialog_escape import bind_escape_to_close
+        bind_escape_to_close(win, on_close=_next)
         _center_alert_window(win)
         try:
             from core.window_icon import show_modal_toplevel
@@ -252,3 +264,9 @@ def show_startup_alerts(root, conn):
         root.wait_window(win)
         if done["action"] in ("next", None):
             index += 1
+
+    try:
+        from core.keyboard_registry import KeyboardRegistry
+        root.after_idle(KeyboardRegistry.finish_modal_session)
+    except Exception:
+        pass

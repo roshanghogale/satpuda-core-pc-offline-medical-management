@@ -137,80 +137,99 @@ class TwoStepMedicineCombo(ttk.Frame):
         self.medicine_names = []
         self._purchased_names_lower = set()
 
+    def _format_pack_size(self, med_type, unit):
+        unit = unit or '1'
+        if med_type and is_strip_count_type(med_type):
+            return f"1*{unit}"
+        return unit
+
+    def _row_to_med_dict(self, row):
+        name, manufacturer, mrp, med_type, unit, total_stock, batch_count = row
+        total_stock = int(total_stock or 0)
+        batch_count = int(batch_count or 1)
+        return {
+            'name': name,
+            'pack_info': self._format_pack_size(med_type, unit),
+            'type': med_type or '',
+            'unit': unit or '1',
+            'stock': total_stock,
+            'total_stock': total_stock,
+            'batch_count': batch_count,
+            'mrp': mrp or 0,
+            'manufacturer': manufacturer or '',
+            'source': 'inventory',
+        }
+
+    def _fetch_latest_batches(self, where_sql, params, limit):
+        """One row per medicine name with total stock summed across all batches."""
+        sql = f"""
+            SELECT m.name, m.manufacturer, m.mrp, m.type,
+                   COALESCE(m.unit, '1'),
+                   COALESCE(agg.total_stock, 0),
+                   COALESCE(agg.batch_count, 1)
+            FROM medicines m
+            INNER JOIN (
+                SELECT name, MAX(id) AS max_id
+                FROM medicines
+                {where_sql}
+                GROUP BY name
+            ) latest ON m.id = latest.max_id
+            INNER JOIN (
+                SELECT name,
+                       SUM(COALESCE(stock_qty, 0)) AS total_stock,
+                       COUNT(*) AS batch_count
+                FROM medicines
+                {where_sql}
+                GROUP BY name
+            ) agg ON agg.name = m.name
+            ORDER BY m.name COLLATE NOCASE
+            LIMIT ?
+        """
+        self.cursor.execute(sql, (*params, *params, limit))
+        return [self._row_to_med_dict(r) for r in self.cursor.fetchall()]
+
     def _query_master(self, search: str, limit: int = 50):
-        """Query medicines (inventory) with case-insensitive prefix+contains search.
-        Shows only medicines that exist in the local inventory.
-        Empty search returns first `limit` names alphabetically."""
+        """Query inventory — one row per name with stock from the latest batch."""
         try:
             if not search or not search.strip():
-                self.cursor.execute(
-                    "SELECT DISTINCT name, manufacturer, mrp, type, unit "
-                    "FROM medicines "
-                    "ORDER BY name COLLATE NOCASE LIMIT ?", (limit,))
-                rows = self.cursor.fetchall()
-            else:
-                s = search.strip()
-                self.cursor.execute(
-                    "SELECT DISTINCT name, manufacturer, mrp, type, unit "
-                    "FROM medicines "
-                    "WHERE name LIKE ? COLLATE NOCASE "
-                    "ORDER BY name COLLATE NOCASE LIMIT ?",
-                    (f"{s}%", limit))
-                prefix = self.cursor.fetchall()
-                contains = []
-                if len(prefix) < limit:
-                    prefix_names = {r[0].lower() for r in prefix}
-                    self.cursor.execute(
-                        "SELECT DISTINCT name, manufacturer, mrp, type, unit "
-                        "FROM medicines "
-                        "WHERE name LIKE ? COLLATE NOCASE "
-                        "  AND name NOT LIKE ? COLLATE NOCASE "
-                        "ORDER BY name COLLATE NOCASE LIMIT ?",
-                        (f"%{s}%", f"{s}%", limit - len(prefix)))
-                    contains = [r for r in self.cursor.fetchall()
-                                if r[0].lower() not in prefix_names]
-                rows = prefix + contains
+                return self._fetch_latest_batches('', (), limit)
 
-            return [{
-                'name': r[0], 'pack_info': r[4] or '',
-                'type': r[3] or '', 'unit': r[4] or '',
-                'stock': 0, 'mrp': r[2] or 0,
-                'manufacturer': r[1] or '', 'source': 'inventory'
-            } for r in rows]
+            s = search.strip()
+            prefix = self._fetch_latest_batches(
+                'WHERE name LIKE ? COLLATE NOCASE',
+                (f'{s}%',),
+                limit,
+            )
+            if len(prefix) >= limit:
+                return prefix
+
+            prefix_names = {m['name'].lower() for m in prefix}
+            extra = self._fetch_latest_batches(
+                'WHERE name LIKE ? COLLATE NOCASE '
+                'AND name NOT LIKE ? COLLATE NOCASE',
+                (f'%{s}%', f'{s}%'),
+                limit - len(prefix),
+            )
+            contains = [m for m in extra if m['name'].lower() not in prefix_names]
+            return prefix + contains
         except Exception:
             return []
-    
-    def on_step1_change(self, *args):
-        """Filter from medicines_master only — case-insensitive."""
-        if not hasattr(self, 'step1_entry') or self.step1_tree is None:
-            return
 
-        search = self.step1_var.get().strip()
+    def _step1_tree_values(self, med):
+        stock = int(med.get('total_stock', med.get('stock')) or 0)
+        batch_count = int(med.get('batch_count') or 1)
+        if batch_count > 1:
+            stock_text = f" {stock} ({batch_count} batches)"
+        else:
+            stock_text = f" {stock}"
+        return (
+            f" {med['name']}",
+            f" {med['pack_info']}",
+            stock_text,
+            f" ₹{med['mrp']:.1f}" if med['mrp'] else ' —',
+            f" {med['manufacturer']}",
+        )
 
-        for item in self.step1_tree.get_children():
-            self.step1_tree.delete(item)
-
-        self.filtered_medicines = self._query_master(search, limit=50)
-
-        if not self.filtered_medicines:
-            self.hide_step1()
-            return
-
-        for med in self.filtered_medicines:
-            self.step1_tree.insert('', tk.END, values=(
-                f" {med['name']}",
-                f" {med['pack_info']}",
-                ' —',
-                f" ₹{med['mrp']:.1f}" if med['mrp'] else ' —',
-                f" {med['manufacturer']}"
-            ))
-
-        self.show_step1()
-        children = self.step1_tree.get_children()
-        if children:
-            self.step1_tree.selection_set(children[0])
-            self.step1_tree.focus(children[0])
-    
     def on_step1_focus_in(self, event):
         """Show dropdown immediately on focus using current entry text."""
         self.after(10, self._do_filter)
@@ -246,7 +265,7 @@ class TwoStepMedicineCombo(ttk.Frame):
         self.on_step1_change(search)
 
     def on_step1_change(self, search=''):
-        """Populate step1 tree from medicines_master filtered by `search`."""
+        """Populate step1 tree from live inventory filtered by `search`."""
         if self.step1_tree is None:
             return
 
@@ -260,13 +279,7 @@ class TwoStepMedicineCombo(ttk.Frame):
             return
 
         for med in self.filtered_medicines:
-            self.step1_tree.insert('', tk.END, values=(
-                f" {med['name']}",
-                f" {med['pack_info']}",
-                ' —',
-                f" ₹{med['mrp']:.1f}" if med['mrp'] else ' —',
-                f" {med['manufacturer']}"
-            ))
+            self.step1_tree.insert('', tk.END, values=self._step1_tree_values(med))
 
         self.show_step1()
         children = self.step1_tree.get_children()
@@ -359,26 +372,53 @@ class TwoStepMedicineCombo(ttk.Frame):
             self.hide_step1()
             self.load_variants(medicine_name)
     
+    def _clear_medicine_selection(self):
+        """Reset medicine field after no-stock or cancel."""
+        self.step1_var.set('')
+        self.selected_medicine = None
+        self.variants = []
+        self.hide_step1()
+        self.hide_step2()
+        try:
+            self.step1_entry.focus_set()
+        except tk.TclError:
+            pass
+
     def load_variants(self, medicine_name):
-        """Load in-stock variants for selected medicine.
-        If none in stock, show a placeholder row so user can still proceed."""
+        """Load in-stock batches only. All-zero-stock medicines show a warning."""
         self.cursor.execute("""
             SELECT id, name, batch_no, expiry_date, stock_qty, mrp, rate,
                    manufacturer, schedule, type, COALESCE(unit,'1') as unit
-            FROM medicines WHERE name = ? AND stock_qty > 0
+            FROM medicines
+            WHERE name = ? AND COALESCE(stock_qty, 0) > 0
             ORDER BY expiry_date ASC
         """, (medicine_name,))
         rows = self.cursor.fetchall()
 
-        # If no in-stock rows, check if it exists with 0 stock (still selectable)
         if not rows:
             self.cursor.execute("""
-                SELECT id, name, batch_no, expiry_date, stock_qty, mrp, rate,
-                       manufacturer, schedule, type, COALESCE(unit,'1') as unit
+                SELECT COUNT(*), SUM(COALESCE(stock_qty, 0))
                 FROM medicines WHERE name = ?
-                ORDER BY expiry_date ASC LIMIT 5
             """, (medicine_name,))
-            rows = self.cursor.fetchall()
+            batch_count, total_stock = self.cursor.fetchone() or (0, 0)
+            exists = int(batch_count or 0) > 0
+            if exists:
+                try:
+                    from core.themed_messagebox import showwarning
+                    msg = (
+                        f'"{medicine_name}" has no stock in any batch.\n'
+                        "Please select another medicine."
+                    )
+                    if int(batch_count or 0) > 1:
+                        msg += (
+                            f"\n\n({int(batch_count)} batches in inventory — "
+                            "set stock to 0 on each batch in Inventory.)"
+                        )
+                    showwarning("No Stock", msg, parent=self.winfo_toplevel())
+                except Exception:
+                    pass
+                self._clear_medicine_selection()
+                return
 
         self.variants = []
         for row in rows:
@@ -396,18 +436,6 @@ class TwoStepMedicineCombo(ttk.Frame):
 
         if self.variants:
             self.show_step2()
-        else:
-            # Medicine is from master only — no purchase record yet
-            # Auto-select with blank batch so user fills details in purchase form
-            self.selected_medicine = {
-                'id': None, 'name': medicine_name, 'batch': '',
-                'pack_size': '', 'expiry_display': '', 'expiry': '',
-                'stock': 0, 'mrp': 0, 'rate': 0,
-                'manufacturer': '', 'schedule': ''
-            }
-            self.step1_entry.event_generate('<<ComboboxSelected>>')
-            if callable(self.next_focus_widget):
-                self.next_focus_widget()
     
     def show_step2(self):
         """Show step2 tree with variants"""
@@ -624,7 +652,11 @@ class TwoStepMedicineCombo(ttk.Frame):
     
     def focus(self):
         """Set focus to entry"""
-        self.step1_entry.focus()
+        try:
+            if self.winfo_exists() and self.step1_entry.winfo_exists():
+                self.step1_entry.focus_set()
+        except tk.TclError:
+            pass
     
     def bind(self, event, callback):
         """Bind event to entry"""

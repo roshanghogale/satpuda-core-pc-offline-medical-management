@@ -12,6 +12,7 @@ from core.font_config import *
 from core.alert_colors import get_alert_color
 from core.scroll_manager import open_dialog
 from ui.settings.settings_tabs.appearance_scroll import AppearanceScrollPane
+from core.settings_section_nav import wire_settings_section_nav, bindings_for_sectioned_tab
 from ui.settings.settings_tabs.updates_tab import UpdatesTab
 
 
@@ -21,6 +22,7 @@ def _restart_app(root=None):
 
 
 _NAV_SECTIONS = [
+    ('stores',  'Store Management'),
     ('updates', 'App Updates'),
     ('export',  'Export Data'),
     ('backup',  'Google Drive Backup'),
@@ -41,6 +43,7 @@ class DatabaseTab:
         self._active_section = None
 
         outer = ttk.Frame(notebook)
+        self.outer = outer
         notebook.add(outer, text=self.TAB_NAME)
 
         shell = ttk.Frame(outer)
@@ -65,7 +68,12 @@ class DatabaseTab:
         self._content_host = self._scroller.frame
 
         self._build_all_panels()
-        self._show_section('updates')
+        self._show_section('stores')
+        wire_settings_section_nav(
+            self, self._nav_buttons, [s[0] for s in _NAV_SECTIONS], self._show_section)
+
+    def get_keyboard_bindings(self):
+        return bindings_for_sectioned_tab(self)
 
     def _panel(self, section_id):
         wrapper = ttk.Frame(self._content_host)
@@ -105,11 +113,253 @@ class DatabaseTab:
                 pass
 
     def _build_all_panels(self):
+        self._build_stores_panel()
         self._build_updates_panel()
         self._build_export_panel()
         self._build_backup_panel()
         self._build_admin_panel()
         self._build_danger_panel()
+
+    def _build_stores_panel(self):
+        frame = self._panel('stores')
+        sf = ttk.LabelFrame(frame, text="Store Management")
+        sf.pack(fill=tk.X, padx=10, pady=10)
+
+        self._stores_info_var = tk.StringVar(value="")
+        ttk.Label(
+            sf, textvariable=self._stores_info_var,
+            wraplength=560, justify=tk.LEFT,
+            font=(FONT_FAMILY, FONT_SIZE_SUPPORTING_TEXT),
+        ).pack(anchor=tk.W, padx=12, pady=(8, 4))
+
+        list_frame = ttk.Frame(sf)
+        list_frame.pack(fill=tk.X, padx=12, pady=4)
+        self._stores_listbox = tk.Listbox(
+            list_frame, height=6, font=(FONT_FAMILY, FONT_SIZE_LABELS),
+            selectbackground='#2563eb', selectforeground='white',
+            activestyle='none', exportselection=False,
+        )
+        self._stores_listbox.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        sb = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self._stores_listbox.yview)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+        self._stores_listbox.config(yscrollcommand=sb.set)
+        self._store_row_keys = []
+
+        btn_row = ttk.Frame(sf)
+        btn_row.pack(fill=tk.X, padx=12, pady=(8, 12))
+        ttk.Button(btn_row, text="Switch to Selected Store",
+                   command=self._switch_selected_store).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(btn_row, text="Create New Store",
+                   command=self._create_new_store).pack(side=tk.LEFT, padx=6)
+        ttk.Button(btn_row, text="Restore Active Store from Drive",
+                   command=self._restore_active_from_drive).pack(side=tk.LEFT, padx=6)
+        ttk.Button(btn_row, text="Refresh",
+                   command=self._refresh_stores_panel).pack(side=tk.LEFT, padx=6)
+
+        self._refresh_stores_panel()
+
+    def _refresh_stores_panel(self):
+        try:
+            from core.store_manager import (
+                list_stores, get_active_store_key, is_satellite_device,
+                get_active_display_name, display_name_key,
+            )
+            if is_satellite_device():
+                name = get_active_display_name()
+                self._stores_info_var.set(
+                    f"This device is linked to one store only: {name}\n"
+                    f"Drive folder: {display_name_key(name)}\n"
+                    "Store switching and creation are disabled on this device."
+                )
+                self._stores_listbox.delete(0, tk.END)
+                if name:
+                    self._stores_listbox.insert(tk.END, f"* {name}")
+                return
+
+            active = get_active_store_key()
+            stores = list_stores()
+            self._stores_listbox.delete(0, tk.END)
+            self._store_row_keys = []
+            active_index = None
+            for s in stores:
+                name = s.get('display_name', '')
+                is_active = s.get('store_key') == active
+                label = f"  {name}" if not is_active else f"▶  {name}   [ACTIVE]"
+                self._stores_listbox.insert(tk.END, label)
+                idx = self._stores_listbox.size() - 1
+                self._store_row_keys.append(s.get('store_key'))
+                if is_active:
+                    active_index = idx
+                    self._stores_listbox.itemconfig(
+                        idx, bg='#dbeafe', fg='#1e3a8a',
+                        selectbackground='#2563eb', selectforeground='white',
+                    )
+                else:
+                    self._stores_listbox.itemconfig(
+                        idx, bg='#f8fafc', fg='#334155',
+                        selectbackground='#2563eb', selectforeground='white',
+                    )
+
+            if active_index is not None:
+                self._stores_listbox.selection_set(active_index)
+                self._stores_listbox.see(active_index)
+
+            count = len(stores)
+            self._stores_info_var.set(
+                f"{count} store(s) on this device. Each has its own database and Drive folder.\n"
+                "The active store is highlighted in blue with ▶ and [ACTIVE]. "
+                "Switching stores restarts the app."
+            )
+        except Exception as e:
+            self._stores_info_var.set(f"Store list unavailable: {e}")
+
+    def _selected_store_key(self):
+        from core.store_manager import is_satellite_device
+        if is_satellite_device():
+            return None
+        sel = self._stores_listbox.curselection()
+        if not sel:
+            return None
+        idx = sel[0]
+        if 0 <= idx < len(self._store_row_keys):
+            return self._store_row_keys[idx]
+        return None
+
+    def _switch_selected_store(self):
+        from core.store_manager import set_active_store, get_active_store_key, is_satellite_device
+        if is_satellite_device():
+            showwarning("Store Management", "This device is linked to one store only.", parent=self._parent)
+            return
+        key = self._selected_store_key()
+        if not key:
+            showwarning("Store Management", "Select a store from the list.", parent=self._parent)
+            return
+        if key == get_active_store_key():
+            showinfo("Store Management", "This store is already active.", parent=self._parent)
+            return
+        if not askyesno(
+            "Switch Store",
+            "Switching stores will restart the app.\n"
+            "Unsaved work on the current page may be lost.\n\nContinue?",
+            parent=self._parent,
+        ):
+            return
+        if set_active_store(key):
+            from core.backup_manager import reload_slots_for_active_store
+            reload_slots_for_active_store()
+            root = self._parent.winfo_toplevel()
+            _restart_app(root)
+
+    def _create_new_store(self):
+        from core.store_manager import create_store, is_satellite_device, names_match, list_stores
+        if is_satellite_device():
+            showwarning("Store Management", "Cannot create stores on a single-store device.", parent=self._parent)
+            return
+
+        dlg = open_dialog(self._parent, "Create New Store", width=420, height=200, resizable=False)
+        body = dlg.content
+        ttk.Label(body, text="Store name (used for local data and Drive backup folder):",
+                  wraplength=380).pack(anchor=tk.W, padx=12, pady=(16, 6))
+        name_var = tk.StringVar()
+        ttk.Entry(body, textvariable=name_var, width=40).pack(padx=12, pady=4)
+
+        def _save():
+            name = name_var.get().strip()
+            if not name:
+                showerror("Create Store", "Store name is required.", parent=dlg)
+                return
+            for s in list_stores():
+                if names_match(s.get('display_name', ''), name):
+                    showerror("Create Store", f'Store "{name}" already exists.', parent=dlg)
+                    return
+            try:
+                entry = create_store(
+                    name, device_role='admin', empty_db=True,
+                    migrate_legacy=False, activate=False,
+                )
+                from core.store_manager import ensure_registry_on_startup
+                ensure_registry_on_startup()
+                self._refresh_stores_panel()
+                dlg.destroy()
+                if askyesno(
+                    "Create Store",
+                    f'Store "{name}" created.\n\nSwitch to it now? (restarts the app)',
+                    parent=self._parent,
+                ):
+                    from core.store_manager import set_active_store
+                    from core.backup_manager import reload_slots_for_active_store
+                    set_active_store(entry['store_key'])
+                    reload_slots_for_active_store()
+                    _restart_app(self._parent.winfo_toplevel())
+            except Exception as e:
+                showerror("Create Store", str(e), parent=dlg)
+
+        ttk.Button(dlg.footer, text="Create", command=_save).pack(side=tk.LEFT, padx=6)
+        ttk.Button(dlg.footer, text="Cancel", command=dlg.destroy).pack(side=tk.LEFT, padx=6)
+
+    def _restore_active_from_drive(self):
+        self._sync_from_drive(status_setter=self._stores_info_var.set)
+
+    def _sync_from_drive(self, *, status_setter=None, auto_restart: bool = True):
+        from core.store_manager import get_active_store, get_active_display_name, has_registry
+
+        if not has_registry():
+            showwarning(
+                "Sync from Drive",
+                "No store is configured on this device.",
+                parent=self._parent,
+            )
+            return
+
+        store = get_active_store()
+        name = (store or {}).get('display_name') or get_active_display_name()
+        if not name:
+            showwarning("Sync from Drive", "No active store.", parent=self._parent)
+            return
+
+        if not askyesno(
+            "Sync from Drive",
+            f'Download the latest Google Drive backup and replace the local database '
+            f'for "{name}"?\n\n'
+            "Unsaved changes on this device will be lost. "
+            "The app will restart after a successful sync.",
+            parent=self._parent,
+        ):
+            return
+
+        if status_setter:
+            status_setter("Syncing from Drive...")
+        else:
+            self._backup_status_var.set("Syncing from Drive...")
+        self._parent.update_idletasks()
+
+        root = self._parent.winfo_toplevel()
+        app = getattr(root, '_main_app', None)
+        conn = getattr(app, 'conn', None) if app else None
+
+        def _run():
+            try:
+                from core.backup_manager import sync_active_store_from_drive
+                ok, msg = sync_active_store_from_drive(close_conn=conn)
+            except Exception as e:
+                ok, msg = False, str(e)
+
+            def _done():
+                if ok:
+                    showinfo("Sync from Drive", f"Sync complete.\n\n{msg}", parent=self._parent)
+                    _restart_app(root)
+                else:
+                    showerror("Sync from Drive", msg, parent=self._parent)
+                    if status_setter:
+                        status_setter("")
+                    else:
+                        self._backup_status_var.set("")
+                self._refresh_stores_panel()
+                self._refresh_backup_info()
+
+            self._parent.after(0, _done)
+
+        threading.Thread(target=_run, daemon=True).start()
 
     def _build_updates_panel(self):
         frame = self._panel('updates')
@@ -144,9 +394,12 @@ class DatabaseTab:
         self._backup_status_var = tk.StringVar(value="")
         ttk.Label(
             bf,
-            text="Use the checkbox to control automatic backup on open/close. "
-                 "Backup Now always runs a manual backup.",
-        ).pack(pady=(8, 4))
+            text="Upload local data to Drive with Backup Now, or pull the latest Drive "
+                 "backup down with Sync from Drive to replace this store's database.",
+            wraplength=560,
+            justify=tk.LEFT,
+            font=(FONT_FAMILY, FONT_SIZE_SUPPORTING_TEXT),
+        ).pack(padx=10, pady=(8, 4), anchor='w')
         try:
             from core.backup_manager import is_auto_backup_enabled
             auto_on = is_auto_backup_enabled()
@@ -161,7 +414,16 @@ class DatabaseTab:
         ).pack(anchor=tk.W, padx=10, pady=(0, 6))
         ttk.Label(bf, textvariable=self._backup_status_var,
                   font=(FONT_FAMILY, FONT_SIZE_LABELS, 'bold')).pack(pady=(0, 4))
-        ttk.Button(bf, text="Backup Now", command=self._manual_backup).pack(pady=(0, 8))
+        backup_btn_row = ttk.Frame(bf)
+        backup_btn_row.pack(pady=(0, 8))
+        ttk.Button(
+            backup_btn_row, text="Backup Now",
+            command=self._manual_backup,
+        ).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(
+            backup_btn_row, text="Sync from Drive",
+            command=self._sync_from_drive,
+        ).pack(side=tk.LEFT)
 
         self._backup_info_var = tk.StringVar(value="")
         ttk.Label(
@@ -265,6 +527,8 @@ class DatabaseTab:
                     f"Store: {name}\n"
                     f"Drive folder: {short_id}\n\n"
                     "Backups upload to Store_<name> inside that Drive folder.\n"
+                    "Use Backup Now to upload, or Sync from Drive to download the latest backup "
+                    "and replace this store's local database.\n"
                     "Use Administrator Login to change store name or folder ID.\n"
                     f"{auto_line}"
                 )
@@ -396,7 +660,10 @@ class DatabaseTab:
                 showerror("Backup Settings", "Drive folder ID is required.", parent=dlg)
                 return
             try:
+                from core.store_manager import has_registry, update_active_store_display_name, display_name_key
                 write_backup_config(folder_id, store_name)
+                if has_registry():
+                    update_active_store_display_name(store_name)
                 import sys
                 if not getattr(sys, 'frozen', False):
                     try:
@@ -405,12 +672,13 @@ class DatabaseTab:
                     except Exception:
                         pass
                 self._refresh_backup_info()
+                self._refresh_stores_panel()
                 showinfo(
                     "Backup Settings",
                     f"Backup settings saved.\n\n"
                     f"Store: {store_name}\n"
-                    f"Drive subfolder: Store_{store_name.replace(' ', '_')}\n\n"
-                    "These settings are kept after app updates.",
+                    f"Drive subfolder: {display_name_key(store_name)}\n\n"
+                    "If this folder already exists on Drive, backups will use it.",
                     parent=dlg,
                 )
             except Exception as e:

@@ -16,7 +16,7 @@ from core.font_config import *
 from core.scroll_manager import make_scrollable, open_dialog
 
 from core.layout_config import get_home_banner_path, get_home_banner_size
-from core.column_config import is_quick_access_visible
+from core.column_config import is_quick_access_visible, is_dashboard_section_visible
 
 
 def build_home(main_frame, conn, nav_click_fn, open_billing_fn,
@@ -25,6 +25,9 @@ def build_home(main_frame, conn, nav_click_fn, open_billing_fn,
     """Build and pack the home dashboard into main_frame."""
     inner = make_scrollable(main_frame)
     inner.configure(padding=(10, 10))
+    app = getattr(main_frame.winfo_toplevel(), '_main_app', None)
+    if app is not None:
+        app._home_inner_frame = inner
 
     cursor = conn.cursor()
     today     = datetime.now().date()
@@ -32,60 +35,63 @@ def build_home(main_frame, conn, nav_click_fn, open_billing_fn,
     near_days = 90
 
     # ── Stats bar (footer) ───────────────────────────────────────────────
-    stats_frame = ttk.LabelFrame(inner, text='📊 Dashboard')
+    stats_frame = None
+    if is_dashboard_section_visible('home_dashboard'):
+        stats_frame = ttk.LabelFrame(inner, text='📊 Dashboard')
 
-    month_start   = today.replace(day=1)
-    fy_start_year = today.year if today.month >= 4 else today.year - 1
-    fy_start = f"{fy_start_year}-04-01"
-    fy_end   = f"{fy_start_year + 1}-03-31"
-    fy_label = f"{fy_start_year}-{str(fy_start_year+1)[2:]}"
+    if stats_frame is not None:
+        month_start   = today.replace(day=1)
+        fy_start_year = today.year if today.month >= 4 else today.year - 1
+        fy_start = f"{fy_start_year}-04-01"
+        fy_end   = f"{fy_start_year + 1}-03-31"
+        fy_label = f"{fy_start_year}-{str(fy_start_year+1)[2:]}"
 
-    cursor.execute("SELECT COALESCE(SUM(total_amount),0),COALESCE(SUM(amount_paid),0),COUNT(*) FROM sales WHERE bill_date=?", (today_str,))
-    t_sales, t_collected, t_bills = cursor.fetchone()
-    cursor.execute("SELECT COALESCE(SUM(total_amount),0),COALESCE(SUM(amount_paid),0),COUNT(*) FROM sales WHERE bill_date>=? AND bill_date<=?", (str(month_start), today_str))
-    m_sales, m_collected, m_bills = cursor.fetchone()
-    cursor.execute("SELECT COALESCE(SUM(total_amount),0),COALESCE(SUM(amount_paid),0),COUNT(*) FROM sales WHERE bill_date>=? AND bill_date<=?", (fy_start, fy_end))
-    y_sales, y_collected, y_bills = cursor.fetchone()
+        cursor.execute("SELECT COALESCE(SUM(total_amount),0),COALESCE(SUM(amount_paid),0),COUNT(*) FROM sales WHERE bill_date=?", (today_str,))
+        t_sales, t_collected, t_bills = cursor.fetchone()
+        cursor.execute("SELECT COALESCE(SUM(total_amount),0),COALESCE(SUM(amount_paid),0),COUNT(*) FROM sales WHERE bill_date>=? AND bill_date<=?", (str(month_start), today_str))
+        m_sales, m_collected, m_bills = cursor.fetchone()
+        cursor.execute("SELECT COALESCE(SUM(total_amount),0),COALESCE(SUM(amount_paid),0),COUNT(*) FROM sales WHERE bill_date>=? AND bill_date<=?", (fy_start, fy_end))
+        y_sales, y_collected, y_bills = cursor.fetchone()
 
-    cursor.execute("SELECT COALESCE(SUM(total_due),0) FROM customers WHERE total_due>0")
-    total_cust_due = cursor.fetchone()[0]
-    cursor.execute("SELECT COALESCE(SUM(total_due),0) FROM suppliers WHERE total_due>0")
-    total_sup_due = cursor.fetchone()[0]
-    cursor.execute("SELECT COALESCE(SUM(CAST(stock_qty AS REAL)*CAST(mrp AS REAL)),0) FROM medicines WHERE stock_qty>0 AND mrp>0")
-    stock_val = cursor.fetchone()[0]
+        cursor.execute("SELECT COALESCE(SUM(total_due),0) FROM customers WHERE total_due>0")
+        total_cust_due = cursor.fetchone()[0]
+        cursor.execute("SELECT COALESCE(SUM(total_due),0) FROM suppliers WHERE total_due>0")
+        total_sup_due = cursor.fetchone()[0]
+        cursor.execute("SELECT COALESCE(SUM(CAST(stock_qty AS REAL)*CAST(mrp AS REAL)),0) FROM medicines WHERE stock_qty>0 AND mrp>0")
+        stock_val = cursor.fetchone()[0]
 
-    today_cols = [
-        ('Today Sales',     f'\u20b9{t_sales:,.0f}'),
-        ('Today Collected', f'\u20b9{t_collected:,.0f}'),
-        ('Today Bills',     str(t_bills)),
-        ('Customer Due',    f'\u20b9{total_cust_due:,.0f}'),
-        ('Supplier Due',    f'\u20b9{total_sup_due:,.0f}'),
-        ('Stock Value',     f'\u20b9{stock_val:,.0f}'),
-    ]
-    month_year_cols = [
-        ('Month Sales',                 f'\u20b9{m_sales:,.0f}'),
-        ('Month Collected',             f'\u20b9{m_collected:,.0f}'),
-        ('Month Bills',                 str(m_bills)),
-        (f'Year Sales ({fy_label})',    f'\u20b9{y_sales:,.0f}'),
-        (f'Year Collected ({fy_label})',f'\u20b9{y_collected:,.0f}'),
-        (f'Year Bills ({fy_label})',    str(y_bills)),
-    ]
+        today_cols = [
+            ('Today Sales',     f'\u20b9{t_sales:,.0f}'),
+            ('Today Collected', f'\u20b9{t_collected:,.0f}'),
+            ('Today Bills',     str(t_bills)),
+            ('Customer Due',    f'\u20b9{total_cust_due:,.0f}'),
+            ('Supplier Due',    f'\u20b9{total_sup_due:,.0f}'),
+            ('Stock Value',     f'\u20b9{stock_val:,.0f}'),
+        ]
+        month_year_cols = [
+            ('Month Sales',                 f'\u20b9{m_sales:,.0f}'),
+            ('Month Collected',             f'\u20b9{m_collected:,.0f}'),
+            ('Month Bills',                 str(m_bills)),
+            (f'Year Sales ({fy_label})',    f'\u20b9{y_sales:,.0f}'),
+            (f'Year Collected ({fy_label})',f'\u20b9{y_collected:,.0f}'),
+            (f'Year Bills ({fy_label})',    str(y_bills)),
+        ]
 
-    for i, (label, value) in enumerate(today_cols):
-        sf = ttk.Frame(stats_frame)
-        sf.grid(row=0, column=i, padx=12, pady=(6, 2), sticky='ew')
-        stats_frame.grid_columnconfigure(i, weight=1)
-        ttk.Label(sf, text=value, font=(FONT_FAMILY, FONT_SIZE_SECTION_TITLE, 'bold')).pack()
-        ttk.Label(sf, text=label, font=(FONT_FAMILY, FONT_SIZE_DEFAULT)).pack()
+        for i, (label, value) in enumerate(today_cols):
+            sf = ttk.Frame(stats_frame)
+            sf.grid(row=0, column=i, padx=12, pady=(6, 2), sticky='ew')
+            stats_frame.grid_columnconfigure(i, weight=1)
+            ttk.Label(sf, text=value, font=(FONT_FAMILY, FONT_SIZE_SECTION_TITLE, 'bold')).pack()
+            ttk.Label(sf, text=label, font=(FONT_FAMILY, FONT_SIZE_DEFAULT)).pack()
 
-    ttk.Separator(stats_frame, orient='horizontal').grid(
-        row=1, column=0, columnspan=6, sticky='ew', padx=8, pady=2)
+        ttk.Separator(stats_frame, orient='horizontal').grid(
+            row=1, column=0, columnspan=6, sticky='ew', padx=8, pady=2)
 
-    for i, (label, value) in enumerate(month_year_cols):
-        sf = ttk.Frame(stats_frame)
-        sf.grid(row=2, column=i, padx=12, pady=(2, 6), sticky='ew')
-        ttk.Label(sf, text=value, font=(FONT_FAMILY, FONT_SIZE_BUTTONS, 'bold')).pack()
-        ttk.Label(sf, text=label, font=(FONT_FAMILY, FONT_SIZE_DEFAULT - 1)).pack()
+        for i, (label, value) in enumerate(month_year_cols):
+            sf = ttk.Frame(stats_frame)
+            sf.grid(row=2, column=i, padx=12, pady=(2, 6), sticky='ew')
+            ttk.Label(sf, text=value, font=(FONT_FAMILY, FONT_SIZE_BUTTONS, 'bold')).pack()
+            ttk.Label(sf, text=label, font=(FONT_FAMILY, FONT_SIZE_DEFAULT - 1)).pack()
 
     # ── Main body: Quick Actions (left column) + Banner (right) ──────────
     body = ttk.Frame(inner)
@@ -107,6 +113,7 @@ def build_home(main_frame, conn, nav_click_fn, open_billing_fn,
 
     # ── Popup list dialog helper ──────────────────────────────────────────
     def _show_list_dialog(title, cols, col_widths, rows):
+        from core.focus_chain import focus_tree
         dlg = open_dialog(main_frame, title, width=820, height=480, resizable=True)
         frm = dlg.content
         frm.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -121,9 +128,17 @@ def build_home(main_frame, conn, nav_click_fn, open_billing_fn,
         vsb.pack(side=tk.RIGHT, fill=tk.Y)
         for r in rows:
             tree.insert('', tk.END, values=r)
+        if rows:
+            focus_tree(tree)
         ttk.Label(dlg.footer, text=f"{len(rows)} record(s)",
                   font=(FONT_FAMILY, FONT_SIZE_DEFAULT)).pack(side=tk.LEFT, padx=8)
-        ttk.Button(dlg.footer, text="Close", command=dlg.destroy).pack(side=tk.RIGHT, padx=8)
+        close_btn = ttk.Button(dlg.footer, text="Close", command=dlg.destroy)
+        close_btn.pack(side=tk.RIGHT, padx=8)
+        tree.bind('<Return>', lambda e: (dlg.destroy(), 'break'), add='+')
+        tree.bind('<Escape>', lambda e: (dlg.destroy(), 'break'), add='+')
+        close_btn.bind('<Return>', lambda e: dlg.destroy())
+        dlg.bind('<F2>', lambda e: (focus_tree(tree), 'break'), add='+')
+        dlg.bind('<Escape>', lambda e: dlg.destroy(), add='+')
 
     # ── Bills & Outstanding dropdown ──────────────────────────────────────
     def _bills_menu(event=None):
@@ -311,15 +326,56 @@ def build_home(main_frame, conn, nav_click_fn, open_billing_fn,
 
     # ── Register canvas ───────────────────────────────────────────────────
     # Pack stats footer last so it appears at the bottom
-    stats_frame.pack(fill=tk.X, pady=(8, 0))
+    if stats_frame is not None:
+        stats_frame.pack(fill=tk.X, pady=(8, 0))
 
     inner.update_idletasks()
     if hasattr(inner, '_canvas'):
         inner._canvas.configure(scrollregion=inner._canvas.bbox('all'))
 
+    def _export_menu_dialog():
+        from core.export_manager import show_export_option_dialog
+        show_export_option_dialog(main_frame, 'Export Data', [
+            ('Export Sales', lambda: _export('sales')),
+            ('Export Purchases', lambda: _export('purchases')),
+            ('Export Inventory', lambda: _export('inventory')),
+            ('Export All', lambda: _export('all')),
+        ], width=420)
+
     def _register():
+        app = getattr(main_frame.winfo_toplevel(), '_main_app', None)
+        if app is not None and getattr(app, 'active_nav', None) != '🏠 Home':
+            return
+        try:
+            if not inner.winfo_exists() or not inner.winfo_ismapped():
+                return
+        except tk.TclError:
+            return
         try:
             register_canvas_fn(inner)
         except Exception:
             pass
+        from core.keyboard_registry import KeyboardRegistry, PageBindings
+        qa_buttons = [b for b in primary_btns + export_btns + dropdown_btns + [general_btn] if b]
+        bindings = PageBindings(
+            page_id='home',
+            first_focus=lambda: qa_buttons[0].focus_set() if qa_buttons else None,
+            on_ctrl_e=_export_menu_dialog,
+            sub_keys={
+                'b': open_billing_fn,
+                'p': open_purchase_fn,
+                'i': open_inventory_fn,
+                'e': _export_menu_dialog,
+            },
+            f2_target=lambda: qa_buttons[0].focus_set() if qa_buttons else None,
+        )
+        inner._keyboard_bindings = bindings
+        app = getattr(main_frame.winfo_toplevel(), '_main_app', None)
+        if app is not None:
+            app._home_keyboard_bindings = bindings
+        if app is None or getattr(app, 'active_nav', None) == '🏠 Home':
+            KeyboardRegistry.register_page(inner, bindings)
+
+    _register()
     main_frame.after(50, _register)
+    main_frame.after(500, _register)

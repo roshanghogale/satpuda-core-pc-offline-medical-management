@@ -215,9 +215,11 @@ class UpdatesTab:
                         )
                 else:
                     self._status_var.set(
-                        f"You are up to date (v{info.current_version})."
+                        f"Connected to GitHub — v{info.current_version} is the latest release "
+                        f"(GitHub: v{info.latest_version or info.current_version})."
                     )
-                    self._set_notes("No newer release found on GitHub.")
+                    notes = format_release_summary(info) if info.latest_version else ""
+                    self._set_notes(notes or "No newer release found on GitHub.")
 
             self._parent().after(0, _done)
 

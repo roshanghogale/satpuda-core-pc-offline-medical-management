@@ -335,3 +335,56 @@
 2026-05-12 16:07:44  INFO  Backup skipped - backup_config.dat missing or invalid.
 2026-05-12 16:08:02  INFO  Backup skipped - backup_config.dat missing or invalid.
 2026-05-12 16:09:23  INFO  Backup skipped - backup_config.dat missing or invalid.
+2026-06-05 13:04:23  ERROR  Backup Drive error: <HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&alt=json returned "File not found: 1ZlNvP2UPm5PKYiL0_-zPGHBpCjJy1XxB.". Details: "[{'message': 'File not found: 1ZlNvP2UPm5PKYiL0_-zPGHBpCjJy1XxB.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+2026-06-05 13:07:09  INFO  backup_config.dat written for store: Swami Samarth Medical
+2026-06-05 13:07:09  INFO  Bundled backup_config.dat written: Swami Samarth Medical
+2026-06-05 13:07:40  INFO  Backup OK [manual] - SatpudaCore_2026-06-05_13-07.db.gz -> Swami Samarth Medical
+2026-06-05 13:10:53  INFO  backup_config.dat written for store: Swami Samarth Medical
+2026-06-05 13:10:53  INFO  Mirrored backup_config.dat to C:\Users\rosha\AppData\Local\VeterinaryApp\backup_config.dat
+2026-06-05 13:12:50  INFO  Bundled backup_config.dat written: Swami Samarth Medical
+2026-06-05 13:13:13  INFO  backup_config.dat written for store: Swami Samarth Medical
+2026-06-05 13:13:13  INFO  Mirrored backup_config.dat to C:\Users\rosha\AppData\Local\VeterinaryApp\backup_config.dat
+2026-06-05 13:13:13  INFO  Bundled backup_config.dat written: Swami Samarth Medical
+2026-06-05 13:13:58  INFO  Backup OK [manual] - SatpudaCore_2026-06-05_13-13.db.gz -> Swami Samarth Medical
+2026-06-05 13:26:09  INFO  Bundled backup_config.dat written: Swami Samarth Medical
+2026-06-05 19:04:16  INFO  backup_config.dat written for store: Roshan
+2026-06-05 19:04:16  INFO  Mirrored backup_config.dat to C:\Users\rosha\AppData\Local\VeterinaryApp\backup_config.dat
+2026-06-05 19:04:53  INFO  Backup OK [manual] - SatpudaCore_2026-06-05_19-04.db.gz -> Roshan
+2026-06-05 19:05:40  INFO  backup_config.dat written for store: saurav
+2026-06-05 19:05:40  INFO  Mirrored backup_config.dat to C:\Users\rosha\AppData\Local\VeterinaryApp\backup_config.dat
+2026-06-05 19:05:55  INFO  Backup OK [manual] - SatpudaCore_2026-06-05_19-05.db.gz -> saurav
+2026-06-05 19:06:29  INFO  backup_config.dat written for store: Roshan
+2026-06-05 19:06:29  INFO  Mirrored backup_config.dat to C:\Users\rosha\AppData\Local\VeterinaryApp\backup_config.dat
+2026-06-05 19:07:24  INFO  backup_config.dat written for store: saurav
+2026-06-05 19:07:24  INFO  Mirrored backup_config.dat to C:\Users\rosha\AppData\Local\VeterinaryApp\backup_config.dat
+2026-06-05 19:09:14  INFO  Bundled backup_config.dat written: Swami Samarth Medical
+2026-06-05 19:11:55  INFO  Bundled backup_config.dat written: Swami Samarth Medical
+2026-06-05 19:14:12  INFO  backup_config.dat written for store: Roshan
+2026-06-05 19:14:12  INFO  Mirrored backup_config.dat to C:\Users\rosha\AppData\Local\VeterinaryApp\backup_config.dat
+2026-06-05 19:27:47  INFO  Bundled backup_config.dat written: Swami Samarth Medical
+2026-06-05 19:44:31  ERROR  Backup Drive error: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-06-05 19:46:25  INFO  backup_config.dat written for store: Roshan
+2026-06-05 19:46:25  INFO  Mirrored backup_config.dat to C:\Users\rosha\AppData\Local\VeterinaryApp\backup_config.dat
+2026-06-05 19:47:59  INFO  Backup OK [manual] - SatpudaCore_2026-06-05_19-47.db.gz -> Roshan
+2026-06-05 19:54:48  INFO  Backup OK [manual] - SatpudaCore_2026-06-05_19-54.db.gz -> Roshan
+2026-06-05 19:56:42  INFO  backup_config.dat written for store: saurav
+2026-06-05 19:56:42  INFO  Mirrored backup_config.dat to C:\Users\rosha\AppData\Local\VeterinaryApp\backup_config.dat
+2026-06-05 19:57:01  INFO  backup_config.dat written for store: Roshan
+2026-06-05 19:57:01  INFO  Mirrored backup_config.dat to C:\Users\rosha\AppData\Local\VeterinaryApp\backup_config.dat
+2026-06-06 07:54:13  INFO  Bundled backup_config.dat written: Swami Samarth Medical
+2026-06-06 10:12:47  INFO  backup_config.dat written for store: Roshan
+2026-06-06 10:12:47  INFO  Mirrored backup_config.dat to C:\Users\rosha\AppData\Local\VeterinaryApp\backup_config.dat
+2026-06-06 10:26:06  INFO  backup_config.dat written for store: saurav
+2026-06-06 10:26:06  INFO  Mirrored backup_config.dat to C:\Users\rosha\AppData\Local\VeterinaryApp\backup_config.dat
+2026-06-06 10:26:38  INFO  backup_config.dat written for store: Roshan
+2026-06-06 10:26:38  INFO  Mirrored backup_config.dat to C:\Users\rosha\AppData\Local\VeterinaryApp\backup_config.dat
+2026-06-06 10:33:42  INFO  Bundled backup_config.dat written: Swami Samarth Medical
+2026-06-06 10:55:14  INFO  backup_config.dat written for store: Roshan
+2026-06-06 10:55:14  INFO  Mirrored backup_config.dat to C:\Users\rosha\AppData\Local\VeterinaryApp\backup_config.dat
+2026-06-07 12:29:06  INFO  Bundled backup_config.dat written: Swami Samarth Medical
+2026-06-07 12:34:13  INFO  backup_config.dat written for store: Roshan
+2026-06-07 12:34:13  INFO  Mirrored backup_config.dat to C:\Users\rosha\AppData\Local\VeterinaryApp\backup_config.dat
+2026-06-07 12:39:46  INFO  Bundled backup_config.dat written: Swami Samarth Medical
+2026-06-07 12:39:47  INFO  backup_config.dat written for store: Roshan
+2026-06-07 12:39:47  INFO  Mirrored backup_config.dat to C:\Users\rosha\AppData\Local\VeterinaryApp\backup_config.dat
+2026-06-07 12:50:23  INFO  Bundled backup_config.dat written: Swami Samarth Medical

@@ -10,7 +10,7 @@ from datetime import datetime
 import re
 from core.font_config import *
 from core.alert_colors import get_alert_color
-from core.scroll_manager import make_scrollable, open_dialog
+from core.scroll_manager import make_scrollable, open_dialog, scroll_to_widget
 from core.calc_engine import calc_return_refund
 from core.layout_config import is_strip_count_type, parse_tablets_per_stripe
 from widgets.searchable_combo import SearchableCombo
@@ -117,8 +117,14 @@ class PurchaseReturnPage:
         self.orig_tree.configure(yscrollcommand=sb1.set)
         self.orig_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         sb1.pack(side=tk.RIGHT, fill=tk.Y)
-        self.orig_tree.bind('<Double-1>', self._add_return_item_dialog)
-        self.orig_tree.bind('<Return>', self._add_return_item_dialog)
+        from core.tree_action_menu import setup_tree_actions
+        setup_tree_actions(
+            orig_frame,
+            self.orig_tree,
+            [("Add to Return", self._add_return_item_dialog)],
+            on_double=self._add_return_item_dialog,
+            escape_to=self.purchase_search.entry,
+        )
 
         # Add button below orig tree
         orig_btn_row = ttk.Frame(inner)
@@ -150,7 +156,13 @@ class PurchaseReturnPage:
         self.ret_tree.configure(yscrollcommand=sb2.set)
         self.ret_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         sb2.pack(side=tk.RIGHT, fill=tk.Y)
-        self.ret_tree.bind('<Delete>', lambda e: self._remove_return_item())
+        setup_tree_actions(
+            ret_frame,
+            self.ret_tree,
+            [("Remove from Return", self._remove_return_item)],
+            on_delete=lambda e: self._remove_return_item(),
+            escape_to=self.add_btn,
+        )
 
         # Remove button below ret tree
         ret_btn_row = ttk.Frame(inner)
@@ -228,13 +240,17 @@ class PurchaseReturnPage:
     # ── Keyboard navigation ───────────────────────────────────────────────
 
     def _setup_nav(self):
-        root = self.parent.winfo_toplevel()
-
-        # F2 → orig_tree, F3 → ret_tree, F5 → save, F6 → clear
-        root.bind('<F2>', lambda e: self._focus_tree(self.orig_tree), add='+')
-        root.bind('<F3>', lambda e: self._focus_tree(self.ret_tree),  add='+')
-        root.bind('<F5>', lambda e: self._save_return(),              add='+')
-        root.bind('<F6>', lambda e: self._clear(),                    add='+')
+        from core.keyboard_registry import KeyboardRegistry, PageBindings
+        bindings = PageBindings(
+            page_id='purchase_return',
+            first_focus=lambda: self.purchase_search.entry.focus_set(),
+            on_f5=self._save_return,
+            on_f6=self._clear,
+            f2_target=lambda: self._focus_tree(self.orig_tree),
+            f3_target=lambda: self._focus_tree(self.ret_tree),
+        )
+        self._inner_frame._keyboard_bindings = bindings
+        KeyboardRegistry.register_page(self._inner_frame, bindings)
 
         # Linear nav: search → load → add → remove → reason → discount → save → clear
         nav = [
@@ -302,6 +318,25 @@ class PurchaseReturnPage:
 
     # ── Core helpers ──────────────────────────────────────────────────────
 
+    def _focus_purchase_search_at_top(self):
+        """After a dialog closes: scroll page to top and focus purchase/supplier search."""
+        try:
+            self.purchase_search.hide_list()
+        except Exception:
+            pass
+        canvas = getattr(self._inner_frame, '_canvas', None)
+        if canvas is not None:
+            try:
+                canvas.update_idletasks()
+                canvas.yview_moveto(0)
+            except Exception:
+                pass
+        try:
+            self.purchase_search.focus(open_dropdown=False)
+            scroll_to_widget(self._inner_frame, self.purchase_search.entry)
+        except Exception:
+            pass
+
     def _reload_purchases(self):
         self.cursor.execute("""
             SELECT COALESCE(p.bill_number, p.purchase_no) || ' — ' || s.name
@@ -324,7 +359,11 @@ class PurchaseReturnPage:
         """, (bill_no, bill_no))
         row = self.cursor.fetchone()
         if not row:
-            showwarning("Not Found", f"Purchase '{bill_no}' not found.")
+            showwarning(
+                "Not Found", f"Purchase '{bill_no}' not found.",
+                parent=self.parent,
+                focus_after=self._focus_purchase_search_at_top,
+            )
             return
         self._purchase_id = row[0]
         self._supplier_id = row[4]
@@ -543,7 +582,11 @@ class PurchaseReturnPage:
 
     def _save_return(self):
         if not self._purchase_id:
-            showwarning("No Purchase", "Please load a purchase first.")
+            showwarning(
+                "No Purchase", "Please load a purchase first.",
+                parent=self.parent,
+                focus_after=self._focus_purchase_search_at_top,
+            )
             return
         if not self.return_items:
             showwarning("No Items", "Please add items to return.")

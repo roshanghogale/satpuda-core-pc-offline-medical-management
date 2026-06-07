@@ -13,30 +13,73 @@ from core.purchase_calculator import PurchaseCalculator
 from core.purchase_service import (
     get_or_create_supplier, update_purchase, expiry_to_display
 )
-from core.scroll_manager import open_dialog
+
+try:
+    import ttkbootstrap as ttk
+except ImportError:
+    from tkinter import ttk
 
 
 def open_edit_window(parent, conn, purchase_id, bill_label, refresh_callback):
     """Open the purchase edit window and wire the Update button."""
     from ui.purchase import PurchasePage
+    from core.scroll_manager import bind_scroll_descendants, refresh_scroll_region
 
-    edit_window = open_dialog(
-        parent, f"Edit Purchase - {bill_label}",
-        width=1400, height=900, resizable=False)
+    edit_window = tk.Toplevel(parent)
+    edit_window.title(f"Edit Purchase - {bill_label}")
+    try:
+        from core.window_icon import apply_window_icon
+        apply_window_icon(edit_window, master=parent.winfo_toplevel(), is_root=False)
+    except Exception:
+        pass
     edit_window.state('zoomed')
 
-    page = PurchasePage(edit_window.content, conn)
+    container = ttk.Frame(edit_window)
+    container.pack(fill=tk.BOTH, expand=True)
+
+    page = PurchasePage(container, conn)
     page._editing_purchase_id = purchase_id
-    edit_window.update_idletasks()
+
+    root = parent.winfo_toplevel()
+    ctrl = getattr(root, '_input_ctrl', None)
+    prev_canvas = prev_frame = None
+    if ctrl is not None:
+        prev_canvas = ctrl._canvas
+        prev_frame = getattr(ctrl, '_active_frame', None)
+        ctrl.set_active_canvas(getattr(page._inner_frame, '_canvas', None))
+        ctrl.set_active_frame(page._inner_frame)
+
+    try:
+        bind_scroll_descendants(page._inner_frame, force=True)
+        refresh_scroll_region(page._inner_frame)
+    except TypeError:
+        bind_scroll_descendants(page._inner_frame)
+        refresh_scroll_region(page._inner_frame)
 
     _load_for_edit(conn, page, purchase_id)
 
+    _closed = [False]
+
+    def _close():
+        if _closed[0]:
+            return
+        _closed[0] = True
+        if ctrl is not None:
+            ctrl.set_active_canvas(prev_canvas)
+            ctrl.set_active_frame(prev_frame)
+        try:
+            edit_window.destroy()
+        except Exception:
+            pass
+        refresh_callback()
+
     def _update():
-        _save_edit(conn, page, purchase_id, bill_label, edit_window, refresh_callback)
+        _save_edit(conn, page, purchase_id, bill_label, _close)
 
     page.save_btn.config(text="Update Purchase", command=_update)
-    edit_window.protocol("WM_DELETE_WINDOW",
-                         lambda: [edit_window.destroy(), refresh_callback()])
+    edit_window.protocol("WM_DELETE_WINDOW", _close)
+    from core.dialog_escape import bind_escape_to_close
+    bind_escape_to_close(edit_window, on_close=_close)
 
 
 def _load_for_edit(conn, page, purchase_id):
@@ -143,7 +186,7 @@ def _load_for_edit(conn, page, purchase_id):
     page.calculate_total()
 
 
-def _save_edit(conn, page, purchase_id, bill_label, edit_window, refresh_callback):
+def _save_edit(conn, page, purchase_id, bill_label, close_fn):
     """Run PurchaseCalculator and call purchase_service.update_purchase."""
     try:
         overall_discount = float(page.overall_discount.get() or 0)
@@ -184,8 +227,7 @@ def _save_edit(conn, page, purchase_id, bill_label, edit_window, refresh_callbac
         showinfo("Success", f"Purchase {bill_label} updated successfully!")
         page._editing_purchase_id = None
         page._edit_payment_snapshot = None
-        edit_window.destroy()
-        refresh_callback()
+        close_fn()
     except Exception as e:
         conn.rollback()
         showerror("Error", f"Failed to update purchase: {e}")
