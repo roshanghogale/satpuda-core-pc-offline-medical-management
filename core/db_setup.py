@@ -83,6 +83,7 @@ _TABLES = [
         paid_due             REAL DEFAULT 0,
         gst_calc_method      TEXT,
         amount_paid_at_entry REAL DEFAULT 0,
+        expenditure REAL DEFAULT 0,
         FOREIGN KEY (supplier_id) REFERENCES suppliers (id)
     )""",
     """CREATE TABLE IF NOT EXISTS purchase_items (
@@ -218,6 +219,60 @@ _TABLES = [
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )""",
+    """CREATE TABLE IF NOT EXISTS medicine_suppliers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        medicine_name TEXT NOT NULL,
+        supplier_id INTEGER NOT NULL,
+        last_rate REAL DEFAULT 0,
+        last_purchase_date DATE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(medicine_name, supplier_id),
+        FOREIGN KEY (supplier_id) REFERENCES suppliers (id)
+    )""",
+    """CREATE TABLE IF NOT EXISTS pending_orders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_no TEXT UNIQUE,
+        medicine_id INTEGER,
+        medicine_name TEXT NOT NULL,
+        pack_size TEXT,
+        supplier_id INTEGER,
+        supplier_name_manual TEXT,
+        supplier_phone TEXT,
+        supplier_email TEXT,
+        order_offline INTEGER DEFAULT 0,
+        offline_note TEXT,
+        quantity REAL NOT NULL DEFAULT 0,
+        unit_price REAL DEFAULT 0,
+        current_stock REAL DEFAULT 0,
+        min_stock REAL DEFAULT 0,
+        order_date DATE,
+        expected_delivery_date DATE,
+        status TEXT DEFAULT 'draft',
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (medicine_id) REFERENCES medicines (id),
+        FOREIGN KEY (supplier_id) REFERENCES suppliers (id)
+    )""",
+    """CREATE TABLE IF NOT EXISTS stock_disposals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        disposal_no TEXT UNIQUE,
+        medicine_id INTEGER NOT NULL,
+        batch_no TEXT,
+        supplier_id INTEGER,
+        purchase_id INTEGER,
+        bill_number TEXT,
+        quantity REAL NOT NULL DEFAULT 0,
+        original_purchase_qty REAL,
+        reason TEXT,
+        disposal_type TEXT NOT NULL,
+        expected_credit_note INTEGER DEFAULT 0,
+        notes TEXT,
+        disposal_date DATE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (medicine_id) REFERENCES medicines (id),
+        FOREIGN KEY (supplier_id) REFERENCES suppliers (id),
+        FOREIGN KEY (purchase_id) REFERENCES purchases (id)
+    )""",
 ]
 
 
@@ -240,21 +295,61 @@ def initialise(conn: sqlite3.Connection):
 
 # ── Migrations ────────────────────────────────────────────────────────────────
 
+# Bump when expensive startup-only migrations change (triggers, views, location fix).
+_STARTUP_MIGRATION_VERSION = 1
+
+
+def _get_startup_migration_version(cur) -> int:
+    try:
+        cur.execute(
+            "SELECT value FROM settings WHERE name='startup_migration_version'")
+        row = cur.fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+    except Exception:
+        return 0
+
+
+def _set_startup_migration_version(cur, conn, version: int) -> None:
+    cur.execute(
+        "INSERT OR REPLACE INTO settings (name, value) VALUES (?, ?)",
+        ('startup_migration_version', str(version)),
+    )
+    conn.commit()
+
+
 def _migrate_all(cur, conn):
     _migrate_doctors(cur)
     _migrate_medicines(cur, conn)
     _migrate_purchases(cur)
     _migrate_purchase_items(cur)
+    _migrate_line_item_medicine_id(cur)
     _migrate_pharmacy_profile(cur)
     _migrate_sales(cur)
-    _create_purchase_triggers(cur)
-    _create_purchase_views(cur)
-    _create_sales_triggers(cur)
-    _migrate_location_format(cur)
+    _migrate_sales_due_formula(conn)
     _migrate_customer_payments(cur)
     _migrate_suppliers(cur)
     _migrate_purchase_items_entry_paid(cur)
+    _migrate_pending_orders(cur)
+    # Sync metadata columns (created_at/updated_at/version/device_id/deleted/sync_status).
+    # Schema only — conflict logic / bootstrap / listeners unchanged this step.
+    from core.sync_metadata_schema import ensure_sync_metadata_schema
+    ensure_sync_metadata_schema(conn)
+
+    if _get_startup_migration_version(cur) < _STARTUP_MIGRATION_VERSION:
+        _create_purchase_triggers(cur)
+        _create_purchase_views(cur)
+        _create_sales_triggers(cur)
+        _migrate_location_format(cur)
+        _set_startup_migration_version(cur, conn, _STARTUP_MIGRATION_VERSION)
+
     conn.commit()
+
+
+def _migrate_pending_orders(cur):
+    try:
+        _alter_if_missing(cur, 'pending_orders', 'order_group_id', 'TEXT')
+    except Exception as e:
+        print(f"pending_orders migration: {e}")
 
 
 def _alter_if_missing(cur, table, col, col_type):
@@ -279,10 +374,16 @@ def _migrate_medicines(cur, conn):
         for col in ('content_drug', 'unit', 'location'):
             if col not in cols:
                 cur.execute(f"ALTER TABLE medicines ADD COLUMN {col} TEXT")
+        if 'is_hidden' not in cols:
+            cur.execute("ALTER TABLE medicines ADD COLUMN is_hidden INTEGER DEFAULT 0")
+        if 'synced_at' not in cols:
+            cur.execute("ALTER TABLE medicines ADD COLUMN synced_at TEXT")
+        from core.medicine_sync_merge import ensure_medicine_sync_triggers
+        ensure_medicine_sync_triggers(cur)
         # Rebuild if unexpected columns exist
         expected = {'id','name','type','stock_qty','unit','gst_percent','mrp','rate',
                     'manufacturer','batch_no','expiry_date','hsn_code','schedule',
-                    'location','content_drug','created_at'}
+                    'location','content_drug','is_hidden','synced_at','created_at'}
         if len(cols) > len(expected) or any(c not in expected for c in cols if c != 'id'):
             _recreate_medicines(cur)
     except Exception as e:
@@ -301,7 +402,7 @@ def _recreate_medicines(cur):
 
         cur.execute("SELECT id, name, type, stock_qty, unit, gst_percent, mrp, rate,"
                     " manufacturer, batch_no, expiry_date, hsn_code, schedule, location,"
-                    " content_drug, created_at FROM medicines")
+                    " content_drug, created_at, COALESCE(is_hidden, 0), synced_at FROM medicines")
         backup = cur.fetchall()
 
         cur.execute("DROP TABLE IF EXISTS medicines")
@@ -312,6 +413,8 @@ def _recreate_medicines(cur):
             gst_percent REAL, mrp REAL, rate REAL,
             manufacturer TEXT, batch_no TEXT, expiry_date DATE,
             hsn_code TEXT, schedule TEXT, location TEXT, content_drug TEXT,
+            is_hidden INTEGER DEFAULT 0,
+            synced_at TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""")
         for row in backup:
@@ -319,9 +422,11 @@ def _recreate_medicines(cur):
                 INSERT INTO medicines
                     (id, name, type, stock_qty, unit, gst_percent, mrp, rate,
                      manufacturer, batch_no, expiry_date, hsn_code, schedule,
-                     location, content_drug, created_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            """, row)  # row has exactly 16 values matching the SELECT above
+                     location, content_drug, created_at, is_hidden, synced_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, row)
+        from core.medicine_sync_merge import ensure_medicine_sync_triggers
+        ensure_medicine_sync_triggers(cur)
     except Exception as e:
         print(f"recreate medicines: {e}")
 
@@ -381,6 +486,8 @@ def _migrate_purchases(cur):
             # legacy aliases
             ('due_amount','REAL DEFAULT 0'), ('credit_amount','REAL DEFAULT 0'),
             ('paid_due','REAL DEFAULT 0'), ('gst_calc_method','TEXT'),
+            ('expenditure','REAL DEFAULT 0'),
+            ('is_autosave', 'INTEGER DEFAULT 0'),
         ]
         for col, col_type in new_cols:
             if col not in cols:
@@ -393,6 +500,25 @@ def _migrate_purchases(cur):
             cur.execute("UPDATE purchases SET final_amount=COALESCE(total_amount,0) WHERE final_amount IS NULL OR final_amount=0")
     except Exception as e:
         print(f"purchases migration: {e}")
+
+
+def _migrate_line_item_medicine_id(cur):
+    """Legacy DBs may use med_id on line-item tables instead of medicine_id."""
+    for table in (
+        'sales_items', 'purchase_items', 'sales_return_items', 'purchase_return_items',
+    ):
+        try:
+            cur.execute(f'PRAGMA table_info({table})')
+            cols = {c[1] for c in cur.fetchall()}
+            if 'medicine_id' not in cols and 'med_id' in cols:
+                cur.execute(f'ALTER TABLE {table} RENAME COLUMN med_id TO medicine_id')
+            elif 'medicine_id' in cols and 'med_id' in cols:
+                cur.execute(
+                    f"UPDATE {table} SET medicine_id=med_id "
+                    f"WHERE (medicine_id IS NULL OR medicine_id=0) AND med_id IS NOT NULL AND med_id!=0"
+                )
+        except Exception as e:
+            print(f'line item medicine_id migration ({table}): {e}')
 
 
 def _migrate_purchase_items(cur):
@@ -443,6 +569,7 @@ def _migrate_sales(cur):
             ('bill_cleared',     'INTEGER DEFAULT 0'),
             ('account_cleared',  'INTEGER DEFAULT 0'),
             ('discount_pct',     'REAL DEFAULT 0'),
+            ('is_autosave',      'INTEGER DEFAULT 0'),
         ]
         for col, col_type in new_cols:
             if col not in cols:
@@ -458,6 +585,26 @@ def _migrate_sales(cur):
                 cur.execute(f"ALTER TABLE sales_items ADD COLUMN {col} {col_type}")
     except Exception as e:
         print(f"sales migration: {e}")
+
+
+def _migrate_sales_due_formula(conn):
+    """One-time repair: bill due = total - paid; total due = prev due + bill due."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT value FROM settings WHERE name='sales_due_formula_migrated'")
+        row = cur.fetchone()
+        if row and row[0] == '1':
+            return
+
+        from core.billing_service import repair_sales_due_fields
+        n = repair_sales_due_fields(conn)
+        print(f"[MIGRATION] Repaired sales due fields on {n} bill(s).")
+        cur.execute(
+            "INSERT OR REPLACE INTO settings (name, value) VALUES ('sales_due_formula_migrated','1')")
+        conn.commit()
+    except Exception as e:
+        print(f"sales due formula migration: {e}")
 
 
 def _rebuild_sales_table(cur):

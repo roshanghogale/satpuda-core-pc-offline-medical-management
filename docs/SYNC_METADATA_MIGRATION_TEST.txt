@@ -1,0 +1,46 @@
+Sync metadata migration test (copy of Store_Roshan)
+source=config\stores\Store_Roshan\veterinary.db
+copy=config\stores\Store_Roshan\veterinary_syncmeta_test.db
+
+table	before	after_pass1	after_pass2
+customers	27	27	27
+suppliers	31	31	31
+doctors	27	27	27
+medicines	389	389	389
+sales	56	56	56
+sales_items	102	102	102
+purchases	71	71	71
+purchase_items	452	452	452
+customer_payments	4	4	4
+supplier_payments	0	0	0
+sales_returns	2	2	2
+sales_return_items	2	2	2
+purchase_returns	2	2	2
+purchase_return_items	2	2	2
+racks	0	0	0
+sections	0	0	0
+boxes	0	0	0
+shelves	0	0	0
+medicine_shelf	0	0	0
+
+dropped_rows=NONE
+ANDROID copy test (_check_android.db -> _check_android_syncmeta_test.db)
+table	before	after1	after2
+customers	17	17	17
+suppliers	25	25	25
+doctors	27	27	27
+medicines	310	310	310
+sales	33	33	33
+sales_items	68	68	68
+purchases	58	58	58
+purchase_items	313	313	313
+customer_payments	4	4	4
+supplier_payments	0	0	0
+sales_returns	2	2	2
+sales_return_items	2	2	2
+purchase_returns	0	0	0
+purchase_return_items	0	0	0
+racks/sections/boxes/shelves/medicine_shelf	0
+dropped_rows=NONE
+
+NOTE: Desktop return-delete sync still not wired; deleted column prepares soft-delete only.
