@@ -14,32 +14,22 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 # Canonical types returned by the detector (mapped to layout types via match_type_to_available)
 CANONICAL_TYPES: Tuple[str, ...] = (
-    "Tablet",
-    "Bolus",
-    "Capsule",
-    "Syrup",
-    "Liquid",
-    "Powder",
-    "Drops",
-    "Injection",
-    "Injection - Vial",
-    "Gel",
-    "Vaccine",
-    "Ointment",
-    "Liniment",
-    "Granules",
-    "Instruments",
-    "Others",
+    "Tablet", "Bolus", "Capsule", "Syrup", "Suspension", "Liquid", "Powder",
+    "Drops", "Eye Drops", "Ear Drops", "Nasal Drops", "Injection",
+    "Injection - Vial", "Gel", "Vaccine", "Ointment", "Cream", "Liniment",
+    "Granules", "Lotion", "Spray", "Shampoo", "Sachet", "Soap", "Inhaler",
+    "Instrument / Medical Device", "Feed Supplement", "Others",
 )
 
 # (type_name, patterns on NAME field, patterns on UNIT/PACK fields, patterns on ANY combined text, base_score)
 _TYPE_RULES: List[Tuple[str, List[str], List[str], List[str], int]] = [
     (
-        "Instruments",
+        "Instrument / Medical Device",
         [
             r"\bsyringe\b", r"\bneedle\b", r"\bgloves?\b", r"\bcatheter\b",
             r"\bscalpel\b", r"\bbandage\b", r"\bsurgical\b", r"\bequipment\b",
             r"\binstrument\b", r"\bthermometer\b", r"\bforceps\b",
+            r"\bmedical\s*device\b",
         ],
         [],
         [],
@@ -70,14 +60,98 @@ _TYPE_RULES: List[Tuple[str, List[str], List[str], List[str], int]] = [
         82,
     ),
     (
+        "Eye Drops",
+        [r"\beye\s*drops?\b", r"\beyedrop", r"\boptical\b"],
+        [r"\beye\b"],
+        [r"\beye\s*drop"],
+        88,
+    ),
+    (
+        "Ear Drops",
+        [r"\bear\s*drops?\b", r"\beardrop"],
+        [r"\bear\b"],
+        [r"\bear\s*drop"],
+        87,
+    ),
+    (
+        "Nasal Drops",
+        [r"\bnasal\s*drops?\b", r"\bnasal\s*drop"],
+        [r"\bnasal\b"],
+        [],
+        86,
+    ),
+    (
         "Drops",
-        [
-            r"\bdrops?\b", r"\beye\s*drop", r"\bear\s*drop", r"\bnasal\s*drop",
-            r"\boptical\b",
-        ],
+        [r"\bdrops?\b"],
         [r"\bdrop\b"],
         [],
         80,
+    ),
+    (
+        "Suspension",
+        [r"\bsuspension\b", r"\bsusp\b"],
+        [r"\bsusp\b"],
+        [],
+        75,
+    ),
+    (
+        "Sachet",
+        [r"\bsachet\b", r"\bsach\b"],
+        [r"\bsachet\b"],
+        [],
+        73,
+    ),
+    (
+        "Cream",
+        [r"\bcream\b", r"\bcrm\b"],
+        [r"\bcream\b", r"\bcrm\b"],
+        [],
+        71,
+    ),
+    (
+        "Lotion",
+        [
+            r"\blotion\b",
+            r"\bface\s*wash\b", r"\bfacewash\b", r"\bface\s*was\b",
+        ],
+        [r"\blotion\b"],
+        [],
+        73,
+    ),
+    (
+        "Spray",
+        [r"\bspray\b"],
+        [r"\bspray\b"],
+        [],
+        67,
+    ),
+    (
+        "Shampoo",
+        [r"\bshampoo\b", r"\bshmp\b"],
+        [],
+        [],
+        65,
+    ),
+    (
+        "Soap",
+        [r"\bsoap\b"],
+        [],
+        [],
+        63,
+    ),
+    (
+        "Inhaler",
+        [r"\binhaler\b", r"\binhal\b", r"\brotacap\b"],
+        [],
+        [],
+        61,
+    ),
+    (
+        "Feed Supplement",
+        [r"\bfeed\s*supplement\b", r"\bsupplement\b", r"\bmineral\b"],
+        [],
+        [],
+        59,
     ),
     (
         "Bolus",
@@ -99,15 +173,16 @@ _TYPE_RULES: List[Tuple[str, List[str], List[str], List[str], int]] = [
     ),
     (
         "Syrup",
-        [r"\bsyrup\b", r"\bsuspension\b", r"\bsusp\b"],
-        [r"\bsyrup\b", r"\bsusp\b", r"\bbot\b", r"\bbottle\b"],
+        [r"\bsyrup\b"],
+        [r"\bsyrup\b", r"\bbot\b", r"\bbottle\b"],
         [r"\bsyrup\b"],
         74,
     ),
     (
         "Liquid",
         [
-            r"\bliquid\b", r"\bliq\b", r"\bsolution\b", r"\bwash\b",
+            r"\bliquid\b", r"\bliq\b", r"\bsolution\b",
+            r"\bsanitizer\b", r"\bsanitiser\b", r"\bhand\s*san\b",
             r"\bltr\b", r"\blitre\b", r"\bliter\b",
         ],
         [r"\bliq\b", r"\bml\b", r"\bltr\b", r"\bbot\b", r"\bbottle\b", r"\b\d+\s*m\b"],
@@ -123,8 +198,8 @@ _TYPE_RULES: List[Tuple[str, List[str], List[str], List[str], int]] = [
     ),
     (
         "Ointment",
-        [r"\bointment\b", r"\boint\b", r"\bcream\b", r"\bcrm\b"],
-        [r"\boint\b", r"\bcrm\b"],
+        [r"\bointment\b", r"\boint\b"],
+        [r"\boint\b"],
         [],
         68,
     ),
@@ -162,6 +237,21 @@ _TYPE_RULES: List[Tuple[str, List[str], List[str], List[str], int]] = [
 ]
 
 _LOW_CONFIDENCE_THRESHOLD = 25
+_DETECTION_OVERRIDE_THRESHOLD = 68.0
+
+# Pack like 60GM / 100ML — size notation, not a dosage-form unit hint.
+_DIMENSIONAL_PACK_RE = re.compile(
+    r"^\d+(?:\.\d+)?\s*(GM|G|MG|ML|MD|KG|L)$",
+    re.IGNORECASE,
+)
+
+# Truncated OCR / cut bill text for cosmetics (facewash name often incomplete).
+_FACEWASH_NAME_PATTERNS = (
+    r"FACEWASH", r"FACWASH", r"FACE\s*WASH", r"FACE\s*WAS", r"FACEW",
+    r"FACW\b", r"FAC\s*W\b", r"\bFW\b", r"\bFW\.", r"FACE\s*W\b",
+    r"CHARCOAL\s*FACE", r"NEEM\s*FACE", r"NEEMWAY\s*FACE",
+    r"\bFACE$", r"\bFACE\s*W$", r"GLOW.*FW", r"LOVELY\s*FW",
+)
 
 
 def _normalize_text(*parts: Any) -> str:
@@ -177,6 +267,93 @@ def _normalize_text(*parts: Any) -> str:
     text = re.sub(r"[_/\\|]+", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
+
+
+def _pack_for_unit_scoring(pack: str) -> str:
+    """Ignore 60GM / 100ML style pack sizes when inferring form from units."""
+    p = (pack or "").strip()
+    if _DIMENSIONAL_PACK_RE.match(p.replace(" ", "")):
+        return ""
+    return p
+
+
+def _looks_like_topical_pack(pack: str) -> bool:
+    return bool(_DIMENSIONAL_PACK_RE.match((pack or "").strip().replace(" ", "")))
+
+
+# Dosage form read from the product name. Word-anchored so a brand like
+# "DROPZ" or "CAPTOPRIL" cannot be mistaken for a form.
+_NAME_FORM_RULES = (
+    (r"\bEYE\s*DROPS?\b|\bE/?D\b", "Eye Drops", 92.0),
+    (r"\bEAR\s*DROPS?\b", "Ear Drops", 92.0),
+    (r"\bNASAL\s*(DROPS?|SPRAY)\b", "Nasal Drops", 92.0),
+    (r"\bVIAL\b", "Injection - Vial", 90.0),
+    (r"\b(INJ|INJECTION|INJEC)\b|\bINJ$", "Injection", 92.0),
+    (r"\b(VACC?|VACCINE)\b", "Vaccine", 90.0),
+    (r"\b(SYP|SYRUP|SYRP)\b|\bSYP$", "Syrup", 92.0),
+    (r"\b(SUSP|SUSPENSION)\b", "Suspension", 90.0),
+    (r"\b(LIQ|LIQUID)\b|\bLIQ$", "Liquid", 90.0),
+    (r"\b(TAB|TABS|TABLET|TABLETS)\b|\bTAB$", "Tablet", 92.0),
+    (r"\b(CAP|CAPS|CAPSULE|CAPSULES)\b|\bCAP$", "Capsule", 92.0),
+    (r"\b(BOLUS|BOL)\b", "Bolus", 90.0),
+    (r"\b(SACHET|SACHETS|SACH)\b", "Sachet", 88.0),
+    (r"\b(POWDER|PWD|PDR)\b", "Powder", 88.0),
+    (r"\bGRANULES?\b", "Granules", 88.0),
+    (r"\bLINIMENT\b", "Liniment", 88.0),
+    (r"\bINHALER\b", "Inhaler", 88.0),
+    (r"\bSPRAY\b", "Spray", 86.0),
+    (r"\bDROPS?\b", "Drops", 84.0),
+)
+
+
+def _detect_bill_form_type(name: str, pack: str = "") -> Tuple[str, float]:
+    """
+    High-confidence form from bill product name (handles truncated OCR text).
+    Used before generic rules so cut facewash / cream / gel names classify correctly.
+    """
+    n = _normalize_text(name).upper()
+    if not n:
+        return "", 0.0
+
+    for pat in _FACEWASH_NAME_PATTERNS:
+        if re.search(pat, n, re.IGNORECASE):
+            return "Lotion", 88.0
+
+    if re.search(r"\bCREAM\b|\bCRM\b|CREAM$", n):
+        return "Cream", 92.0
+    if re.search(r"\bGEL\b|GEL$", n):
+        return "Gel", 92.0
+    if re.search(r"\bLOTION\b", n):
+        return "Lotion", 90.0
+    if re.search(r"\bOINTMENT\b|\bOINT\b", n):
+        return "Ointment", 90.0
+    if re.search(r"\bSHAMPOO\b|\bSHMP\b", n):
+        return "Shampoo", 88.0
+    if re.search(r"\bSOAP\b", n):
+        return "Soap", 88.0
+    if re.search(r"\bSANITIZER\b|\bSANITISER\b|\bHAND\s*SAN\b", n):
+        return "Liquid", 88.0
+
+    has_oral = bool(re.search(
+        r"\b(TAB|TABS|TABLET|CAP|CAPS|CAPSULE|BOLUS|BOL|SYP|SYRUP|INJ|INJECTION|DROP)\b",
+        n,
+    ))
+    if _looks_like_topical_pack(pack) and not has_oral:
+        if re.search(r"\b(FACE|FACW|CHARCOAL|NEEM|FW|WASH|CLEAN|SCRUB)\b", n):
+            return "Lotion", 78.0
+
+    # The dosage form printed on the product name. On a supplier bill this is
+    # the most reliable signal there is -- and it was missing here, so anything
+    # measured in ML or LIT fell through to the pack rules and came back as
+    # "Liquid". A 30ML injection, a 500ML syrup and a 5LIT liquid all read the
+    # same, which is what made every imported row say Liquid.
+    #
+    # Ordered most specific first: EYE DROPS before DROPS, VIAL before INJ.
+    for pattern, med_type, conf in _NAME_FORM_RULES:
+        if re.search(pattern, n):
+            return med_type, conf
+
+    return "", 0.0
 
 
 def _score_patterns(text: str, patterns: Sequence[str], weight: float) -> float:
@@ -201,9 +378,29 @@ def classify_medicine_type(
     Classify medicine type from name + units + bill context.
     Returns (canonical_type, confidence_score).
     """
+    bill_form, bill_conf = _detect_bill_form_type(name, pack)
+    if bill_form and bill_conf >= _DETECTION_OVERRIDE_THRESHOLD:
+        matched = match_type_to_available(bill_form, available_types) or bill_form
+        return matched, bill_conf
+
+    from core.bill_import_normalize import pack_is_volume_or_weight
+    if pack_is_volume_or_weight(pack):
+        matched = match_type_to_available("Liquid", available_types) or "Liquid"
+        return matched, 80.0
+
     name_t = _normalize_text(name)
-    unit_t = _normalize_text(qty_unit, pkg_unit, pack)
-    combined = _normalize_text(name, pack, qty_unit, pkg_unit, bill_text)
+    unit_t = _normalize_text(
+        qty_unit,
+        pkg_unit,
+        _pack_for_unit_scoring(pack),
+    )
+    combined = _normalize_text(
+        name,
+        _pack_for_unit_scoring(pack),
+        qty_unit,
+        pkg_unit,
+        bill_text,
+    )
 
     scores: Dict[str, float] = {}
     for type_name, name_pats, unit_pats, any_pats, base in _TYPE_RULES:
@@ -219,7 +416,10 @@ def classify_medicine_type(
         scores[type_name] = float(base) + hits
 
     if not scores:
-        fallback = match_type_to_available("Others", available_types) or "Tablet"
+        if bill_form:
+            matched = match_type_to_available(bill_form, available_types) or bill_form
+            return matched, bill_conf
+        fallback = match_type_to_available("Others", available_types) or "Others"
         return fallback, 0.0
 
     ranked = sorted(scores.items(), key=lambda x: (-x[1], x[0]))
@@ -227,7 +427,10 @@ def classify_medicine_type(
     second_score = ranked[1][1] if len(ranked) > 1 else 0.0
 
     if best_score < _LOW_CONFIDENCE_THRESHOLD:
-        fallback = match_type_to_available("Others", available_types) or "Tablet"
+        if bill_form:
+            matched = match_type_to_available(bill_form, available_types) or bill_form
+            return matched, bill_conf
+        fallback = match_type_to_available("Others", available_types) or "Others"
         return fallback, best_score
 
     # Ambiguous: two types close — prefer higher-priority (already sorted by score)
@@ -271,29 +474,44 @@ def match_type_to_available(
         if str(option).lower() == wanted.lower():
             return str(option)
 
-    # Fuzzy contains
+    # Avoid Cream/Gel/Lotion collapsing into Ointment via substring match.
+    _EXACT_ONLY = frozenset({
+        "cream", "gel", "lotion", "tablet", "capsule", "syrup", "liquid",
+        "powder", "injection", "drops", "shampoo", "soap", "spray",
+    })
+    if key not in _EXACT_ONLY:
+        wl = wanted.lower()
+        for option in options:
+            ol = str(option).lower()
+            if wl in ol or ol in wl:
+                return str(option)
+
     wl = wanted.lower()
     for option in options:
-        ol = str(option).lower()
-        if wl in ol or ol in wl:
+        if str(option).lower() == wl:
             return str(option)
 
-    # Capsule/Drops/Instruments/Others not in layout → Tablet or first fallback
     fallbacks = {
         "capsule": "Tablet",
         "drops": "Liquid",
         "syrup": "Syrup",
         "instruments": "Others",
-        "others": options[0] if options else "Tablet",
+        "others": "Others",
+        "lotion": "Lotion",
+        "cream": "Cream",
+        "gel": "Gel",
     }
     if wl in fallbacks:
         fb = fallbacks[wl]
         for option in options:
             if str(option).lower() == fb.lower():
                 return str(option)
-        return options[0] if options else wanted
 
-    return wanted if wanted in options else (options[0] if options else wanted)
+    for option in options:
+        if str(option).lower() == "others":
+            return str(option)
+
+    return wanted if wanted in options else ""
 
 
 def _learned_path() -> str:
@@ -366,27 +584,15 @@ def resolve_medicine_type(
     *,
     use_learned: bool = True,
     save_learned: bool = True,
+    prefer_name_detection: bool = False,
 ) -> str:
     """
-    Resolve type: DB/master → import_learned → intelligent detection.
+    Resolve type: name detection (bill import) → DB/master → import_learned → classify.
     """
     clean_name = (name or "").strip()
     name_key = clean_name.upper()
 
-    if conn and clean_name:
-        stored = lookup_stored_medicine_type(conn, clean_name)
-        if stored:
-            matched = match_type_to_available(stored, available_types) or stored
-            if use_learned and save_learned and name_key:
-                save_learned_medicine_type(name_key, matched)
-            return matched
-
-    if use_learned and name_key:
-        learned = load_learned_medicine_types().get(name_key)
-        if learned:
-            return match_type_to_available(learned, available_types) or learned
-
-    detected, _conf = classify_medicine_type(
+    detected, conf = classify_medicine_type(
         name=clean_name,
         pack=pack,
         qty_unit=qty_unit,
@@ -394,9 +600,64 @@ def resolve_medicine_type(
         bill_text=bill_text,
         available_types=available_types,
     )
+    if prefer_name_detection and conf >= _DETECTION_OVERRIDE_THRESHOLD:
+        if use_learned and save_learned and name_key and detected:
+            save_learned_medicine_type(name_key, detected)
+        return detected
+
+    if conn and clean_name:
+        stored = lookup_stored_medicine_type(conn, clean_name)
+        if stored:
+            stored_matched = match_type_to_available(stored, available_types) or stored
+            if prefer_name_detection and conf >= _DETECTION_OVERRIDE_THRESHOLD:
+                if _stored_type_conflicts_with_detection(stored_matched, detected):
+                    if use_learned and save_learned and name_key:
+                        save_learned_medicine_type(name_key, detected)
+                    return detected
+            if use_learned and save_learned and name_key:
+                save_learned_medicine_type(name_key, stored_matched)
+            return stored_matched
+
+    if use_learned and name_key:
+        learned = load_learned_medicine_types().get(name_key)
+        if learned:
+            learned_matched = match_type_to_available(learned, available_types) or learned
+            if prefer_name_detection and conf >= _DETECTION_OVERRIDE_THRESHOLD:
+                if _stored_type_conflicts_with_detection(learned_matched, detected):
+                    if save_learned and name_key:
+                        save_learned_medicine_type(name_key, detected)
+                    return detected
+            return learned_matched
+
     if use_learned and save_learned and name_key and detected:
         save_learned_medicine_type(name_key, detected)
     return detected
+
+
+def _stored_type_conflicts_with_detection(stored: str, detected: str) -> bool:
+    """True when DB/learned type likely wrong vs strong name-based detection."""
+    s = (stored or "").strip().lower()
+    d = (detected or "").strip().lower()
+    if not s or not d or s == d:
+        return False
+    topical = frozenset({"cream", "gel", "lotion", "shampoo", "soap", "ointment"})
+    wrong_for_topical = frozenset({"tablet", "bolus", "capsule", "powder", "liquid"})
+    if d in topical and s in wrong_for_topical:
+        return True
+    if d == "lotion" and s in {"tablet", "powder", "liquid", "ointment"}:
+        return True
+    if d in {"cream", "gel"} and s == "ointment":
+        return True
+    liquid_forms = frozenset({
+        "liquid", "syrup", "suspension", "injection", "injection - vial",
+        "drops", "eye drops", "ear drops", "nasal drops",
+    })
+    strip_forms = frozenset({"tablet", "bolus", "capsule", "tablet pack", "bolus pack"})
+    if d in liquid_forms and s in strip_forms:
+        return True
+    if d in strip_forms and s in liquid_forms:
+        return True
+    return False
 
 
 def detect_medicine_type(
@@ -447,25 +708,31 @@ def enrich_invoice_medicine_types(
     invoice: Any,
     conn: Any = None,
     available_types: Optional[Iterable[str]] = None,
+    *,
+    save_learned: bool = True,
 ) -> None:
     """Set medicine_type on each imported line using full detection pipeline."""
     if available_types is None:
         try:
-            from core.layout_config import MED_TYPES
+            from core.layout_config import get_med_types
 
-            available_types = list(MED_TYPES)
+            available_types = get_med_types()
         except Exception:
             available_types = list(CANONICAL_TYPES)
 
     for item in getattr(invoice, "items", []) or []:
-        if (item.raw or {}).get("medicine_type_locked"):
+        raw = item.raw or {}
+        if raw.get("medicine_type_locked"):
             continue
-        if (item.medicine_type or "").strip() and (item.raw or {}).get(
-            "medicine_type_source"
-        ) == "column":
+        if (
+            (item.medicine_type or "").strip()
+            and raw.get("medicine_type_source") == "column"
+            and not raw.get("gemini_import")
+        ):
             continue
 
         qty_u, pkg_u, bill_t = _item_context_text(item)
+        bill_photo = bool(raw.get("gemini_import") or raw.get("hsn_chapter"))
         resolved = resolve_medicine_type(
             conn=conn,
             name=item.name,
@@ -474,7 +741,8 @@ def enrich_invoice_medicine_types(
             pkg_unit=pkg_u,
             bill_text=bill_t,
             available_types=available_types,
-            save_learned=bool(conn),
+            save_learned=bool(conn) and save_learned,
+            prefer_name_detection=bill_photo,
         )
         item.medicine_type = resolved
         if item.raw is None:

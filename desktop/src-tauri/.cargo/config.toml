@@ -1,0 +1,14 @@
+# Rust target directory.
+#
+# On Windows the target dir MUST be a short path: MSVC link.exe takes the object
+# files as a command line, and a deep path like
+#   ...\Satpuda Core Server Update\desktop\src-tauri\target\debug\deps\...
+# blows past the ~32K limit and fails with an unhelpful "could not compile `app`".
+#
+# It used to be hardcoded here as target-dir = "C:\satpuda-rs", which made the
+# project unbuildable anywhere else: on macOS/Linux cargo reads that as a RELATIVE
+# path containing ':' and dies with
+#   "failed to join paths from `$DYLD_FALLBACK_LIBRARY_PATH` together".
+#
+# The Windows build scripts now set CARGO_TARGET_DIR instead, which gives the same
+# short path on Windows and leaves every other platform on the default ./target.

@@ -2,10 +2,25 @@
 import json
 import mimetypes
 import os
+import shutil
 import sqlite3
 import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import ThreadingMixIn
 from urllib.parse import parse_qs, unquote, urlparse
+
+try:
+    from http.server import ThreadingHTTPServer as _ThreadingHTTPServer
+except ImportError:
+
+    class _ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+        daemon_threads = True
+
+
+class ThreadingHTTPServer(_ThreadingHTTPServer):
+    allow_reuse_address = True
+    daemon_threads = True
 
 _DEFAULT_PORT = 8765
 _server = None
@@ -62,6 +77,43 @@ def _web_app_dir():
     return os.path.join(base, 'web_app')
 
 
+def prepare_web_purchase_root():
+    """
+    Return the folder that contains index.html.
+
+    When frozen, copy bundled web_app files into LOCALAPPDATA so the server
+    can write catalog.json and serve static files reliably (Win7/Win10 EXE).
+    """
+    import sys
+    root = _web_app_dir()
+    os.makedirs(root, exist_ok=True)
+    if getattr(sys, 'frozen', False):
+        bundle = os.path.join(sys._MEIPASS, 'web_app')
+        # catalog.json is NOT in this list, and must never be.
+        #
+        # It is the SHOP'S OWN file: write_runtime_catalog builds it from this
+        # store's database every time web purchase is opened -- its suppliers,
+        # with their addresses, phone numbers, GSTINs and drug licence numbers.
+        # A copy of it had been left in web_app/ in the repo, so it was bundled
+        # into the EXE, and this loop then wrote ANOTHER shop's supplier list
+        # over the shop's own on every single launch. Unconditionally, and
+        # silently.
+        #
+        # launcher.html is gone for the same reason: 857 KB of one shop's real
+        # supplier records, referenced by nothing but this line.
+        for name in ('index.html', 'medicines.json'):
+            src = os.path.join(bundle, name)
+            if os.path.isfile(src):
+                shutil.copy2(src, os.path.join(root, name))
+        src_assets = os.path.join(bundle, 'assets')
+        dst_assets = os.path.join(root, 'assets')
+        if os.path.isdir(src_assets):
+            if os.path.isdir(dst_assets):
+                shutil.rmtree(dst_assets, ignore_errors=True)
+            shutil.copytree(src_assets, dst_assets)
+    return root
+
+
 def _json_response(handler, status, payload):
     body = json.dumps(payload).encode('utf-8')
     handler.send_response(status)
@@ -82,13 +134,49 @@ def _layout_schedules():
 
 
 def _layout_med_types():
-    from core.layout_config import load_layout, _DEFAULT_MED_TYPES
-    layout = load_layout()
-    med_types = layout.get('med_types') or list(_DEFAULT_MED_TYPES)
-    return med_types if med_types else list(_DEFAULT_MED_TYPES)
+    from core.layout_config import get_med_types
+    return get_med_types()
+
+
+def _is_online() -> bool:
+    try:
+        from core.sync_prefs import is_online_mode
+
+        return bool(is_online_mode())
+    except Exception:
+        return False
 
 
 def _get_suppliers(conn):
+    # Online the engine's connection is sqlite3.connect(":memory:") -- an empty
+    # shell. Reading suppliers from it returned NONE, and write_runtime_catalog
+    # then saved that emptiness over the shop's own catalog.json, so the web
+    # purchase-entry page lost every supplier it had.
+    if _is_online():
+        try:
+            from core.online_catalog import suppliers as _online_suppliers
+
+            rows = _online_suppliers() or []
+            out = []
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                name = str(r.get('name') or '').strip()
+                if not name:
+                    continue
+                out.append({
+                    'name': name,
+                    'address': str(r.get('address') or ''),
+                    'phone': str(r.get('phone') or ''),
+                    'gstin': str(r.get('gstin') or r.get('gst_number') or ''),
+                    'dl_numbers': str(r.get('dl_numbers') or r.get('dl_number') or ''),
+                })
+            out.sort(key=lambda d: d['name'].lower())
+            return {'ok': True, 'suppliers': out, 'count': len(out)}
+        except Exception as e:
+            # Do NOT fall through to the empty local table -- an unreachable
+            # server must look like a failure, not like a shop with no suppliers.
+            return {'ok': False, 'error': str(e), 'suppliers': []}
     if conn is None:
         return {'ok': False, 'error': 'database not connected', 'suppliers': []}
     try:
@@ -124,6 +212,20 @@ def _get_med_types():
 
 def _inventory_medicine_names(conn):
     """Distinct medicine names already in your stock (including newly saved purchases)."""
+    if _is_online():
+        try:
+            from core.online_catalog import medicines as _online_medicines
+
+            seen = {}
+            for r in _online_medicines() or []:
+                if not isinstance(r, dict):
+                    continue
+                nm = str(r.get('name') or '').strip()
+                if nm:
+                    seen.setdefault(nm.lower(), nm)
+            return [seen[k] for k in sorted(seen)]
+        except Exception:
+            return []
     names = []
     try:
         cur = conn.cursor()
@@ -136,6 +238,58 @@ def _inventory_medicine_names(conn):
     except Exception:
         pass
     return names
+
+
+def _get_inventory_stock(conn, query='', limit=100):
+    """Aggregated stock by medicine name (no batch detail) for OPD prescription UI."""
+    q = (query or '').strip()
+    limit = max(1, min(int(limit or 100), 500))
+    items = []
+    try:
+        cur = conn.cursor()
+        if q:
+            like = f'%{q}%'
+            cur.execute(
+                """
+                SELECT name,
+                       SUM(COALESCE(stock_qty, 0)) AS total_stock,
+                       MAX(COALESCE(type, '')) AS med_type
+                FROM medicines
+                WHERE TRIM(COALESCE(name, '')) != ''
+                  AND name LIKE ? COLLATE NOCASE
+                GROUP BY name
+                ORDER BY name COLLATE NOCASE
+                LIMIT ?
+                """,
+                (like, limit),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT name,
+                       SUM(COALESCE(stock_qty, 0)) AS total_stock,
+                       MAX(COALESCE(type, '')) AS med_type
+                FROM medicines
+                WHERE TRIM(COALESCE(name, '')) != ''
+                GROUP BY name
+                ORDER BY name COLLATE NOCASE
+                LIMIT ?
+                """,
+                (limit,),
+            )
+        for row in cur.fetchall():
+            name = row[0]
+            if not name:
+                continue
+            items.append({
+                'name': name,
+                'total_stock': int(row[1] or 0),
+                'in_stock': int(row[1] or 0) > 0,
+                'type': row[2] or '',
+            })
+    except Exception as e:
+        return {'ok': False, 'error': str(e), 'items': []}
+    return {'ok': True, 'items': items, 'count': len(items)}
 
 
 def build_runtime_catalog(conn):
@@ -160,6 +314,16 @@ def write_runtime_catalog(web_root, conn):
     """
     payload = build_runtime_catalog(conn)
     path = os.path.join(web_root, 'catalog.json')
+    # A catalog with nothing in it is never an improvement on the one already
+    # there. If the read failed -- server down, mode mid-switch -- keep the
+    # shop's last good file rather than blanking the page it feeds.
+    if not payload.get('suppliers') and not payload.get('inventory_medicine_names'):
+        if os.path.isfile(path) and os.path.getsize(path) > 2:
+            print(
+                '[web purchase] keeping the existing catalog.json: '
+                f"this read came back empty ({payload.get('supplier_error') or 'no rows'})"
+            )
+            return path
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(payload, f, ensure_ascii=False)
     return path
@@ -167,7 +331,7 @@ def write_runtime_catalog(web_root, conn):
 
 def _get_bootstrap(conn):
     """Lightweight — no medicine bulk load (387k+ names use /api/medicines/search)."""
-    from core.app_setup import load_app_mode
+    from core.app_prefs import load_app_mode
     return {
         'ok': True,
         'schedules': _layout_schedules(),
@@ -209,7 +373,7 @@ def _search_inventory_medicines(conn, query, limit):
 
 def _search_medicines(conn, query, limit=50, min_master_chars=2):
     """Inventory first; master DB (387k+) only when query has min_master_chars+ letters."""
-    from core.app_setup import load_app_mode
+    from core.app_prefs import load_app_mode
     from core.master_medicine_service import search_master_names
 
     q = (query or '').strip()
@@ -328,6 +492,16 @@ class _WebPurchaseHandler(BaseHTTPRequestHandler):
                 'ok': True,
                 'names': _inventory_medicine_names(conn),
             })
+            return
+
+        if path.rstrip('/') == '/api/inventory/stock':
+            if conn is None:
+                _json_response(self, 503, {'error': 'database not available'})
+                return
+            qs = parse_qs(urlparse(self.path).query)
+            q = (qs.get('q') or [''])[0]
+            limit = (qs.get('limit') or ['100'])[0]
+            _json_response(self, 200, _get_inventory_stock(conn, q, limit))
             return
 
         self._serve_static(path)
@@ -457,15 +631,24 @@ def get_api_base_url():
 def start_web_purchase_server(conn, port=_DEFAULT_PORT, web_root=None):
     """Start background server with a thread-safe DB connection to the app database."""
     global _server, _server_thread, _port, _web_root
-    _close_server_conn()
+    stop_web_purchase_server()
     _db['conn'] = _open_thread_safe_conn(conn)
-    _port = port
-    _web_root = web_root or _web_app_dir()
+    _web_root = web_root or prepare_web_purchase_root()
 
-    if _server is not None:
-        return get_api_base_url()
+    last_err = None
+    for attempt_port in range(port, port + 10):
+        try:
+            _server = ThreadingHTTPServer(('127.0.0.1', attempt_port), _WebPurchaseHandler)
+            _port = attempt_port
+            break
+        except OSError as exc:
+            last_err = exc
+            _server = None
+    else:
+        raise RuntimeError(
+            f'Could not start web purchase server on ports {port}-{port + 9}: {last_err}'
+        )
 
-    _server = ThreadingHTTPServer(('127.0.0.1', port), _WebPurchaseHandler)
     _server_thread = threading.Thread(target=_server.serve_forever, daemon=True)
     _server_thread.start()
     return get_api_base_url()
@@ -473,12 +656,18 @@ def start_web_purchase_server(conn, port=_DEFAULT_PORT, web_root=None):
 
 def stop_web_purchase_server():
     global _server, _server_thread, _web_root
-    if _server is not None:
+    srv = _server
+    _server = None
+    if srv is not None:
         try:
-            _server.shutdown()
+            srv.shutdown()
         except Exception:
             pass
-        _server = None
-        _server_thread = None
+        try:
+            srv.server_close()
+        except Exception:
+            pass
+    _server_thread = None
     _close_server_conn()
     _web_root = None
+    time.sleep(0.05)

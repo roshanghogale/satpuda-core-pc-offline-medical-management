@@ -8,116 +8,46 @@ No UI pages, no DB code here.
 import os
 import sys
 
+from core.app_prefs import (
+    AVAILABLE_THEMES,
+    load_app_mode,
+    load_theme,
+    save_app_mode,
+    save_theme,
+)
+
 try:
-    import ttkbootstrap as ttk
-    from ttkbootstrap.constants import *
+    import ttkbootstrap as tttk_bootstrap_check  # noqa: F401
     TTKBOOTSTRAP_AVAILABLE = True
 except ImportError:
-    import tkinter.ttk as ttk
     TTKBOOTSTRAP_AVAILABLE = False
 
-import tkinter as tk
 from core.font_config import *
 
 
-# ── Theme ─────────────────────────────────────────────────────────────────────
-
-AVAILABLE_THEMES = {
-    # ── Dark themes (10) ─────────────────────────────────────── dark first
-    'steel-dark':    'Dark  — Steel Blue',
-    'charcoal-dark': 'Dark  — Charcoal Grey',
-    'crimson-dark':  'Dark  — Crimson Red',
-    'rose-dark':     'Dark  — Rose Pink',
-    'navy-dark':     'Dark  — Navy Blue',
-    'forest-dark':   'Dark  — Forest Green',
-    'midnight-dark': 'Dark  — Midnight Violet',
-    'amber-dark':    'Dark  — Amber Gold',
-    'teal-dark':     'Dark  — Teal Cyan',
-    'violet-dark':   'Dark  — Violet Purple',
-    # ── Light themes (10) ──────────────────────────────────── light second
-    'steel-light':    'Light — Steel Blue',
-    'charcoal-light': 'Light — Charcoal Grey',
-    'crimson-light':  'Light — Crimson Red',
-    'rose-light':     'Light — Rose Pink',
-    'navy-light':     'Light — Navy Blue',
-    'forest-light':   'Light — Forest Green',
-    'midnight-light': 'Light — Midnight Violet',
-    'amber-light':    'Light — Amber Gold',
-    'teal-light':     'Light — Teal Cyan',
-    'violet-light':   'Light — Violet Purple',
-}
+def _tk():
+    import tkinter as tk
+    return tk
 
 
-def _theme_config_path() -> str:
-    if getattr(sys, 'frozen', False):
-        return os.path.join(
-            os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
-            'VeterinaryApp', 'theme_config.txt')
-    return os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        '..', 'config', 'theme_config.txt')
-
-
-def load_theme() -> str:
-    try:
-        path = _theme_config_path()
-        if os.path.exists(path):
-            t = open(path).read().strip()
-            if t in AVAILABLE_THEMES:
-                return t
-    except Exception:
-        pass
-    return 'steel-dark'
-
-
-def save_theme(theme: str):
-    try:
-        with open(_theme_config_path(), 'w') as f:
-            f.write(theme)
-    except Exception:
-        pass
-
-
-# ── App Mode (medical / veterinary) ──────────────────────────────────────────
-
-def _app_mode_path() -> str:
-    if getattr(sys, 'frozen', False):
-        return os.path.join(
-            os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
-            'VeterinaryApp', 'app_mode.txt')
-    return os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        '..', 'config', 'app_mode.txt')
-
-
-def load_app_mode() -> str:
-    """Return 'medical' or 'veterinary'."""
-    try:
-        path = _app_mode_path()
-        if os.path.exists(path):
-            m = open(path).read().strip().lower()
-            if m in ('medical', 'veterinary'):
-                return m
-    except Exception:
-        pass
-    return 'medical'
-
-
-def save_app_mode(mode: str):
-    try:
-        with open(_app_mode_path(), 'w') as f:
-            f.write(mode)
-    except Exception:
-        pass
+def _ttk():
+    if TTKBOOTSTRAP_AVAILABLE:
+        import ttkbootstrap as ttk
+        return ttk
+    from tkinter import ttk
+    return ttk
 
 
 # ── Window creation ───────────────────────────────────────────────────────────
 
-def _patch_ttkbootstrap_return_binding(root: tk.Widget) -> None:
+def _patch_ttkbootstrap_return_binding(root) -> None:
     """
     ttkbootstrap invokes the default button on Enter globally. If a dialog was
     closed, the target widget may already be destroyed → KeyError / TclError.
     """
+    tk = _tk()
+    ttk = _ttk()
+
     def _safe_return(event):
         try:
             w = root.nametowidget(event.widget)
@@ -137,6 +67,8 @@ def _patch_ttkbootstrap_return_binding(root: tk.Widget) -> None:
 
 def create_window(theme: str):
     """Create and return the root window with fonts applied."""
+    tk = _tk()
+    ttk = _ttk()
     try:
         if TTKBOOTSTRAP_AVAILABLE:
             import warnings
@@ -162,8 +94,9 @@ def create_window(theme: str):
 
 def _apply_native_widget_theme(root):
     """Apply ttkbootstrap theme colors to native tk widgets (Menu, Listbox, Canvas)."""
+    ttk = _ttk()
     try:
-        style  = ttk.Style()
+        style = ttk.Style()
         colors = style.colors
         bg     = colors.bg
         fg     = colors.fg
@@ -212,6 +145,7 @@ def _apply_native_widget_theme(root):
 def _setup_fonts(root):
     if not TTKBOOTSTRAP_AVAILABLE:
         return
+    ttk = _ttk()
     try:
         root.option_add('*TCombobox*Listbox.Font', (FONT_FAMILY, FONT_SIZE_DROPDOWNS))
         root.option_add('*Font', (FONT_FAMILY, FONT_SIZE_DEFAULT))

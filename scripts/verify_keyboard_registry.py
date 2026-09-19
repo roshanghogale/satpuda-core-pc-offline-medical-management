@@ -60,6 +60,7 @@ def test_registry_install() -> list[str]:
         '5': lambda: None,
         '6': lambda: None,
         '7': lambda: None,
+        '8': lambda: None,
     }
     KeyboardRegistry.configure_navigation(handlers)
     try:

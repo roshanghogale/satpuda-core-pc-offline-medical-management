@@ -21,8 +21,8 @@ class ImportPurchasesPage:
 
     @property
     def TYPES(self):
-        from core.layout_config import load_layout, _DEFAULT_MED_TYPES
-        return load_layout().get('med_types', list(_DEFAULT_MED_TYPES))
+        from core.layout_config import get_med_types
+        return get_med_types()
 
     def __init__(self, parent, conn):
         self.conn = conn
@@ -233,7 +233,9 @@ class ImportPurchasesPage:
             b['overall_discount_pct'] = float(p.overall_discount_pct.get() or 0)
         except (ValueError, AttributeError):
             b['overall_discount_pct'] = 0.0
-        b['amount_paid']      = float(p.amount_paid.get() or 0)
+        b['cash_paid'] = float(p.cash_paid.get() or 0)
+        b['online_paid'] = float(p.online_paid.get() or 0)
+        b['amount_paid'] = round(b['cash_paid'] + b['online_paid'], 2)
         b['items'] = list(p.purchase_items)
 
     # ── load a bill into the PurchasePage ─────────────────────────────────
@@ -278,6 +280,16 @@ class ImportPurchasesPage:
         page.purchase_date.insert(0, bill.get('purchase_date', ''))
         page.bill_number.delete(0, tk.END)
         page.bill_number.insert(0, bill.get('bill_number', ''))
+        if hasattr(page, 'set_gst_calc_method'):
+            method = (bill.get('gst_calc_method') or 'discount_after_gst').strip()
+            if method not in ('discount_before_gst', 'discount_after_gst'):
+                method = 'discount_after_gst'
+            page.set_gst_calc_method(method)
+        elif hasattr(page, 'gst_calc_method_var'):
+            method = (bill.get('gst_calc_method') or 'discount_after_gst').strip()
+            if method not in ('discount_before_gst', 'discount_after_gst'):
+                method = 'discount_after_gst'
+            page.gst_calc_method_var.set(method)
 
         # Load previous due for this supplier
         page.load_supplier_details()
@@ -293,15 +305,23 @@ class ImportPurchasesPage:
         page.overall_discount_pct.insert(0, str(disc_pct) if disc_pct else '0')
         page.overall_discount.delete(0, tk.END)
         page.overall_discount.insert(0, str(disc_rs))
-        page.amount_paid.delete(0, tk.END)
-        page.amount_paid.insert(0, str(bill.get('amount_paid', 0)))
+        cash = float(bill.get('cash_paid', bill.get('amount_paid', 0)) or 0)
+        online = float(bill.get('online_paid', 0) or 0)
+        if cash <= 0 and online <= 0 and float(bill.get('amount_paid', 0) or 0) > 0:
+            cash = float(bill.get('amount_paid', 0) or 0)
+        page.cash_paid.delete(0, tk.END)
+        if cash:
+            page.cash_paid.insert(0, str(cash))
+        page.online_paid.delete(0, tk.END)
+        if online:
+            page.online_paid.insert(0, str(online))
 
         page.update_items_tree()
         if disc_pct and not disc_rs:
             page.sync_overall_discount_fields('pct')
         else:
             page.sync_overall_discount_fields('rupees')
-        page.calculate_total()
+        page.recalculate_purchase_totals()
 
         # Disable individual save — use nav buttons only
         page.save_btn.config(text="Use Next/Submit to save", state=tk.DISABLED)

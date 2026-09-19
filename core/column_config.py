@@ -32,8 +32,11 @@ TABLE_COLUMNS = {
         ('Stock', 'medicines.stock_qty'),
         ('Unit', 'medicines.unit'),
         ('MRP', 'medicines.mrp'),
+        ('MRP/Tab', ''),
         ('Rate', 'medicines.rate'),
+        ('Rate/Tab', ''),
         ('Manufacturer', 'medicines.manufacturer'),
+        ('Supplier Name', ''),
         ('Schedule', 'medicines.schedule'),
         ('Location', 'medicines.location'),
     ],
@@ -55,12 +58,15 @@ TABLE_COLUMNS = {
         ('Total Due', 'sales.total_due'),
     ],
     'purchase_history': [
+        ('Purchase No', 'purchases.purchase_no'),
         ('Bill No', 'purchases.bill_number'),
         ('Date', 'purchases.purchase_date'),
         ('Supplier', 'suppliers.name'),
         ('Phone', 'suppliers.phone'),
         ('Final Amount', 'purchases.final_amount'),
         ('Paid at Entry', 'purchases.amount_paid_at_entry'),
+        ('Cash Paid', 'purchases.cash_paid_at_entry'),
+        ('Online Paid', 'purchases.online_paid_at_entry'),
         ('Paid via Payment', 'supplier_payments.amount'),
         ('Returns', 'purchase_returns.refund_amount'),
         ('Entry Due', ''),
@@ -75,8 +81,12 @@ TABLE_COLUMNS = {
         ('Qty', 'purchase_items.qty'),
         ('Pack', ''),
         ('HSN', 'medicines.hsn_code'),
+        ('Schedule', 'medicines.schedule'),
         ('Free', 'purchase_items.free_qty'),
+        ('MRP', 'purchase_items.mrp'),
+        ('MRP/Tab', ''),
         ('Rate', 'purchase_items.rate'),
+        ('Rate/Tab', ''),
         ('Disc%', 'purchase_items.discount_percent'),
         ('GST%', 'purchase_items.gst_percent'),
         ('Taxable', ''),
@@ -140,14 +150,15 @@ EXPORT_REPORTS = {
         ),
         'schedule_report': (
             'Schedule Report',
-            ['Date', 'Customer', 'Doctor', 'Medicine', 'Content/Drug', 'Schedule',
+            ['Date', 'Bill No', 'Customer', 'Doctor', 'Medicine', 'Batch', 'Content/Drug', 'Schedule',
              'Expiry', 'Qty', 'Rate', 'Amount'],
         ),
     },
     'inventory': {
         'stock_statement': (
             'Stock Statement (all)',
-            ['Name', 'Type', 'Batch', 'Expiry', 'Stock', 'Unit', 'MRP', 'Rate', 'Manufacturer', 'Schedule'],
+            ['Name', 'Type', 'Batch', 'Expiry', 'Stock', 'Unit',
+             'MRP', 'MRP/Tab', 'Rate', 'Rate/Tab', 'Manufacturer', 'Schedule'],
         ),
         'near_expiry': (
             'Near Expiry Report',
@@ -165,7 +176,7 @@ EXPORT_REPORTS = {
     'purchase_history': {
         'purchase_register': (
             'Purchase Register',
-            ['Bill No', 'Date', 'Supplier', 'Phone', 'Final Amount', 'Paid at Entry', 'Returns'],
+            ['Bill No', 'Date', 'Supplier', 'Phone', 'Final Amount', 'Paid at Entry', 'Cash Paid', 'Online Paid', 'Returns'],
         ),
         'monthly_summary': (
             'Monthly Purchase Summary',
@@ -194,6 +205,28 @@ EXPORT_REPORTS = {
     },
 }
 
+# Columns the DESKTOP screens cannot draw, whatever the tick says. The
+# registry above is shared with the Tk trees, which do render these; on the
+# React pages they are not in the column list at all, so a checkbox for them
+# is a control with nothing on the other end. Ticking "Returns" on Purchase
+# History did nothing and never could.
+DESKTOP_MISSING_COLUMNS = {
+    'sales_history': {'Schedule'},
+    'purchase_history': {'Paid via Payment', 'Returns', 'Items'},
+    # The Purchase items table draws fifteen of the eighteen registry columns.
+    'purchase': {'Pack', 'MRP/Tab', 'Rate/Tab'},
+}
+
+
+def desktop_table_columns():
+    """TABLE_COLUMNS minus the columns the desktop screens never render."""
+    out = {}
+    for page, cols in TABLE_COLUMNS.items():
+        missing = DESKTOP_MISSING_COLUMNS.get(page, set())
+        out[page] = [(name, db) for name, db in cols if name not in missing]
+    return out
+
+
 PAGE_LABELS = {
     'billing': 'Billing — Selected Medicines',
     'inventory': 'Inventory — Medicine List',
@@ -220,8 +253,7 @@ QUICK_ACCESS_BUTTONS = [
     ('export_purchases', '📦 Export Purchases'),
     ('export_inventory', '🗃 Export Inventory'),
     ('export_all', '📁 Export All'),
-    ('bills_due', '🧾 Bills & Due'),
-    ('stock_expiry', '📦 Stock & Expiry'),
+    ('alerts', '🔔 Alerts'),
     ('general_products', '🏷 General Products'),
 ]
 
@@ -248,19 +280,39 @@ def all_column_names(page_key):
 
 
 def default_column_visibility():
+    """Defaults for Settings → Layout & Lists → Column Visibility.
+
+    A few ledger columns stay hidden until the user turns them on
+    (Location, MRP/Tab, Rate/Tab, sales due/credit fields, purchase Paid at Entry).
+    """
+    hidden = {
+        'inventory': {'Location', 'MRP/Tab', 'Rate/Tab'},
+        'sales_history': {
+            'Discount',
+            'Cash Paid',
+            'Online Paid',
+            'Previous Due',
+            'Due Amount',
+            'Credit Amount',
+        },
+        'purchase_history': {'Bill No', 'Paid at Entry', 'Returns'},
+    }
     out = {}
     for page_key, cols in TABLE_COLUMNS.items():
-        out[page_key] = {col: True for col, _ in cols}
+        hide = hidden.get(page_key) or set()
+        out[page_key] = {col: (col not in hide) for col, _ in cols}
     return out
 
 
 def default_export_column_visibility():
-    """All export reports: every column enabled by default."""
+    """Export reports: Discount off by default; other columns on."""
     out = {}
     for page_key, reports in EXPORT_REPORTS.items():
         out[page_key] = {}
         for report_key, (_label, columns) in reports.items():
-            out[page_key][report_key] = {col: True for col in columns}
+            out[page_key][report_key] = {
+                col: (col != 'Discount') for col in columns
+            }
     return out
 
 
@@ -279,18 +331,72 @@ def _normalize_page_export_saved(page_key, raw_page):
     return {}
 
 
+def _migrate_purchase_history_column_prefs(page: dict) -> dict:
+    """Sr column renamed to Purchase No (same setting)."""
+    if 'Sr' in page and 'Purchase No' not in page:
+        page = dict(page)
+        page['Purchase No'] = page.pop('Sr')
+    return page
+
+
+def _migrate_sales_history_column_prefs(page: dict, cfg: dict) -> dict:
+    """Hide Discount / show Total Due by default (one-time layout flip)."""
+    page = dict(page or {})
+    if cfg.get('sales_history_cols_v2'):
+        return page
+    page['Discount'] = False
+    page['Total Due'] = True
+    return page
+
+
+def _ensure_sales_history_cols_v2(cfg: dict, page: dict) -> None:
+    """Persist one-time column default flip so user toggles stick afterward."""
+    if cfg.get('sales_history_cols_v2'):
+        return
+    try:
+        from core.layout_config import save_layout
+        vis = dict(cfg.get('column_visibility') or {})
+        vis['sales_history'] = dict(page)
+        cfg = dict(cfg)
+        cfg['column_visibility'] = vis
+        cfg['sales_history_cols_v2'] = True
+        save_layout(cfg)
+    except Exception:
+        pass
+
+
 def get_column_visibility(page_key=None):
     cfg = load_layout()
     saved = cfg.get('column_visibility') or {}
     defaults = default_column_visibility()
     if page_key:
         page = dict(defaults.get(page_key, {}))
-        page.update(saved.get(page_key, {}))
+        raw = saved.get(page_key, {})
+        if page_key == 'purchase_history':
+            raw = _migrate_purchase_history_column_prefs(raw)
+        if page_key == 'sales_history':
+            raw = _migrate_sales_history_column_prefs(raw, cfg)
+        page.update(raw)
+        if page_key == 'sales_history':
+            # Defaults already flipped; ensure saved prefs get the one-shot update.
+            if not cfg.get('sales_history_cols_v2'):
+                page['Discount'] = False
+                page['Total Due'] = True
+                _ensure_sales_history_cols_v2(cfg, page)
         return page
     merged = {}
     for pk, cols in defaults.items():
         merged[pk] = dict(cols)
-        merged[pk].update(saved.get(pk, {}))
+        raw = saved.get(pk, {})
+        if pk == 'purchase_history':
+            raw = _migrate_purchase_history_column_prefs(raw)
+        if pk == 'sales_history':
+            raw = _migrate_sales_history_column_prefs(raw, cfg)
+        merged[pk].update(raw)
+        if pk == 'sales_history' and not cfg.get('sales_history_cols_v2'):
+            merged[pk]['Discount'] = False
+            merged[pk]['Total Due'] = True
+            _ensure_sales_history_cols_v2(cfg, merged[pk])
     return merged
 
 
@@ -299,7 +405,12 @@ def get_visible_columns(page_key, all_columns=None):
     if all_columns is None:
         all_columns = all_column_names(page_key)
     vis = get_column_visibility(page_key)
-    visible = [c for c in all_columns if vis.get(c, True)]
+    try:
+        from core.record_indicators import INDICATOR_COL, STATUS_COL
+        always_on = {INDICATOR_COL, STATUS_COL}
+    except Exception:
+        always_on = set()
+    visible = [c for c in all_columns if vis.get(c, True) or c in always_on]
     return visible or list(all_columns)
 
 
@@ -369,21 +480,31 @@ def export_tree_data(tree, page_key, all_columns=None):
 
 
 def export_table(parent, title, headers, rows, filename, page_key, report_key):
-    """Export with a column picker, then format chooser (CSV / Excel / PDF)."""
+    """Export using column prefs from Settings → Appearance → Export report columns."""
     from core.export_manager import export_data
     from core.themed_messagebox import showinfo
-    col_vis = prompt_export_columns(parent, page_key, report_key, list(headers))
-    if col_vis is None:
-        return
-    h, r = filter_export_table(list(headers), rows, page_key, report_key, column_vis=col_vis)
+
+    h, r = filter_export_table(list(headers), rows, page_key, report_key)
     if not r:
         showinfo(
             "Export",
             "No export columns selected. Enable columns under Settings → Appearance → "
-            "Export Report Columns.",
+            "Export report columns.",
         )
         return
     export_data(parent, title, h, r, filename)
+
+
+def export_table_voice(parent, title, headers, rows, filename, page_key, report_key, fmt="csv"):
+    """Voice export — saved column prefs, no dialogs, file goes to Downloads."""
+    from core.export_manager import export_data_direct
+    headers = list(headers)
+    visible = get_export_visible_columns(page_key, headers, report_key)
+    col_vis = {h: (h in visible) for h in headers}
+    h, r = filter_export_table(headers, rows, page_key, report_key, column_vis=col_vis)
+    if not r:
+        return None, "No export columns enabled. Check Settings → Appearance → Export Report Columns."
+    return export_data_direct(parent, title, h, r, filename, fmt)
 
 
 def filter_export_table(headers, rows, page_key, report_key, column_vis=None):
@@ -396,144 +517,15 @@ def filter_export_table(headers, rows, page_key, report_key, column_vis=None):
         visible = get_export_visible_columns(page_key, headers, report_key)
     if visible == headers:
         return headers, rows
+    visible = [c for c in visible if c in headers]
+    if not visible:
+        return headers, rows
     idx = [headers.index(c) for c in visible]
     out_rows = []
     for row in rows:
         r = list(row)
         out_rows.append([r[i] if i < len(r) else '' for i in idx])
     return visible, out_rows
-
-
-def update_export_column_visibility(page_key, report_key, col_vis):
-    """Persist export column choices without a full Appearance save."""
-    from core.layout_config import _get_config_path, save_layout
-    path = _get_config_path()
-    data = {}
-    if os.path.exists(path):
-        try:
-            with open(path, encoding='utf-8') as f:
-                data = json.load(f)
-        except Exception:
-            data = {}
-    export_vis = data.get('export_column_visibility') or {}
-    page = _normalize_page_export_saved(page_key, export_vis.get(page_key, {}))
-    page[report_key] = dict(col_vis)
-    export_vis[page_key] = page
-    data['export_column_visibility'] = export_vis
-    save_layout(data)
-
-
-def prompt_export_columns(parent, page_key, report_key, headers):
-    """
-    Let the user choose export columns before running a report export.
-    Returns {column: bool} or None if cancelled. At least one column required.
-    """
-    import tkinter as tk
-    from core.scroll_manager import open_dialog
-    from core.themed_messagebox import showwarning
-
-    try:
-        import ttkbootstrap as ttk
-    except ImportError:
-        from tkinter import ttk
-
-    headers = list(headers)
-    if not headers:
-        return {}
-
-    report_label = EXPORT_REPORTS.get(page_key, {}).get(report_key, (report_key, headers))[0]
-    page_label = EXPORT_PAGE_LABELS.get(page_key, page_key)
-    saved = get_export_column_visibility(page_key, report_key)
-
-    dlg = open_dialog(
-        parent,
-        f"Export columns — {report_label}",
-        width=420,
-        height=min(520, 140 + len(headers) * 28),
-        resizable=True,
-    )
-    body = dlg.content
-    ttk.Label(
-        body,
-        text=f"{page_label}\nSelect columns to include in this export:",
-        wraplength=380,
-    ).pack(padx=12, pady=(10, 6), anchor='w')
-
-    vars_map = {}
-    checkbuttons = []
-    chk_frame = ttk.Frame(body)
-    chk_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=4)
-    for col in headers:
-        var = tk.BooleanVar(value=saved.get(col, True))
-        vars_map[col] = var
-        cb = ttk.Checkbutton(chk_frame, text=col, variable=var)
-        cb.pack(anchor=tk.W, pady=2)
-        checkbuttons.append(cb)
-
-    remember = tk.BooleanVar(value=True)
-    remember_cb = ttk.Checkbutton(
-        body,
-        text="Remember these columns for this report",
-        variable=remember,
-    )
-    remember_cb.pack(anchor=tk.W, padx=12, pady=(4, 8))
-
-    result = {'cancelled': True}
-
-    def select_all():
-        for var in vars_map.values():
-            var.set(True)
-
-    def clear_all():
-        for var in vars_map.values():
-            var.set(False)
-
-    btn_row = ttk.Frame(body)
-    btn_row.pack(fill=tk.X, padx=12, pady=(0, 4))
-    select_all_btn = ttk.Button(btn_row, text="Select all", command=select_all)
-    select_all_btn.pack(side=tk.LEFT, padx=(0, 6))
-    clear_all_btn = ttk.Button(btn_row, text="Clear all", command=clear_all)
-    clear_all_btn.pack(side=tk.LEFT)
-
-    def on_ok():
-        picked = {col: var.get() for col, var in vars_map.items()}
-        if not any(picked.values()):
-            showwarning(
-                "Export Columns",
-                "Select at least one column to export.",
-                parent=dlg,
-            )
-            return
-        if remember.get():
-            update_export_column_visibility(page_key, report_key, picked)
-        result.update({'cancelled': False, 'visibility': picked})
-        dlg.destroy()
-
-    def on_cancel():
-        dlg.destroy()
-
-    try:
-        continue_btn = ttk.Button(dlg.footer, text="Continue", command=on_ok, bootstyle='primary')
-        continue_btn.pack(side=tk.LEFT, padx=4)
-        cancel_btn = ttk.Button(dlg.footer, text="Cancel", command=on_cancel, bootstyle='secondary')
-        cancel_btn.pack(side=tk.RIGHT, padx=4)
-    except Exception:
-        continue_btn = ttk.Button(dlg.footer, text="Continue", command=on_ok)
-        continue_btn.pack(side=tk.LEFT, padx=4)
-        cancel_btn = ttk.Button(dlg.footer, text="Cancel", command=on_cancel)
-        cancel_btn.pack(side=tk.RIGHT, padx=4)
-
-    from core.dialog_keyboard import wire_dialog_arrow_nav
-    wire_dialog_arrow_nav(
-        checkbuttons + [remember_cb, select_all_btn, clear_all_btn, continue_btn, cancel_btn],
-        dlg,
-        initial_focus=checkbuttons[0] if checkbuttons else continue_btn,
-    )
-
-    dlg.wait_window()
-    if result.get('cancelled'):
-        return None
-    return result.get('visibility')
 
 
 def get_quick_access_settings():

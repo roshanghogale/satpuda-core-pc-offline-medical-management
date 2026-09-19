@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import os
 import sys
+import shutil
+import tempfile
+import time
 
 
 def prepare_frozen_runtime() -> None:
@@ -26,16 +29,37 @@ def prepare_frozen_runtime() -> None:
                 os.environ.pop(key, None)
 
     if hasattr(os, 'add_dll_directory'):
-        for folder in (base, exe_dir, os.path.join(base, 'DLLs')):
-            if folder and os.path.isdir(folder):
-                try:
-                    os.add_dll_directory(folder)
-                except (OSError, AttributeError):
-                    pass
+        _ver = sys.getwindowsversion()
+        _legacy_win = _ver.major < 6 or (_ver.major == 6 and _ver.minor <= 1)
+        if not _legacy_win:
+            for folder in (base, exe_dir, os.path.join(base, 'DLLs')):
+                if folder and os.path.isdir(folder):
+                    try:
+                        os.add_dll_directory(folder)
+                    except (OSError, AttributeError):
+                        pass
 
     path_parts: list[str] = []
-    for folder in (base, exe_dir):
-        if folder and folder not in path_parts:
+    # sys.getwindowsversion() exists only on Windows. This was called
+    # unconditionally, so a frozen macOS/Linux build died here with
+    # AttributeError before it could start -- even though the very next line
+    # already gates the work on sys.platform == 'win32'. Behaviour on Windows is
+    # unchanged: same call, same comparison.
+    if sys.platform == 'win32':
+        _ver = sys.getwindowsversion()
+        _legacy_win = _ver.major < 6 or (_ver.major == 6 and _ver.minor <= 1)
+    else:
+        _legacy_win = False
+    if _legacy_win and sys.platform == 'win32':
+        system_root = os.environ.get('SystemRoot', r'C:\Windows')
+        for folder in (
+            os.path.join(system_root, 'SysWOW64'),
+            os.path.join(system_root, 'System32'),
+        ):
+            if os.path.isdir(folder) and folder not in path_parts:
+                path_parts.append(folder)
+    for folder in (base, exe_dir, os.path.join(base, 'DLLs')):
+        if folder and os.path.isdir(folder) and folder not in path_parts:
             path_parts.append(folder)
 
     for part in os.environ.get('PATH', '').split(os.pathsep):
@@ -59,13 +83,42 @@ def prepare_frozen_runtime() -> None:
             import ctypes
             for name in (
                 'tcl86t.dll', 'tk86t.dll', 'tcl86.dll', 'tk86.dll',
-                'sqlite3.dll', 'python313.dll',
+                'sqlite3.dll', 'python313.dll', 'python38.dll', 'python3.dll',
+                'VCRUNTIME140.dll', 'MSVCP140.dll', 'ucrtbase.dll',
             ):
                 dll_path = os.path.join(base, name)
                 if os.path.isfile(dll_path):
                     ctypes.WinDLL(dll_path)
         except OSError:
             pass
+
+    cleanup_stale_pyinstaller_temp()
+
+
+def cleanup_stale_pyinstaller_temp(*, max_age_hours: float = 6.0) -> None:
+    """Remove old _MEI* folders left by one-file EXE runs (not the active session)."""
+    if not getattr(sys, 'frozen', False):
+        return
+    try:
+        temp_root = tempfile.gettempdir()
+        current = os.path.normcase(os.path.abspath(getattr(sys, '_MEIPASS', '')))
+        cutoff = time.time() - max(1.0, float(max_age_hours)) * 3600.0
+        for name in os.listdir(temp_root):
+            if not name.upper().startswith('_MEI'):
+                continue
+            path = os.path.join(temp_root, name)
+            if not os.path.isdir(path):
+                continue
+            if os.path.normcase(os.path.abspath(path)) == current:
+                continue
+            try:
+                if os.path.getmtime(path) >= cutoff:
+                    continue
+                shutil.rmtree(path, ignore_errors=True)
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 
 def clean_env_for_child_process() -> dict:

@@ -7,10 +7,17 @@ except ImportError:
 
 from core.alert_colors import get_alert_color
 from core.font_config import *
-from core.scroll_manager import make_scrollable
 from core.customer_service import get_all_customers, recalculate_customer_due
 from core.layout_config import CUSTOMERS_ROWS
 from core.column_config import apply_column_visibility, all_column_names
+from core.record_indicators import (
+    customer_status,
+    extend_columns,
+    indicator_column_widths,
+    column_heading,
+    prepare_tree_row,
+    register_tree_tags,
+)
 from widgets.searchable_combo import SearchableCombo
 
 
@@ -23,20 +30,21 @@ class CustomersPage:
         self._all_data = []
 
         self._build_ui()
-        self.load_customers()
+        self.parent.after(0, self._schedule_load_customers)
         self.parent.after(100, self._setup_nav)
         self.parent.after(200, self.search_entry.focus)
 
     # ── UI ────────────────────────────────────────────────────────────────
 
     def _build_ui(self):
-        if self._embedded:
-            inner = ttk.Frame(self.parent)
-            inner.pack(fill=tk.BOTH, expand=True)
-        else:
-            inner = make_scrollable(self.parent)
+        # Fixed layout so the summary bar stays visible (no page-scroll fight).
+        inner = ttk.Frame(self.parent)
+        inner.pack(fill=tk.BOTH, expand=True)
         self._inner_frame = inner
-        inner.configure(padding=(10, 10))
+        try:
+            inner.configure(padding=(10, 10))
+        except Exception:
+            pass
 
         # Filter bar
         filter_frame = ttk.LabelFrame(inner, text="Search Customers")
@@ -75,17 +83,19 @@ class CustomersPage:
         tree_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
         self._all_columns = tuple(all_column_names('customers'))
+        self._tree_columns = extend_columns(self._all_columns)
         self.tree = ttk.Treeview(
-            tree_frame, columns=self._all_columns, show='headings',
+            tree_frame, columns=self._tree_columns, show='headings',
             height=CUSTOMERS_ROWS, style='Large.Treeview')
 
         widths = {'Name': 200, 'Phone': 130, 'Address': 260,
                   'Total Due': 110, 'Credit': 110}
-        for col in self._all_columns:
-            self.tree.heading(col, text=col,
-                              command=lambda c=col: self._sort(c))
+        widths.update(indicator_column_widths())
+        for col in self._tree_columns:
+            self.tree.heading(col, text=column_heading(col),
+                              command=lambda c=col: self._sort(c) if not c.startswith("__") else None)
             self.tree.column(col, width=widths.get(col, 120))
-        apply_column_visibility(self.tree, 'customers', self._all_columns)
+        apply_column_visibility(self.tree, 'customers', self._tree_columns)
 
         vsb = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL,
                             command=self.tree.yview)
@@ -99,10 +109,7 @@ class CustomersPage:
         tree_frame.grid_rowconfigure(0, weight=1)
         tree_frame.grid_columnconfigure(0, weight=1)
 
-        from core.alert_colors import get_tree_tag_colors
-        clr = get_tree_tag_colors()
-        self.tree.tag_configure('has_due',    background=clr['due_bg'],     foreground=clr['due_fg'])
-        self.tree.tag_configure('has_credit', background=clr['cleared_bg'], foreground=clr['cleared_fg'])
+        register_tree_tags(self.tree)
 
         from core.tree_action_menu import setup_tree_actions
         self._action_menu = setup_tree_actions(
@@ -136,6 +143,14 @@ class CustomersPage:
                 kw['foreground'] = color
             ttk.Label(summary, textvariable=var, **kw).grid(
                 row=0, column=i*2+1, padx=10, pady=5)
+
+        # Keep summary on-screen: pin to bottom; tree takes remaining space.
+        filter_frame.pack_forget()
+        tree_frame.pack_forget()
+        summary.pack_forget()
+        summary.pack(side=tk.BOTTOM, fill=tk.X, pady=5)
+        filter_frame.pack(side=tk.TOP, fill=tk.X, pady=5)
+        tree_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=5)
 
     # ── Data ─────────────────────────────────────────────────────────────
 
@@ -186,11 +201,26 @@ class CustomersPage:
         from core.column_config import export_table
         export_table(self.parent, 'Customer Due List', headers, rows, 'customer_due_list', 'customers', 'customer_due_list')
 
-    def load_customers(self):
-        self._all_data = get_all_customers(self.conn)
+    def _schedule_load_customers(self):
+        from core.background_workers import run_in_thread
+        run_in_thread(
+            lambda: get_all_customers(self.conn),
+            name='CustomersLoad',
+            root=self.parent,
+            on_success=self._apply_customers,
+        )
+
+    def _apply_customers(self, data):
+        self._all_data = data or []
         names = [c['name'] for c in self._all_data]
-        self.search_entry.configure(values=names)
+        try:
+            self.search_entry.configure(values=names)
+        except Exception:
+            pass
         self._render(self._all_data)
+
+    def load_customers(self):
+        self._schedule_load_customers()
 
     def _render(self, data):
         for item in self.tree.get_children():
@@ -203,14 +233,18 @@ class CustomersPage:
             total_due    += due
             total_credit += credit
 
-            tag = 'has_due' if due > 0 else ('has_credit' if credit > 0 else '')
+            status = customer_status(due, credit)
+            vals = (
+                c['name'], c['phone'] or '',
+                c['address'] or '',
+                f"{due:.2f}" if due else '',
+                f"{credit:.2f}" if credit else '',
+            )
+            values, tags = prepare_tree_row(vals, status)
             self.tree.insert('', tk.END,
                              iid=str(c['id']),
-                             values=(c['name'], c['phone'] or '',
-                                     c['address'] or '',
-                                     f"{due:.2f}" if due else '',
-                                     f"{credit:.2f}" if credit else ''),
-                             tags=(tag,) if tag else ())
+                             values=values,
+                             tags=tags)
 
         self.total_customers_var.set(str(len(data)))
         self.total_due_var.set(f"₹{total_due:.2f}")
@@ -297,10 +331,32 @@ class CustomersPage:
         self.load_customers()
 
     def _recalculate_all(self):
-        for c in self._all_data:
-            recalculate_customer_due(self.conn, c['id'])
-        self.load_customers()
-        showinfo("Done", "All customer dues recalculated.", parent=self.parent)
+        if not askyesno(
+                "Recalculate All",
+                "Recalculate dues for all customers? This may take a moment.",
+                parent=self.parent):
+            return
+        ids = [c['id'] for c in self._all_data]
+
+        def _worker(put):
+            for i, cid in enumerate(ids, 1):
+                recalculate_customer_due(self.conn, cid)
+                if i % 25 == 0 or i == len(ids):
+                    put(f"Recalculated {i}/{len(ids)} customers…")
+            return len(ids)
+
+        def _done(count):
+            self.load_customers()
+            showinfo("Done", f"Recalculated dues for {count} customer(s).", parent=self.parent)
+
+        from core.background_workers import run_with_progress
+        run_with_progress(
+            self.parent,
+            "Recalculating Customer Dues",
+            _worker,
+            on_complete=_done,
+            on_error=lambda exc: showerror("Error", str(exc), parent=self.parent),
+        )
 
     # ── Keyboard nav ──────────────────────────────────────────────────────
 

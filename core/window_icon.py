@@ -1,10 +1,10 @@
 """
 Window and Windows taskbar icon helpers (dev + PyInstaller EXE).
+Theme-aware: light themes use Logo 01, dark themes use Logo 03.
 """
 from __future__ import annotations
 
 import os
-import shutil
 import sys
 
 _APP_USER_MODEL_ID = 'SatpudaMedical.SatpudaCore.1'
@@ -23,54 +23,52 @@ def init_process_app_id() -> None:
 
 
 def _assets_dir() -> str:
-    if getattr(sys, 'frozen', False):
-        return os.path.join(sys._MEIPASS, 'assets')
-    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'assets')
-
-
-def _appdata_icon_path() -> str:
-    base = os.path.join(
-        os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
-        'VeterinaryApp',
-    )
-    os.makedirs(base, exist_ok=True)
-    return os.path.join(base, 'satpuda_logo.ico')
+    from core.brand_assets import assets_dir
+    return assets_dir()
 
 
 def _ensure_cached_ico() -> str:
-    """Copy bundled .ico to AppData so iconbitmap always has a stable path."""
+    """Theme-aware ICO under AppData (regenerated from brand PNG)."""
     global _icon_cache_path
-    if _icon_cache_path and os.path.isfile(_icon_cache_path):
-        return _icon_cache_path
-
-    dst = _appdata_icon_path()
-    src = os.path.join(_assets_dir(), 'satpuda_logo.ico')
     try:
-        if os.path.isfile(src):
-            if not os.path.isfile(dst) or os.path.getmtime(src) > os.path.getmtime(dst):
-                shutil.copy2(src, dst)
-            _icon_cache_path = dst
-            return dst
+        from core.brand_assets import ensure_theme_ico
+        path = ensure_theme_ico()
+        if path and os.path.isfile(path):
+            _icon_cache_path = path
+            return path
     except Exception:
         pass
-
-    if os.path.isfile(src):
-        _icon_cache_path = src
-        return src
-    if os.path.isfile(dst):
-        _icon_cache_path = dst
-        return dst
-    return ''
+    if _icon_cache_path and os.path.isfile(_icon_cache_path):
+        return _icon_cache_path
+    fallback = os.path.join(_assets_dir(), 'satpuda_logo.ico')
+    return fallback if os.path.isfile(fallback) else ''
 
 
 def get_icon_paths() -> tuple[str, str]:
-    base = _assets_dir()
-    ico = _ensure_cached_ico() or os.path.join(base, 'satpuda_logo.ico')
-    return (ico, os.path.join(base, 'satpuda_logo.png'))
+    ico = _ensure_cached_ico()
+    try:
+        from core.brand_assets import get_icon_png
+        png = get_icon_png()
+    except Exception:
+        png = os.path.join(_assets_dir(), 'satpuda_logo.png')
+    if not ico:
+        ico = os.path.join(_assets_dir(), 'satpuda_logo.ico')
+    return (ico, png)
 
 
 def get_icon_path() -> str:
     return get_icon_paths()[0]
+
+
+def refresh_window_icons_for_theme(root=None) -> None:
+    """Call after theme change so title-bar / taskbar icons swap light/dark."""
+    global _icon_cache_path
+    _icon_cache_path = None
+    if root is not None:
+        try:
+            apply_window_icon(root, master=root, is_root=True)
+        except Exception:
+            pass
 
 
 def _set_iconbitmap(window, ico_path: str, default: bool = False) -> None:
@@ -110,7 +108,17 @@ def apply_window_icon(window, master=None, *, is_root: bool = False) -> None:
             holder._satpuda_icon_img = img
             window.wm_iconphoto(True, img)
     except Exception:
-        pass
+        # PNG may be too large / RGBA for PhotoImage — try Pillow resize
+        try:
+            from PIL import Image, ImageTk
+            if os.path.isfile(png):
+                im = Image.open(png).convert('RGBA')
+                im.thumbnail((64, 64), Image.LANCZOS)
+                img = ImageTk.PhotoImage(im, master=holder)
+                holder._satpuda_icon_img = img
+                window.wm_iconphoto(True, img)
+        except Exception:
+            pass
 
 
 def apply_main_window_icon(root) -> None:
@@ -170,6 +178,11 @@ def show_modal_toplevel(window, parent=None) -> None:
         pass
     try:
         window.grab_set()
+    except Exception:
+        pass
+    try:
+        from core.voice.voice_dialog import track_modal_dialog
+        track_modal_dialog(window)
     except Exception:
         pass
 

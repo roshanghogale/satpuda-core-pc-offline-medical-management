@@ -3,6 +3,7 @@
     "TULJAI MEDICAL AGENCY": "TULJAI MEDICAL AGENCY",
     "SEEMA FRUITS PHARMA & VETERINARY DISTRIBUTORS": "SEEMA FRUITS PHARMA & VETERINARY DISTRIBUTORS",
     "JAI GANESH PHARMAVET": "JAI GANESH PHARMAVET",
+    "JAY GANESH PHARMAVET": "JAY GANESH PHARMAVET",
     "PARAKH MEDICAL AGENCIES": "PARAKH MEDICAL AGENCIES",
     "SHRI SWAMI SAMARTH MEDICAL": "SHRI SWAMI SAMARTH MEDICAL",
     "SHRI SWAMI SAMARTH MEDICAL AND AGENCY": "SHRI SWAMI SAMARTH MEDICAL AND AGENCY",
@@ -10,12 +11,49 @@
     "PRINT HEALTH QRCODE ON BILL & EARN PARAKH MEDICAL AGENCIES": "Print HEALTH QRCODE on BILL & Earn PARAKH MEDICAL AGENCIES",
     "SHOP NO.4-5,APMC COMPLEX NEAR OLD BUSSTOP, JALGAON(JAMOD) SHREE RADHE": "SHOP NO.4-5,APMC COMPLEX NEAR OLD BUSSTOP, JALGAON(JAMOD) SHREE RADHE",
     "VIJAY MEDISALES": "VIJAY MEDISALES",
-    "JAIN PHARMA": "JAIN PHARMA"
+    "JAIN PHARMA": "JAIN PHARMA",
+    "RATHI MEDICAL STORES": "RATHI MEDICAL STORES",
+    "VINAR MEDICAL AGENCIES": "VINAR MEDICAL AGENCIES",
+    "RAJ MEDICO'S, KHAMGAON": "RAJ MEDICO'S, KHAMGAON",
+    "RAJ MEDICO'S": "RAJ MEDICO'S",
+    "JAI GANESH PHARAMAVET": "JAI GANESH PHARAMAVET",
+    "OM SAI MEDICO": "OM SAI MEDICO",
+    "SHREE DISTRIBUTOR": "SHREE DISTRIBUTOR",
+    "ASHIRWAD PHARMA": "ASHIRWAD PHARMA",
+    "NAHAR MEDITRADE": "NAHAR MEDITRADE",
+    "JAI GANESH PHARAMVET": "JAI GANESH PHARAMVET",
+    "AILANI MEDICO'S": "AILANI MEDICO'S",
+    "PARAKH TRADERS": "PARAKH TRADERS",
+    "JAY SHRI SHYAM MEDICAL AND AGENCY": "JAY SHRI SHYAM MEDICAL AND AGENCY",
+    "JAISHIV PHARMA": "JAISHIV PHARMA",
+    "SHRI MEDICAL AND AGENCY": "SHRI MEDICAL AND AGENCY",
+    "MEDICAL AND AGENCY": "MEDICAL AND AGENCY",
+    "SHREE MEDICAL AND AGENCY": "SHREE MEDICAL AND AGENCY",
+    "SIT MEDICAL AND AGENCY": "SIT MEDICAL AND AGENCY",
+    "PARAKH MEDICAL STORES": "PARAKH MEDICAL STORES",
+    "ARAKH MEDICAL STORES": "ARAKH MEDICAL STORES",
+    "OM MEDICAL AND GENERAL STORES": "OM MEDICAL AND GENERAL STORES",
+    "G.K.HEALTHCARE": "G.K.HEALTHCARE",
+    "PARAS MEDICAL AND GEN STORES": "PARAS MEDICAL AND GEN STORES",
+    "PHARMA,KHAMGAON": "PHARMA,KHAMGAON",
+    "JAIN PHARMA, KHAMGAON": "JAIN PHARMA, KHAMGAON",
+    "SANKALP SALES": "SANKALP SALES",
+    "VIJAY AGENCIES": "VIJAY AGENCIES",
+    "SWAMI SAMARTH MEDICAL AND AGENCY": "SWAMI SAMARTH MEDICAL AND AGENCY",
+    "SHRI SWAMI SAMARTH MEDICAL STORES": "SHRI SWAMI SAMARTH MEDICAL STORES",
+    "VARDHAMAN MEDICO": "VARDHAMAN MEDICO",
+    "VARDHAMAN MEDICOS": "VARDHAMAN MEDICOS",
+    "TAYAL AGENCIES": "TAYAL AGENCIES",
+    "RATNADEEP PHARMA DISTRIBUTOR": "RATNADEEP PHARMA DISTRIBUTOR",
+    "SHRIGURUDEO PHARMACEUTICALS": "SHRIGURUDEO PHARMACEUTICALS",
+    "NISHANT SALES & SERVICES": "NISHANT SALES & SERVICES",
+    "CHIRAG MEDICAL & GENERAL STORES": "CHIRAG MEDICAL & GENERAL STORES",
+    "BHARAT PHARMA AGENCY": "BHARAT PHARMA AGENCY"
   },
   "medicine_aliases": {},
   "column_aliases": {},
   "medicine_types": {
-    "SHARKOFERROL VET": "Liquid",
+    "SHARKOFERROL VET": "Powder",
     "CMIN HI BOLUS": "Bolus",
     "EYESAFE EYE DROP": "Drops",
     "RUCHAMAX POW": "Powder",
@@ -46,7 +84,7 @@
     "POVIDECK OINT SILK B.LOT KESAR": "Ointment",
     "PAN-40MG IV INJ": "Injection",
     "ACEFLARE-SP TAB (A/A)": "Tablet",
-    "RATOL GRANULE": "Others",
+    "RATOL GRANULE": "Powder",
     "CONDOM NIGHT RIDER-BUBBLE GUM": "Others",
     "SINAREST DROP ORAL": "Drops",
     "S.V. SET NO.- 23": "Others",
@@ -145,7 +183,7 @@
     "OFLOKIND-OZ BOL": "Bolus",
     "FRISIUM 10 TAB 15 TAB": "Tablet",
     "OPOX DROPS 10ML": "Drops",
-    "GUTRITE SACHET": "Others",
+    "GUTRITE SACHET": "Sachet",
     "AMPOXIN 500 CAP": "Capsule",
     "TAXIM INJ 2GM VIAL": "Injection - Vial",
     "TAXIM 1 GM ING 1": "Injection",
@@ -158,11 +196,11 @@
     "TELMA 40 TAB": "Tablet",
     "CYPON SYP": "Liquid",
     "DUPHALAC SYR 150ML": "Liquid",
-    "ELECTRAL ASSORTED SACHET": "Others",
+    "ELECTRAL ASSORTED SACHET": "Sachet",
     "CANDID POW 50 GM": "Powder",
-    "SUKHADA CHURNA": "Others",
+    "SUKHADA CHURNA": "Powder",
     "RELIEVEX OINT": "Ointment",
-    "GANGA AMRIT EYE DROP": "Drops",
+    "GANGA AMRIT EYE DROP": "Eye Drops",
     "A.P.SPECIAL BALM -12G": "Powder",
     "WARTOSIN SOLUTION-3ML": "Liquid",
     "VAYMOL ROLLON 10ML": "Liquid",
@@ -173,12 +211,12 @@
     "SENSODYNE ACCESS-25G": "Powder",
     "MOOV OINT-10G TUBE": "Ointment",
     "DETTOL LIQ-250ML": "Liquid",
-    "MOOV SPRAY-15G SMALL": "Powder",
-    "HAJMOLA SACHET ANARDANA": "Others",
+    "MOOV SPRAY-15G SMALL": "Spray",
+    "HAJMOLA SACHET ANARDANA": "Sachet",
     "FEM GOLD BLEACH-9G": "Powder",
     "EVERYOUTH GOLDEN GLOW 8G": "Powder",
-    "EVERYOUTH WALNUT SCRUB-7G": "Powder",
-    "BOROPLUS SACHET-6G": "Powder",
+    "EVERYOUTH WALNUT SCRUB-7G": "Lotion",
+    "BOROPLUS SACHET-6G": "Sachet",
     "ZANDU BALM-5G SACHE": "Powder",
     "DERMICOOL POWDER-50G": "Powder",
     "CHANDRAPRABHA BATI-20": "Others",
@@ -189,6 +227,4525 @@
     "DULCOFLEX TAB-15'S": "Tablet",
     "VICKS VEPORUB 10G": "Powder",
     "PARAD TABLET-MUGDHA RASA": "Tablet",
-    "PANCHARISHTRA-450ML": "Liquid"
+    "PANCHARISHTRA-450ML": "Liquid",
+    "DUE DATE:": "Others",
+    "[RUMIPRO": "Bolus",
+    "OLONE CEF PLUS BOLUS 1": "Bolus",
+    "OSTOVET FORTE LIQ": "Liquid",
+    "| SHARKOFERROL VET": "Powder",
+    "A TO ZPOWDER 5": "Powder",
+    "GST 5%": "Others",
+    "NATUR": "Others",
+    "TBL ELECTRODUS LIQ 200 BL1041 12": "Liquid",
+    "FIT ADULT DAIPER ECO": "Others",
+    "VIR OSTOVET FORTE LIQ ZOLI GK194 03": "Liquid",
+    "MANKI TONAKIND GOLD POW 125G IABMHY025 11": "Powder",
+    "RPPL CPE GEL 300 RG-415 06/27": "Gel",
+    "B FIT ADULT DAIPER ECO. L10*1 10P": "Others",
+    "GST % .16 31.40": "Others",
+    "CASH DISC": "Others",
+    "BOLUS 6-BO": "Bolus",
+    "6OL VERTITREAT-8 TAB": "Tablet",
+    "PROMINANT CHARCOAL FACEWAS": "Lotion",
+    "OOICUNFRESH GEL": "Gel",
+    "PROMINANT HAND SANITIZER": "Liquid",
+    "LUUIFRESH CREAM": "Cream",
+    "NEEMWAY N & A FACE WASH": "Lotion",
+    "1337.17 FTERO BOPHOB @EL 3004 ZXC": "Others",
+    "425.00 KOJIVIT ELOS": "Cream",
+    "73.03 BETNOVATE C CREAN GSK": "Others",
+    "NEBTDOCE": "Others",
+    "NERTEL TRIO": "Others",
+    "158 .40 LOBATE": "Others",
+    "72.09 MED [10'$": "Others",
+    "203.40 SATROGYL 0 TAB": "Tablet",
+    "BETNOVATE C CREAN GSK I302T IT6O [ 14 55.64": "Others",
+    "NEBTDOCE TTAB": "Others",
+    "5 3857 1337.17 FTERO BOPHOB @EL": "Others",
+    "KOJIVIT ELOS CREAM MCR": "Cream",
+    "NEBTDOCE TTAB RRE 115": "Others",
+    "NERTEL TRIO 25 TAB SRS": "Tablet",
+    ".40 LOBATE @": "Others",
+    "3857 225.00 XONE 83 104 INJ": "Injection",
+    "IASTEALI ROTACAPS": "Others",
+    "TARBLE 4067": "Others",
+    "THROMBOPHOB GEL": "Gel",
+    "KOJIVIT PLUS CREAM": "Cream",
+    "BETNOVATE C CREAM": "Cream",
+    "NEBTUCE T TAB": "Tablet",
+    "NEWTEL TRIO 25 TAB": "Tablet",
+    "LOBATE GM NEO CREAM": "Cream",
+    "TELMED 40 TAB": "Tablet",
+    "SATROGYL O TAB": "Tablet",
+    "XONE SB 1GM INJ": "Injection",
+    "DYNAGLIPT M TAB": "Tablet",
+    "ASTHALIN CFC FREE INHALER": "Inhaler",
+    "ASTHALIN ROTACAPS": "Liquid",
+    "AEROCORT ROTACAPS": "Others",
+    "VERTITREAT-8 TAB": "Tablet",
+    "CLINFRESH GEL": "Gel",
+    "LULIFRESH CREAM": "Cream",
+    "PROMINANT CHARCOAL FACEWASH": "Lotion",
+    "PROMINANT CHARCOAL FACE": "Lotion",
+    "NEEMWAY FACE W": "Lotion",
+    "NEEMWAY FACE": "Lotion",
+    "GLOW LOVELY FW": "Lotion",
+    "NIVEA FW": "Lotion",
+    "THROMBOPHOB GEL 30GM": "Gel",
+    "LOBATE GM NEO CREAM 20GM": "Cream",
+    "ASTHALIN ROTACAPS 60'S": "Liquid",
+    "AEROCORT ROTACAPS 60'S": "Others",
+    "LUVI SILICON NIPPLE": "Others",
+    "VINRAL Z 500ML (ORANGE)": "Liquid",
+    "VINRAL Z LEMON 500ML": "Liquid",
+    "SKINSHINE CREAM": "Cream",
+    "BESTOSLIDE P (AMBER)": "Others",
+    "INJ INROCIN 100ML": "Injection",
+    "L.S BELT (MEDIUM) (ADVANCE": "Instrument / Medical Device",
+    "CERVICAL COLLAR (M) (ADVANC": "Instrument / Medical Device",
+    "GRAIN GOLD (GRAINS AMMPUL": "Others",
+    "S V SET 24NO": "Others",
+    "PREGNANCY KIT VET 1PIC": "Others",
+    "PHOSPHATE ENEMA 100ML": "Liquid",
+    "CAREX CONDOM 10 PIC": "Others",
+    "IV NS 250 ML (BML)": "Injection",
+    "DIAPER ADULT (PAINT) MEDIC": "Others",
+    "DISPOVAN 5ML": "Liquid",
+    "ADD APP PLUS SYP": "Liquid",
+    "LEVOZET M SYP (60ML)": "Liquid",
+    "NOSY CLEAR (ADULT)": "Liquid",
+    "PERWICK PLUS LOTION": "Lotion",
+    "CEEFLOX TZ (H)": "Others",
+    "OTRIDASH OXY FAST RELIEF D": "Liquid",
+    "CALCIDASH D3 NANO SHOT": "Liquid",
+    "COLDTREAT FORTE SYP": "Liquid",
+    "NEEMWAY NEEM& ALOE SOAP": "Soap",
+    "NEEMWAY PROTECTIVE SOAP": "Soap",
+    "LAXIFRESH PLUS SYP": "Liquid",
+    "HAIRFLY TAB": "Tablet",
+    "FOOTTREAT CREAM": "Cream",
+    "HAIRFLY ONION HAIR OIL": "Liquid",
+    "E-FAB EAR DROPS": "Ear Drops",
+    "CLEAR SKIN CREAM": "Cream",
+    "DERMIKEM OC": "Others",
+    "CASTOR OIL": "Others",
+    "OSG WRIST BRACE": "Instrument / Medical Device",
+    "SCALP VEIN": "Others",
+    "BANDAGE 10CM X 4MTR": "Instrument / Medical Device",
+    "BANDAGE 5CM X 4 MTR": "Instrument / Medical Device",
+    "OD-MS": "Others",
+    "ENSHINE ADVANCE BRUSH": "Others",
+    "SEPTIPLAST BANDAGE": "Instrument / Medical Device",
+    "AZROLID-250 TAB": "Tablet",
+    "ENZOMAGIC CAPSULE": "Capsule",
+    "ITROMED-200 CAP": "Capsule",
+    "NUTIACTIVE CAP": "Capsule",
+    "SCRABEL LOTOIN 50ML": "Liquid",
+    "THIOROK-AP TAB": "Tablet",
+    "TOBRA-D E DROP": "Drops",
+    "WATER WATER FOR INJ. 5ML": "Injection",
+    "GRAIN GOLD": "Others",
+    "L HIST MONT TABLET": "Tablet",
+    "ACEMIZ MR TABLET": "Tablet",
+    "ABZ PLUS SUSPENSION": "Suspension",
+    "METRONIDAZOLE IP INJ. (RE": "Injection",
+    "D3 HIGH ORAL SOLUTION": "Liquid",
+    "NS 100ML DOK": "Liquid",
+    "PARAD TABLET 100GM(RALAX": "Tablet",
+    "CREPE BADAGE 7.5CM": "Instrument / Medical Device",
+    "DISPOVAN SYRINGES 10ML": "Bolus",
+    "ELECTROFIT (APPLE)": "Liquid",
+    "PINKOO GRIPE WATER": "Liquid",
+    "NASOCAN NASAL DROP": "Nasal Drops",
+    "NO SCARS CREAM 20GM": "Cream",
+    "KUFF-Q DX TAB": "Tablet",
+    "CASTOR OIL 50GM (MACX)": "Powder",
+    "RL 500ML": "Liquid",
+    "CYPSTAR 200ML SYRUP": "Syrup",
+    "RIB BELT (GM)": "Powder",
+    "CEFLOX D EYE/EAR DROP": "Ear Drops",
+    "POWERGIN TAB": "Tablet",
+    "KETOKEM ACTIV SHAMPOO 7.5": "Shampoo",
+    "RANTAC INJ 2ML": "Injection",
+    "BLEACHING POWDER 500GM": "Powder",
+    "MONOCAN 200 CAP": "Capsule",
+    "ELECTROFIT APPLE 200ML": "Liquid",
+    "BUSCOWIN INJECTION 1ML": "Injection",
+    "EMSACB PLUS LOTION": "Lotion",
+    "ELECTROFIT APPLE": "Liquid",
+    "COSMO SILKY ROSE": "Powder",
+    "DERMI 5+ CREAM 15GM": "Cream",
+    "BETARAD 0.5 TAB": "Tablet",
+    "DICLOSIN FORTE TAB": "Tablet",
+    "I.V SET (GENSCO)": "Liquid",
+    "NEBIDUCE T TAB": "Tablet",
+    "CYPON TAB": "Tablet",
+    "DOLOKIND SR TAB": "Tablet",
+    "BANDY PLUS SUSP": "Suspension",
+    "TREATNERVE-NT TAB": "Tablet",
+    "TRIPTLIN PLUS TAB": "Tablet",
+    "DOXY-1 L-DR CAP": "Capsule",
+    "FUSIGEN ONT": "Powder",
+    "LEVOCET M KID TAB": "Tablet",
+    "AD 10MG SACHET": "Sachet",
+    "MPX CV KT DT TAB": "Tablet",
+    "HCQS 200 TAB": "Tablet",
+    "TRAMADIN-100 MG INJ": "Injection",
+    "ECOSPRIN AV75 CAP": "Capsule",
+    "METXL 12.5MG TAB": "Tablet",
+    "CETIRIZ TAB": "Tablet",
+    "JOLIGOOD-L SYP.": "Liquid",
+    "CILNIBLU 10 TAB": "Tablet",
+    "XSTAN-AM TAB": "Tablet",
+    "OFFICE OZ TAB": "Tablet",
+    "OPOX 50DT TAB": "Tablet",
+    "HIFEN 50MG TAB": "Tablet",
+    "AZIGOOD-250 TAB": "Tablet",
+    "VERTIMET-16 TAB": "Tablet",
+    "ANOVATE ONT": "Powder",
+    "GLYCOMET 250MG TAB": "Tablet",
+    "R-PPI-L CAP": "Capsule",
+    "VOMER-O": "Others",
+    "PREGA NEWS": "Tablet",
+    "D3 MUST FORTE DROP": "Drops",
+    "AMLOKIND AT TAB": "Tablet",
+    "LIPIKIND-CV 10 CAP": "Capsule",
+    "GLYCOMET GP1 TAB": "Tablet",
+    "HICOPE DROP": "Drops",
+    "GLYNASE MF TAB": "Tablet",
+    "PAN IN(40MG) INJ": "Injection",
+    "XSTAN BETA 50 TAB": "Tablet",
+    "ECO-ALL LIQUID": "Liquid",
+    "ZERODOL SPAS TAB": "Tablet",
+    "ACNESTAR SOAP": "Soap",
+    "DAFFY SOAP": "Soap",
+    "SATROGYL-O DRY SYP": "Liquid",
+    "EMTY SYP": "Liquid",
+    "XSTAN-AMH TAB": "Tablet",
+    "MEFTAL SPAS TAB": "Tablet",
+    "TELMIKIND BETA-50": "Others",
+    "IMAX-[S] INJ": "Injection",
+    "FENDIKIND PLUS LIQ": "Liquid",
+    "COOLMIN POWDER": "Powder",
+    "HEPAWAYS LIQ": "Liquid",
+    "CHRCOL BOLUS": "Bolus",
+    "CHRCOL SUS": "Liquid",
+    "OFLOKIND BOLUS": "Bolus",
+    "DIGYVET LIQ 1 LTR": "Liquid",
+    "PROTIN C LIQ": "Liquid",
+    "BOVICHARGE LIQ": "Liquid",
+    "METROKIND-LP BOL": "Bolus",
+    "SERAKIND PLUS BOLUS": "Bolus",
+    "FENTAS XP BOLUS": "Bolus",
+    "BROTONE LIQ": "Liquid",
+    "DERMI-5 CREAM": "Cream",
+    "DISP.SYRINGS 5ML": "Instrument / Medical Device",
+    "NICIP COLD & FLU NF": "Others",
+    "FEEDING BOTTLE 125 ML": "Liquid",
+    "NS 100 ML": "Liquid",
+    "DISP. SYRINGS 5ML": "Instrument / Medical Device",
+    "USTAD CONDOMS 7S": "Others",
+    "RATOL PAD": "Bolus",
+    "CYCLOPAM SY": "Liquid",
+    "DUPHALAC SY (LEMON)": "Liquid",
+    "FLEXON SYP": "Liquid",
+    "OFFICE 50MG DRY SY": "Liquid",
+    "AD 10 SACHET": "Sachet",
+    "BABEZ-MPS SY": "Liquid",
+    "MEFTAGESIC P SY": "Liquid",
+    "XSTAN AMH TAB": "Tablet",
+    "XSTAN AM TAB": "Tablet",
+    "FOURTS B SYP": "Liquid",
+    "ECOSPRIN 150 TAB": "Tablet",
+    "ECOSPRIN AV 75 CAP": "Capsule",
+    "TRIPTYLIN PLUS TAB": "Tablet",
+    "BANDYKIND PLUS BOLUS": "Bolus",
+    "TISSU AID BOLUS": "Bolus",
+    "ISOFLUD INJ": "Injection",
+    "ATROPINE SULPHATE INJ": "Injection",
+    "ANISTAMIN INJ": "Injection",
+    "TRIBIVET INJ": "Injection",
+    "MAXXTOL BOLUS": "Bolus",
+    "TONAKIND GOLD POWDER": "Powder",
+    "ZEET INJ VET": "Injection",
+    "MELONEX PLUS INJ": "Injection",
+    "INTACEF 4GM INJ": "Injection",
+    "CHARMAMRUT TAB": "Tablet",
+    "FORTIVIR INJ": "Injection",
+    "SOBRINATE INJ": "Injection",
+    "METABOLITE POW": "Powder",
+    "DEXONA VET INJ": "Injection",
+    "TOBRA D EYE DROP": "Eye Drops",
+    "PIPZO 4.5GM INJ": "Injection",
+    "IBUGESIC PLUS 60ML": "Liquid",
+    "HUMAN INSULATARD 40 U": "Others",
+    "NAXDOM 250MG TAB": "Tablet",
+    "NAXDOM-500MG TAB": "Tablet",
+    "ECOSPRIN AV-75 TAB": "Tablet",
+    "IODEX 8 GM 48 MRP": "Powder",
+    "ZANDU BALM 4.5 ML": "Liquid",
+    "TEMSAN 40MG TAB": "Tablet",
+    "BETABEST AM 50 TAB": "Tablet",
+    "HIFEN 200 DT": "Others",
+    "VITCOFOL SYP 200 ML": "Liquid",
+    "FRICOLD SYP 60 ML": "Liquid",
+    "OFM SYP 60 ML": "Liquid",
+    "ECO-ALL RES": "Others",
+    "CEPODEM DROP": "Drops",
+    "OPOX 50 SYP": "Others",
+    "MEFTAGESIC DS SYP 60 ML": "Liquid",
+    "ROOMAG DP POW": "Liquid",
+    "ZERODOL SP TAB": "Tablet",
+    "ANDIAL TAB": "Tablet",
+    "TELMED 40MG TAB": "Tablet",
+    "SKINLITE CREAM 20G": "Cream",
+    "THYRONORM 112MCG TAB": "Tablet",
+    "ODOMOS CREAM 25 GM": "Cream",
+    "ODOMOS CREAM 50 GM": "Cream",
+    "ABSORBENT COTTON WOOL": "Powder",
+    "ERYTHROMYCIN 500MG TAB": "Tablet",
+    "LUPISULIDE-P TAB": "Tablet",
+    "USTAD CONDOM": "Others",
+    "WATER FOR INJ LP": "Injection",
+    "WOVEN FAB.OF COTTON 4'": "Bolus",
+    "WOVEN FAB.OF COTTON 3\"": "Bolus",
+    "AMLOBIG AT TAB": "Tablet",
+    "GABAKIND NT TAB": "Tablet",
+    "ACEMIZ MR TAB": "Tablet",
+    "DERMI 5 CREAM NEW COMB": "Cream",
+    "DIAPER ADULT": "Others",
+    "L-HIST MONT TAB": "Tablet",
+    "OMEE 20MG CAP NEW": "Capsule",
+    "THRIL CONDOM": "Others",
+    "O2 SYP": "Liquid",
+    "CYRA D": "Capsule",
+    "ACTIVIR DT 400MG": "Tablet",
+    "ECOSPRIN AV 75": "Capsule",
+    "LEVOSIZ M KID": "Tablet",
+    "IBUGESIC PLUS SYP": "Liquid",
+    "IT-MAC 100": "Capsule",
+    "MEFTAGESIC DS SYP": "Liquid",
+    "CANDID POWDER": "Powder",
+    "ECO ALL LIQ": "Liquid",
+    "ZERODOL TH 4": "Tablet",
+    "TELMIKIND BETA 50MG": "Tablet",
+    "IBUGESIC PLUS": "Tablet",
+    "WYSOLONE 5MG": "Tablet",
+    "WYSOLONE 10MG": "Tablet",
+    "NEUROBION FORTE": "Tablet",
+    "HICOPE DROP 15ML": "Drops",
+    "THYROX 50MG": "Tablet",
+    "EVION 400MG": "Capsule",
+    "M CEFT INJ 3GM": "Injection",
+    "PENTIDS 400 TAB": "Tablet",
+    "RUMICARE POW": "Powder",
+    "HITEK BOLUS": "Bolus",
+    "GASS OFF LIQUID": "Liquid",
+    "THUN H LIQ 250ML": "Liquid",
+    "GUTLYTE-GS POW": "Powder",
+    "SPASDICVET BOLUS": "Bolus",
+    "RAKSHARAB INJ": "Injection",
+    "MELONEX Z PLUS BOLUS": "Bolus",
+    "KISKIN CREAM": "Cream",
+    "CHELATED RANMIX SHAKTI": "Powder",
+    "BROTONE S VET": "Liquid",
+    "DEXAFLOX EYE DROPS": "Eye Drops",
+    "RUMEN FS POW": "Powder",
+    "INTACEF-TAZO 562.5 MG": "Others",
+    "MELONEX PLUS BOLUS": "Bolus",
+    "ROPITAS BOLUS": "Bolus",
+    "PANACUR 1 5 BOLUS": "Bolus",
+    "HITEK ORAL LIQ": "Liquid",
+    "PRONAC-D BOLUS": "Bolus",
+    "M CEFT TAZO": "Injection",
+    "KITTU STRONG EYE/EAR D": "Eye Drops",
+    "DIAROAK POW": "Powder",
+    "LENOVO IU SOL": "Liquid",
+    "LIVOTAS LIQ": "Liquid",
+    "TRIBIVET ORAL": "Liquid",
+    "TONOPHOSPHAN INJ": "Injection",
+    "HIMAX OINT": "Ointment",
+    "VITUM H ADVANC 250ML": "Liquid",
+    "AARAM INJ": "Injection",
+    "NOVIZAC INJ": "Injection",
+    "ECOTAS BOLUS": "Bolus",
+    "INTALYTE ORAL POW": "Powder",
+    "RUMENTAS BOLUS": "Bolus",
+    "INTACEF-TAZO 3375MG IN": "Others",
+    "GLUCABOOST LIQ": "Liquid",
+    "VIMERAL LIQ": "Liquid",
+    "ALBOMAR LIQ": "Liquid",
+    "RABIVAC VET INJ": "Injection",
+    "THUN H": "Liquid",
+    "M CEFT 3GM INJ": "Injection",
+    "BROTONE S LIQ": "Liquid",
+    "HEALANT CREAM": "Cream",
+    "APTIQUIK BOOST BOLUS": "Bolus",
+    "MAMMIDIUM POW": "Powder",
+    "TRIBIVET INJ-30ML": "Injection",
+    "MAMMIDIUM POW-200GM": "Powder",
+    "DEXONA INJ-5ML": "Injection",
+    "ATROPINE SULPHATE INJ-100": "Injection",
+    "G-CAL 5LTR": "Liquid",
+    "G-CAL": "Liquid",
+    "OMEE CAP": "Capsule",
+    "CALCIMAX 5LTR": "Liquid",
+    "ADULT PULL UP M": "Others",
+    "SMS CERVICAL COLLAR L": "Instrument / Medical Device",
+    "SMS CERVICAL COLLAR M": "Instrument / Medical Device",
+    "ZAKSHOT PLUS BOLUS": "Bolus",
+    "LORNITAS LIQ 75ML": "Liquid",
+    "STECLIN BOLUS 4'S": "Bolus",
+    "HORMOTONE LIQ 450ML": "Liquid",
+    "MINILICK 1KG": "Powder",
+    "MINLICK": "Powder",
+    "VITAKIND CHOLINE LIQ": "Liquid",
+    "METRALI-500 TAB 100'": "Tablet",
+    "GLUCOBOOST LIQ 600ML": "Liquid",
+    "UTROVET FORTE BOLUS 1*4": "Bolus",
+    "UTROVET TAB 100 TAB": "Tablet",
+    "ROOMEG DP POW 30GM": "Powder",
+    "PORON LIQ": "Liquid",
+    "RUMEN FS BOLUS": "Bolus",
+    "RIDEMA INJ 10ML": "Injection",
+    "ALBOMAR 30ML": "Liquid",
+    "ALBOMAR 60ML": "Liquid",
+    "BABY LOTION": "Lotion",
+    "METROKIND LP BOLUS": "Bolus",
+    "SERAKIND PLUS BOLUS 2'": "Bolus",
+    "MULTISTAR LIQUID 100ML": "Liquid",
+    "P-SODA 500GM": "Powder",
+    "PROTIN-C 1LTR": "Liquid",
+    "CHARCOL BOLUS": "Bolus",
+    "INTACEF-TAZO 3375 INJ 1 VI": "Injection",
+    "PANACUR 150MG TAB 10'S": "Tablet",
+    "MASTAFAST POW 50GM": "Powder",
+    "TITALI-M TAB 60'S": "Tablet",
+    "BROTONE LIQ 500ML": "Liquid",
+    "CHELATED AGRIMIN FORTE 5 K": "Powder",
+    "HEALANT SPRAY 100ML": "Spray",
+    "CALCIJOINT TAB": "Tablet",
+    "CALCIJOINT D3 SACHET": "Sachet",
+    "CLINSOL FOAMING FACE WASH": "Lotion",
+    "CLINSOL GEL": "Gel",
+    "CREPE BANDAGE 2\" LEEFORD": "Instrument / Medical Device",
+    "ELOSONE HT OINT": "Ointment",
+    "ENSHINE TOOTHPASTE": "Powder",
+    "FREELEX PLUS SYP": "Liquid",
+    "FREELEX TAB": "Tablet",
+    "LEEFORD ARM SLING": "Others",
+    "LEEFORD WRIST BRACE": "Others",
+    "NAZOHIST-F NASAL SPRAY": "Nasal Drops",
+    "ORA FAST TAB": "Tablet",
+    "SINARZINE TAB": "Tablet",
+    "SUNSHADE LOTION SPE-30": "Lotion",
+    "SUNSHADE LOTION SPF 50": "Lotion",
+    "TAVERA-M TAB": "Tablet",
+    "THIOFORD TAB": "Tablet",
+    "VOMIFORD MD TAB": "Tablet",
+    "ZOSTER CREAM": "Cream",
+    "FORACORT 200 ROTACAPS 30CA": "Others",
+    "FORACORT 400 ROTACAPS 30CA": "Others",
+    "SYSFOL TAB 30'S 30'S": "Tablet",
+    "H VIT FORTE TAB 10'S": "Tablet",
+    "LIVOGEN CAPTAB 15'S": "Others",
+    "LIVOGEN Z TAB 15'S": "Tablet",
+    "DR.ORTHO OIL 60ML": "Liquid",
+    "DR.ORTHO OIL 120 ML": "Liquid",
+    "CANDID CREAM": "Cream",
+    "CYSTONE TAB": "Tablet",
+    "BETABEST XL 25 TAB": "Tablet",
+    "AZTOR ASP-75 MG CAP 10'S": "Capsule",
+    "GLYMED GLYCERINE BAR": "Others",
+    "SIMYL MCT OIL (HDPE) 100 M": "Liquid",
+    "SHELCAL 500 TAB": "Tablet",
+    "CYRA D CAP 10'S": "Capsule",
+    "SOLVIN COLD TAB": "Tablet",
+    "FRICOLD SUSP": "Suspension",
+    "OFM SUSP 60ML": "Suspension",
+    "NAXDOM 250 TAB 10'S": "Tablet",
+    "NAXDOM 500 MG TAB 10'S": "Tablet",
+    "APTIMUST SYRUP 200ML": "Syrup",
+    "BETABEST XL 50 TAB": "Tablet",
+    "XONE 1000 INJ": "Injection",
+    "PAN IV": "Injection - Vial",
+    "ALKALEB SYR": "Liquid",
+    "BROZEET LS DROP": "Drops",
+    "KUFRIL LS DROP 15ML": "Drops",
+    "AEROCORT ROTACAP 60'S": "Inhaler",
+    "VITCOFOL CAP": "Capsule",
+    "LEVIPIL 500 TAB 10'S": "Tablet",
+    "KESOL 20 LIQ 200ML": "Liquid",
+    "ZILOS 50MG": "Others",
+    "OTEK AC PLUS DROP": "Drops",
+    "BRUTACEF 200 DT TAB": "Tablet",
+    "COLDSOL TAB 1*10": "Tablet",
+    "BEPLEX FORTE TAB 20'S": "Tablet",
+    "ORAFLORA TAB": "Tablet",
+    "WYSOLONE 10MG TAB": "Tablet",
+    "CYCLOPAM-TAB 1X10": "Tablet",
+    "BECLOMIN OINT": "Ointment",
+    "AMODEP AT TAB 14'S": "Tablet",
+    "FOURTS B SYP 200ML": "Liquid",
+    "ULTRA D3 800 DROP 1": "Drops",
+    "CYCLOPAM-DROPS 10ML": "Drops",
+    "NEOSPORIN POWDER 10GM": "Powder",
+    "ENDERM GM CREAM": "Cream",
+    "ZIVAST ASP 10 TAB": "Tablet",
+    "NICARDIA RETARD 20MG TAB 1": "Tablet",
+    "EMESET INJ 2ML": "Injection",
+    "B PROTIN CF 200GM": "Powder",
+    "FRISIUM 10 TAB": "Tablet",
+    "OPOX DROPS": "Drops",
+    "TAXIM 1 GM INJ": "Injection",
+    "CANDID V GEL": "Gel",
+    "MACFAST 500 TAB": "Tablet",
+    "OFDEX EYE/ EAR DROP": "Ear Drops",
+    "DVN PLUS TAB": "Tablet",
+    "NEBISTAR-T 10": "Others",
+    "OH-D3 DROP": "Drops",
+    "THYRONORM 50 MG": "Others",
+    "SCABOMA LOTION": "Lotion",
+    "D3 RICH 800 IU DROPS": "Drops",
+    "BUDETROL 400 CAP": "Capsule",
+    "MACPOD CV 50DT TAB": "Tablet",
+    "PANDERM ++ CREAM": "Cream",
+    "THYROX 50MG TAB": "Tablet",
+    "RANTAC OD 300 TAB": "Tablet",
+    "NEUROBION FORTE TAB": "Tablet",
+    "RINIFOL CAP": "Capsule",
+    "RINIFOL PED TAB": "Tablet",
+    "TEDIBAR BATHING SOAP": "Soap",
+    "XYLOCANE 2 JELLY 30GRM": "Gel",
+    "SYNDOPA PLUS TAB 10'S": "Tablet",
+    "NEWTEL 40 TAB 10'S": "Tablet",
+    "REFRESH TEARS EYE DROP 10ML": "Eye Drops",
+    "RIDOL TAB 10'S": "Tablet",
+    "ITONE EYE DROP 10ML": "Eye Drops",
+    "DOXINATE TABS 10'S": "Tablet",
+    "FRICOLD SUSP 60ML": "Suspension",
+    "BECOSULES SYP 120ML": "Liquid",
+    "MEFKIND-DS SUSP 60ML": "Suspension",
+    "NYCIL POWDER 50GM": "Powder",
+    "CLEARWAX EAR DROP 10ML": "Ear Drops",
+    "BETNOVATE C CREAM 20GRM": "Cream",
+    "GRANIFORCE SYP 10ML": "Liquid",
+    "PENTIDS 400 TAB 6'S": "Tablet",
+    "DERMI COOL POW": "Powder",
+    "NISHA HAIR DAI BROUN 1": "Others",
+    "MOSI EYE DROP": "Eye Drops",
+    "MOSI-D DROP": "Drops",
+    "NEWTEL AMH TAB": "Tablet",
+    "TONACT ASP 75 CAP": "Capsule",
+    "CALPOL PAED DROP": "Drops",
+    "CYPON PAED.DROP": "Drops",
+    "R.B TONE CAP": "Capsule",
+    "NUROKIND INJ": "Injection",
+    "CONFIDO TAB": "Tablet",
+    "FLEMICLAV 625 TAB": "Tablet",
+    "ZIVAST ASP 10 CAP": "Capsule",
+    "OROFER XT DROP": "Drops",
+    "OHD3 PLUS DROP": "Drops",
+    "COMPLAIN KES BADAM": "Powder",
+    "ACILOC INJ": "Injection",
+    "AMLOKIND 5 TAB": "Tablet",
+    "AMODEP TM TAB": "Tablet",
+    "ISRYL M1 TAB": "Tablet",
+    "AMODEP 5MG TAB": "Tablet",
+    "DUOLIN ROTACAPS 60'S": "Others",
+    "AEROCOURT ROTACAPS 60'S": "Others",
+    "ACTIVIR 800 DT TAB 10'S": "Tablet",
+    "AETOR ASP-75 CAP": "Capsule",
+    "CLAVAM 1.2 INJ": "Injection",
+    "GEMCAL D3 CAP 15'S": "Capsule",
+    "UPRISE D3 60K CAP 12'S": "Capsule",
+    "RANDY PLUS TAB": "Tablet",
+    "TELMIKIND AM TAB": "Tablet",
+    "NUROKIND GOLD CAP": "Capsule",
+    "DYNALIGLIPT M TAB": "Tablet",
+    "AMLOKIND AT TAB 15'S": "Tablet",
+    "AMLOKIND S TAB 15'S": "Tablet",
+    "BETADINE SOL 10%": "Liquid",
+    "BETADINE GARGLE 2%MINT": "Liquid",
+    "FORACORT 100 ROTACAPS": "Liquid",
+    "BUDECOREST RESPULLE 0.5MG/50B": "Liquid",
+    "BUDECOREST RESPULE 0.5MG/60B": "Liquid",
+    "PRIMOLUT N TAB": "Tablet",
+    "DOLO 650 TAB": "Tablet",
+    "CALPOL SY": "Liquid",
+    "CETAPHIL OILY SKIN CLEANS": "Liquid",
+    "CETAPHIL SKIN CLEANSER": "Liquid",
+    "CYRA D CAP 15 BOX": "Capsule",
+    "NEWTEL BETA 50 TAB": "Tablet",
+    "ISRYL M1 15'S": "Others",
+    "LSYS LOTION 60ML": "Lotion",
+    "PENTIDS 400 TAB 10'S": "Tablet",
+    "SUPERMET XL 25 TAB 15'S": "Tablet",
+    "PAN IV (40MG) INJ": "Injection",
+    "ASTHAKIND DX SY": "Liquid",
+    "NOBEL GEL": "Gel",
+    "SAMLOKIND AT TAB": "Tablet",
+    "TRAMADIN 100 INJ": "Injection",
+    "LIPIKIND CV 10 CAP": "Capsule",
+    "AMLOKIND 5 TAB 15'S": "Tablet",
+    "STATPURE GOLD 10 CAP 15'S": "Capsule",
+    "TELMIKIND 40 TAB 15'S": "Tablet",
+    "BETADINE SPR. POWDER": "Powder",
+    "CIPLOX E/E DROPS": "Drops",
+    "FORACORT 200 CFC FREE INH": "Others",
+    "AMLOPRES AT TAB 15'S": "Tablet",
+    "IBUGESIC PLUS SUSP": "Suspension",
+    "SYNDOPA PLUS (15'S)": "Others",
+    "KAYAM TABLET-DABBI": "Tablet",
+    "A.P.SPECIAL BALM-12G": "Powder",
+    "JHARAN OIL 20ML": "Liquid",
+    "AMRUTANJAN ROLL-ON-05ML": "Liquid",
+    "SENSODYNE FRESHGEL-40G": "Powder",
+    "IODEX-8G": "Powder",
+    "SENSODYNE-RAPID RELIEF-40G": "Powder",
+    "SENSODYNE FRESHMINT-40G": "Powder",
+    "BAI SHATAVARI GRANULES": "Granules",
+    "LIV52 TAB": "Tablet",
+    "HIMALAYA BABY SOAP-50G": "Soap",
+    "BONNY SILICON NIPPLE": "Others",
+    "SARSO TAIL RAPSCOS-100": "Liquid",
+    "SARSO TAIL RAPSCOS-50": "Liquid",
+    "VIKAS COUGH DROP-850T": "Drops",
+    "SD-FLAM TAB": "Tablet",
+    "SKORE NOTHING GLIMAX": "Others",
+    "SKORE STRAWBERRY-3PC": "Others",
+    "SKORE BLUE 3PC": "Others",
+    "HARAN OIL 20ML": "Liquid",
+    "AMBUTARIAN ROLL-ON -05ML": "Liquid",
+    "SENSODYNE RAPID RELIEF-40G": "Powder",
+    "SHATAVARI GRANULES": "Granules",
+    "INV 52 TAB": "Tablet",
+    "SURYA PRAKASH TAIL": "Liquid",
+    "PET SAFA CHURNA 100G": "Powder",
+    "AMYRON SYP": "Liquid",
+    "PETSAFA CHURNA-60G": "Powder",
+    "FEEL IT MASS STRAWBERRY-3": "Others",
+    "FEEL IT MASS-CHOCOLATE 3'": "Others",
+    "VEET HAIR REMOVER SACHE": "Powder",
+    "HAJMOLA SACHET": "Sachet",
+    "FEMIPLEX TAB": "Tablet",
+    "GLUCON-D ORANGE 450G": "Powder",
+    "GLUCON-D ORANGE-1KG": "Powder",
+    "PANCHSAKAR CHURN B-50G": "Powder",
+    "ASHWAGANDHARISHTRA-220ML": "Liquid",
+    "TRIPHALA GUGGULU-40T": "Others",
+    "GULKAND-SANDU-200G": "Powder",
+    "HIMALAYA BABY POWDER-50G": "Powder",
+    "HIMALAYA BABY SOAP-125G": "Soap",
+    "HIMALAYA BABY OIL-100ML": "Liquid",
+    "HIMALAYA BABY CREAM-50ML": "Cream",
+    "HIMALAYA BABY OIL-50ML": "Liquid",
+    "HIMALAYA BABY POW-30G": "Powder",
+    "CLOVE OIL-RAPSCOS": "Liquid",
+    "CASEROLE FREE": "Feed Supplement",
+    "AYUSAS SAPAT(ADULSA)-100M": "Liquid",
+    "BOROLINE SX CREAM-TUBE": "Cream",
+    "UJALA EYE DROP": "Eye Drops",
+    "VASMOL 33-100ML": "Liquid",
+    "DR.ORTHO OIL SMALL-60ML": "Liquid",
+    "DR.ORTHO OINTMENT-30G": "Ointment",
+    "ACNESTAR SOAP-75G": "Soap",
+    "USTAD CONDOM 6PC": "Others",
+    "VASMOL 33-50ML": "Liquid",
+    "BOROLINE SX -7GM SMALLPOT": "Powder",
+    "SENSODYNE-RAPID RELIEF-40 SD": "Powder",
+    "75G SENSODYNE RAPIDRELIEF": "Powder",
+    "ITCHGUARD CR-15G": "Powder",
+    "SUGAR FREE GOLD POWDER": "Powder",
+    "ZANDU BALM BOTTLE-25ML": "Liquid",
+    "RHUMA OIL-50ML": "Liquid",
+    "BALANT KADHA NO 2-200ML": "Liquid",
+    "CHANDANASAV-220ML": "Liquid",
+    "CHANDANASAV-450ML": "Liquid",
+    "PUNARNAVASAV-220ML": "Liquid",
+    "HIMALAYA BABY POWDER-100G": "Powder",
+    "HIMALAYA BABY LOTION-100M": "Lotion",
+    "CIPLADINE OINT-10G": "Ointment",
+    "CASTOR OIL-RAPSCO": "Liquid",
+    "WHISPER XL WINGS -6PC": "Others",
+    "SKORE NOTHING-STRAWBERY-3": "Others",
+    "RENALKA SYP 100ML": "Liquid",
+    "MENTAT TAB": "Tablet",
+    "MENTAT SYP 200ML": "Liquid",
+    "BULVEL SATVA": "Powder",
+    "CYSTONE FORTE TAB": "Tablet",
+    "GRANIFORCE SYRUP": "Syrup",
+    "PALSINURON CAP": "Capsule",
+    "M-OUT ROLL ON": "Liquid",
+    "MOUTHMIST SPRAY(PAN)": "Spray",
+    "MOUTHMIST SPRAY MINT": "Spray",
+    "NICOSHOT GUM 2MG": "Others",
+    "SIGNET ALOEVERA GEL": "Gel",
+    "SIGNET CHARCOAL F.WASH": "Lotion",
+    "SMARTAID BANDAGE(REG)": "Instrument / Medical Device",
+    "SMARTAID BAND.(ROUND)": "Instrument / Medical Device",
+    "CAPSICUM PLASTER": "Others",
+    "SMARTAID SKIN BLADE": "Instrument / Medical Device",
+    "STEAM VAPORIZER": "Instrument / Medical Device",
+    "BABY WIPES TINYFACE": "Liquid",
+    "ICONIC TWIST N LOCK 2PC": "Others",
+    "CHATURBHUJ OIL 100ML": "Liquid",
+    "MAHARASNADI KADHA": "Liquid",
+    "KESH KING GOLD SHAMPOO": "Shampoo",
+    "LEF-CASTOR NF CREAM": "Cream",
+    "DERMIKEM OC PLUS OINT": "Ointment",
+    "INT-INTADERM OC OINT": "Ointment",
+    "ZERODOL TH4 TAB": "Tablet",
+    "TELMIKIND BETA 50TAB": "Others",
+    "IBUGESIC PLUS TAB": "Tablet",
+    "ZILOS-H TAB": "Tablet",
+    "SUMO SPRAY 20GM": "Spray",
+    "SUMO SPRAY 35GM": "Spray",
+    "KRACK CREAM": "Cream",
+    "ORAL-B BRUSHCOMBO": "Others",
+    "SM.LOVEGUARD(CHO) 40RS": "Others",
+    "SM.LOVEGUARD(STRAW) 40RS": "Others",
+    "INT-MONTAS L TAB": "Tablet",
+    "SHATAVARI KALP(SANDU)": "Powder",
+    "ZANDU BALM 1ML POUCH": "Liquid",
+    "A.P.SPECIAL BALM": "Powder",
+    "TOR.NO SCARS CREAM": "Cream",
+    "KANCHANAR BUGGUL": "Tablet",
+    "GAN.HARITAKI CHURNA": "Powder",
+    "SD TIGER PHENYLE(BLACK)": "Liquid",
+    "SD MANFORCE(STRAW+VANILA)": "Others",
+    "MANFORCE(SUNNY EDIT)": "Others",
+    "NS CALAPURE A LOTION": "Lotion",
+    "MULTISTAR LIQ 500ML": "Liquid",
+    "INTACEF TAZO 3375MG": "Others",
+    "INTACEF 3GM": "Powder",
+    "M-CEFT+TAZO 3375 GM": "Powder",
+    "TITALI M": "Tablet",
+    "OFLOKIND-OZ BOLUS 2'S": "Bolus",
+    "MOXEL BOLUS": "Bolus",
+    "FENTAS 1.5GM": "Bolus",
+    "PARALAX LIQ 120ML": "Liquid",
+    "CHIROL OINT-DABBI": "Ointment",
+    "FIGARO OIL-SMALL-50ML": "Liquid",
+    "PARAD 100TAB-18%": "Others",
+    "AMRUTANJAN BACK PAIN ROLL": "Liquid",
+    "JUFEX FORTE SYP-100ML": "Liquid",
+    "DEXOLAC-1 REFILL 400G": "Powder",
+    "KRACK CREAM-15G S": "Cream",
+    "VEET HAIR REMOVER-TUBE": "Powder",
+    "ABHYARISHTRA-220ML-BAI": "Liquid",
+    "SHATARI POWDER-SANDU": "Powder",
+    "RENALKA SYP": "Liquid",
+    "HIMALAYA BABY SOAP-25G": "Soap",
+    "HIM.FACE WASH-15ML": "Lotion",
+    "HIM.FACE WASH-50ML": "Lotion",
+    "HIMALAYA BABY POW-30G SMA": "Powder",
+    "ZEAL COUGH LOZENGES": "Others",
+    "VICKS COUGH DROP-850T": "Drops",
+    "SKORE NOTHING CLIMAX3PC": "Others",
+    "DUOLIN ROTACAPS": "Others",
+    "ACIVIR 800 DT TAB": "Tablet",
+    "AZTOR ASP-75 CAP": "Capsule",
+    "DOXOLIN 200 TAB": "Tablet",
+    "TEMSAN 40 TAB": "Tablet",
+    "CYRA D CAP": "Capsule",
+    "TOPISAL 3% LOTION": "Lotion",
+    "ETOS-MR TAB": "Tablet",
+    "LSYS CREAM": "Cream",
+    "ISRYL M2": "Others",
+    "SHELICAL 500 TAB": "Tablet",
+    "GEMCAL D3 CAP": "Capsule",
+    "UPRISE D3 60K CAP": "Capsule",
+    "BANDY PLUS TAB": "Bolus",
+    "BETADINE GARGLE 2%": "Liquid",
+    "BUDECORT RESPULE": "Liquid",
+    "AMLOKIND SOL": "Liquid",
+    "BETADINE 5 TAB": "Tablet",
+    "BETADINE GARGLE": "Liquid",
+    "ISRYL M2 15'S": "Others",
+    "TEMSAN 40 TAB 15'S": "Tablet",
+    "TOPISAL 38 LOTION 30ML": "Lotion",
+    "ACIVIR 800 DT TAB 10'S": "Tablet",
+    "ISRYL M1": "Others",
+    "AMLOKIND SOL 10%": "Liquid",
+    "BETADINE 5 TAB 15'S": "Tablet",
+    "BUDECORT RESPULE 0.5MG": "Liquid",
+    "TOPISAL 3% LOTION 30ML": "Lotion",
+    "TEMSAN 40 TAB 15S": "Tablet",
+    "LSYS CREAM 30GM": "Cream",
+    "ISRYL M2 15S": "Others",
+    "SHEL CAL 500 TAB": "Tablet",
+    "MISC": "Others",
+    "SHEL.CAL 500 TAB": "Tablet",
+    "BUDECORT RESPULE 0.5MG50B": "Liquid",
+    "200G DEXOLAC-1 TIN": "Powder",
+    "SARSO TAIL": "Liquid",
+    "VICKS COUGH DROP": "Drops",
+    "SKORE NOTHING CLIMAX": "Others",
+    "SKORE STRAWBERRY": "Others",
+    "SKORE BLUE": "Others",
+    "AMRUTANJAN BACK PAIN ROLL-": "Liquid",
+    "THYRONORM 100 MG": "Others",
+    "THYRONORM 75 MG": "Others",
+    "CANDID B CREAM": "Cream",
+    "HIFEN 200DT TAB": "Tablet",
+    "MPX CV 625MG TAB": "Tablet",
+    "OPOX 50MG DT TAB": "Tablet",
+    "PANTIN L CAP": "Capsule",
+    "IPRAZEST RESPULES": "Others",
+    "MACFAST 650 TAB": "Tablet",
+    "OMNACORTIL 20MG TAB": "Tablet",
+    "POLYPOD 50 DT TAB": "Tablet",
+    "CINLIBLU 10 TAB": "Tablet",
+    "SOLVIN COLD DROPS": "Drops",
+    "DEOCAL SYR": "Liquid",
+    "PERMED SOAP": "Soap",
+    "ECOSPRIN 75 TAB": "Tablet",
+    "GLYCOMET 250 TAB": "Tablet",
+    "PANCON L CAP": "Capsule",
+    "PAINOCON GEL": "Gel",
+    "BEDSHEET GIFT": "Others",
+    "O2 SYP 30ML": "Liquid",
+    "ZERODOL SPAS TAB 10'S": "Tablet",
+    "HIFEN LXX 200 TAB": "Tablet",
+    "MEGAPEN KID TAB 10'S": "Tablet",
+    "B FIT ADULT DAIPER ECO. L 10*1": "Instrument / Medical Device",
+    "S V SET": "Others",
+    "PREGNANCY KIT VET": "Others",
+    "PHOSPHATE ENEMA": "Liquid",
+    "CAREX CONDOM": "Others",
+    "IV NS 250 ML": "Injection",
+    "NEBTUDUCE T TAB": "Tablet",
+    "DEFCORT-6MG TAB 6'S": "Tablet",
+    "CALCIUM SANDOZ INJ 10ML": "Injection",
+    "OPOX 50 DT TAB 10'S": "Tablet",
+    "ANDIAL TAB 10'S": "Tablet",
+    "BANDY PLUS SUS 10ML": "Liquid",
+    "SHELCAL XT TAB 10'S": "Tablet",
+    "PRU 10 TAB 10'S": "Tablet",
+    "SCABEX LOTION 50ML": "Lotion",
+    "BETADINE OINT 15GRM": "Ointment",
+    "PAN 40 VIAL VIAL": "Injection - Vial",
+    "HICOPE SYP 100ML": "Liquid",
+    "CLOBETAMIL-G CREAM 10GM": "Cream",
+    "ZERODOL SP TAB 10'S": "Tablet",
+    "ZIFI 200DT TAB 10'S": "Tablet",
+    "LINOWIN 600MG TAB 10'S": "Tablet",
+    "BUSCOGAST TAB 10'S": "Tablet",
+    "BILASET M TAB": "Tablet",
+    "MACFAST 650 TAB 10'S": "Tablet",
+    "TRYPTOMER 10 TAB 10'S": "Tablet",
+    "LASILACTONE 50 TAB 10ST": "Tablet",
+    "DULCOFLEX TAB 10'S": "Tablet",
+    "D3 MUST 60K TAB 4'S": "Bolus",
+    "CETIRIZINE TAB (B) 10'S": "Tablet",
+    "IODEX 50GRM": "Others",
+    "SUPRADYN TAB 15'S": "Tablet",
+    "NEUROBION FORTE TAB 10'S": "Tablet",
+    "ETOS MR TAB": "Tablet",
+    "GERBISA TAB 10 ST": "Tablet",
+    "RBEN DSR CAP 10'S": "Capsule",
+    "CYPON TAB 10'S": "Tablet",
+    "ITCH GUARD 12GM": "Powder",
+    "CANDID B CREAM 10RM": "Cream",
+    "HADENSA OINT 20GRM": "Ointment",
+    "CANDID CR NEW 20GRM": "Others",
+    "RESPIRA PLUS SYP": "Liquid",
+    "BRO-ZEDEX SYP 100ML": "Liquid",
+    "NEERI SYP 100ML": "Liquid",
+    "COMPLAIN KES BADAM 200GRM": "Others",
+    "ALLOUT COIL": "Others",
+    "VICCO WSO SACHET 7GRM": "Sachet",
+    "ACVIFLAM-P": "Tablet",
+    "WYSOLONE 10 TAB.": "Tablet",
+    "NORMAXIN-TB": "Tablet",
+    "SMUTH CREAM": "Cream",
+    "VIBACT CAP": "Capsule",
+    "ZERODOL MR TAB": "Tablet",
+    "XYMEX MIPS TAB": "Tablet",
+    "XYMEX MPS TAB": "Tablet",
+    "COLIMEX TAB 25 MG": "Tablet",
+    "CALCIMUST BOLUS": "Bolus",
+    "MASTAFAST POWD 50GM": "Powder",
+    "MASTAFAST POWD 200GM": "Powder",
+    "ENROGEN PLUS 100ML": "Liquid",
+    "GLUCABOOST LIQ 600ML": "Liquid",
+    "NEBLON POWDER": "Powder",
+    "HORMOTONE LIQ": "Liquid",
+    "M-CEFT 3GM": "Liquid",
+    "SHARKOFEROL 450GM": "Powder",
+    "ZEET INJ": "Injection",
+    "NEUROXIN M INJ 30ML": "Injection",
+    "CAPSSOLA GOLD GEL 300 GM": "Gel",
+    "MAMICEF SUSP 10ML": "Suspension",
+    "XYROFUR 500MG INJ": "Injection",
+    "IMIZET INJ 5ML": "Injection",
+    "MASTIRID I.M.": "Ointment",
+    "ROOKARE BOLUS": "Bolus",
+    "ROOT FCR POWD 500GM": "Powder",
+    "FOSPHORISE LIQ 250ML": "Liquid",
+    "RALEMBIC IV 3LIT": "Injection",
+    "AMOXIRUM FORTE INJ": "Injection",
+    "LIXEN BOLUS": "Bolus",
+    "AMOXIRUM FORTE INJ 3GM": "Injection",
+    "MEGLUDYNE INJ 100ML": "Injection",
+    "URZABOOST AFS LIQ 600ML": "Liquid",
+    "BOOST UP GOLD BOLUS": "Bolus",
+    "MASTITIS DROPS": "Drops",
+    "HITEK ORAL 100ML": "Liquid",
+    "CALBOROL INJ": "Injection",
+    "CEDON 50MG SYP DOLOSTAT-SP TAB KOLQ AF SYP XSTAN BETA 50 TAB XSTAN-AM TAB NEE DT TAB COLIZA LIQ MANFORCE CONDOM CHOC+HA MANFORCE CONDOM SUNNY NUROKIND GOLD CAP GLYCOMET 500MG TAB": "Liquid",
+    "AZITHRAL 250 TAB": "Tablet",
+    "AZITHRAL 500 TAB": "Tablet",
+    "OPOX CV 50 SY": "Liquid",
+    "ENO LEMON": "Powder",
+    "ECOSPRIN AV 150 CAP": "Capsule",
+    "MACBERY-DX": "Liquid",
+    "THYRONORM-75 TAB": "Tablet",
+    "NEWTEL BETA 25 TAB": "Tablet",
+    "BECOSILES CAP": "Capsule",
+    "MACPOD 200 DT TAB": "Tablet",
+    "KETOROL DT TAB": "Tablet",
+    "OMEE 20MG CAP": "Capsule",
+    "DABUR GLUCOSE": "Powder",
+    "COFSILS IRS COUGH DROPS": "Drops",
+    "COFSILS ORANGE JAR": "Liquid",
+    "SILVEREX IONIC": "Powder",
+    "TYREL 100ML LIQ": "Liquid",
+    "NATLIV 500ML LIQ": "Liquid",
+    "TITALI M TAB": "Tablet",
+    "FENTAS 3 GM BOLUS": "Bolus",
+    "FENTAS 1.5GM BOLUS": "Bolus",
+    "INTAMOX O BOLUS": "Bolus",
+    "MAXXTOL 30ML INJ": "Liquid",
+    "DNS 500": "Liquid",
+    "MIFEX IV": "Liquid",
+    "CALBORAL IV": "Liquid",
+    "ROOTRAZ LIQ 15ML": "Liquid",
+    "RUCHAMAX 15M POW": "Liquid",
+    "BROTONE 120ML LIQ": "Liquid",
+    "BROTONE 500ML LIQ": "Liquid",
+    "NILVERM POW": "Liquid",
+    "TOTAVIT STRONG POW 1KG": "Liquid",
+    "MULTISTAR-H LIQ 100ML": "Liquid",
+    "BANDYKIND PLUS LIQ 30ML": "Liquid",
+    "BANDYKIND PLUS 90ML LIQ": "Liquid",
+    "MULTISTAR-H 250ML": "Liquid",
+    "MASTAFAST POWDER": "Liquid",
+    "BOVI OK POW": "Liquid",
+    "PARALAX ADV 450ML": "Liquid",
+    "P-DEPOT INJ 3ML": "Liquid",
+    "SULPHA BOLUS": "Bolus",
+    "TONOREX POW 50GM": "Liquid",
+    "BUTOX LIQ 15ML": "Liquid",
+    "TONOPHOSPAN INJ 100ML": "Liquid",
+    "TONOPHOSPAN INJ": "Liquid",
+    "MEGLOC ADV BOLUS": "Bolus",
+    "MECOVET-XL LIQ 100 ML": "Liquid",
+    "D 25 IV 500ML": "Liquid",
+    "KHAND MALAM": "Liquid",
+    "TR-WELL BOLUS": "Bolus",
+    "CALDHARA POWER GEL": "Gel",
+    "DISPO 20ML": "Liquid",
+    "DISPO 10ML SYRINGE": "Liquid",
+    "NEEDLE 16NO": "Instrument / Medical Device",
+    "NEEDLE 18 NO STEEL": "Instrument / Medical Device",
+    "TUSSIN-DMR PED SYRUP": "Liquid",
+    "ISRYL-M-2 TAB": "Tablet",
+    "NEWTEL-AM TAB": "Tablet",
+    "TENEFIT-M TAB": "Tablet",
+    "AZTOR-ASP-75 CAP": "Capsule",
+    "LEVIPIL-500 TAB": "Tablet",
+    "DOXY-1 L-DR FORTE CAP": "Capsule",
+    "GLYCOMET-GP-1 TAB": "Tablet",
+    "CALADRYL SOLUTION": "Liquid",
+    "CYPON DROPS": "Liquid",
+    "DERIPHYLLIN RETARD-150": "Tablet",
+    "DILZEM-SR-90 TAB": "Tablet",
+    "DPLONEX DT": "Others",
+    "GELUSIL-MPS LIQUID": "Liquid",
+    "BANDY PLUS SYP": "Liquid",
+    "GLIZID-M-40/500 TAB": "Tablet",
+    "CIPLAR-10 TAB": "Tablet",
+    "CIPLOX-TZ TAB": "Tablet",
+    "CONCOR-COR-2.5 TAB": "Tablet",
+    "DOXINATE TAB.": "Tablet",
+    "TAXIM-O-200 TAB": "Tablet",
+    "TAXIMAX-1500 INJ": "Injection",
+    "DLONEX DT": "Others",
+    "ULTRA KING TAB": "Tablet",
+    "OMEE CAP 20MG": "Capsule",
+    "OROGARD MOUTH WASH": "Lotion",
+    "CLAVUNOM-625 TAB": "Tablet",
+    "DOXY 100 TAB": "Tablet",
+    "GM NAPHTHALENE BALLS": "Powder",
+    "TELMIKIND BETA 50 TAB": "Tablet",
+    "THYRONORM 12.5 TAB": "Tablet",
+    "RESINI GEL": "Gel",
+    "SUPRADYN TAB": "Tablet",
+    "CYRA LS TAB": "Tablet",
+    "NEXPRO RD FORTE CAP": "Capsule",
+    "PECTIN M TR": "Others",
+    "ROSYN 500 CAP": "Capsule",
+    "LEVOCET M TR": "Liquid",
+    "TENP 40 TAB": "Tablet",
+    "PLESSAR BETA 50 TAB": "Tablet",
+    "STROPESS XL 25 TAB": "Tablet",
+    "NICARDIA RETARD 20 TAB": "Tablet",
+    "CYRA TAB": "Tablet",
+    "VITCOFOL C INJ COMBI": "Liquid",
+    "ATARAX 10 TABS": "Tablet",
+    "ONDEM INJ": "Liquid",
+    "CLAVAM DRY SYP": "Liquid",
+    "SKINLIGHT CREAM": "Cream",
+    "HIM SHISHU ANAND": "Others",
+    "AIR 180 TAB": "Tablet",
+    "BRUAN SYP": "Liquid"
+  },
+  "medicine_metadata": {
+    "VERTITREAT-8 TAB": {
+      "schedule": "H",
+      "content_drug": "Betahistine 8mg"
+    },
+    "PROMINANT CHARCOAL FACEWAS": {
+      "content_drug": "Activated Charcoal"
+    },
+    "CLINFRESH GEL": {
+      "schedule": "H",
+      "content_drug": "Clindamycin 1% w/w"
+    },
+    "PROMINANT HAND SANITIZER": {
+      "content_drug": "Isopropyl Alcohol 70%"
+    },
+    "LULIFRESH CREAM": {
+      "schedule": "H",
+      "content_drug": "Luliconazole (1% w/w)"
+    },
+    "NEEMWAY N & A FACE WASH": {
+      "content_drug": "Neem Extract"
+    },
+    "THROMBOPHOB GEL 30GM": {
+      "schedule": "H",
+      "content_drug": "Benzyl Nicotinate (2mg) + Heparin (50IU)"
+    },
+    "KOJIVIT PLUS CREAM": {
+      "content_drug": "Kojic Acid, Arbutin, Octinoxate, Mulberry Extract, Vitamin E",
+      "schedule": "H"
+    },
+    "BETNOVATE C CREAM": {
+      "schedule": "H",
+      "content_drug": "Betamethasone (0.1% w/w) + Clioquinol (Iodochlorhydroxyquin) (3% w/w)"
+    },
+    "NEWTEL TRIO 25 TAB": {
+      "schedule": "H",
+      "content_drug": "(10mg) + Metoprolol Succinate (25mg) + Telmisartan (40mg)"
+    },
+    "LOBATE GM NEO CREAM 20GM": {
+      "schedule": "H",
+      "content_drug": "Clobetasol (0.05% w/w) + Miconazole (2% w/w) + Neomycin (0.5% w/w)"
+    },
+    "TELMED 40 TAB": {
+      "schedule": "H",
+      "content_drug": "Telmisartan (40mg)"
+    },
+    "SATROGYL O TAB": {
+      "schedule": "H",
+      "content_drug": "Satranidazole (300mg) + Ofloxacin (200mg)"
+    },
+    "XONE SB 1GM INJ": {
+      "schedule": "H1",
+      "content_drug": "Ceftriaxone (1000mg) + Sulbactam (500mg)"
+    },
+    "DYNAGLIPT M TAB": {
+      "schedule": "H",
+      "content_drug": "Teneligliptin (20mg)"
+    },
+    "ASTHALIN CFC FREE INHALER": {
+      "schedule": "H",
+      "content_drug": "Salbutamol (100mcg)"
+    },
+    "ASTHALIN ROTACAPS 60'S": {
+      "schedule": "H",
+      "content_drug": "Ambroxol (30mg/5ml) + Levosalbutamol (1mg/5ml) + Guaifenesin (50mg/5ml)"
+    },
+    "AEROCORT ROTACAPS 60'S": {
+      "schedule": "H",
+      "content_drug": "Levosalbutamol (100mcg) + Beclometasone (100mcg)"
+    },
+    "OSTOVET FORTE LIQ..": {
+      "content_drug": "Calcium, Phosphorus, Vitamin D3, Vitamin B12",
+      "schedule": "H"
+    },
+    "SHARKOFERROL VET": {
+      "content_drug": "Shark Liver Oil, Vitamin A, Vitamin D3"
+    },
+    "VIMERAL FORTE 1.2 LTR": {
+      "content_drug": "Vitamin A, Vitamin D3, Vitamin E, Vitamin B12"
+    },
+    "LUVI SILICON NIPPLE": {
+      "content_drug": "Silicone"
+    },
+    "VINRAL Z 500ML (ORANGE)": {
+      "content_drug": "Zinc Sulphate"
+    },
+    "VINRAL Z LEMON 500ML": {
+      "content_drug": "Zinc Sulphate"
+    },
+    "SKINSHINE CREAM": {
+      "schedule": "H",
+      "content_drug": "Hydroquinone (2% w/w) + Mometasone (0.1% w/w) + Tretinoin (0.025% w/w)"
+    },
+    "BESTOSLIDE P (AMBER)": {
+      "schedule": "H",
+      "content_drug": "Aceclofenac 100mg, Paracetamol 325mg"
+    },
+    "INJ INROCIN 100ML": {
+      "schedule": "H",
+      "content_drug": "Ciprofloxacin 200mg/100ml"
+    },
+    "L.S BELT (MEDIUM) (ADVANCE": {
+      "content_drug": "Medical Device"
+    },
+    "CERVICAL COLLAR (M) (ADVANC": {
+      "content_drug": "Medical Device"
+    },
+    "GRAIN GOLD (GRAINS AMMPUL": {
+      "content_drug": "Ayurvedic Proprietary Medicine"
+    },
+    "S V SET 24NO": {
+      "content_drug": "Ondansetron (2mg)"
+    },
+    "PREGNANCY KIT VET 1PIC": {
+      "content_drug": "Human Chorionic Gonadotropin (hCG) detection kit"
+    },
+    "PHOSPHATE ENEMA 100ML": {
+      "schedule": "H",
+      "content_drug": "Clindamycin (1% w/w)"
+    },
+    "CAREX CONDOM 10 PIC": {
+      "content_drug": "Latex"
+    },
+    "IV NS 250 ML (BML)": {
+      "schedule": "H",
+      "content_drug": "Sodium Chloride 0.9% w/v"
+    },
+    "DIAPER ADULT (PAINT) MEDIC": {
+      "content_drug": "N/A"
+    },
+    "DISPOVAN 5ML": {
+      "content_drug": "N/A"
+    },
+    "ADD APP PLUS SYP": {
+      "content_drug": "Cyproheptadine (2mg) + Tricholine Citrate (275mg)"
+    },
+    "LEVOZET M SYP (60ML)": {
+      "schedule": "H",
+      "content_drug": "Levocetirizine (2.5mg) + Montelukast (4mg)"
+    },
+    "NOSY CLEAR (ADULT)": {
+      "content_drug": "Xylometazoline (0.1% w/v)"
+    },
+    "PERWICK PLUS LOTION": {
+      "schedule": "H",
+      "content_drug": "Permethrin 5%"
+    },
+    "CEEFLOX TZ (H)": {
+      "schedule": "H",
+      "content_drug": "Ofloxacin (200mg) + Ornidazole (500mg)"
+    },
+    "OTRIDASH OXY FAST RELIEF D": {
+      "schedule": "H",
+      "content_drug": "Oxymetazoline 0.05%"
+    },
+    "CALCIDASH D3 NANO SHOT": {
+      "content_drug": "Cholecalciferol 60000 IU"
+    },
+    "COLDTREAT FORTE SYP": {
+      "schedule": "H",
+      "content_drug": "Paracetamol 250mg, Phenylephrine 5mg, Chlorpheniramine 2mg"
+    },
+    "NEEMWAY NEEM& ALOE SOAP": {
+      "content_drug": "Neem Extract"
+    },
+    "NEEMWAY PROTECTIVE SOAP": {
+      "content_drug": "Neem Extract"
+    },
+    "LAXIFRESH PLUS SYP": {
+      "content_drug": "Sodium Picosulfate (5mg/5ml)"
+    },
+    "HAIRFLY TAB": {
+      "content_drug": "Biotin, Calcium Pantothenate, Zinc, Selenium, Amino Acids"
+    },
+    "FOOTTREAT CREAM": {
+      "content_drug": "Urea, Lactic Acid, Glycerin"
+    },
+    "HAIRFLY ONION HAIR OIL": {
+      "content_drug": "Onion Oil Extract"
+    },
+    "E-FAB EAR DROPS": {
+      "schedule": "H",
+      "content_drug": "Chloramphenicol, Beclomethasone, Clotrimazole, Lignocaine"
+    },
+    "CLEAR SKIN CREAM": {
+      "schedule": "H",
+      "content_drug": "Hydroquinone (NA) + Mometasone (NA) + Tretinoin (NA)"
+    },
+    "DERMIKEM OC": {
+      "schedule": "H",
+      "content_drug": "Terbinafine (1% w/w) + Clobetasol (0.05% w/w) + Ofloxacin (0.75% w/w) + Ornidazole (2% w/w)"
+    },
+    "CASTOR OIL": {
+      "content_drug": "Terbinafine (1% w/w) + Clobetasol (0.05% w/w) + Ofloxacin (0.75% w/w) + Ornidazole (2% w/w)"
+    },
+    "OSG WRIST BRACE": {
+      "content_drug": "Medical Device"
+    },
+    "SCALP VEIN": {
+      "content_drug": "Ketoconazole (2% w/v) + Coal Tar (4% w/v)"
+    },
+    "BANDAGE 10CM X 4MTR": {
+      "content_drug": "Medical Device"
+    },
+    "BANDAGE 5CM X 4 MTR": {
+      "content_drug": "Medical Device"
+    },
+    "OD-MS": {
+      "schedule": "H",
+      "content_drug": "Domperidone (10mg) + Omeprazole (20mg)"
+    },
+    "ENSHINE ADVANCE BRUSH": {
+      "content_drug": "Hydroquinone (2% w/w) + Mometasone (0.1% w/w)"
+    },
+    "SEPTIPLAST BANDAGE": {
+      "content_drug": "Cetrimide (3% w/v) + Chlorhexidine Gluconate (1.5% w/v)"
+    },
+    "AZROLID-250 TAB": {
+      "schedule": "H",
+      "content_drug": "Azithromycin (250mg)"
+    },
+    "ENZOMAGIC CAPSULE": {
+      "content_drug": "Alpha-amylase (18.75mg) + Pepsin (12.5mg)"
+    },
+    "ITROMED-200 CAP": {
+      "schedule": "H",
+      "content_drug": "Itraconazole (100mg)"
+    },
+    "NUTIACTIVE CAP": {
+      "content_drug": "Multivitamin and Multimineral"
+    },
+    "SCRABEL LOTOIN 50ML": {
+      "schedule": "H",
+      "content_drug": "Permethrin (5% w/v)"
+    },
+    "THIOROK-AP TAB": {
+      "schedule": "H",
+      "content_drug": "(4mg) + Aceclofenac (100mg) + Paracetamol (325mg)ADD"
+    },
+    "TOBRA-D E DROP": {
+      "schedule": "H",
+      "content_drug": "Dexamethasone (0.1%) + Tobramycin (0.3%)"
+    },
+    "WATER WATER FOR INJ. 5ML": {
+      "content_drug": "Sodium Chloride (NA)"
+    },
+    "GRAIN GOLD": {
+      "content_drug": "Ayurvedic Proprietary Medicine"
+    },
+    "L HIST MONT TABLET": {
+      "schedule": "H",
+      "content_drug": "Betahistine (16mg)"
+    },
+    "ACEMIZ MR TABLET": {
+      "schedule": "H",
+      "content_drug": "Aceclofenac (100mg) + Paracetamol (325mg) + Chlorzoxazone (250mg)"
+    },
+    "ABZ PLUS SUSPENSION": {
+      "schedule": "H",
+      "content_drug": "Ivermectin  (6mg) +  Albendazole (400mg)"
+    },
+    "METRONIDAZOLE IP INJ. (RE": {
+      "schedule": "H",
+      "content_drug": "Metronidazole (500mg)"
+    },
+    "D3 HIGH ORAL SOLUTION": {
+      "content_drug": "Vitamin D3 (60000IU)"
+    },
+    "NS 100ML DOK": {
+      "content_drug": "Sodium Chloride (0.9% w/v)"
+    },
+    "PARAD TABLET 100GM(RALAX": {
+      "content_drug": "Dicyclomine (20mg) + Paracetamol (500mg)"
+    },
+    "CREPE BADAGE 7.5CM": {
+      "content_drug": "Cotton Elastic Bandage"
+    },
+    "DISPOVAN SYRINGES 10ML": {
+      "content_drug": "N/A"
+    },
+    "ELECTROFIT (APPLE)": {
+      "content_drug": "Electrolytes (Sodium, Potassium, Chloride, Citrate, Dextrose)"
+    },
+    "PINKOO GRIPE WATER": {
+      "content_drug": "Dill Oil, Fennel Oil, Sodium Bicarbonate"
+    },
+    "NASOCAN NASAL DROP": {
+      "content_drug": "Xylometazoline (0.1% w/v)"
+    },
+    "NO SCARS CREAM 20GM": {
+      "schedule": "H",
+      "content_drug": "Hydroquinone (2% w/w) + Mometasone (0.1% w/w) + Tretinoin (0.025% w/w)"
+    },
+    "KUFF-Q DX TAB": {
+      "schedule": "H",
+      "content_drug": "Phenylephrine (5mg) + Chlorpheniramine Maleate (2mg) + Dextromethorphan Hydrobromide (15mg)"
+    },
+    "CASTOR OIL 50GM (MACX)": {
+      "content_drug": "Terbinafine (1% w/w) + Clobetasol (0.05% w/w) + Ofloxacin (0.75% w/w) + Ornidazole (2% w/w)"
+    },
+    "RL 500ML": {
+      "schedule": "H",
+      "content_drug": "Ramipril (5mg)"
+    },
+    "CYPSTAR 200ML SYRUP": {
+      "schedule": "H",
+      "content_drug": "Cyproheptadine (NA)"
+    },
+    "RIB BELT (GM)": {
+      "content_drug": "Domperidone (30mg) + Rabeprazole (20mg)"
+    },
+    "CEFLOX D EYE/EAR DROP": {
+      "schedule": "H",
+      "content_drug": "Ciprofloxacin (0.3%) + Betamethasone (0.1%)"
+    },
+    "POWERGIN TAB": {
+      "schedule": "H",
+      "content_drug": "Chlorzoxazone (250mg) + Diclofenac (50mg) + Paracetamol (325mg)"
+    },
+    "KETOKEM ACTIV SHAMPOO 7.5": {
+      "schedule": "H",
+      "content_drug": "Ketoconazole (2% w/v) + Zinc pyrithione (1% w/v)"
+    },
+    "RANTAC INJ 2ML": {
+      "schedule": "H",
+      "content_drug": "Ranitidine (25mg)"
+    },
+    "BLEACHING POWDER 500GM": {
+      "content_drug": "Calcium Hypochlorite"
+    },
+    "MONOCAN 200 CAP": {
+      "schedule": "H",
+      "content_drug": "Itraconazole (100mg)"
+    },
+    "ELECTROFIT APPLE 200ML": {
+      "content_drug": "Electrolytes (Sodium, Potassium, Chloride, Citrate, Dextrose)"
+    },
+    "BUSCOWIN INJECTION 1ML": {
+      "schedule": "H",
+      "content_drug": "Hyoscine Butylbromide 20mg/ml"
+    },
+    "EMSACB PLUS LOTION": {
+      "schedule": "H",
+      "content_drug": "Salicylic Acid 6% w/v, Coal Tar 6% w/v"
+    },
+    "ELECTROFIT APPLE": {
+      "content_drug": "Electrolytes (Sodium, Potassium, Chloride, Citrate, Dextrose)"
+    },
+    "COSMO SILKY ROSE": {
+      "content_drug": "Talcum Powder"
+    },
+    "DERMI 5+ CREAM 15GM": {
+      "schedule": "H",
+      "content_drug": "Clobetasol (0.05% w/w) + Gentamicin (0.1% w/w) + Clotrimazole (1% w/w) + Clioquinol (Iodochlorhydroxyquin) (1% w/w) + Tolnaftate (1% w/w)"
+    },
+    "BETARAD 0.5 TAB": {
+      "schedule": "H",
+      "content_drug": "Betamethasone 0.5mg"
+    },
+    "DICLOSIN FORTE TAB": {
+      "schedule": "H",
+      "content_drug": "Chlorzoxazone (250mg) + Diclofenac (50mg) + Paracetamol (325mg)"
+    },
+    "I.V SET (GENSCO)": {
+      "content_drug": "Ondansetron (2mg/5ml)"
+    },
+    "THROMBOPHOB GEL": {
+      "schedule": "H",
+      "content_drug": "Benzyl Nicotinate (2mg) + Heparin (50IU)"
+    },
+    "NEBIDUCE T TAB": {
+      "schedule": "H",
+      "content_drug": "Nebivolol 5mg, Telmisartan 40mg"
+    },
+    "LOBATE GM NEO CREAM": {
+      "schedule": "H",
+      "content_drug": "Clobetasol (0.05% w/w) + Miconazole (2% w/w) + Neomycin (0.5% w/w)"
+    },
+    "ASTHALIN ROTACAPS": {
+      "schedule": "H",
+      "content_drug": "Ambroxol (30mg/5ml) + Levosalbutamol (1mg/5ml) + Guaifenesin (50mg/5ml)"
+    },
+    "AEROCORT ROTACAPS": {
+      "schedule": "H",
+      "content_drug": "Levosalbutamol (100mcg) + Beclometasone (100mcg)"
+    },
+    "CYPON TAB": {
+      "schedule": "H",
+      "content_drug": "Cyproheptadine (4mg)"
+    },
+    "DOLOKIND SR TAB": {
+      "schedule": "H",
+      "content_drug": "Aceclofenac (200mg)"
+    },
+    "BANDY PLUS SUSP": {
+      "schedule": "H",
+      "content_drug": "Ivermectin  (1.5mg) +  Albendazole (200mg)"
+    },
+    "TREATNERVE-NT TAB": {
+      "schedule": "H",
+      "content_drug": "Pregabalin (75mg) + Nortriptyline (10mg) + Methylcobalamin (1500mcg)"
+    },
+    "TRIPTLIN PLUS TAB": {
+      "schedule": "H",
+      "content_drug": "Amitriptyline 12.5mg, Chlordiazepoxide 5mg"
+    },
+    "DOXY-1 L-DR CAP": {
+      "schedule": "H",
+      "content_drug": "Doxycycline (100mg) + Lactobacillus (5Billion Spores)"
+    },
+    "FUSIGEN ONT": {
+      "schedule": "H",
+      "content_drug": "Sodium Fusidate (20mg)"
+    },
+    "LEVOCET M KID TAB": {
+      "schedule": "H",
+      "content_drug": "Levocetirizine (2.5mg) + Montelukast (4mg)"
+    },
+    "AD 10MG SACHET": {
+      "schedule": "H",
+      "content_drug": "Racecadotril (10mg)"
+    },
+    "MPX CV KT DT TAB": {
+      "schedule": "H",
+      "content_drug": "Amoxycillin  (200mg) +  Clavulanic Acid (28.5mg)"
+    },
+    "HCQS 200 TAB": {
+      "schedule": "H",
+      "content_drug": "Hydroxychloroquine (200mg)"
+    },
+    "TRAMADIN-100 MG INJ": {
+      "schedule": "H",
+      "content_drug": "Tramadol (100mg)"
+    },
+    "ECOSPRIN AV75 CAP": {
+      "schedule": "H",
+      "content_drug": "Atorvastatin (10mg) + Aspirin (150mg)"
+    },
+    "METXL 12.5MG TAB": {
+      "schedule": "H",
+      "content_drug": "(10mg) + Metoprolol Succinate (25mg)"
+    },
+    "CETIRIZ TAB": {
+      "schedule": "H",
+      "content_drug": "Cetirizine (10mg)"
+    },
+    "JOLIGOOD-L SYP.": {
+      "content_drug": "Lactulose 10g/15ml"
+    },
+    "CILNIBLU 10 TAB": {
+      "schedule": "H",
+      "content_drug": "Cilnidipine (10mg)"
+    },
+    "XSTAN-AM TAB": {
+      "schedule": "H",
+      "content_drug": "Telmisartan (40mg) + Amlodipine (5mg)"
+    },
+    "OFFICE OZ TAB": {
+      "schedule": "H",
+      "content_drug": "Ofloxacin (200mg) + Ornidazole (500mg)"
+    },
+    "OPOX 50DT TAB": {
+      "schedule": "H",
+      "content_drug": "Cefpodoxime Proxetil (100mg)"
+    },
+    "HIFEN 50MG TAB": {
+      "schedule": "H",
+      "content_drug": "Cefixime (50mg)"
+    },
+    "AZIGOOD-250 TAB": {
+      "schedule": "H",
+      "content_drug": "Azithromycin (250mg)"
+    },
+    "VERTIMET-16 TAB": {
+      "schedule": "H",
+      "content_drug": "Betahistine (16mg)"
+    },
+    "ANOVATE ONT": {
+      "schedule": "H",
+      "content_drug": "Phenylephrine (0.10% w/w) + Beclometasone (0.025% w/w) + Lidocaine (2.50% w/w)"
+    },
+    "GLYCOMET 250MG TAB": {
+      "schedule": "H",
+      "content_drug": "Metformin (250mg)"
+    },
+    "R-PPI-L CAP": {
+      "schedule": "H",
+      "content_drug": "Pantoprazole (20mg)"
+    },
+    "VOMER-O": {
+      "schedule": "H",
+      "content_drug": "Ondansetron (4mg) + Omeprazole (20mg)"
+    },
+    "PREGA NEWS": {
+      "content_drug": "Methylcobalamin (1500mcg) + Pregabalin (75mg)"
+    },
+    "D3 MUST FORTE DROP": {
+      "content_drug": "Vitamin D3 (800IU)"
+    },
+    "AMLOKIND AT TAB": {
+      "schedule": "H",
+      "content_drug": "Amlodipine (5mg) + Atenolol (50mg)"
+    },
+    "LIPIKIND-CV 10 CAP": {
+      "schedule": "H",
+      "content_drug": "Atorvastatin (10mg) + Clopidogrel (75mg)"
+    },
+    "GLYCOMET GP1 TAB": {
+      "schedule": "H",
+      "content_drug": "Glimepiride (1mg) + Metformin (500mg)"
+    },
+    "HICOPE DROP": {
+      "schedule": "H",
+      "content_drug": "Hydroxyzine (6mg)"
+    },
+    "GLYNASE MF TAB": {
+      "schedule": "H",
+      "content_drug": "Glipizide (5mg) + Metformin (500mg)"
+    },
+    "PAN IN(40MG) INJ": {
+      "schedule": "H",
+      "content_drug": "Pantoprazole (40mg)"
+    },
+    "XSTAN BETA 50 TAB": {
+      "schedule": "H",
+      "content_drug": "Telmisartan (40mg) + Metoprolol Succinate (50mg)"
+    },
+    "ECO-ALL LIQUID": {
+      "content_drug": "Bacillus Clausii (2Billion Spores)",
+      "schedule": "H"
+    },
+    "ZERODOL SPAS TAB": {
+      "schedule": "H",
+      "content_drug": "Drotaverine (80mg) + Aceclofenac (100mg)"
+    },
+    "ACNESTAR SOAP": {
+      "content_drug": "Benzoyl Peroxide 2.5% + Salicylic Acid 1%"
+    },
+    "DAFFY SOAP": {
+      "content_drug": "Syndet base soap"
+    },
+    "SATROGYL-O DRY SYP": {
+      "schedule": "H",
+      "content_drug": "Satranidazole (75mg/5ml) + Ofloxacin (50mg/5ml)"
+    },
+    "EMTY SYP": {
+      "schedule": "H",
+      "content_drug": "Lactulose (10gm)"
+    },
+    "XSTAN-AMH TAB": {
+      "schedule": "H",
+      "content_drug": "Telmisartan (40mg) + Amlodipine (5mg) + Hydrochlorothiazide (12.5mg)"
+    },
+    "MEFTAL SPAS TAB": {
+      "schedule": "H",
+      "content_drug": "Dicyclomine (10mg) + Mefenamic Acid (250mg)"
+    },
+    "TELMIKIND BETA-50": {
+      "schedule": "H",
+      "content_drug": "Telmisartan (40mg) + Metoprolol Succinate (50mg)"
+    },
+    "IMAX-[S] INJ": {
+      "schedule": "H",
+      "content_drug": "Iron Sucrose (20mg/ml)"
+    },
+    "FENDIKIND PLUS LIQ": {
+      "schedule": "H",
+      "content_drug": "Fenbendazole 150mg, Ivermectin 10mg"
+    },
+    "COOLMIN POWDER": {
+      "content_drug": "Menthol, Camphor, Talc"
+    },
+    "HEPAWAYS LIQ": {
+      "content_drug": "Liver Extract, Yeast Extract, Vitamin B12"
+    },
+    "CHRCOL BOLUS": {
+      "content_drug": "Activated Charcoal"
+    },
+    "CHRCOL SUS": {
+      "content_drug": "Activated Charcoal"
+    },
+    "OFLOKIND-OZ BOL": {
+      "schedule": "H",
+      "content_drug": "Ofloxacin (50mg) + Ornidazole (125mg)"
+    },
+    "OFLOKIND BOLUS": {
+      "schedule": "H",
+      "content_drug": "Ofloxacin (50mg) + Ornidazole (125mg)"
+    },
+    "DIGYVET LIQ 1 LTR": {
+      "content_drug": "Digestive Enzymes, Probiotics"
+    },
+    "PROTIN C LIQ": {
+      "content_drug": "Protein Hydrolysate, Vitamin C"
+    },
+    "MEGLUDYNE INJ": {
+      "schedule": "H",
+      "content_drug": "FLUNXIXIN MEGLUMINE"
+    },
+    "BOVICHARGE LIQ": {
+      "content_drug": "Calcium, Phosphorus, Vitamin D3"
+    },
+    "METROKIND-LP BOL": {
+      "schedule": "H",
+      "content_drug": "Metronidazole (1% w/v) + Povidone Iodine (5% w/v)"
+    },
+    "SERAKIND PLUS BOLUS": {
+      "schedule": "H",
+      "content_drug": "Serratiopeptidase, Diclofenac"
+    },
+    "FENTAS XP BOLUS": {
+      "schedule": "H",
+      "content_drug": "Fenbendazole, Praziquantel"
+    },
+    "PROTIPOINT LIQUID": {
+      "content_drug": "Protein Hydrolysate, Amino Acids"
+    },
+    "BROTONE LIQ": {
+      "content_drug": "Bromhexine, Ammonium Chloride"
+    },
+    "DERMI-5 CREAM": {
+      "schedule": "H",
+      "content_drug": "Clobetasol (0.05% w/w) + Gentamicin (0.1% w/w) + Clotrimazole (1% w/w) + Clioquinol (Iodochlorhydroxyquin) (1% w/w) + Tolnaftate (1% w/w)"
+    },
+    "DISP.SYRINGS 5ML": {
+      "content_drug": "Medical Device"
+    },
+    "NICIP COLD & FLU NF": {
+      "schedule": "H",
+      "content_drug": "Caffeine (25mg) + Cetirizine (5mg) + Nimesulide (100mg) + Paracetamol (325mg) + Phenylephrine (5mg)"
+    },
+    "FEEDING BOTTLE 125 ML": {
+      "content_drug": "N/A"
+    },
+    "NS 100 ML": {
+      "content_drug": "Sodium Chloride (0.9% w/v)"
+    },
+    "DISP. SYRINGS 5ML": {
+      "content_drug": "Medical Device"
+    },
+    "USTAD CONDOMS 7S": {
+      "content_drug": "Latex"
+    },
+    "RATOL PAD": {
+      "schedule": "H",
+      "content_drug": "Zinc Phosphide"
+    },
+    "CYCLOPAM SY": {
+      "schedule": "H",
+      "content_drug": "Dicyclomine (10mg) + Simethicone (40mg)"
+    },
+    "DUPHALAC SY (LEMON)": {
+      "content_drug": "Lactulose (3.335gm/5ml)"
+    },
+    "TELMA 40 TAB": {
+      "schedule": "H",
+      "content_drug": "Telmisartan (40mg)"
+    },
+    "FLEXON SYP": {
+      "schedule": "H",
+      "content_drug": "Ibuprofen (100mg) + Paracetamol (162.5mg)"
+    },
+    "OFFICE 50MG DRY SY": {
+      "schedule": "H",
+      "content_drug": "Cefixime (50mg) + Ofloxacin (50mg)"
+    },
+    "AD 10 SACHET": {
+      "content_drug": "Racecadotril (10mg)"
+    },
+    "BABEZ-MPS SY": {
+      "content_drug": "Magaldrate 400mg + Simethicone 20mg per 5ml"
+    },
+    "MEFTAGESIC P SY": {
+      "schedule": "H",
+      "content_drug": "Mefenamic Acid (50mg/5ml) + Paracetamol (125mg/5ml)"
+    },
+    "XSTAN AMH TAB": {
+      "schedule": "H",
+      "content_drug": "Telmisartan (40mg) + Amlodipine (5mg) + Hydrochlorothiazide (12.5mg)"
+    },
+    "XSTAN AM TAB": {
+      "schedule": "H",
+      "content_drug": "Telmisartan (40mg) + Amlodipine (5mg)"
+    },
+    "FOURTS B SYP": {
+      "content_drug": "Multivitamin + Multimineral"
+    },
+    "ECOSPRIN 150 TAB": {
+      "schedule": "H",
+      "content_drug": "Aspirin (150mg)"
+    },
+    "ECOSPRIN AV 75 CAP": {
+      "schedule": "H",
+      "content_drug": "Atorvastatin (10mg) + Aspirin (75mg)"
+    },
+    "TRIPTYLIN PLUS TAB": {
+      "schedule": "H",
+      "content_drug": "Amitriptyline (12.5mg) + Chlordiazepoxide (5mg)"
+    },
+    "BANDYKIND PLUS BOLUS": {
+      "schedule": "H",
+      "content_drug": "Albendazole 1500mg, Ivermectin 50mg"
+    },
+    "TISSU AID BOLUS": {
+      "content_drug": "Serratiopeptidase"
+    },
+    "ISOFLUD INJ": {
+      "schedule": "H",
+      "content_drug": "Isoflupredone Acetate 2mg/ml"
+    },
+    "ATROPINE SULPHATE INJ": {
+      "schedule": "H",
+      "content_drug": "Atropine (0.6mg)"
+    },
+    "ANISTAMIN INJ": {
+      "schedule": "H",
+      "content_drug": "Chlorpheniramine Maleate 10mg/ml"
+    },
+    "TRIBIVET INJ": {
+      "content_drug": "Vitamin B1, B6, B12",
+      "schedule": "H"
+    },
+    "MAXXTOL BOLUS": {
+      "schedule": "H",
+      "content_drug": "Tolfenamic Acid"
+    },
+    "TONAKIND GOLD POWDER": {
+      "content_drug": "Mineral Mixture and Vitamins"
+    },
+    "ZEET INJ VET": {
+      "schedule": "H",
+      "content_drug": "Ammonium Chloride (60mg) + Dextromethorphan Hydrobromide (5mg) + Guaifenesin (50mg) + Levocetirizine (2.5mg)"
+    },
+    "MELONEX PLUS INJ": {
+      "schedule": "H",
+      "content_drug": "Meloxicam (15mg)"
+    },
+    "INTACEF 4GM INJ": {
+      "schedule": "H",
+      "content_drug": "Ceftriaxone (3000mg) + Tazobactum (375mg)"
+    },
+    "CHARMAMRUT TAB": {
+      "content_drug": "Herbal Formulation"
+    },
+    "FORTIVIR INJ": {
+      "schedule": "H",
+      "content_drug": "Enrofloxacin (100mg)"
+    },
+    "SOBRINATE INJ": {
+      "schedule": "H",
+      "content_drug": "Sodium Acid Phosphate"
+    },
+    "METABOLITE POW": {
+      "content_drug": "Mineral Mixture and Vitamins"
+    },
+    "DEXONA VET INJ": {
+      "schedule": "H",
+      "content_drug": "Dexamethasone (4mg/ml)"
+    },
+    "TOBRA D EYE DROP": {
+      "schedule": "H",
+      "content_drug": "Dexamethasone (0.1%) + Tobramycin (0.3%)"
+    },
+    "PIPZO 4.5GM INJ": {
+      "schedule": "H",
+      "content_drug": "Piperacillin (4000mg) + Tazobactum (500mg)"
+    },
+    "IBUGESIC PLUS 60ML": {
+      "schedule": "H",
+      "content_drug": "Ibuprofen (400mg) + Paracetamol (325mg)"
+    },
+    "HUMAN INSULATARD 40 U": {
+      "schedule": "H",
+      "content_drug": "Insulin Isophane (40IU)"
+    },
+    "NAXDOM 250MG TAB": {
+      "schedule": "H",
+      "content_drug": "& Cure Healthcare Pvt. Ltd.Naproxen (250mg) + Domperidone (10mg)ADD"
+    },
+    "NAXDOM-500MG TAB": {
+      "schedule": "H",
+      "content_drug": "& Cure Healthcare Pvt. Ltd.Naproxen (500mg) + Domperidone (10mg)ADD"
+    },
+    "ECOSPRIN AV-75 TAB": {
+      "schedule": "H",
+      "content_drug": "Atorvastatin (10mg) + Aspirin (75mg)"
+    },
+    "IODEX 8 GM 48 MRP": {
+      "content_drug": "Methyl Salicylate, Menthol, Eucalyptus Oil, Turpentine Oil"
+    },
+    "ZANDU BALM 4.5 ML": {
+      "content_drug": "Menthol, Gaultheria procumbens, Syzygium aromaticum"
+    },
+    "TEMSAN 40MG TAB": {
+      "schedule": "H",
+      "content_drug": "Telmisartan (40mg) + Atorvastatin (10mg)"
+    },
+    "BETABEST AM 50 TAB": {
+      "schedule": "H",
+      "content_drug": "Amlodipine (5mg) + Metoprolol Succinate (50mg)"
+    },
+    "HIFEN 200 DT": {
+      "schedule": "H",
+      "content_drug": "Cefixime (200mg)"
+    },
+    "VITCOFOL SYP 200 ML": {
+      "content_drug": "Iron Sucrose (100mg)"
+    },
+    "FRICOLD SYP 60 ML": {
+      "schedule": "H",
+      "content_drug": "Paracetamol (500mg) + Phenylpropanolamine (25mg) + Cetirizine (5mg)"
+    },
+    "OFM SYP 60 ML": {
+      "schedule": "H",
+      "content_drug": "Ofloxacin (200mg) + Metronidazole (600mg)"
+    },
+    "ECO-ALL RES": {
+      "schedule": "H",
+      "content_drug": "Bacillus Clausii (2Billion Spores)"
+    },
+    "CEPODEM DROP": {
+      "schedule": "H",
+      "content_drug": "Cefpodoxime Proxetil (50mg)"
+    },
+    "OPOX 50 SYP": {
+      "schedule": "H",
+      "content_drug": "Cefpodoxime Proxetil (50mg)"
+    },
+    "MEFTAGESIC DS SYP 60 ML": {
+      "schedule": "H",
+      "content_drug": "Mefenamic Acid (100mg/5ml) + Paracetamol (250mg/5ml)"
+    },
+    "ROOMAG DP POW": {
+      "content_drug": "Magnesium Hydroxide 3.11g, Liquid Paraffin 1.25ml"
+    },
+    "ZERODOL SP TAB": {
+      "schedule": "H",
+      "content_drug": "Aceclofenac (100mg) + Paracetamol (325mg) + Serratiopeptidase (15mg)"
+    },
+    "ANDIAL TAB": {
+      "schedule": "H",
+      "content_drug": "(2mg)ADD"
+    },
+    "TELMED 40MG TAB": {
+      "schedule": "H",
+      "content_drug": "(5mg) + Telmisartan (40mg)ADD"
+    },
+    "SKINLITE CREAM 20G": {
+      "schedule": "H",
+      "content_drug": "Hydroquinone (2% w/w) + Mometasone (0.1% w/w) + Tretinoin (0.025% w/w)"
+    },
+    "THYRONORM 112MCG TAB": {
+      "schedule": "H",
+      "content_drug": "Thyroxine (112mcg)"
+    },
+    "ODOMOS CREAM 25 GM": {
+      "content_drug": "N,N-Diethylbenzamide 12%"
+    },
+    "ODOMOS CREAM 50 GM": {
+      "content_drug": "N,N-Diethylbenzamide 12%"
+    },
+    "ABSORBENT COTTON WOOL": {
+      "content_drug": "Clotrimazole (1% w/w)"
+    },
+    "ERYTHROMYCIN 500MG TAB": {
+      "schedule": "H",
+      "content_drug": "(500mg)"
+    },
+    "LUPISULIDE-P TAB": {
+      "schedule": "H",
+      "content_drug": "Nimesulide (100mg) + Paracetamol (500mg)"
+    },
+    "USTAD CONDOM": {
+      "content_drug": "Latex"
+    },
+    "WATER FOR INJ LP": {
+      "content_drug": "Sodium Chloride (NA)"
+    },
+    "WOVEN FAB.OF COTTON 4'": {
+      "content_drug": "Cotton Fabric"
+    },
+    "WOVEN FAB.OF COTTON 3\"": {
+      "content_drug": "Cotton Fabric"
+    },
+    "AMLOBIG AT TAB": {
+      "schedule": "H",
+      "content_drug": "Amlodipine 5mg + Atenolol 50mg"
+    },
+    "GABAKIND NT TAB": {
+      "schedule": "H",
+      "content_drug": "Gabapentin (200mg) + Nortriptyline (10mg)"
+    },
+    "ACEMIZ MR TAB": {
+      "schedule": "H",
+      "content_drug": "Aceclofenac (100mg) + Paracetamol (325mg) + Chlorzoxazone (250mg)"
+    },
+    "DERMI 5 CREAM NEW COMB": {
+      "schedule": "H",
+      "content_drug": "Clobetasol (0.05% w/w) + Gentamicin (0.1% w/w) + Clotrimazole (1% w/w) + Clioquinol (Iodochlorhydroxyquin) (1% w/w) + Tolnaftate (1% w/w)"
+    },
+    "DIAPER ADULT": {
+      "content_drug": "N/A"
+    },
+    "L-HIST MONT TAB": {
+      "schedule": "H",
+      "content_drug": "Levocetirizine 5mg, Montelukast 10mg"
+    },
+    "OMEE 20MG CAP NEW": {
+      "schedule": "H",
+      "content_drug": "Omeprazole (20mg)"
+    },
+    "THRIL CONDOM": {
+      "content_drug": "Latex contraceptive"
+    },
+    "O2 SYP": {
+      "schedule": "H",
+      "content_drug": "Ofloxacin (50mg/5ml) + Ornidazole (125mg/5ml)"
+    },
+    "CYRA D": {
+      "schedule": "H",
+      "content_drug": "Domperidone (30mg) + Rabeprazole (20mg)"
+    },
+    "ACTIVIR DT 400MG": {
+      "schedule": "H",
+      "content_drug": "Acyclovir 400mg"
+    },
+    "ECOSPRIN AV 75": {
+      "schedule": "H",
+      "content_drug": "Atorvastatin (10mg) + Aspirin (75mg)"
+    },
+    "LEVOSIZ M KID": {
+      "schedule": "H",
+      "content_drug": "Levocetirizine (2.5mg) + Montelukast (4mg)"
+    },
+    "IBUGESIC PLUS SYP": {
+      "schedule": "H",
+      "content_drug": "Ibuprofen (400mg) + Paracetamol (325mg)"
+    },
+    "IT-MAC 100": {
+      "schedule": "H",
+      "content_drug": "Rabeprazole (20mg) + Itopride (150mg)"
+    },
+    "MEFTAGESIC DS SYP": {
+      "schedule": "H",
+      "content_drug": "Mefenamic Acid (100mg/5ml) + Paracetamol (250mg/5ml)"
+    },
+    "CANDID POWDER": {
+      "content_drug": "Beclometasone (0.025% w/w) + Clotrimazole (1% w/w)"
+    },
+    "ECO ALL LIQ": {
+      "schedule": "H",
+      "content_drug": "Bacillus Clausii (2Billion Spores)"
+    },
+    "ZERODOL TH 4": {
+      "schedule": "H",
+      "content_drug": "Aceclofenac (100mg) + Thiocolchicoside (4mg)"
+    },
+    "TELMIKIND BETA 50MG": {
+      "schedule": "H",
+      "content_drug": "Telmisartan (40mg) + Metoprolol Succinate (50mg)"
+    },
+    "IBUGESIC PLUS": {
+      "schedule": "H",
+      "content_drug": "Ibuprofen (400mg) + Paracetamol (325mg)"
+    },
+    "WYSOLONE 5MG": {
+      "schedule": "H",
+      "content_drug": "Prednisolone (5mg)"
+    },
+    "WYSOLONE 10MG": {
+      "schedule": "H",
+      "content_drug": "Prednisolone (30mg)"
+    },
+    "NEUROBION FORTE": {
+      "content_drug": "Methylcobalamin (1000mcg) + Vitamin B6 (Pyridoxine) (100mg) + Nicotinamide (100mg)"
+    },
+    "HICOPE DROP 15ML": {
+      "schedule": "H",
+      "content_drug": "Hydroxyzine (6mg)"
+    },
+    "THYROX 50MG": {
+      "schedule": "H",
+      "content_drug": "Thyroxine (50mcg)"
+    },
+    "EVION 400MG": {
+      "content_drug": "Vitamin E (400mg)"
+    },
+    "M CEFT INJ 3GM": {
+      "schedule": "H",
+      "content_drug": "Ceftriaxone (500mg)"
+    },
+    "RUCHAMAX POW": {
+      "content_drug": "Herbal Digestive Supplement"
+    },
+    "PENTIDS 400 TAB": {
+      "schedule": "H",
+      "content_drug": "Penicillin G (400000IU)"
+    },
+    "RUMICARE POW": {
+      "content_drug": "Probiotics and Digestive Enzymes"
+    },
+    "HITEK BOLUS": {
+      "schedule": "H",
+      "content_drug": "Ivermectin 100mg"
+    },
+    "GASS OFF LIQUID": {
+      "content_drug": "Simethicone and Magnesium Hydroxide"
+    },
+    "THUN H LIQ 250ML": {
+      "content_drug": "Herbal formulation",
+      "schedule": "H"
+    },
+    "GUTLYTE-GS POW": {
+      "content_drug": "Polyethylene Glycol Electrolyte Powder"
+    },
+    "SPASDICVET BOLUS": {
+      "schedule": "H",
+      "content_drug": "Dicyclomine and Paracetamol"
+    },
+    "RAKSHARAB INJ": {
+      "schedule": "H",
+      "content_drug": "Rabies Vaccine"
+    },
+    "MELONEX Z PLUS BOLUS": {
+      "schedule": "H",
+      "content_drug": "Meloxicam (15mg)"
+    },
+    "KISKIN CREAM": {
+      "schedule": "H",
+      "content_drug": "Clobetasol Propionate 0.05%, Neomycin 0.5%, Miconazole 2%"
+    },
+    "CHELATED RANMIX SHAKTI": {
+      "content_drug": "Chelated Minerals, Vitamins, Amino Acids"
+    },
+    "BROTONE S VET": {
+      "content_drug": "Bromhexine, Ammonium Chloride"
+    },
+    "DEXAFLOX EYE DROPS": {
+      "schedule": "H",
+      "content_drug": "Dexamethasone 0.1% + Ciprofloxacin 0.3%"
+    },
+    "RUMEN FS POW": {
+      "content_drug": "Saccharomyces cerevisiae + Probiotics + Enzymes"
+    },
+    "INTACEF-TAZO 562.5 MG": {
+      "schedule": "H",
+      "content_drug": "Ceftriaxone (3000mg) + Tazobactum (375mg)"
+    },
+    "MELONEX PLUS BOLUS": {
+      "schedule": "H",
+      "content_drug": "Meloxicam (15mg)"
+    },
+    "ROPITAS BOLUS": {
+      "schedule": "H",
+      "content_drug": "Triclabendazole 900mg"
+    },
+    "PANACUR 1 5 BOLUS": {
+      "content_drug": "Fenbendazole 1.5g",
+      "schedule": "H"
+    },
+    "HITEK ORAL LIQ": {
+      "schedule": "H",
+      "content_drug": "Ivermectin 100mg"
+    },
+    "PRONAC-D BOLUS": {
+      "schedule": "H",
+      "content_drug": "Acetylcysteine (NA)"
+    },
+    "M CEFT TAZO": {
+      "schedule": "H",
+      "content_drug": "Ceftriaxone (500mg)"
+    },
+    "KITTU STRONG EYE/EAR D": {
+      "schedule": "H",
+      "content_drug": "Ciprofloxacin + Dexamethasone"
+    },
+    "DIAROAK POW": {
+      "content_drug": "Herbal formulation for diarrhea"
+    },
+    "LENOVO IU SOL": {
+      "schedule": "H",
+      "content_drug": "Levocetirizine (5mg)"
+    },
+    "LIVOTAS LIQ": {
+      "content_drug": "Liver extract, Yeast extract, Vitamin B12"
+    },
+    "TRIBIVET ORAL": {
+      "content_drug": "Vitamin B1, B6, B12"
+    },
+    "TONOPHOSPHAN INJ": {
+      "schedule": "H",
+      "content_drug": "Toldimfos Sodium 200mg/ml"
+    },
+    "HIMAX OINT": {
+      "content_drug": "Himax herbal ointment"
+    },
+    "VITUM H ADVANC 250ML": {
+      "content_drug": "Vitamin H (Biotin) supplement"
+    },
+    "AARAM INJ": {
+      "schedule": "H",
+      "content_drug": "Alprazolam (0.25mg)"
+    },
+    "NOVIZAC INJ": {
+      "schedule": "H",
+      "content_drug": "Disodium Hydrogen Citrate (130mg)"
+    },
+    "ECOTAS BOLUS": {
+      "content_drug": "Triclabendazole",
+      "schedule": "H"
+    },
+    "INTALYTE ORAL POW": {
+      "content_drug": "Electrolytes, Dextrose"
+    },
+    "RUMENTAS BOLUS": {
+      "content_drug": "Saccharomyces cerevisiae, Probiotics, Enzymes"
+    },
+    "INTACEF-TAZO 3375MG IN": {
+      "schedule": "H",
+      "content_drug": "Ceftriaxone (3000mg) + Tazobactum (375mg)"
+    },
+    "GLUCABOOST LIQ": {
+      "content_drug": "Dextrose, Calcium, Phosphorus"
+    },
+    "VIMERAL LIQ": {
+      "content_drug": "Vitamin A, Vitamin D3, Vitamin E, Vitamin B12"
+    },
+    "ALBOMAR LIQ": {
+      "schedule": "H",
+      "content_drug": "Albendazole 25mg/ml"
+    },
+    "RABIVAC VET INJ": {
+      "schedule": "H",
+      "content_drug": "Inactivated Rabies Virus"
+    },
+    "THUN H": {
+      "content_drug": "Herbal formulation"
+    },
+    "M CEFT 3GM INJ": {
+      "schedule": "H",
+      "content_drug": "Ceftriaxone (250mg)"
+    },
+    "BROTONE S LIQ": {
+      "content_drug": "Bromhexine, Ammonium Chloride"
+    },
+    "HEALANT CREAM": {
+      "content_drug": "Herbal antiseptic and wound healing agents"
+    },
+    "APTIQUIK BOOST BOLUS": {
+      "content_drug": "Buclizine (12mg/5ml)"
+    },
+    "MAMMIDIUM POW": {
+      "content_drug": "Dicyclomine 10mg, Simethicone 40mg"
+    },
+    "TRIBIVET INJ-30ML": {
+      "schedule": "H",
+      "content_drug": "Vitamin B1, B6, B12"
+    },
+    "MAMMIDIUM POW-200GM": {
+      "content_drug": "Dicyclomine 10mg, Simethicone 40mg"
+    },
+    "DEXONA INJ-5ML": {
+      "schedule": "H",
+      "content_drug": "Dexamethasone (4mg/ml)"
+    },
+    "ATROPINE SULPHATE INJ-100": {
+      "schedule": "H",
+      "content_drug": "Atropine (0.6mg)"
+    },
+    "G-CAL 5LTR": {
+      "content_drug": "Calcium Orotate (740mg) + Vitamin D3 (500IU)"
+    },
+    "G-CAL": {
+      "content_drug": "Calcium (500mg) + Vitamin D3 (250IU)"
+    },
+    "OMEE CAP": {
+      "schedule": "H",
+      "content_drug": "Omeprazole (20mg) + nan"
+    },
+    "CALCIMAX 5LTR": {
+      "content_drug": "(0.25mcg) + Calcium (200mg) + Zinc (7.5mg) + Vitamin K2-7 (50mcg) + Magnesium (50mg)ADD"
+    },
+    "ADULT PULL UP M": {
+      "content_drug": "Adult Diaper"
+    },
+    "SMS CERVICAL COLLAR L": {
+      "content_drug": "Medical Device"
+    },
+    "SMS CERVICAL COLLAR M": {
+      "content_drug": "Medical Device"
+    },
+    "ZAKSHOT PLUS BOLUS": {
+      "schedule": "H",
+      "content_drug": "Sulphadimidine, Sulphadiazine, Sulphamerazine"
+    },
+    "LORNITAS LIQ 75ML": {
+      "content_drug": "L-Ornithine L-Aspartate"
+    },
+    "ELECTRODUS LIQ": {
+      "content_drug": "Electrolytes, Dextrose"
+    },
+    "STECLIN BOLUS 4'S": {
+      "schedule": "H",
+      "content_drug": "Tetracycline Hydrochloride"
+    },
+    "HORMOTONE LIQ 450ML": {
+      "content_drug": "Herbal Uterine Tonic",
+      "schedule": "H"
+    },
+    "MINILICK 1KG": {
+      "content_drug": "Mineral Mixture"
+    },
+    "MINLICK": {
+      "content_drug": "Mineral Mixture"
+    },
+    "VITAKIND CHOLINE LIQ": {
+      "content_drug": "(1mg) + Lutein (5mg) + Eicosapentaenoic Acid (325mg) + Docosahexanoic Acid (175mg)"
+    },
+    "METRALI-500 TAB 100'": {
+      "schedule": "H",
+      "content_drug": "Metronidazole 500mg"
+    },
+    "GLUCOBOOST LIQ 600ML": {
+      "content_drug": "Dextrose, Calcium, Phosphorus"
+    },
+    "UTROVET FORTE BOLUS 1*4": {
+      "content_drug": "Herbal Uterine Cleanser"
+    },
+    "UTROVET TAB 100 TAB": {
+      "content_drug": "Herbal Uterine Cleanser"
+    },
+    "ROOMEG DP POW 30GM": {
+      "content_drug": "Rumenotoric Herbal Powder"
+    },
+    "PORON LIQ": {
+      "schedule": "H",
+      "content_drug": "Povidone Iodine"
+    },
+    "RUMEN FS BOLUS": {
+      "content_drug": "Saccharomyces cerevisiae + Probiotics + Enzymes"
+    },
+    "RIDEMA INJ 10ML": {
+      "schedule": "H",
+      "content_drug": "Furosemide (50mg)"
+    },
+    "ALBOMAR 30ML": {
+      "schedule": "H",
+      "content_drug": "Albendazole 25mg/ml"
+    },
+    "ALBOMAR 60ML": {
+      "schedule": "H",
+      "content_drug": "Albendazole 25mg/ml"
+    },
+    "BABY LOTION": {
+      "content_drug": "Mefenamic Acid (100mg/5ml) + Paracetamol (250mg/5ml)"
+    },
+    "METROKIND LP BOLUS": {
+      "schedule": "H",
+      "content_drug": "Metronidazole (1% w/v) + Povidone Iodine (5% w/v)"
+    },
+    "SERAKIND PLUS BOLUS 2'": {
+      "schedule": "H",
+      "content_drug": "Serratiopeptidase, Diclofenac"
+    },
+    "MULTISTAR LIQUID 100ML": {
+      "content_drug": "Multivitamin + Minerals"
+    },
+    "TONOBOOST LIQ": {
+      "content_drug": "Vitamin B-Complex + Amino Acids"
+    },
+    "P-SODA 500GM": {
+      "content_drug": "Sodium Bicarbonate"
+    },
+    "PROTIN-C 1LTR": {
+      "content_drug": "Protein Hydrolysate, Vitamin C"
+    },
+    "CHARCOL BOLUS": {
+      "content_drug": "Activated Charcoal"
+    },
+    "INTACEF-TAZO 3375 INJ 1 VI": {
+      "schedule": "H",
+      "content_drug": "Ceftriaxone (3000mg) + Tazobactum (375mg)"
+    },
+    "PANACUR 150MG TAB 10'S": {
+      "schedule": "H",
+      "content_drug": "Fenbendazole 1.5g"
+    },
+    "MASTAFAST POW 50GM": {
+      "content_drug": "Herbal Mastitis Supplement"
+    },
+    "TITALI-M TAB 60'S": {
+      "schedule": "H",
+      "content_drug": "Tilmicosin 250mg"
+    },
+    "BROTONE LIQ 500ML": {
+      "content_drug": "Bromhexine, Ammonium Chloride"
+    },
+    "CHELATED AGRIMIN FORTE 5 K": {
+      "content_drug": "Chelated Minerals, Vitamins, Amino Acids"
+    },
+    "HEALANT SPRAY 100ML": {
+      "content_drug": "Herbal antiseptic and wound healing agents"
+    },
+    "CALCIJOINT TAB": {
+      "content_drug": "Vitamin D3 (600000IU)"
+    },
+    "CALCIJOINT D3 SACHET": {
+      "content_drug": "3 (60000IU)ADD"
+    },
+    "CLINSOL FOAMING FACE WASH": {
+      "content_drug": "Salicylic Acid, Glycolic Acid"
+    },
+    "CLINSOL GEL": {
+      "schedule": "H",
+      "content_drug": "Clindamycin (1% w/w) + Nicotinamide (4% w/w)"
+    },
+    "CREPE BANDAGE 2\" LEEFORD": {
+      "content_drug": "Cotton Elastic Bandage"
+    },
+    "ELOSONE HT OINT": {
+      "schedule": "H",
+      "content_drug": "Hydroquinone (2% w/w) + Mometasone (0.1% w/w) + Tretinoin (0.025% w/w)"
+    },
+    "ENSHINE TOOTHPASTE": {
+      "content_drug": "Hydroquinone (2% w/w) + Mometasone (0.1% w/w)"
+    },
+    "FREELEX PLUS SYP": {
+      "schedule": "H",
+      "content_drug": "Liquid Paraffin (125ml) + Milk of Magnesia (3.75ml) + Sodium Picosulfate (3.33mg)"
+    },
+    "FREELEX TAB": {
+      "schedule": "H",
+      "content_drug": "Bisacodyl (5mg)"
+    },
+    "LEEFORD ARM SLING": {
+      "content_drug": "Medical Support Device"
+    },
+    "LEEFORD WRIST BRACE": {
+      "content_drug": "Medical Support Device"
+    },
+    "NAZOHIST-F NASAL SPRAY": {
+      "schedule": "H",
+      "content_drug": "Fluticasone Furoate (50mcg) + Azelastine (140mcg)"
+    },
+    "ORA FAST TAB": {
+      "content_drug": "Choline Salicylate (8.7% w/w) + Lidocaine (2% w/w)"
+    },
+    "SINARZINE TAB": {
+      "schedule": "H",
+      "content_drug": "Cinnarizine (25mg)"
+    },
+    "SUNSHADE LOTION SPE-30": {
+      "content_drug": "Sunscreen SPF 30"
+    },
+    "SUNSHADE LOTION SPF 50": {
+      "content_drug": "Sunscreen SPF 50"
+    },
+    "TAVERA-M TAB": {
+      "schedule": "H",
+      "content_drug": "Drotaverine (80mg) + Mefenamic Acid (250mg)"
+    },
+    "THIOFORD TAB": {
+      "schedule": "H",
+      "content_drug": "Thiocolchicoside (4mg) + Aceclofenac (100mg) + Paracetamol (325mg)"
+    },
+    "VOMIFORD MD TAB": {
+      "schedule": "H",
+      "content_drug": "Ondansetron (4mg)"
+    },
+    "ZOSTER CREAM": {
+      "schedule": "H",
+      "content_drug": "Acyclovir (5% w/w)"
+    },
+    "GUTRITE SACHET": {
+      "content_drug": "Lactobacillus sporogenes"
+    },
+    "FORACORT 200 ROTACAPS 30CA": {
+      "schedule": "H",
+      "content_drug": "Formoterol (6mcg) + Budesonide (100mcg)"
+    },
+    "FORACORT 400 ROTACAPS 30CA": {
+      "schedule": "H",
+      "content_drug": "Formoterol (6mcg) + Budesonide (400mcg)"
+    },
+    "SYSFOL TAB 30'S 30'S": {
+      "content_drug": "Doxylamine (20mg) + Vitamin B6 (Pyridoxine) (20mg) + Folic Acid (5mg)"
+    },
+    "H VIT FORTE TAB 10'S": {
+      "content_drug": "Alpha Lipoic Acid (100mg) + Benfotiamine (50mg) + Chromium Picolinate (200mcg) + Folic Acid (1.5mg) + Methylcobalamin (1500mcg) + Myo-Inositol (100mg) + Pyridoxine Hydrochloride (3mg)"
+    },
+    "LIVOGEN CAPTAB 15'S": {
+      "content_drug": "& Gamble Health LtdFerrous Ascorbate (152mg) + Folic Acid (1500mcg)ADD"
+    },
+    "LIVOGEN Z TAB 15'S": {
+      "content_drug": "& Gamble Health LtdFerrous Ascorbate (100mg) + Folic Acid (1500mcg) + Zinc Sulphate Monohydrate (67.8mg)ADD"
+    },
+    "DR.ORTHO OIL 60ML": {
+      "content_drug": "Linum usitatissimum + Cinnamomum camphora + Mentha piperita"
+    },
+    "DR.ORTHO OIL 120 ML": {
+      "content_drug": "Carvedilol (12.5mg)"
+    },
+    "CANDID CREAM": {
+      "schedule": "H",
+      "content_drug": "Clotrimazole (1% w/w)"
+    },
+    "CYSTONE TAB": {
+      "content_drug": "Didymocarpus pedicellata + Saxifraga ligulata"
+    },
+    "BETABEST XL 25 TAB": {
+      "schedule": "H",
+      "content_drug": "Metoprolol Succinate (23.75mg)"
+    },
+    "AZTOR ASP-75 MG CAP 10'S": {
+      "schedule": "H",
+      "content_drug": "Atorvastatin (10mg) + Aspirin (75mg)"
+    },
+    "GLYMED GLYCERINE BAR": {
+      "content_drug": "Glycerine"
+    },
+    "SIMYL MCT OIL (HDPE) 100 M": {
+      "content_drug": "Medium Chain Triglycerides"
+    },
+    "SHELCAL 500 TAB": {
+      "content_drug": "Vitamin D3 (125IU)"
+    },
+    "CYRA D CAP 10'S": {
+      "schedule": "H",
+      "content_drug": "Domperidone (30mg) + Rabeprazole (20mg)"
+    },
+    "SOLVIN COLD TAB": {
+      "schedule": "H",
+      "content_drug": "Chlorpheniramine Maleate (2mg) + Paracetamol (500mg) + Phenylephrine (10mg)"
+    },
+    "FRICOLD SUSP": {
+      "schedule": "H",
+      "content_drug": "Paracetamol (500mg) + Phenylpropanolamine (25mg) + Cetirizine (5mg)"
+    },
+    "OFM SUSP 60ML": {
+      "schedule": "H",
+      "content_drug": "Ofloxacin (200mg) + Metronidazole (600mg)"
+    },
+    "NAXDOM 250 TAB 10'S": {
+      "schedule": "H",
+      "content_drug": "& Cure Healthcare Pvt. Ltd.Naproxen (250mg) + Domperidone (10mg)ADD"
+    },
+    "NAXDOM 500 MG TAB 10'S": {
+      "schedule": "H",
+      "content_drug": "& Cure Healthcare Pvt. Ltd.Naproxen (500mg) + Domperidone (10mg)ADD"
+    },
+    "APTIMUST SYRUP 200ML": {
+      "content_drug": "Cyproheptadine (2mg/5ml) + Tricholine Citrate (275mg/5ml) + Sorbitol (2gm/5ml)"
+    },
+    "BETABEST XL 50 TAB": {
+      "schedule": "H",
+      "content_drug": "Metoprolol Succinate (47.5mg)"
+    },
+    "XONE 1000 INJ": {
+      "schedule": "H",
+      "content_drug": "Ceftriaxone (1000mg)"
+    },
+    "PAN IV": {
+      "schedule": "H",
+      "content_drug": "Pantoprazole (40mg)"
+    },
+    "ALKALEB SYR": {
+      "content_drug": "Disodium Hydrogen Citrate 1.53gm"
+    },
+    "BROZEET LS DROP": {
+      "schedule": "H",
+      "content_drug": "Ambroxol (7.5mg/ml) + Levosalbutamol (0.25mg/ml) + Guaifenesin (12.5mg/ml)"
+    },
+    "KUFRIL LS DROP 15ML": {
+      "schedule": "H",
+      "content_drug": "Ambroxol (7.5mg/ml) + Levosalbutamol (0.25mg/ml) + Guaifenesin (12.5mg/ml)"
+    },
+    "AEROCORT ROTACAP 60'S": {
+      "schedule": "H",
+      "content_drug": "Levosalbutamol (100mcg) + Beclometasone (100mcg)"
+    },
+    "VITCOFOL CAP": {
+      "content_drug": "Nicotinamide (200mg/ml) + Folic Acid (15mg/ml) + Cyanocobalamin (500mcg/ml)"
+    },
+    "LEVIPIL 500 TAB 10'S": {
+      "schedule": "H",
+      "content_drug": "Levetiracetam (500mg)"
+    },
+    "KESOL 20 LIQ 200ML": {
+      "schedule": "H",
+      "content_drug": "Potassium Citrate 1100mg, Magnesium Citrate 375mg"
+    },
+    "ZILOS 50MG": {
+      "schedule": "H",
+      "content_drug": "Losartan (50mg)"
+    },
+    "OTEK AC PLUS DROP": {
+      "schedule": "H",
+      "content_drug": "Lidocaine (2% w/v) + Beclometasone (0.025% w/v) + Clotrimazole (1% w/v) + Chloramphenicol (5% w/v)"
+    },
+    "BRUTACEF 200 DT TAB": {
+      "schedule": "H",
+      "content_drug": "Cefixime (200mg)"
+    },
+    "COLDSOL TAB 1*10": {
+      "schedule": "H",
+      "content_drug": "Caffeine (30mg) + Cetirizine (5mg)"
+    },
+    "BEPLEX FORTE TAB 20'S": {
+      "content_drug": "Thiamine(Vitamin B1) (4.5mg) + Vitamin B2 (90.9mg) + Vitamin B6 (Pyridoxine) (NA) + Niacinamide (NA) + D-Panthenol (NA)"
+    },
+    "ORAFLORA TAB": {
+      "content_drug": "Choline Salicylate (8.7% w/w) + Lidocaine (2% w/w)"
+    },
+    "WYSOLONE 10MG TAB": {
+      "schedule": "H",
+      "content_drug": "Prednisolone (30mg)"
+    },
+    "CYCLOPAM-TAB 1X10": {
+      "schedule": "H",
+      "content_drug": "Dicyclomine (20mg) + Paracetamol (500mg)"
+    },
+    "BECLOMIN OINT": {
+      "schedule": "H",
+      "content_drug": "Beclometasone (0.025% w/w) + Miconazole (2% w/w)"
+    },
+    "AMODEP AT TAB 14'S": {
+      "schedule": "H",
+      "content_drug": "Amlodipine (5mg) + Atenolol (50mg)"
+    },
+    "FOURTS B SYP 200ML": {
+      "content_drug": "Multivitamin + Multimineral"
+    },
+    "ULTRA D3 800 DROP 1": {
+      "content_drug": "Moxifloxacin (0.5% w/v)"
+    },
+    "CYCLOPAM-DROPS 10ML": {
+      "schedule": "H",
+      "content_drug": "Dicyclomine (10mg) + Simethicone (40mg)"
+    },
+    "NEOSPORIN POWDER 10GM": {
+      "schedule": "H",
+      "content_drug": "Bacitracin (400IU) + Neomycin (3400IU) + Polymyxin B (5000IU)"
+    },
+    "ENDERM GM CREAM": {
+      "schedule": "H",
+      "content_drug": "Clobetasol (0.05% w/w) + Miconazole (2% w/w)"
+    },
+    "ZIVAST ASP 10 TAB": {
+      "schedule": "H",
+      "content_drug": "Atorvastatin (10mg) + Aspirin (75mg)"
+    },
+    "NICARDIA RETARD 20MG TAB 1": {
+      "schedule": "H",
+      "content_drug": "Nifedipine (30mg)"
+    },
+    "EMESET INJ 2ML": {
+      "schedule": "H",
+      "content_drug": "Ondansetron (4mg)"
+    },
+    "B PROTIN CF 200GM": {
+      "content_drug": "Protein Hydrolysate, Vitamin C"
+    },
+    "FRISIUM 10 TAB": {
+      "schedule": "H",
+      "content_drug": "Clobazam (10mg)"
+    },
+    "OPOX DROPS": {
+      "schedule": "H",
+      "content_drug": "Cefpodoxime Proxetil (25mg)"
+    },
+    "AMPOXIN 500 CAP": {
+      "schedule": "H",
+      "content_drug": "Ampicillin (250mg) + Cloxacillin (250mg)"
+    },
+    "TAXIM INJ 2GM VIAL": {
+      "schedule": "H",
+      "content_drug": "Cefixime (200mg)"
+    },
+    "TAXIM 1 GM INJ": {
+      "schedule": "H",
+      "content_drug": "Cefotaxime (1gm)"
+    },
+    "CANDID V GEL": {
+      "schedule": "H",
+      "content_drug": "Clotrimazole (1% w/w)"
+    },
+    "MACFAST 500 TAB": {
+      "content_drug": "Paracetamol (500mg)"
+    },
+    "SUPERMET XL 25 TAB": {
+      "schedule": "H",
+      "content_drug": "Metoprolol Succinate (23.75mg)"
+    },
+    "OFDEX EYE/ EAR DROP": {
+      "schedule": "H",
+      "content_drug": "Ofloxacin (0.3% w/v) + Dexamethasone (0.1% w/v)"
+    },
+    "DVN PLUS TAB": {
+      "schedule": "H",
+      "content_drug": "Drotaverine (80mg) + Mefenamic Acid (250mg)"
+    },
+    "NEBISTAR-T 10": {
+      "schedule": "H",
+      "content_drug": "Nebivolol (10mg)"
+    },
+    "CYPON SYP": {
+      "schedule": "H",
+      "content_drug": "Cyproheptadine (2mg/5ml) + Tricholine Citrate (275mg/5ml) + Sorbitol (2gm/5ml)"
+    },
+    "DUPHALAC SYR 150ML": {
+      "content_drug": "Lactulose (3.335gm/5ml)"
+    },
+    "ELECTRAL ASSORTED SACHET": {
+      "content_drug": "Oral Rehydration Salts"
+    },
+    "CANDID POW 50 GM": {
+      "content_drug": "Beclometasone (0.025% w/w) + Clotrimazole (1% w/w)"
+    },
+    "OH-D3 DROP": {
+      "content_drug": "Cholecalciferol 800 IU"
+    },
+    "THYRONORM 50 MG": {
+      "schedule": "H",
+      "content_drug": "Thyroxine (50mcg)"
+    },
+    "SCABOMA LOTION": {
+      "schedule": "H",
+      "content_drug": "Lindane (1% w/v)"
+    },
+    "D3 RICH 800 IU DROPS": {
+      "content_drug": "Cholecalciferol 800 IU"
+    },
+    "BUDETROL 400 CAP": {
+      "schedule": "H",
+      "content_drug": "Formoterol (6mcg) + Budesonide (400mcg)"
+    },
+    "MACPOD CV 50DT TAB": {
+      "schedule": "H",
+      "content_drug": "Cefpodoxime Proxetil (200mg) + Clavulanic Acid (125mg)"
+    },
+    "PANDERM ++ CREAM": {
+      "schedule": "H",
+      "content_drug": "Terbinafine (1% w/w) + Clobetasol (0.05% w/w) + Ofloxacin (0.75% w/w) + Ornidazole (2% w/w)"
+    },
+    "THYROX 50MG TAB": {
+      "schedule": "H",
+      "content_drug": "Thyroxine (50mcg)"
+    },
+    "RANTAC OD 300 TAB": {
+      "schedule": "H",
+      "content_drug": "Ranitidine (300mg)"
+    },
+    "NEUROBION FORTE TAB": {
+      "content_drug": "Methylcobalamin (1000mcg) + Vitamin B6 (Pyridoxine) (100mg) + Nicotinamide (100mg)"
+    },
+    "RINIFOL CAP": {
+      "content_drug": "Folic Acid + Vitamin B12 + Zinc"
+    },
+    "RINIFOL PED TAB": {
+      "content_drug": "Folic Acid + Vitamin B12 + Zinc"
+    },
+    "OPOX DROPS 10ML": {
+      "schedule": "H",
+      "content_drug": "Cefpodoxime Proxetil (25mg)"
+    },
+    "CANDID V GEL 30GM": {
+      "schedule": "H",
+      "content_drug": "Clotrimazole (1% w/w)"
+    },
+    "TEDIBAR BATHING SOAP": {
+      "content_drug": "Syndet base"
+    },
+    "XYLOCANE 2 JELLY 30GRM": {
+      "schedule": "H",
+      "content_drug": "Lignocaine 2%"
+    },
+    "SYNDOPA PLUS TAB 10'S": {
+      "schedule": "H",
+      "content_drug": "Levodopa (100mg) + Carbidopa (25mg)"
+    },
+    "NEWTEL 40 TAB 10'S": {
+      "schedule": "H",
+      "content_drug": "Telmisartan (40mg)"
+    },
+    "REFRESH TEARS EYE DROP 10ML": {
+      "content_drug": "Carboxymethylcellulose (0.5% w/v)"
+    },
+    "RIDOL TAB 10'S": {
+      "schedule": "H",
+      "content_drug": "Loperamide (2mg)"
+    },
+    "ITONE EYE DROP 10ML": {
+      "content_drug": "Herbal extracts"
+    },
+    "DOXINATE TABS 10'S": {
+      "schedule": "H",
+      "content_drug": "Doxylamine (10mg) + Vitamin B6 (Pyridoxine) (10mg)"
+    },
+    "FRICOLD SUSP 60ML": {
+      "schedule": "H",
+      "content_drug": "Paracetamol (500mg) + Phenylpropanolamine (25mg) + Cetirizine (5mg)"
+    },
+    "BECOSULES SYP 120ML": {
+      "content_drug": "B-Complex vitamins"
+    },
+    "MEFKIND-DS SUSP 60ML": {
+      "schedule": "H",
+      "content_drug": "Mefenamic Acid (100mg/5ml) + Paracetamol (250mg/5ml)"
+    },
+    "NYCIL POWDER 50GM": {
+      "content_drug": "Chlorphenesin 1%"
+    },
+    "CLEARWAX EAR DROP 10ML": {
+      "content_drug": "Benzocaine (2.7% w/v) + Chlorbutol (5% w/v) + Paradichlorobenzene (2% w/v) + Turpentine Oil (15% w/v)"
+    },
+    "BETNOVATE C CREAM 20GRM": {
+      "schedule": "H",
+      "content_drug": "Betamethasone (0.1% w/w) + Clioquinol (Iodochlorhydroxyquin) (3% w/w)"
+    },
+    "GRANIFORCE SYP 10ML": {
+      "schedule": "H",
+      "content_drug": "Granisetron (1mg)"
+    },
+    "PENTIDS 400 TAB 6'S": {
+      "schedule": "H",
+      "content_drug": "Penicillin G (400000IU)"
+    },
+    "DERMI COOL POW": {
+      "content_drug": "Clobetasol (0.05% w/w) + Gentamicin (0.1% w/w) + Clotrimazole (1% w/w) + Clioquinol (Iodochlorhydroxyquin) (1% w/w) + Tolnaftate (1% w/w)"
+    },
+    "NISHA HAIR DAI BROUN 1": {
+      "content_drug": "Henna based hair color"
+    },
+    "MOSI EYE DROP": {
+      "schedule": "H",
+      "content_drug": "Moxifloxacin (0.5% w/v)"
+    },
+    "MOSI-D DROP": {
+      "schedule": "H",
+      "content_drug": "Moxifloxacin (0.5% w/v) + Dexamethasone (0.1% w/v)"
+    },
+    "NEWTEL AMH TAB": {
+      "schedule": "H",
+      "content_drug": "Telmisartan (40mg) + Amlodipine (5mg) + Hydrochlorothiazide (12.5mg)"
+    },
+    "TONACT ASP 75 CAP": {
+      "schedule": "H",
+      "content_drug": "Atorvastatin (10mg) + Aspirin (75mg)"
+    },
+    "CALPOL PAED DROP": {
+      "content_drug": "Paracetamol (100mg/ml)"
+    },
+    "CYPON PAED.DROP": {
+      "content_drug": "Cyproheptadine (1.5mg) + Tricholine Citrate (55mg)",
+      "schedule": "H"
+    },
+    "R.B TONE CAP": {
+      "content_drug": "Ferrous Fumarate + Folic Acid + Vitamin B12"
+    },
+    "NUROKIND INJ": {
+      "schedule": "H",
+      "content_drug": "Methylcobalamin (500mcg)"
+    },
+    "CONFIDO TAB": {
+      "content_drug": "Herbal formulation"
+    },
+    "FLEMICLAV 625 TAB": {
+      "schedule": "H",
+      "content_drug": "Amoxycillin  (500mg) +  Clavulanic Acid (125mg)"
+    },
+    "ZIVAST ASP 10 CAP": {
+      "schedule": "H",
+      "content_drug": "Atorvastatin (10mg) + Aspirin (75mg)"
+    },
+    "OROFER XT DROP": {
+      "content_drug": "Iron (30mg) + Folic Acid (500mcg) + Vitamin B12 (500mcg)"
+    },
+    "OHD3 PLUS DROP": {
+      "content_drug": "Cholecalciferol 800IU"
+    },
+    "COMPLAIN KES BADAM": {
+      "content_drug": "Health Supplement"
+    },
+    "ACILOC INJ": {
+      "schedule": "H",
+      "content_drug": "Ranitidine (25mg)"
+    },
+    "AMLOKIND 5 TAB": {
+      "schedule": "H",
+      "content_drug": "Amlodipine (5mg)"
+    },
+    "AMODEP TM TAB": {
+      "schedule": "H",
+      "content_drug": "Telmisartan (40mg) + Amlodipine (5mg)"
+    },
+    "ISRYL M1 TAB": {
+      "schedule": "H",
+      "content_drug": "Glimepiride (1mg) + Metformin (500mg)"
+    },
+    "AMODEP 5MG TAB": {
+      "schedule": "H",
+      "content_drug": "Amlodipine (5mg)"
+    },
+    "DUOLIN ROTACAPS 60'S": {
+      "schedule": "H",
+      "content_drug": "Levosalbutamol (100mcg) + Ipratropium (40mcg)"
+    },
+    "AEROCOURT ROTACAPS 60'S": {
+      "schedule": "H",
+      "content_drug": "Salmeterol 50mcg + Fluticasone Propionate 250mcg"
+    },
+    "ACTIVIR 800 DT TAB 10'S": {
+      "schedule": "H",
+      "content_drug": "Acyclovir 400mg"
+    },
+    "AETOR ASP-75 CAP": {
+      "schedule": "H",
+      "content_drug": "Atorvastatin 10mg + Aspirin 75mg"
+    },
+    "CLAVAM 1.2 INJ": {
+      "schedule": "H1",
+      "content_drug": "Amoxycillin  (125mg) +  Clavulanic Acid (25mg)"
+    },
+    "GEMCAL D3 CAP 15'S": {
+      "content_drug": "Calcium (500mg) + Vitamin D3 (500IU)"
+    },
+    "UPRISE D3 60K CAP 12'S": {
+      "content_drug": "Vitamin D3 (60000IU)"
+    },
+    "RANDY PLUS TAB": {
+      "schedule": "H",
+      "content_drug": "Rabeprazole 20mg + Domperidone 30mg"
+    },
+    "TELMIKIND AM TAB": {
+      "schedule": "H",
+      "content_drug": "Telmisartan (40mg) + Amlodipine (5mg)"
+    },
+    "NUROKIND GOLD CAP": {
+      "content_drug": "Methylcobalamin (1500mcg) + Niacinamide (100mg) + Vitamin B6 (Pyridoxine) (100mg)"
+    },
+    "DYNALIGLIPT M TAB": {
+      "schedule": "H",
+      "content_drug": "Teneligliptin 20mg + Metformin 500mg"
+    },
+    "AMLOKIND AT TAB 15'S": {
+      "schedule": "H",
+      "content_drug": "Amlodipine (5mg) + Atenolol (50mg)"
+    },
+    "AMLOKIND S TAB 15'S": {
+      "schedule": "H",
+      "content_drug": "Amlodipine (5mg)"
+    },
+    "BETADINE SOL 10%": {
+      "content_drug": "Povidone Iodine (5% w/v)"
+    },
+    "BETADINE GARGLE 2%MINT": {
+      "content_drug": "Povidone Iodine (2% w/v)"
+    },
+    "FORACORT 100 ROTACAPS": {
+      "schedule": "H",
+      "content_drug": "Formoterol (6mcg) + Budesonide (100mcg)"
+    },
+    "BUDECOREST RESPULLE 0.5MG/50B": {
+      "schedule": "H",
+      "content_drug": "Budesonide 0.5mg"
+    },
+    "BUDECOREST RESPULE 0.5MG/60B": {
+      "schedule": "H",
+      "content_drug": "Budesonide 0.5mg"
+    },
+    "PRIMOLUT N TAB": {
+      "schedule": "H",
+      "content_drug": "Norethisterone (5mg)"
+    },
+    "DOLO 650 TAB": {
+      "content_drug": "Paracetamol (650mg)"
+    },
+    "CALPOL SY": {
+      "content_drug": "Paracetamol (250mg)"
+    },
+    "CETAPHIL OILY SKIN CLEANS": {
+      "content_drug": "Cleansing agent"
+    },
+    "CETAPHIL SKIN CLEANSER": {
+      "content_drug": "Cleansing agent"
+    },
+    "CYRA D CAP 15 BOX": {
+      "schedule": "H",
+      "content_drug": "Domperidone (30mg) + Rabeprazole (20mg)"
+    },
+    "NEWTEL BETA 50 TAB": {
+      "schedule": "H",
+      "content_drug": "Telmisartan (40mg) + Metoprolol Succinate (50mg)"
+    },
+    "ISRYL M1 15'S": {
+      "schedule": "H",
+      "content_drug": "Glimepiride (1mg) + Metformin (500mg)"
+    },
+    "LSYS LOTION 60ML": {
+      "content_drug": "Lactic Acid 5%"
+    },
+    "PENTIDS 400 TAB 10'S": {
+      "schedule": "H",
+      "content_drug": "Penicillin G (400000IU)"
+    },
+    "SUPERMET XL 25 TAB 15'S": {
+      "schedule": "H",
+      "content_drug": "Metoprolol Succinate (23.75mg)"
+    },
+    "PAN IV (40MG) INJ": {
+      "schedule": "H",
+      "content_drug": "Pantoprazole (40mg)"
+    },
+    "ASTHAKIND DX SY": {
+      "schedule": "H",
+      "content_drug": "Phenylephrine (5mg/5ml) + Chlorpheniramine Maleate (2mg/5ml) + Dextromethorphan Hydrobromide (15mg/5ml)"
+    },
+    "NOBEL GEL": {
+      "schedule": "H",
+      "content_drug": "Diclofenac (2% w/w) + Methyl Salicylate (10% w/w) + Menthol (5% w/w)"
+    },
+    "SAMLOKIND AT TAB": {
+      "schedule": "H",
+      "content_drug": "Amlodipine (2.5mg) + Atenolol (50mg)"
+    },
+    "TRAMADIN 100 INJ": {
+      "schedule": "H",
+      "content_drug": "Tramadol (100mg)"
+    },
+    "LIPIKIND CV 10 CAP": {
+      "schedule": "H",
+      "content_drug": "Atorvastatin (10mg) + Clopidogrel (75mg)"
+    },
+    "AMLOKIND 5 TAB 15'S": {
+      "schedule": "H",
+      "content_drug": "Amlodipine (5mg)"
+    },
+    "STATPURE GOLD 10 CAP 15'S": {
+      "schedule": "H",
+      "content_drug": "Aspirin (75mg) + Rosuvastatin (10mg) + Clopidogrel (75mg)"
+    },
+    "TELMIKIND 40 TAB 15'S": {
+      "schedule": "H",
+      "content_drug": "Telmisartan (40mg)"
+    },
+    "BETADINE SPR. POWDER": {
+      "content_drug": "Povidone Iodine (5%)"
+    },
+    "CIPLOX E/E DROPS": {
+      "schedule": "H",
+      "content_drug": "Ciprofloxacin (0.3% w/v)"
+    },
+    "FORACORT 200 CFC FREE INH": {
+      "schedule": "H",
+      "content_drug": "Glycopyrrolate (12.5mcg) + Formoterol (6mcg) + Budesonide (200mcg)"
+    },
+    "AMLOPRES AT TAB 15'S": {
+      "schedule": "H",
+      "content_drug": "Amlodipine (5mg) + Atenolol (50mg)"
+    },
+    "IBUGESIC PLUS SUSP": {
+      "schedule": "H",
+      "content_drug": "Ibuprofen (400mg) + Paracetamol (325mg)"
+    },
+    "SYNDOPA PLUS (15'S)": {
+      "schedule": "H",
+      "content_drug": "Levodopa (100mg) + Carbidopa (25mg)"
+    },
+    "KAYAM TABLET-DABBI": {
+      "content_drug": "Senna, Ajwain, Nishoth, Himej, Svarjiksara, Yasti Madhu"
+    },
+    "A.P.SPECIAL BALM-12G": {
+      "content_drug": "Menthol, Camphor, Eucalyptus Oil, Wintergreen Oil"
+    },
+    "JHARAN OIL 20ML": {
+      "content_drug": "Herbal extracts for pain relief"
+    },
+    "AMRUTANJAN ROLL-ON-05ML": {
+      "content_drug": "Menthol, Camphor, Eucalyptus Oil"
+    },
+    "SENSODYNE FRESHGEL-40G": {
+      "content_drug": "Potassium Nitrate, Sodium Fluoride"
+    },
+    "IODEX-8G": {
+      "content_drug": "Methyl Salicylate, Menthol, Eucalyptus Oil, Turpentine Oil"
+    },
+    "SENSODYNE-RAPID RELIEF-40G": {
+      "content_drug": "Strontium Acetate, Sodium Fluoride"
+    },
+    "SENSODYNE FRESHMINT-40G": {
+      "content_drug": "Potassium Nitrate, Sodium Fluoride"
+    },
+    "MOOV OINT-10G TUBE": {
+      "content_drug": "Diclofenac Diethylamine, Methyl Salicylate, Menthol, Turpentine Oil"
+    },
+    "MOOV SPRAY-15G SMALL": {
+      "content_drug": "Diclofenac Diethylamine, Methyl Salicylate, Menthol, Turpentine Oil"
+    },
+    "BOROPLUS SACHET-6G": {
+      "content_drug": "Herbal extracts (Aloe Vera, Neem, Tulsi)"
+    },
+    "BAI SHATAVARI GRANULES": {
+      "content_drug": "Asparagus racemosus"
+    },
+    "LIV52 TAB": {
+      "content_drug": "Capparis spinosa, Cichorium intybus, Mandur Bhasma"
+    },
+    "HIMALAYA BABY SOAP-50G": {
+      "content_drug": "Olive Oil, Almond Oil"
+    },
+    "BONNY SILICON NIPPLE": {
+      "content_drug": "Silicone"
+    },
+    "SARSO TAIL RAPSCOS-100": {
+      "content_drug": "Mustard Oil"
+    },
+    "SARSO TAIL RAPSCOS-50": {
+      "content_drug": "Mustard Oil"
+    },
+    "VIKAS COUGH DROP-850T": {
+      "content_drug": "Menthol, Camphor, Eucalyptus Oil"
+    },
+    "SD-FLAM TAB": {
+      "schedule": "H",
+      "content_drug": "Sildenafil (50mg) + Dapoxetine (30mg)"
+    },
+    "SKORE NOTHING GLIMAX": {
+      "content_drug": "Condom"
+    },
+    "SKORE STRAWBERRY-3PC": {
+      "content_drug": "Condom"
+    },
+    "SKORE BLUE 3PC": {
+      "content_drug": "Condom"
+    },
+    "HARAN OIL 20ML": {
+      "content_drug": "Herbal extracts for pain relief"
+    },
+    "AMBUTARIAN ROLL-ON -05ML": {
+      "content_drug": "Menthol, Camphor, Eucalyptus Oil"
+    },
+    "SENSODYNE RAPID RELIEF-40G": {
+      "content_drug": "Strontium Acetate, Sodium Fluoride"
+    },
+    "SHATAVARI GRANULES": {
+      "content_drug": "Asparagus racemosus"
+    },
+    "INV 52 TAB": {
+      "content_drug": "Herbal Liver Support Formulation"
+    },
+    "SURYA PRAKASH TAIL": {
+      "content_drug": "Ayurvedic Herbal Oil"
+    },
+    "PET SAFA CHURNA 100G": {
+      "content_drug": "Senna, Ajwain, Haritaki, Nishoth"
+    },
+    "AMYRON SYP": {
+      "content_drug": "Ayurvedic Herbal Supplement"
+    },
+    "PETSAFA CHURNA-60G": {
+      "content_drug": "Senna, Ajwain, Haritaki, Nishoth"
+    },
+    "FEEL IT MASS STRAWBERRY-3": {
+      "content_drug": "Condom"
+    },
+    "FEEL IT MASS-CHOCOLATE 3'": {
+      "content_drug": "Condom"
+    },
+    "VEET HAIR REMOVER SACHE": {
+      "content_drug": "Potassium Thioglycolate"
+    },
+    "HAJMOLA SACHET": {
+      "content_drug": "Black Salt, Cumin, Ginger, Lemon"
+    },
+    "FEMIPLEX TAB": {
+      "content_drug": "Ayurvedic Herbal Formulation"
+    },
+    "GLUCON-D ORANGE 450G": {
+      "content_drug": "Glucose, Vitamin D, Calcium"
+    },
+    "GLUCON-D ORANGE-1KG": {
+      "content_drug": "Glucose, Vitamin D, Calcium"
+    },
+    "DERMICOOL POWDER-50G": {
+      "content_drug": "Talc, Menthol, Jasat Bhasma"
+    },
+    "PANCHSAKAR CHURN B-50G": {
+      "content_drug": "Senna, Haritaki, Shunthi, Shatapushpa, Saindhava Lavana"
+    },
+    "ASHWAGANDHARISHTRA-220ML": {
+      "content_drug": "Withania somnifera extract"
+    },
+    "TRIPHALA GUGGULU-40T": {
+      "content_drug": "Triphala, Guggulu, Pippali"
+    },
+    "GULKAND-SANDU-200G": {
+      "content_drug": "Rose Petals, Sugar"
+    },
+    "HIMALAYA BABY POWDER-50G": {
+      "content_drug": "Olive Oil, Almond Oil"
+    },
+    "HIMALAYA BABY SOAP-125G": {
+      "content_drug": "Olive Oil, Almond Oil"
+    },
+    "HIMALAYA BABY OIL-100ML": {
+      "content_drug": "Olive Oil, Almond Oil"
+    },
+    "HIMALAYA BABY CREAM-50ML": {
+      "content_drug": "Olive Oil, Almond Oil"
+    },
+    "HIMALAYA BABY OIL-50ML": {
+      "content_drug": "Olive Oil, Almond Oil"
+    },
+    "HIMALAYA BABY POW-30G": {
+      "content_drug": "Olive Oil, Almond Oil"
+    },
+    "CLOVE OIL-RAPSCOS": {
+      "content_drug": "Syzygium aromaticum oil"
+    },
+    "CASEROLE FREE": {
+      "content_drug": "Herbal Supplement"
+    },
+    "AYUSAS SAPAT(ADULSA)-100M": {
+      "content_drug": "Adulsa (Justicia adhatoda) Extract"
+    },
+    "BOROLINE SX CREAM-TUBE": {
+      "content_drug": "Boric Acid, Zinc Oxide, Lanolin"
+    },
+    "UJALA EYE DROP": {
+      "content_drug": "Potassium Nitrate, Zinc Sulphate"
+    },
+    "VASMOL 33-100ML": {
+      "content_drug": "Hair Colorant (Para-phenylenediamine based)"
+    },
+    "DR.ORTHO OIL SMALL-60ML": {
+      "content_drug": "Linseed Oil, Mentha Oil, Camphor, Eucalyptus Oil"
+    },
+    "DR.ORTHO OINTMENT-30G": {
+      "content_drug": "Linseed Oil, Mentha Oil, Camphor, Eucalyptus Oil"
+    },
+    "ACNESTAR SOAP-75G": {
+      "content_drug": "Benzoyl Peroxide 2.5% + Salicylic Acid 1%"
+    },
+    "USTAD CONDOM 6PC": {
+      "content_drug": "Latex"
+    },
+    "VASMOL 33-50ML": {
+      "content_drug": "Hair Colorant (Para-phenylenediamine based)"
+    },
+    "BOROLINE SX -7GM SMALLPOT": {
+      "content_drug": "Boric Acid, Zinc Oxide, Lanolin"
+    },
+    "SENSODYNE-RAPID RELIEF-40 SD": {
+      "content_drug": "Strontium Acetate, Sodium Fluoride"
+    },
+    "75G SENSODYNE RAPIDRELIEF": {
+      "content_drug": "Strontium Acetate"
+    },
+    "ITCHGUARD CR-15G": {
+      "content_drug": "Clotrimazole, Menthol"
+    },
+    "SUGAR FREE GOLD POWDER": {
+      "content_drug": "Aspartame"
+    },
+    "ZANDU BALM BOTTLE-25ML": {
+      "content_drug": "Menthol, Gaultheria procumbens, Syzygium aromaticum"
+    },
+    "RHUMA OIL-50ML": {
+      "content_drug": "Ayurvedic Herbal Oil"
+    },
+    "BALANT KADHA NO 2-200ML": {
+      "content_drug": "Ayurvedic Herbal Formulation"
+    },
+    "CHANDANASAV-220ML": {
+      "content_drug": "Ayurvedic Herbal Formulation"
+    },
+    "CHANDANASAV-450ML": {
+      "content_drug": "Ayurvedic Herbal Formulation"
+    },
+    "PUNARNAVASAV-220ML": {
+      "content_drug": "Ayurvedic Herbal Formulation"
+    },
+    "HIMALAYA BABY POWDER-100G": {
+      "content_drug": "Olive Oil, Almond Oil"
+    },
+    "HIMALAYA BABY LOTION-100M": {
+      "content_drug": "Olive Oil, Almond Oil"
+    },
+    "CIPLADINE OINT-10G": {
+      "content_drug": "Povidone Iodine (10% w/w)"
+    },
+    "CASTOR OIL-RAPSCO": {
+      "content_drug": "Terbinafine (1% w/w) + Clobetasol (0.05% w/w) + Ofloxacin (0.75% w/w) + Ornidazole (2% w/w)"
+    },
+    "WHISPER XL WINGS -6PC": {
+      "content_drug": "Sanitary Napkin"
+    },
+    "SKORE NOTHING-STRAWBERY-3": {
+      "content_drug": "Condom"
+    },
+    "SUKHADA CHURNA": {
+      "content_drug": "Ayurvedic herbal formulation"
+    },
+    "RELIEVEX OINT": {
+      "content_drug": "Diclofenac Diethylamine 1.16% w/w"
+    },
+    "GANGA AMRIT EYE DROP": {
+      "content_drug": "Ayurvedic herbal eye drops"
+    },
+    "A.P.SPECIAL BALM -12G": {
+      "content_drug": "Menthol, Camphor, Eucalyptus Oil, Wintergreen Oil"
+    },
+    "WARTOSIN SOLUTION-3ML": {
+      "content_drug": "Ayurvedic herbal solution for warts"
+    },
+    "VAYMOL ROLLON 10ML": {
+      "content_drug": "Menthol, Camphor, Wintergreen Oil"
+    },
+    "DEXOLAC -2 REFILL 400G": {
+      "content_drug": "Infant Milk Substitute"
+    },
+    "DEXOLAC -3 REFILL 400G": {
+      "content_drug": "Follow-up Formula"
+    },
+    "IODEX-3G SACHE": {
+      "content_drug": "Methyl Salicylate, Menthol, Eucalyptus Oil, Turpentine Oil"
+    },
+    "ENO-LEMON SACHE JAR 102": {
+      "content_drug": "Sodium Bicarbonate, Citric Acid, Sodium Carbonate"
+    },
+    "SENSODYNE ACCESS-25G": {
+      "content_drug": "Potassium Nitrate, Sodium Fluoride"
+    },
+    "DETTOL LIQ-250ML": {
+      "content_drug": "Chloroxylenol 4.8% w/v"
+    },
+    "HAJMOLA SACHET ANARDANA": {
+      "content_drug": "Black Salt, Cumin, Ginger, Lemon"
+    },
+    "FEM GOLD BLEACH-9G": {
+      "content_drug": "Hydrogen Peroxide based bleach"
+    },
+    "EVERYOUTH GOLDEN GLOW 8G": {
+      "content_drug": "Cosmetic face peel"
+    },
+    "EVERYOUTH WALNUT SCRUB-7G": {
+      "content_drug": "Walnut shell powder, Vitamin E"
+    },
+    "ZANDU BALM-5G SACHE": {
+      "content_drug": "Menthol, Gaultheria procumbens, Syzygium aromaticum"
+    },
+    "CHANDRAPRABHA BATI-20": {
+      "content_drug": "Ayurvedic herbal formulation"
+    },
+    "MAHASUDARSHAN KADHA-220ML": {
+      "content_drug": "Ayurvedic herbal decoction"
+    },
+    "TURBO BRIGHT F.W-GARNIER-": {
+      "content_drug": "Cosmetic face wash"
+    },
+    "OIL CLEAR F.W-GARNIER-50": {
+      "content_drug": "Cosmetic face wash"
+    },
+    "RENALKA SYP 100ML": {
+      "content_drug": "Disodium Hydrogen Citrate 1.53gm/5ml"
+    },
+    "MENTAT TAB": {
+      "content_drug": "Bacopa monnieri, Centella asiatica, Withania somnifera"
+    },
+    "MENTAT SYP 200ML": {
+      "content_drug": "Bacopa monnieri, Centella asiatica, Withania somnifera"
+    },
+    "BULVEL SATVA": {
+      "content_drug": "Herbal formulation"
+    },
+    "CYSTONE FORTE TAB": {
+      "content_drug": "Didymocarpus pedicellata + Saxifraga ligulata"
+    },
+    "GRANIFORCE SYRUP": {
+      "schedule": "H",
+      "content_drug": "Granisetron (1mg)"
+    },
+    "PALSINURON CAP": {
+      "content_drug": "Herbal formulation for diabetes"
+    },
+    "M-OUT ROLL ON": {
+      "content_drug": "Citronella oil, Eucalyptus oil"
+    },
+    "MOUTHMIST SPRAY(PAN)": {
+      "content_drug": "Menthol, Thymol, Eucalyptol"
+    },
+    "MOUTHMIST SPRAY MINT": {
+      "content_drug": "Menthol, Thymol, Eucalyptol"
+    },
+    "NICOSHOT GUM 2MG": {
+      "content_drug": "Nicotine Polacrilex 2mg"
+    },
+    "SIGNET ALOEVERA GEL": {
+      "content_drug": "Aloe Vera extract"
+    },
+    "SIGNET CHARCOAL F.WASH": {
+      "content_drug": "Activated Charcoal"
+    },
+    "SMARTAID BANDAGE(REG)": {
+      "content_drug": "Adhesive bandage"
+    },
+    "SMARTAID BAND.(ROUND)": {
+      "content_drug": "Adhesive bandage"
+    },
+    "CAPSICUM PLASTER": {
+      "content_drug": "Capsicum extract"
+    },
+    "SMARTAID SKIN BLADE": {
+      "content_drug": "Surgical blade"
+    },
+    "STEAM VAPORIZER": {
+      "content_drug": "Medical device"
+    },
+    "BABY WIPES TINYFACE": {
+      "content_drug": "Mefenamic Acid (100mg/5ml) + Paracetamol (250mg/5ml)"
+    },
+    "ICONIC TWIST N LOCK 2PC": {
+      "content_drug": "Non-medicated accessory"
+    },
+    "CHATURBHUJ OIL 100ML": {
+      "content_drug": "Ayurvedic formulation"
+    },
+    "MAHARASNADI KADHA": {
+      "content_drug": "Ayurvedic formulation"
+    },
+    "KESH KING GOLD SHAMPOO": {
+      "content_drug": "Ketoconazole (2% w/v) + Zinc pyrithione (1% w/v)"
+    },
+    "LEF-CASTOR NF CREAM": {
+      "schedule": "H",
+      "content_drug": "Terbinafine (1% w/w) + Clobetasol (0.05% w/w)"
+    },
+    "DERMIKEM OC PLUS OINT": {
+      "schedule": "H",
+      "content_drug": "Clobetasol (NA) + Miconazole (NA) + Neomycin (NA)"
+    },
+    "INT-INTADERM OC OINT": {
+      "schedule": "H",
+      "content_drug": "Ofloxacin (0.75% w/w) + Ornidazole (2.0% w/w) + Itraconazole (1% w/w) + Clobetasol (0.05% w/w)"
+    },
+    "ZERODOL TH4 TAB": {
+      "schedule": "H",
+      "content_drug": "Aceclofenac (100mg) + Thiocolchicoside (4mg)"
+    },
+    "TELMIKIND BETA 50TAB": {
+      "schedule": "H",
+      "content_drug": "Telmisartan (40mg) + Metoprolol Succinate (50mg)"
+    },
+    "IBUGESIC PLUS TAB": {
+      "schedule": "H",
+      "content_drug": "Ibuprofen (400mg) + Paracetamol (325mg)"
+    },
+    "ZILOS-H TAB": {
+      "schedule": "H",
+      "content_drug": "Losartan (50mg) + Hydrochlorothiazide (12.5mg)"
+    },
+    "SUMO SPRAY 20GM": {
+      "content_drug": "Dicyclomine (20mg) + Paracetamol (325mg)",
+      "schedule": "H"
+    },
+    "SUMO SPRAY 35GM": {
+      "content_drug": "Dicyclomine (20mg) + Paracetamol (325mg)",
+      "schedule": "H"
+    },
+    "KRACK CREAM": {
+      "content_drug": "Salicylic Acid, Borax, Petroleum Jelly"
+    },
+    "ORAL-B BRUSHCOMBO": {
+      "content_drug": "Chlorhexidine Gluconate (NA)"
+    },
+    "SM.LOVEGUARD(CHO) 40RS": {
+      "content_drug": "Latex"
+    },
+    "SM.LOVEGUARD(STRAW) 40RS": {
+      "content_drug": "Latex"
+    },
+    "INT-MONTAS L TAB": {
+      "schedule": "H",
+      "content_drug": "Ofloxacin (0.75% w/w) + Ornidazole (2.0% w/w) + Itraconazole (1% w/w) + Clobetasol (0.05% w/w)"
+    },
+    "SHATAVARI KALP(SANDU)": {
+      "content_drug": "Asparagus racemosus"
+    },
+    "ZANDU BALM 1ML POUCH": {
+      "content_drug": "Menthol, Gaultheria procumbens, Syzygium aromaticum"
+    },
+    "A.P.SPECIAL BALM": {
+      "content_drug": "Menthol, Camphor, Eucalyptus Oil, Wintergreen Oil"
+    },
+    "TOR.NO SCARS CREAM": {
+      "schedule": "H",
+      "content_drug": "Hydroquinone 2%, Mometasone 0.1%, Tretinoin 0.025%"
+    },
+    "KANCHANAR BUGGUL": {
+      "content_drug": "Bauhinia variegata, Triphala, Trikatu"
+    },
+    "GAN.HARITAKI CHURNA": {
+      "content_drug": "Terminalia chebula"
+    },
+    "SD TIGER PHENYLE(BLACK)": {
+      "content_drug": "Coal Tar Acid"
+    },
+    "SD MANFORCE(STRAW+VANILA)": {
+      "content_drug": "Natural Rubber Latex"
+    },
+    "MANFORCE(SUNNY EDIT)": {
+      "content_drug": "Sildenafil (50mg) + Dapoxetine (30mg)"
+    },
+    "NS CALAPURE A LOTION": {
+      "content_drug": "Sodium Chloride (0.9%)"
+    },
+    "MULTISTAR LIQ 500ML": {
+      "content_drug": "Multivitamin + Minerals"
+    },
+    "INTACEF TAZO 3375MG": {
+      "schedule": "H",
+      "content_drug": "Ceftriaxone (3000mg) + Tazobactum (375mg)"
+    },
+    "INTACEF 3GM": {
+      "schedule": "H",
+      "content_drug": "Ceftriaxone (3000mg) + Tazobactum (375mg)"
+    },
+    "M-CEFT+TAZO 3375 GM": {
+      "schedule": "H",
+      "content_drug": "Cefixime (50mg) + Ofloxacin (50mg)"
+    },
+    "TITALI M": {
+      "schedule": "H",
+      "content_drug": "Tilmicosin 250mg"
+    },
+    "OFLOKIND-OZ BOLUS 2'S": {
+      "schedule": "H",
+      "content_drug": "Ofloxacin (50mg) + Ornidazole (125mg)"
+    },
+    "MOXEL BOLUS": {
+      "schedule": "H",
+      "content_drug": "Amoxycillin (500mg)"
+    },
+    "FENTAS 1.5GM": {
+      "schedule": "H",
+      "content_drug": "Fenbendazole, Praziquantel"
+    },
+    "PARALAX LIQ 120ML": {
+      "content_drug": "Liquid Paraffin + Milk of Magnesia"
+    },
+    "CASPA DROP": {
+      "content_drug": "(0.5mg) + Escitalopram Oxalate (10mg)"
+    },
+    "DULCOFLEX TAB-15'S": {
+      "content_drug": "(5mg)ADD"
+    },
+    "VICKS VEPORUB 10G": {
+      "content_drug": "Camphor 5.26%, Menthol 2.82%, Eucalyptus Oil 1.33%"
+    },
+    "PARAD TABLET-MUGDHA RASA": {
+      "content_drug": "Dicyclomine (20mg) + Paracetamol (500mg)"
+    },
+    "PANCHARISHTRA-450ML": {
+      "content_drug": "Ayurvedic Formulation"
+    },
+    "CHIROL OINT-DABBI": {
+      "content_drug": "Ayurvedic formulation"
+    },
+    "FIGARO OIL-SMALL-50ML": {
+      "content_drug": "Olive Oil"
+    },
+    "PARAD 100TAB-18%": {
+      "content_drug": "Dicyclomine (20mg) + Paracetamol (500mg)"
+    },
+    "AMRUTANJAN BACK PAIN ROLL": {
+      "content_drug": "Menthol, Camphor, Eucalyptus Oil"
+    },
+    "JUFEX FORTE SYP-100ML": {
+      "content_drug": "Ayurvedic herbal extract"
+    },
+    "DEXOLAC-1 REFILL 400G": {
+      "content_drug": "Infant Milk Substitute"
+    },
+    "KRACK CREAM-15G S": {
+      "content_drug": "Salicylic Acid, Borax, Petroleum Jelly"
+    },
+    "VEET HAIR REMOVER-TUBE": {
+      "content_drug": "Potassium Thioglycolate"
+    },
+    "ABHYARISHTRA-220ML-BAI": {
+      "content_drug": "Ayurvedic herbal formulation"
+    },
+    "SHATARI POWDER-SANDU": {
+      "content_drug": "Asparagus racemosus (Shatavari)"
+    },
+    "RENALKA SYP": {
+      "content_drug": "Disodium Hydrogen Citrate 1.53gm/5ml"
+    },
+    "HIMALAYA BABY SOAP-25G": {
+      "content_drug": "Olive Oil, Almond Oil"
+    },
+    "HIM.FACE WASH-15ML": {
+      "content_drug": "Herbal extracts"
+    },
+    "HIM.FACE WASH-50ML": {
+      "content_drug": "Olive Oil, Almond Oil"
+    },
+    "HIMALAYA BABY POW-30G SMA": {
+      "content_drug": "Olive Oil, Almond Oil"
+    },
+    "ZEAL COUGH LOZENGES": {
+      "content_drug": "Rabeprazole (20mg)"
+    },
+    "VICKS COUGH DROP-850T": {
+      "content_drug": "Menthol 5mg"
+    },
+    "SKORE NOTHING CLIMAX3PC": {
+      "content_drug": "Condom"
+    },
+    "DUOLIN ROTACAPS": {
+      "schedule": "H",
+      "content_drug": "Levosalbutamol (100mcg) + Ipratropium (40mcg)"
+    },
+    "ACIVIR 800 DT TAB": {
+      "schedule": "H",
+      "content_drug": "Acyclovir (800mg)"
+    },
+    "AZTOR ASP-75 CAP": {
+      "schedule": "H",
+      "content_drug": "Atorvastatin (10mg) + Aspirin (75mg)"
+    },
+    "DOXOLIN 200 TAB": {
+      "schedule": "H",
+      "content_drug": "Doxofylline (200mg)"
+    },
+    "TEMSAN 40 TAB": {
+      "schedule": "H",
+      "content_drug": "Telmisartan (40mg)"
+    },
+    "CYRA D CAP": {
+      "schedule": "H",
+      "content_drug": "Domperidone (30mg) + Rabeprazole (20mg)"
+    },
+    "TOPISAL 3% LOTION": {
+      "schedule": "H",
+      "content_drug": "Clobetasol (0.05% w/w) + Salicylic Acid (3% w/w)"
+    },
+    "ETOS-MR TAB": {
+      "schedule": "H",
+      "content_drug": "Etoricoxib (60mg) + Thiocolchicoside (4mg)"
+    },
+    "LSYS CREAM": {
+      "schedule": "H",
+      "content_drug": "Lactic Acid 5%"
+    },
+    "ISRYL M2": {
+      "schedule": "H",
+      "content_drug": "Glimepiride (2mg) + Metformin (500mg)"
+    },
+    "SHELICAL 500 TAB": {
+      "content_drug": "Calcium Carbonate 500mg + Vitamin D3"
+    },
+    "GEMCAL D3 CAP": {
+      "content_drug": "Calcium (500mg) + Vitamin D3 (500IU)"
+    },
+    "UPRISE D3 60K CAP": {
+      "content_drug": "Vitamin D3 (60000IU)"
+    },
+    "BANDY PLUS TAB": {
+      "schedule": "H",
+      "content_drug": "Ivermectin  (6mg) +  Albendazole (400mg)"
+    },
+    "BETADINE GARGLE 2%": {
+      "content_drug": "Povidone Iodine (2% w/v)"
+    },
+    "BUDECORT RESPULE": {
+      "schedule": "H",
+      "content_drug": "Budesonide (1mg)"
+    },
+    "AMLOKIND SOL": {
+      "schedule": "H",
+      "content_drug": "Amlodipine (5mg)"
+    },
+    "BETADINE 5 TAB": {
+      "content_drug": "Povidone Iodine (5% w/v)"
+    },
+    "BETADINE GARGLE": {
+      "content_drug": "Povidone Iodine (2% w/v)"
+    },
+    "ISRYL M2 15'S": {
+      "schedule": "H",
+      "content_drug": "Glimepiride (2mg) + Metformin (500mg)"
+    },
+    "TEMSAN 40 TAB 15'S": {
+      "schedule": "H",
+      "content_drug": "Telmisartan (40mg)"
+    },
+    "TOPISAL 38 LOTION 30ML": {
+      "schedule": "H",
+      "content_drug": "Clobetasol (0.05% w/w) + Salicylic Acid (3% w/w)"
+    },
+    "ACIVIR 800 DT TAB 10'S": {
+      "schedule": "H",
+      "content_drug": "Acyclovir (800mg)"
+    },
+    "ISRYL M1": {
+      "schedule": "H",
+      "content_drug": "Glimepiride (1mg) + Metformin (500mg)"
+    },
+    "AMLOKIND SOL 10%": {
+      "schedule": "H",
+      "content_drug": "Amlodipine (5mg)"
+    },
+    "BETADINE 5 TAB 15'S": {
+      "content_drug": "Povidone Iodine (5% w/v)"
+    },
+    "BUDECORT RESPULE 0.5MG": {
+      "schedule": "H",
+      "content_drug": "Budesonide (1mg)"
+    },
+    "TOPISAL 3% LOTION 30ML": {
+      "schedule": "H",
+      "content_drug": "Clobetasol (0.05% w/w) + Salicylic Acid (3% w/w)"
+    },
+    "TEMSAN 40 TAB 15S": {
+      "schedule": "H",
+      "content_drug": "Telmisartan (40mg)"
+    },
+    "LSYS CREAM 30GM": {
+      "schedule": "H",
+      "content_drug": "Lactic Acid 5%"
+    },
+    "ISRYL M2 15S": {
+      "schedule": "H",
+      "content_drug": "Glimepiride (2mg) + Metformin (500mg)"
+    },
+    "SHEL CAL 500 TAB": {
+      "content_drug": "Vitamin D3 (125IU)"
+    },
+    "SHEL.CAL 500 TAB": {
+      "content_drug": "Vitamin D3 (125IU)"
+    },
+    "BUDECORT RESPULE 0.5MG50B": {
+      "schedule": "H",
+      "content_drug": "Budesonide (1mg)"
+    },
+    "200G DEXOLAC-1 TIN": {
+      "content_drug": "Infant Milk Substitute"
+    },
+    "SARSO TAIL": {
+      "content_drug": "Mustard Oil"
+    },
+    "VICKS COUGH DROP": {
+      "content_drug": "Menthol 5mg"
+    },
+    "SKORE NOTHING CLIMAX": {
+      "content_drug": "Condom"
+    },
+    "SKORE STRAWBERRY": {
+      "content_drug": "Condom"
+    },
+    "SKORE BLUE": {
+      "content_drug": "Condom"
+    },
+    "AMRUTANJAN BACK PAIN ROLL-": {
+      "content_drug": "Menthol, Camphor, Eucalyptus Oil"
+    },
+    "THYRONORM 100 MG": {
+      "schedule": "H",
+      "content_drug": "Thyroxine (50mcg)"
+    },
+    "THYRONORM 75 MG": {
+      "schedule": "H",
+      "content_drug": "Thyroxine (50mcg)"
+    },
+    "CANDID B CREAM": {
+      "schedule": "H",
+      "content_drug": "Beclometasone (0.025% w/w) + Clotrimazole (1% w/w)"
+    },
+    "HIFEN 200DT TAB": {
+      "schedule": "H",
+      "content_drug": "Cefixime (200mg)"
+    },
+    "MPX CV 625MG TAB": {
+      "schedule": "H",
+      "content_drug": "Amoxycillin  (500mg) +  Clavulanic Acid (125mg)"
+    },
+    "OPOX 50MG DT TAB": {
+      "schedule": "H",
+      "content_drug": "Cefpodoxime Proxetil (50mg)"
+    },
+    "PANTIN L CAP": {
+      "schedule": "H",
+      "content_drug": "Levosulpiride (75mg) + Pantoprazole (40mg)"
+    },
+    "IPRAZEST RESPULES": {
+      "schedule": "H",
+      "content_drug": "Levosalbutamol (1.25mg) + Ipratropium (500mcg)"
+    },
+    "MACFAST 650 TAB": {
+      "content_drug": "Paracetamol (650mg)"
+    },
+    "OMNACORTIL 20MG TAB": {
+      "schedule": "H",
+      "content_drug": "Prednisolone (20mg)"
+    },
+    "POLYPOD 50 DT TAB": {
+      "schedule": "H",
+      "content_drug": "Cefpodoxime Proxetil (50mg)"
+    },
+    "CINLIBLU 10 TAB": {
+      "schedule": "H",
+      "content_drug": "Cinnarizine 10mg"
+    },
+    "SOLVIN COLD DROPS": {
+      "schedule": "H",
+      "content_drug": "Chlorpheniramine Maleate (1mg) + Paracetamol (125mg) + Phenylephrine (2.5mg)"
+    },
+    "DEOCAL SYR": {
+      "content_drug": "Calcium + Vitamin D3"
+    },
+    "PERMED SOAP": {
+      "content_drug": "Permethrin (1% w/w)",
+      "schedule": "H"
+    },
+    "ECOSPRIN 75 TAB": {
+      "schedule": "H",
+      "content_drug": "Aspirin (75mg)"
+    },
+    "GLYCOMET 250 TAB": {
+      "schedule": "H",
+      "content_drug": "Metformin (250mg)"
+    },
+    "PANCON L CAP": {
+      "schedule": "H",
+      "content_drug": "Domperidone (30mg) + Pantoprazole (40mg)"
+    },
+    "PAINOCON GEL": {
+      "content_drug": "Diclofenac + Linseed Oil + Menthol + Methyl Salicylate"
+    },
+    "BEDSHEET GIFT": {
+      "content_drug": "Non-medicinal item"
+    },
+    "O2 SYP 30ML": {
+      "schedule": "H",
+      "content_drug": "Ofloxacin (50mg/5ml) + Ornidazole (125mg/5ml)"
+    },
+    "ZERODOL SPAS TAB 10'S": {
+      "schedule": "H",
+      "content_drug": "Drotaverine (80mg) + Aceclofenac (100mg)"
+    },
+    "HIFEN LXX 200 TAB": {
+      "schedule": "H",
+      "content_drug": "Cefixime (200mg) + Dicloxacillin (500mg) + Lactobacillus (2.5Billion Spores)"
+    },
+    "MEGAPEN KID TAB 10'S": {
+      "schedule": "H",
+      "content_drug": "Ampicillin (125mg) + Cloxacillin (125mg)"
+    },
+    "RUMIPRO BOLUS": {
+      "content_drug": "Probiotics and Prebiotics"
+    },
+    "MEGLOC ADVANCE BOLUS": {
+      "schedule": "H",
+      "content_drug": "Meglumine Antimonate"
+    },
+    "OLONE CEF PLUS BOLUS": {
+      "schedule": "H1",
+      "content_drug": "Ceftriaxone and Tazobactam"
+    },
+    "CPE GEL": {
+      "content_drug": "Calcium, Phosphorus and Energy supplement"
+    },
+    "AFANIL LIQ": {
+      "content_drug": "Herbal formulation",
+      "schedule": "H"
+    },
+    "B FIT ADULT DAIPER ECO. L 10*1": {
+      "content_drug": "Medical Device"
+    },
+    "TONAKIND GOLD POW": {
+      "content_drug": "Mineral Mixture and Vitamins"
+    },
+    "A TO Z POWDER": {
+      "content_drug": "Multivitamin and Mineral supplement"
+    },
+    "PAN-40MG IV INJ": {
+      "schedule": "H",
+      "content_drug": "Pantoprazole (40mg)"
+    },
+    "ACEFLARE-SP TAB (A/A)": {
+      "schedule": "H",
+      "content_drug": "Aceclofenac, Paracetamol, Serratiopeptidase"
+    },
+    "RATOL GRANULE": {
+      "content_drug": "Zinc Phosphide",
+      "schedule": "H"
+    },
+    "SINAREST DROP ORAL": {
+      "content_drug": "Oxymetazoline (0.5mg)",
+      "schedule": "H"
+    },
+    "S.V. SET NO.- 23": {
+      "content_drug": "Amoxycillin (750mg) + Pantoprazole (40mg) + Clarithromycin (500mg)"
+    },
+    "CONDOM NIGHT RIDER-BUBBLE GUM": {
+      "content_drug": "Condom"
+    },
+    "S V SET": {
+      "content_drug": "Amoxycillin (750mg) + Pantoprazole (40mg) + Clarithromycin (500mg)"
+    },
+    "PREGNANCY KIT VET": {
+      "content_drug": "Human Chorionic Gonadotropin (hCG) detection kit"
+    },
+    "PHOSPHATE ENEMA": {
+      "schedule": "P",
+      "content_drug": "Clindamycin (1% w/w)"
+    },
+    "CAREX CONDOM": {
+      "content_drug": "Latex"
+    },
+    "IV NS 250 ML": {
+      "content_drug": "Sodium Chloride 0.9% w/v",
+      "schedule": "C"
+    },
+    "NEBTUDUCE T TAB": {
+      "schedule": "H",
+      "content_drug": "Nebivolol, Telmisartan"
+    },
+    "DEFCORT-6MG TAB 6'S": {
+      "schedule": "H",
+      "content_drug": "Deflazacort (1mg)"
+    },
+    "CALCIUM SANDOZ INJ 10ML": {
+      "schedule": "H",
+      "content_drug": "Calcium Gluconate (50mg) + Calcium Lactobionate (87.5mg)"
+    },
+    "OPOX 50 DT TAB 10'S": {
+      "schedule": "H",
+      "content_drug": "Cefpodoxime Proxetil (50mg)"
+    },
+    "ANDIAL TAB 10'S": {
+      "schedule": "H",
+      "content_drug": "(2mg)ADD"
+    },
+    "BANDY PLUS SUS 10ML": {
+      "schedule": "H",
+      "content_drug": "Ivermectin  (1.5mg) +  Albendazole (200mg)"
+    },
+    "SHELCAL XT TAB 10'S": {
+      "content_drug": "Calcium Carbonate (1250mg) + Vitamin D3 (2000IU) + Methylcobalamin (1500mcg) + L-Methyl Folate Calcium (1mg) + Pyridoxal-5-phosphate (20mg)"
+    },
+    "PRU 10 TAB 10'S": {
+      "schedule": "H",
+      "content_drug": "Hydroxyzine (10mg)"
+    },
+    "SCABEX LOTION 50ML": {
+      "schedule": "H",
+      "content_drug": "Lindane (1% w/v) + Cetrimide (0.1% w/v)"
+    },
+    "BETADINE OINT 15GRM": {
+      "content_drug": "Povidone Iodine (5% w/w)"
+    },
+    "PAN 40 VIAL VIAL": {
+      "schedule": "H",
+      "content_drug": "Pantoprazole (40mg)"
+    },
+    "HICOPE SYP 100ML": {
+      "schedule": "H",
+      "content_drug": "Hydroxyzine (6mg)"
+    },
+    "CLOBETAMIL-G CREAM 10GM": {
+      "schedule": "H",
+      "content_drug": "Clobetasol (0.05% w/w) + Gentamicin (0.1% w/w)"
+    },
+    "ZERODOL SP TAB 10'S": {
+      "schedule": "H",
+      "content_drug": "Aceclofenac (100mg) + Paracetamol (325mg) + Serratiopeptidase (15mg)"
+    },
+    "ZIFI 200DT TAB 10'S": {
+      "schedule": "H",
+      "content_drug": "Cefixime (200mg)"
+    },
+    "LINOWIN 600MG TAB 10'S": {
+      "schedule": "H",
+      "content_drug": "Linezolid (600mg)"
+    },
+    "BUSCOGAST TAB 10'S": {
+      "schedule": "H",
+      "content_drug": "(10mg) + Paracetamol (325mg)ADD"
+    },
+    "BILASET M TAB": {
+      "schedule": "H",
+      "content_drug": "Bilastine (20mg)"
+    },
+    "MACFAST 650 TAB 10'S": {
+      "content_drug": "Paracetamol (650mg)",
+      "schedule": "H"
+    },
+    "TRYPTOMER 10 TAB 10'S": {
+      "schedule": "H",
+      "content_drug": "'s Laboratories LtdAmitriptyline (10mg)ADD"
+    },
+    "LASILACTONE 50 TAB 10ST": {
+      "schedule": "H",
+      "content_drug": "Furosemide (20mg) + Spironolactone (50mg)"
+    },
+    "DULCOFLEX TAB 10'S": {
+      "content_drug": "(5mg)ADD",
+      "schedule": "H"
+    },
+    "D3 MUST 60K TAB 4'S": {
+      "content_drug": ".Vitamin D3 (60000IU)ADD"
+    },
+    "CETIRIZINE TAB (B) 10'S": {
+      "schedule": "H",
+      "content_drug": "Cetirizine (10mg)"
+    },
+    "IODEX 50GRM": {
+      "content_drug": "Methyl Salicylate, Menthol, Eucalyptus Oil, Turpentine Oil"
+    },
+    "SUPRADYN TAB 15'S": {
+      "content_drug": "Multivitamins + Minerals"
+    },
+    "NEUROBION FORTE TAB 10'S": {
+      "content_drug": "Methylcobalamin (1000mcg) + Vitamin B6 (Pyridoxine) (100mg) + Nicotinamide (100mg)"
+    },
+    "ETOS MR TAB": {
+      "schedule": "H",
+      "content_drug": "Etoricoxib (60mg) + Thiocolchicoside (4mg)"
+    },
+    "GERBISA TAB 10 ST": {
+      "content_drug": "Bisacodyl (5mg)",
+      "schedule": "H"
+    },
+    "RBEN DSR CAP 10'S": {
+      "schedule": "H",
+      "content_drug": "Rabeprazole (20mg)"
+    },
+    "CYPON TAB 10'S": {
+      "schedule": "H",
+      "content_drug": "Cyproheptadine (4mg)"
+    },
+    "ITCH GUARD 12GM": {
+      "content_drug": "Luliconazole (1% w/w)",
+      "schedule": "H"
+    },
+    "CANDID B CREAM 10RM": {
+      "schedule": "H",
+      "content_drug": "Beclometasone (0.025% w/w) + Clotrimazole (1% w/w)"
+    },
+    "HADENSA OINT 20GRM": {
+      "content_drug": "Lanolin (100% w/w) + Lidocaine (1% w/w) + Menthol (1% w/w) + Thymol (0.5% w/w)",
+      "schedule": "H"
+    },
+    "CANDID CR NEW 20GRM": {
+      "schedule": "H",
+      "content_drug": "Clotrimazole (1% w/w)"
+    },
+    "RESPIRA PLUS SYP": {
+      "schedule": "H",
+      "content_drug": "Ambroxol (30mg) + Levosalbutamol (1mg) + Guaifenesin (50mg)"
+    },
+    "BRO-ZEDEX SYP 100ML": {
+      "schedule": "H",
+      "content_drug": "Bromhexine (4mg) + Guaifenesin (50mg) + Menthol (2.5mg) + Terbutaline (1.25mg)"
+    },
+    "NEERI SYP 100ML": {
+      "content_drug": "Herbal formulation"
+    },
+    "COMPLAIN KES BADAM 200GRM": {
+      "content_drug": "Health Supplement"
+    },
+    "ALLOUT COIL": {
+      "content_drug": "Allethrin (Insecticide)"
+    },
+    "VICCO WSO SACHET 7GRM": {
+      "content_drug": "Probiotic, Rumen supplement"
+    },
+    "ACVIFLAM-P": {
+      "schedule": "H",
+      "content_drug": "Aceclofenac + Paracetamol"
+    },
+    "WYSOLONE 10 TAB.": {
+      "schedule": "H",
+      "content_drug": "Prednisolone (30mg)"
+    },
+    "NORMAXIN-TB": {
+      "schedule": "H",
+      "content_drug": "Clidinium (2.5mg) + Chlordiazepoxide (5mg) + Dicyclomine (10mg)"
+    },
+    "SMUTH CREAM": {
+      "schedule": "H",
+      "content_drug": "Lidocaine (3% w/w) + Calcium Dobesilate (0.25% w/w) + Hydrocortisone (0.25% w/w) + Zinc (5% w/w)"
+    },
+    "VIBACT CAP": {
+      "content_drug": "Beclometasone (0.025% w/w) + Neomycin (0.5% w/w) + Clotrimazole (1% w/w)"
+    },
+    "ZERODOL MR TAB": {
+      "schedule": "H",
+      "content_drug": "Aceclofenac (100mg) + Tizanidine (2mg)"
+    },
+    "XYMEX MIPS TAB": {
+      "content_drug": "Fungal Diastase, Papain, Simethicone"
+    },
+    "XYMEX MPS TAB": {
+      "content_drug": "Fungal Diastase, Papain, Simethicone"
+    },
+    "COLIMEX TAB 25 MG": {
+      "schedule": "H",
+      "content_drug": "Dicyclomine (20mg) + Paracetamol (500mg)"
+    },
+    "CALCIMUST BOLUS": {
+      "content_drug": "Calcium, Phosphorus, Vitamin D3, Vitamin B12"
+    },
+    "MASTAFAST POWD 50GM": {
+      "content_drug": "Herbal Mastitis Supplement"
+    },
+    "MASTAFAST POWD 200GM": {
+      "content_drug": "Herbal Mastitis Supplement"
+    },
+    "ENROGEN PLUS 100ML": {
+      "schedule": "H",
+      "content_drug": "Enrofloxacin"
+    },
+    "GLUCABOOST LIQ 600ML": {
+      "content_drug": "Dextrose, Calcium, Phosphorus"
+    },
+    "NEBLON POWDER": {
+      "content_drug": "Vitamin A, D3, E, H, Zinc, Selenium"
+    },
+    "HORMOTONE LIQ": {
+      "content_drug": "Herbal Uterine Tonic"
+    },
+    "M-CEFT 3GM": {
+      "schedule": "H1",
+      "content_drug": "Cefixime (200mg)"
+    },
+    "SHARKOFEROL 450GM": {
+      "content_drug": "Vitamin A, D3, E, Mineral supplement"
+    },
+    "ZEET INJ": {
+      "schedule": "H",
+      "content_drug": "Ammonium Chloride (60mg) + Dextromethorphan Hydrobromide (5mg) + Guaifenesin (50mg) + Levocetirizine (2.5mg)"
+    },
+    "NEUROXIN M INJ 30ML": {
+      "content_drug": "Methylcobalamin (1500mcg)"
+    },
+    "CAPSSOLA GOLD GEL 300 GM": {
+      "content_drug": "Herbal topical gel"
+    },
+    "MAMICEF SUSP 10ML": {
+      "schedule": "H1",
+      "content_drug": "Ceftriaxone"
+    },
+    "XYROFUR 500MG INJ": {
+      "schedule": "H1",
+      "content_drug": "Ceftiofur"
+    },
+    "IMIZET INJ 5ML": {
+      "schedule": "H",
+      "content_drug": "Imidocarb Dipropionate"
+    },
+    "MASTIRID I.M.": {
+      "schedule": "H1",
+      "content_drug": "Ceftriaxone, Tazobactam"
+    },
+    "ROOKARE BOLUS": {
+      "content_drug": "Herbal uterine cleanser"
+    },
+    "ROOT FCR POWD 500GM": {
+      "content_drug": "Probiotic, Prebiotic, and Enzyme feed supplement"
+    },
+    "FOSPHORISE LIQ 250ML": {
+      "content_drug": "Organic Phosphorus and Vitamin B12"
+    },
+    "RALEMBIC IV 3LIT": {
+      "schedule": "H",
+      "content_drug": "Albendazole"
+    },
+    "AMOXIRUM FORTE INJ": {
+      "schedule": "H1",
+      "content_drug": "Ceftriaxone and Tazobactam"
+    },
+    "LIXEN BOLUS": {
+      "schedule": "H",
+      "content_drug": "(600mg)ADD"
+    },
+    "AMOXIRUM FORTE INJ 3GM": {
+      "schedule": "H1",
+      "content_drug": "Ceftriaxone and Tazobactam"
+    },
+    "MEGLUDYNE INJ 100ML": {
+      "schedule": "H",
+      "content_drug": "FLUNXIXIN MEGLUMINE"
+    },
+    "URZABOOST AFS LIQ 600ML": {
+      "content_drug": "Herbal liver tonic and metabolic stimulant"
+    },
+    "BOOST UP GOLD BOLUS": {
+      "content_drug": "Chelated minerals, Vitamins, and Probiotics"
+    },
+    "MASTITIS DROPS": {
+      "content_drug": "Homeopathic preparation for mastitis",
+      "schedule": "H"
+    },
+    "HITEK ORAL 100ML": {
+      "schedule": "H",
+      "content_drug": "Ivermectin 100mg"
+    },
+    "CALBOROL INJ": {
+      "content_drug": "Calcium Borogluconate, Magnesium, and Phosphorus"
+    },
+    "AZITHRAL 250 TAB": {
+      "schedule": "H",
+      "content_drug": "Azithromycin (500mg)"
+    },
+    "AZITHRAL 500 TAB": {
+      "schedule": "H",
+      "content_drug": "Azithromycin (500mg)"
+    },
+    "OPOX CV 50 SY": {
+      "schedule": "H1",
+      "content_drug": "Cefpodoxime Proxetil (200mg) + Clavulanic Acid (125mg)"
+    },
+    "ENO LEMON": {
+      "content_drug": "Sodium Bicarbonate + Citric Acid + Sodium Carbonate"
+    },
+    "ECOSPRIN AV 150 CAP": {
+      "schedule": "H",
+      "content_drug": "Atorvastatin (10mg) + Aspirin (150mg)"
+    },
+    "MACBERY-DX": {
+      "schedule": "H",
+      "content_drug": "Chlorpheniramine Maleate (4mg) + Dextromethorphan Hydrobromide (10mg)"
+    },
+    "THYRONORM-75 TAB": {
+      "schedule": "H",
+      "content_drug": "Thyroxine (75mcg)"
+    },
+    "NEWTEL BETA 25 TAB": {
+      "schedule": "H",
+      "content_drug": "Telmisartan (40mg) + Metoprolol Succinate (25mg)"
+    },
+    "BECOSILES CAP": {
+      "content_drug": "Vitamin B-Complex + Vitamin C"
+    },
+    "MACPOD 200 DT TAB": {
+      "schedule": "H",
+      "content_drug": "Cefpodoxime Proxetil (100mg)"
+    },
+    "KETOROL DT TAB": {
+      "schedule": "H",
+      "content_drug": "'s Laboratories LtdKetorolac (10mg)ADD"
+    },
+    "OMEE 20MG CAP": {
+      "schedule": "H",
+      "content_drug": "Omeprazole (20mg)"
+    },
+    "DABUR GLUCOSE": {
+      "content_drug": "Glucose"
+    },
+    "COFSILS IRS COUGH DROPS": {
+      "content_drug": "Ambroxol (30mg) + Levosalbutamol (1mg) + Guaifenesin (50mg)"
+    },
+    "COFSILS ORANGE JAR": {
+      "content_drug": "Diphenhydramine (14.08mg/5ml) + Ammonium Chloride (138mg/5ml) + Sodium Citrate (57.03mg/5ml)"
+    },
+    "SILVEREX IONIC": {
+      "schedule": "H",
+      "content_drug": "Silver Nitrate (0.2% w/w)"
+    },
+    "TYREL 100ML LIQ": {
+      "schedule": "H",
+      "content_drug": "Tylosin"
+    },
+    "NATLIV 500ML LIQ": {
+      "content_drug": "Liver extract, Yeast extract, Vitamin B12"
+    },
+    "TITALI M TAB": {
+      "schedule": "H",
+      "content_drug": "Tilmicosin 250mg"
+    },
+    "FENTAS 3 GM BOLUS": {
+      "schedule": "H1",
+      "content_drug": "Fenbendazole, Praziquantel"
+    },
+    "FENTAS 1.5GM BOLUS": {
+      "schedule": "H1",
+      "content_drug": "Fenbendazole, Praziquantel"
+    },
+    "INTAMOX O BOLUS": {
+      "schedule": "H1",
+      "content_drug": "Amoxycillin (4.5mg) + Dicloxacillin (NA)"
+    },
+    "MAXXTOL 30ML INJ": {
+      "schedule": "H",
+      "content_drug": "Tolfenamic Acid"
+    },
+    "DNS 500": {
+      "content_drug": "Dextrose (5% w/v) + Sodium Chloride (0.9% w/v)"
+    },
+    "MIFEX IV": {
+      "content_drug": "Calcium Gluconate, Magnesium, Phosphorus, Dextrose"
+    },
+    "CALBORAL IV": {
+      "content_drug": "Calcium Borogluconate"
+    },
+    "ROOTRAZ LIQ 15ML": {
+      "schedule": "H",
+      "content_drug": "Toltrazuril"
+    },
+    "RUCHAMAX 15M POW": {
+      "content_drug": "Herbal digestive stimulants"
+    },
+    "BROTONE 120ML LIQ": {
+      "content_drug": "Bromhexine, Ammonium Chloride"
+    },
+    "BROTONE 500ML LIQ": {
+      "content_drug": "Bromhexine, Ammonium Chloride"
+    },
+    "NILVERM POW": {
+      "schedule": "H",
+      "content_drug": "Levamisole"
+    },
+    "TOTAVIT STRONG POW 1KG": {
+      "content_drug": "Multivitamins, Minerals, Amino acids"
+    },
+    "MULTISTAR-H LIQ 100ML": {
+      "content_drug": "Multivitamin + Minerals"
+    },
+    "BANDYKIND PLUS LIQ 30ML": {
+      "schedule": "H",
+      "content_drug": "Albendazole 1500mg, Ivermectin 50mg"
+    },
+    "BANDYKIND PLUS 90ML LIQ": {
+      "schedule": "H",
+      "content_drug": "Albendazole 1500mg, Ivermectin 50mg"
+    },
+    "MULTISTAR-H 250ML": {
+      "content_drug": "Multivitamin + Minerals"
+    },
+    "MASTAFAST POWDER": {
+      "content_drug": "Herbal Mastitis Supplement"
+    },
+    "BOVI OK POW": {
+      "content_drug": "Mineral mixture and probiotic supplement"
+    },
+    "PARALAX ADV 450ML": {
+      "content_drug": "Liquid Paraffin + Milk of Magnesia",
+      "schedule": "H"
+    },
+    "P-DEPOT INJ 3ML": {
+      "schedule": "H",
+      "content_drug": "Zuclopenthixol (200mg/ml)"
+    },
+    "SULPHA BOLUS": {
+      "schedule": "H",
+      "content_drug": "Sulphacetamide (10% w/v) + Hydrocortisone (0.5% w/v)"
+    },
+    "TONOREX POW 50GM": {
+      "content_drug": "Vitamin and mineral supplement"
+    },
+    "BUTOX LIQ 15ML": {
+      "schedule": "H",
+      "content_drug": "Deltamethrin"
+    },
+    "TONOPHOSPAN INJ 100ML": {
+      "schedule": "H",
+      "content_drug": "Sodium Acid Phosphate"
+    },
+    "TONOPHOSPAN INJ": {
+      "schedule": "H",
+      "content_drug": "Sodium Acid Phosphate"
+    },
+    "MEGLOC ADV BOLUS": {
+      "schedule": "H1",
+      "content_drug": "Flunixin Meglumine, Serratiopeptidase, Cetirizine, Magnesium Trisilicate"
+    },
+    "MECOVET-XL LIQ 100 ML": {
+      "content_drug": "Methylcobalamin + Vitamin B-complex"
+    },
+    "D 25 IV 500ML": {
+      "content_drug": "Sodium Chloride 0.9% w/v"
+    },
+    "KHAND MALAM": {
+      "content_drug": "Ayurvedic topical ointment"
+    },
+    "TR-WELL BOLUS": {
+      "schedule": "H",
+      "content_drug": "Theophylline (NA)"
+    },
+    "CALDHARA POWER GEL": {
+      "content_drug": "Calcium and Phosphorus supplement"
+    },
+    "DISPO 20ML": {
+      "content_drug": "Methylcobalamin (2500mcg)"
+    },
+    "DISPO 10ML SYRINGE": {
+      "content_drug": "N/A"
+    },
+    "NEEDLE 16NO": {
+      "content_drug": "Medical Device"
+    },
+    "NEEDLE 18 NO STEEL": {
+      "content_drug": "Medical Device"
+    },
+    "TUSSIN-DMR PED SYRUP": {
+      "schedule": "H",
+      "content_drug": "Dextromethorphan Hydrobromide (15mg/5ml) + Cetirizine (5mg/5ml) + Phenylephrine (10mg/5ml) + Ambroxol (30mg/5ml) + Guaifenesin (100mg/5ml) + Sodium Citrate (75mg/5ml)"
+    },
+    "ISRYL-M-2 TAB": {
+      "schedule": "H",
+      "content_drug": "Glimepiride (2mg)"
+    },
+    "NEWTEL-AM TAB": {
+      "schedule": "H",
+      "content_drug": "Telmisartan (40mg) + Amlodipine (5mg)"
+    },
+    "TENEFIT-M TAB": {
+      "schedule": "H",
+      "content_drug": "Metformin (500mg) + Teneligliptin (20mg)"
+    },
+    "AZTOR-ASP-75 CAP": {
+      "schedule": "H",
+      "content_drug": "Atorvastatin (10mg) + Aspirin (75mg)"
+    },
+    "LEVIPIL-500 TAB": {
+      "schedule": "H",
+      "content_drug": "Levetiracetam (500mg)"
+    },
+    "DOXY-1 L-DR FORTE CAP": {
+      "schedule": "H",
+      "content_drug": "Doxycycline (100mg) + Lactobacillus (5Billion Spores)"
+    },
+    "GLYCOMET-GP-1 TAB": {
+      "schedule": "H",
+      "content_drug": "Glimepiride (1mg) + Metformin (500mg)"
+    },
+    "CALADRYL SOLUTION": {
+      "content_drug": "Calamine, Diphenhydramine Hydrochloride, Camphor"
+    },
+    "CYPON DROPS": {
+      "schedule": "H",
+      "content_drug": "Cyproheptadine (1.5mg) + Tricholine Citrate (55mg)"
+    },
+    "DERIPHYLLIN RETARD-150": {
+      "schedule": "H",
+      "content_drug": "Etofylline (115mg) + Theophylline (35mg)"
+    },
+    "DILZEM-SR-90 TAB": {
+      "schedule": "H",
+      "content_drug": "Diltiazem (90mg)"
+    },
+    "DPLONEX DT": {
+      "schedule": "H",
+      "content_drug": "Naproxen"
+    },
+    "GELUSIL-MPS LIQUID": {
+      "content_drug": "Magnesium Hydroxide, Aluminium Hydroxide, Simethicone"
+    },
+    "BANDY PLUS SYP": {
+      "schedule": "H",
+      "content_drug": "Ivermectin  (1.5mg) +  Albendazole (200mg)"
+    },
+    "GLIZID-M-40/500 TAB": {
+      "schedule": "H",
+      "content_drug": "Gliclazide (40mg) + Metformin (500mg)"
+    },
+    "CIPLAR-10 TAB": {
+      "schedule": "H",
+      "content_drug": "Propranolol (10mg)"
+    },
+    "CIPLOX-TZ TAB": {
+      "schedule": "H",
+      "content_drug": "Ciprofloxacin (500mg) + Tinidazole (600mg)"
+    },
+    "CONCOR-COR-2.5 TAB": {
+      "schedule": "H",
+      "content_drug": "Bisoprolol (2.5mg)"
+    },
+    "DOXINATE TAB.": {
+      "schedule": "H",
+      "content_drug": "Doxylamine (10mg) + Vitamin B6 (Pyridoxine) (10mg)"
+    },
+    "TAXIM-O-200 TAB": {
+      "schedule": "H1",
+      "content_drug": "Cefixime (200mg)"
+    },
+    "TAXIMAX-1500 INJ": {
+      "schedule": "H1",
+      "content_drug": "Cefotaxime (1000mg) + Sulbactam (500mg)"
+    },
+    "DLONEX DT": {
+      "schedule": "H",
+      "content_drug": "Diclofenac Potassium"
+    },
+    "ULTRA KING TAB": {
+      "content_drug": "Tramadol (37.5mg) + Paracetamol (325mg)"
+    },
+    "OMEE CAP 20MG": {
+      "schedule": "H",
+      "content_drug": "Omeprazole (20mg)"
+    },
+    "OROGARD MOUTH WASH": {
+      "content_drug": "Chlorhexidine Gluconate (0.2% w/v) + Sodium Fluoride (0.07% w/v) + Triclosan (0.05% w/v)",
+      "schedule": "H"
+    },
+    "CLAVUNOM-625 TAB": {
+      "schedule": "H1",
+      "content_drug": "Amoxycillin + Potassium Clavulanate"
+    },
+    "DOXY 100 TAB": {
+      "schedule": "H",
+      "content_drug": "Doxycycline (100mg)"
+    },
+    "GM NAPHTHALENE BALLS": {
+      "content_drug": "Naphthalene"
+    },
+    "TELMIKIND BETA 50 TAB": {
+      "schedule": "H",
+      "content_drug": "Telmisartan (40mg) + Metoprolol Succinate (50mg)"
+    },
+    "THYRONORM 12.5 TAB": {
+      "schedule": "H",
+      "content_drug": "Thyroxine (12.5mcg)"
+    },
+    "RESINI GEL": {
+      "content_drug": "Diclofenac (NA)"
+    },
+    "SUPRADYN TAB": {
+      "content_drug": "Multivitamins + Minerals"
+    },
+    "CYRA LS TAB": {
+      "schedule": "H",
+      "content_drug": "Levosulpiride (75mg) + Rabeprazole (20mg)"
+    },
+    "NEXPRO RD FORTE CAP": {
+      "schedule": "H",
+      "content_drug": "Domperidone (30mg) + Esomeprazole (20mg)"
+    },
+    "PECTIN M TR": {
+      "schedule": "H",
+      "content_drug": "Metronidazole + Pectin + Kaolin"
+    },
+    "ROSYN 500 CAP": {
+      "schedule": "H",
+      "content_drug": "Rosuvastatin"
+    },
+    "LEVOCET M TR": {
+      "schedule": "H",
+      "content_drug": "Levocetirizine (2.5mg/5ml) + Montelukast (4mg/5ml)"
+    },
+    "TENP 40 TAB": {
+      "schedule": "H",
+      "content_drug": "Pantoprazole (40mg)"
+    },
+    "PLESSAR BETA 50 TAB": {
+      "schedule": "H",
+      "content_drug": "Metoprolol Succinate"
+    },
+    "STROPESS XL 25 TAB": {
+      "schedule": "H",
+      "content_drug": "Mirabegron"
+    },
+    "NICARDIA RETARD 20 TAB": {
+      "schedule": "H",
+      "content_drug": "Nifedipine (20mg)"
+    },
+    "CYRA TAB": {
+      "schedule": "H",
+      "content_drug": "Rabeprazole (20mg)"
+    },
+    "VITCOFOL C INJ COMBI": {
+      "schedule": "H",
+      "content_drug": "Nicotinamide (200mg/ml) + Folic Acid (15mg/ml) + Cyanocobalamin (500mcg/ml)"
+    },
+    "ATARAX 10 TABS": {
+      "schedule": "H",
+      "content_drug": "'s Laboratories LtdHydroxyzine (10mg)ADD"
+    },
+    "ONDEM INJ": {
+      "schedule": "H",
+      "content_drug": "Ondansetron (2mg)"
+    },
+    "CLAVAM DRY SYP": {
+      "schedule": "H",
+      "content_drug": "Amoxycillin  (125mg) +  Clavulanic Acid (31.25mg)"
+    },
+    "SKINLIGHT CREAM": {
+      "schedule": "H",
+      "content_drug": "Hydroquinone + Mometasone Furoate + Tretinoin"
+    },
+    "HIM SHISHU ANAND": {
+      "content_drug": "Ayurvedic massage oil for babies"
+    },
+    "AIR 180 TAB": {
+      "schedule": "H",
+      "content_drug": "Fexofenadine (180mg)"
+    },
+    "BRUAN SYP": {
+      "schedule": "H",
+      "content_drug": "Ibuprofen"
+    },
+    "SHREE RADHE MEDICAL STORES": {
+      "content_drug": "Not a medicine / Retail store name"
+    },
+    "ATARAX 10MG TAB": {
+      "schedule": "H",
+      "content_drug": "'s Laboratories LtdHydroxyzine (10mg)ADD"
+    },
+    "GLIMISTAR PM 2": {
+      "schedule": "H",
+      "content_drug": "Glimepiride (2mg) + Metformin (500mg) + Pioglitazone (15mg)"
+    },
+    "KETO SOAP": {
+      "schedule": "H",
+      "content_drug": "Ketoconazole (2%w/w)"
+    },
+    "O2 TAB": {
+      "schedule": "H",
+      "content_drug": "Ofloxacin (200mg) + Ornidazole (500mg)"
+    },
+    "PHEXIN REDI SYP 250 MG": {
+      "schedule": "H",
+      "content_drug": "Cefalexin (250mg)"
+    },
+    "PHEXIN 250 TAB": {
+      "schedule": "H",
+      "content_drug": "Cefalexin (275mg)"
+    },
+    "DEXORANGE SYP": {
+      "content_drug": "Ferric Ammonium Citrate + Folic Acid + Vitamin B12 + Zinc"
+    },
+    "MACBERY PD SYP": {
+      "schedule": "H",
+      "content_drug": "Guaiphenesin (50mg/5ml) + Ambroxol (15mg/5ml) + Levosalbutamol (0.5mg/5ml)"
+    },
+    "OPOX 200 MG TAB": {
+      "schedule": "H",
+      "content_drug": "Cefpodoxime Proxetil (200mg)"
+    },
+    "BEVON SYP": {
+      "content_drug": "Multivitamins + Multiminerals + Antioxidants"
+    }
   }
 }

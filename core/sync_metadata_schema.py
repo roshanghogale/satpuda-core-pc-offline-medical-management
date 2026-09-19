@@ -6,12 +6,13 @@ sync_status. Does NOT change conflict resolution, bootstrap, or listeners.
 
 Medicine keeps existing synced_at (extended, not replaced).
 
-NOTE: Desktop return-delete is still not wired to Firebase sync — `deleted`
-prepares soft-delete; wiring delete→sync is a separate task.
+NOTE: Desktop return-delete is wired from Sales/Purchase Return history
+(soft-delete local + push deleted=true + related stock/customer/supplier).
 """
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3
 from datetime import datetime, timezone
 from typing import Iterable
@@ -34,6 +35,8 @@ SYNC_METADATA_TABLES: tuple[str, ...] = (
     "sales_return_items",
     "purchase_returns",
     "purchase_return_items",
+    "general_products",
+    "stock_disposals",
     "racks",
     "sections",
     "boxes",
@@ -57,16 +60,18 @@ def _now_iso() -> str:
 
 def get_sync_device_id() -> str:
     """
-    Existing identity only — prefer SC- connection key (store link), else
-    license hardware fingerprint (PC device.key / hw cache). No new IDs.
+    Per-DEVICE identity for sync metadata device_id.
+
+    Must be unique per machine. The server echoes this back as
+    sync_hint.source_device_id, and each client compares it against its own value
+    to decide "my write or a peer's?". A shared value makes every peer classify
+    the other's writes as self-echo and skip the instant UI refresh, so updates
+    only land on the 45s safety poll.
+
+    This previously preferred the SC- connection key, which is IDENTICAL on every
+    device paired to the same store — that is what broke live Mac2 <-> Android
+    sync. Store identity belongs to the store key; device identity lives here.
     """
-    try:
-        from core.store_link import get_local_android_key
-        key = (get_local_android_key() or "").strip()
-        if key:
-            return key
-    except Exception:
-        pass
     try:
         from core.license_manager import _get_hardware_hash
         hw = (_get_hardware_hash() or "").strip()
@@ -74,7 +79,32 @@ def get_sync_device_id() -> str:
             return hw
     except Exception:
         pass
-    return ""
+    return _persisted_device_uuid()
+
+
+def _persisted_device_uuid() -> str:
+    """Stable random fallback when the hardware fingerprint is unavailable."""
+    import uuid
+
+    try:
+        from core.license_manager import _appdata_dir
+        path = os.path.join(_appdata_dir(), "sync_device_id.txt")
+    except Exception:
+        return ""
+    try:
+        if os.path.isfile(path):
+            existing = open(path, encoding="utf-8").read().strip()
+            if existing:
+                return existing
+    except Exception:
+        pass
+    fresh = "dev-" + str(uuid.uuid4())
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(fresh)
+    except Exception:
+        return fresh
+    return fresh
 
 
 def _table_exists(cur: sqlite3.Cursor, table: str) -> bool:
@@ -108,6 +138,13 @@ def ensure_sync_metadata_schema(conn: sqlite3.Connection) -> dict[str, dict]:
     now = _now_iso()
     report: dict[str, dict] = {}
 
+    try:
+        from core.client_uuid import ensure_client_uuid_schema
+
+        ensure_client_uuid_schema(conn)
+    except Exception as exc:
+        log.debug("client_uuid schema: %s", exc)
+
     for table in SYNC_METADATA_TABLES:
         if not _table_exists(cur, table):
             report[table] = {"before": 0, "after": 0, "columns_added": [], "skipped": True}
@@ -124,17 +161,34 @@ def ensure_sync_metadata_schema(conn: sqlite3.Connection) -> dict[str, dict]:
 
         # Backfill only NULL / empty legacy rows (idempotent).
         try:
-            cur.execute(
-                f"""
-                UPDATE {table}
-                SET created_at = COALESCE(
-                        NULLIF(TRIM(CAST(created_at AS TEXT)), ''),
-                        ?
-                    )
-                WHERE created_at IS NULL OR TRIM(CAST(created_at AS TEXT)) = ''
-                """,
-                (now,),
-            )
+            if table == "medicines":
+                cur.execute(
+                    """
+                    UPDATE medicines
+                    SET created_at = COALESCE(
+                            NULLIF(TRIM(CAST(created_at AS TEXT)), ''),
+                            (SELECT MIN(p.purchase_date)
+                             FROM purchase_items pi
+                             JOIN purchases p ON p.id = pi.purchase_id
+                             WHERE pi.medicine_id = medicines.id),
+                            ?
+                        )
+                    WHERE created_at IS NULL OR TRIM(CAST(created_at AS TEXT)) = ''
+                    """,
+                    (now,),
+                )
+            else:
+                cur.execute(
+                    f"""
+                    UPDATE {table}
+                    SET created_at = COALESCE(
+                            NULLIF(TRIM(CAST(created_at AS TEXT)), ''),
+                            ?
+                        )
+                    WHERE created_at IS NULL OR TRIM(CAST(created_at AS TEXT)) = ''
+                    """,
+                    (now,),
+                )
             cur.execute(
                 f"""
                 UPDATE {table}

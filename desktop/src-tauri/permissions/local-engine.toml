@@ -1,0 +1,14 @@
+[[permission]]
+identifier = "allow-ensure-desktop-api"
+description = "Allow the UI to start/check the local Python data engine"
+commands.allow = ["ensure_desktop_api"]
+
+[[permission]]
+identifier = "allow-desktop-api-status"
+description = "Allow the UI to query whether the local data engine is listening"
+commands.allow = ["desktop_api_status"]
+
+[[permission]]
+identifier = "allow-restart-app"
+description = "Allow the UI to restart the desktop application"
+commands.allow = ["restart_app"]

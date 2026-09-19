@@ -19,6 +19,14 @@ from core.font_config import *
 from core.alert_colors import get_alert_color
 from core.layout_config import SUPPLIERS_ROWS
 from core.column_config import apply_column_visibility, all_column_names
+from core.record_indicators import (
+    extend_columns,
+    indicator_column_widths,
+    column_heading,
+    prepare_tree_row,
+    register_tree_tags,
+    supplier_status,
+)
 from core.scroll_manager import make_scrollable, open_dialog
 from core.themed_messagebox import showinfo, showwarning, showerror, askyesno
 
@@ -71,21 +79,20 @@ class SuppliersTab:
         list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
 
         self._all_columns = tuple(all_column_names('suppliers'))
+        self._tree_columns = extend_columns(self._all_columns)
         col_widths = {
             'Name': 180, 'Phone': 110, 'GSTIN': 140,
             'Address': 220, 'Total Due': 100, 'Credit': 90, 'Status': 80,
         }
-        self.tree = ttk.Treeview(list_frame, columns=self._all_columns, show='headings',
+        col_widths.update(indicator_column_widths())
+        self.tree = ttk.Treeview(list_frame, columns=self._tree_columns, show='headings',
                                  height=SUPPLIERS_ROWS, style='Large.Treeview')
-        for col in self._all_columns:
-            self.tree.heading(col, text=col)
+        for col in self._tree_columns:
+            self.tree.heading(col, text=column_heading(col))
             self.tree.column(col, width=col_widths.get(col, 100))
-        apply_column_visibility(self.tree, 'suppliers', self._all_columns)
+        apply_column_visibility(self.tree, 'suppliers', self._tree_columns)
 
-        from core.alert_colors import get_tree_tag_colors
-        clr = get_tree_tag_colors()
-        self.tree.tag_configure('has_due',    background=clr['due_bg'],     foreground=clr['due_fg'])
-        self.tree.tag_configure('has_credit', background=clr['cleared_bg'], foreground=clr['cleared_fg'])
+        register_tree_tags(self.tree)
 
         sb = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
@@ -122,51 +129,108 @@ class SuppliersTab:
         except Exception:
             pass
 
+    def _fetch_online_suppliers(self):
+        from core.online_catalog import suppliers
+
+        rows = []
+        for s in suppliers(force=True):
+            try:
+                sid = int(s.get("id") or s.get("local_id") or 0)
+            except (TypeError, ValueError):
+                continue
+            if sid <= 0:
+                continue
+            rows.append((
+                sid,
+                s.get("name") or "",
+                s.get("phone") or "",
+                s.get("gstin") or "",
+                s.get("address") or "",
+                float(s.get("total_due") or 0),
+                float(s.get("total_credit") or 0),
+            ))
+        rows.sort(key=lambda r: str(r[1]).upper())
+        return rows
+
+    def _apply_supplier_rows(self, rows):
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        self.suppliers_data = list(rows or [])
+        total_due = 0.0
+        total_credit = 0.0
+        for row in self.suppliers_data:
+            sid, name, phone, gstin, address, due, credit = row
+            due = float(due)
+            credit = float(credit)
+            total_due += due
+            total_credit += credit
+            if due > 0:
+                status = "Due"
+            elif credit > 0:
+                status = "Credit"
+            else:
+                status = "Cleared"
+            vals = (
+                name, phone or '', gstin, address,
+                f"₹{due:.2f}" if due else '-',
+                f"₹{credit:.2f}" if credit else '-',
+                status,
+            )
+            values, tags = prepare_tree_row(
+                vals, supplier_status(due, credit), badge_text=status.upper())
+            self.tree.insert('', tk.END, iid=str(sid), values=values, tags=tags)
+        self.total_suppliers_var.set(str(len(self.suppliers_data)))
+        self.total_due_var.set(f"₹{total_due:.2f}")
+        self.total_credit_var.set(f"₹{total_credit:.2f}")
+
     def load(self):
         """
         Phase 2: reads total_due / total_credit from suppliers table.
         No aggregation from purchases.
+        Online: store catalog via online_catalog.suppliers.
         """
-        for item in self.tree.get_children():
-            self.tree.delete(item)
+        try:
+            from core.sync_prefs import is_online_mode
 
-        self.cursor.execute("""
-            SELECT id, name, phone, COALESCE(gstin,''), COALESCE(address,''),
-                   COALESCE(total_due,0), COALESCE(total_credit,0)
-            FROM suppliers ORDER BY name
-        """)
-        self.suppliers_data = self.cursor.fetchall()
+            if is_online_mode():
+                from core.background_workers import run_in_thread
+                self._load_gen = int(getattr(self, "_load_gen", 0) or 0) + 1
+                gen = self._load_gen
 
-        total_due    = 0.0
-        total_credit = 0.0
+                def _apply(rows):
+                    if gen != getattr(self, "_load_gen", 0):
+                        return
+                    self._apply_supplier_rows(rows)
 
-        for row in self.suppliers_data:
-            sid, name, phone, gstin, address, due, credit = row
-            due    = float(due)
-            credit = float(credit)
-            total_due    += due
-            total_credit += credit
+                def _err(exc):
+                    if gen != getattr(self, "_load_gen", 0):
+                        return
+                    showerror("Error", f"Failed to load suppliers: {exc}")
+                    self._apply_supplier_rows([])
 
-            if due > 0:
-                status = "Due"
-                tag    = 'has_due'
-            elif credit > 0:
-                status = "Credit"
-                tag    = 'has_credit'
-            else:
-                status = "Cleared"
-                tag    = ''
+                run_in_thread(
+                    self._fetch_online_suppliers,
+                    name="SuppliersLoad",
+                    root=self.tree,
+                    on_success=_apply,
+                    on_error=_err,
+                )
+                return
+        except Exception as e:
+            showerror("Error", f"Failed to load suppliers: {e}")
+            self._apply_supplier_rows([])
+            return
 
-            self.tree.insert('', tk.END, iid=str(sid), values=(
-                name, phone or '', gstin, address,
-                f"₹{due:.2f}"    if due    else '-',
-                f"₹{credit:.2f}" if credit else '-',
-                status,
-            ), tags=(tag,) if tag else ())
-
-        self.total_suppliers_var.set(str(len(self.suppliers_data)))
-        self.total_due_var.set(f"₹{total_due:.2f}")
-        self.total_credit_var.set(f"₹{total_credit:.2f}")
+        try:
+            self.cursor.execute("""
+                SELECT id, name, phone, COALESCE(gstin,''), COALESCE(address,''),
+                       COALESCE(total_due,0), COALESCE(total_credit,0)
+                FROM suppliers ORDER BY name
+            """)
+            self._apply_supplier_rows(self.cursor.fetchall())
+        except Exception as e:
+            showerror("Error", f"Failed to load suppliers: {e}")
+            self._apply_supplier_rows([])
 
     def _recalc_selected(self):
         sel = self.tree.selection()
@@ -175,17 +239,52 @@ class SuppliersTab:
         supplier_id = int(sel[0])
         from core.purchase_service import recalculate_supplier_due
         recalculate_supplier_due(self.conn, supplier_id)
+        try:
+            from core.sync_coordinator import after_supplier_saved
+            after_supplier_saved(self.conn, supplier_id)
+        except Exception:
+            pass
         self.load()
 
     def _recalculate_all(self):
         from core.purchase_service import recalculate_supplier_due
-        for row in self.suppliers_data:
-            try:
-                recalculate_supplier_due(self.conn, row[0])
-            except Exception as e:
-                print(f"[RECALC] supplier {row[0]}: {e}")
-        self.load()
-        showinfo("Done", "All supplier balances recalculated.")
+        from core.themed_messagebox import askyesno, showerror, showinfo
+
+        if not askyesno(
+            "Recalculate All",
+            "Recalculate dues for all suppliers? This may take a moment.",
+            parent=self.tree,
+        ):
+            return
+        ids = [row[0] for row in self.suppliers_data]
+
+        def _worker(put):
+            for i, sid in enumerate(ids, 1):
+                try:
+                    recalculate_supplier_due(self.conn, sid)
+                except Exception as e:
+                    print(f"[RECALC] supplier {sid}: {e}")
+                if i % 25 == 0 or i == len(ids):
+                    put(f"Recalculated {i}/{len(ids)} suppliers…")
+            return len(ids)
+
+        def _done(count):
+            self.load()
+            showinfo(
+                "Done",
+                f"Recalculated dues for {count} supplier(s).",
+                parent=self.tree,
+            )
+
+        from core.background_workers import run_with_progress
+
+        run_with_progress(
+            self.tree,
+            "Recalculating Supplier Dues",
+            _worker,
+            on_complete=_done,
+            on_error=lambda exc: showerror("Error", str(exc), parent=self.tree),
+        )
 
     def edit(self):
         sel = self.tree.selection()
@@ -220,11 +319,54 @@ class SuppliersTab:
 
         def save():
             try:
-                self.cursor.execute(
-                    "UPDATE suppliers SET name=?,phone=?,gstin=?,address=? WHERE id=?",
-                    (name_e.get(), phone_e.get(), gstin_e.get(),
-                     addr_e.get(1.0, tk.END).strip(), supplier_id))
-                self.conn.commit()
+                from core.sync_prefs import is_online_mode
+
+                name = name_e.get().strip()
+                phone = phone_e.get().strip()
+                gstin = gstin_e.get().strip()
+                address = addr_e.get(1.0, tk.END).strip()
+                if is_online_mode():
+                    from core.online_catalog import invalidate, suppliers
+                    from core.server_crud import upsert_contact_online
+
+                    # Only send a balance we actually found. Defaulting to 0.0
+                    # meant that editing a supplier's phone number could push
+                    # zeros over a real outstanding due and wipe it.
+                    due = credit = None
+                    for row in self.suppliers_data:
+                        if int(row[0]) == supplier_id:
+                            due = float(row[5] or 0)
+                            credit = float(row[6] or 0)
+                            break
+                    else:
+                        for s in suppliers():
+                            try:
+                                if int(s.get("id") or s.get("local_id") or 0) == supplier_id:
+                                    due = float(s.get("total_due") or 0)
+                                    credit = float(s.get("total_credit") or 0)
+                                    break
+                            except (TypeError, ValueError):
+                                continue
+                    payload = {
+                        "id": supplier_id,
+                        "local_id": supplier_id,
+                        "name": name,
+                        "phone": phone,
+                        "gstin": gstin,
+                        "address": address,
+                    }
+                    if due is not None:
+                        payload["total_due"] = due
+                        payload["total_credit"] = credit
+                    upsert_contact_online("suppliers", payload)
+                    invalidate("suppliers")
+                else:
+                    self.cursor.execute(
+                        "UPDATE suppliers SET name=?,phone=?,gstin=?,address=? WHERE id=?",
+                        (name, phone, gstin, address, supplier_id))
+                    self.conn.commit()
+                    from core.sync_coordinator import after_supplier_saved
+                    after_supplier_saved(self.conn, supplier_id)
                 showinfo("Success", "Supplier updated successfully!")
                 dlg.destroy()
                 self.load()
@@ -258,15 +400,48 @@ class SuppliersTab:
         if not askyesno("Confirm Delete", f"Delete supplier {name}?"):
             return
         try:
-            self.cursor.execute(
-                "SELECT COUNT(*) FROM purchases WHERE supplier_id=?", (supplier_id,))
-            if self.cursor.fetchone()[0] > 0:
-                showwarning(
-                    "Cannot Delete",
-                    "Supplier has purchase history and cannot be deleted.")
-                return
-            self.cursor.execute("DELETE FROM suppliers WHERE id=?", (supplier_id,))
-            self.conn.commit()
+            from core.sync_prefs import is_online_mode
+
+            if is_online_mode():
+                from core.online_catalog import invalidate
+                from core.server_crud import delete_contact_online
+                from core import store_query_client as sq
+
+                purchases = (sq.list_purchases(q=str(name), limit=50) or {}).get("rows") or []
+                has_history = False
+                for r in purchases:
+                    if not isinstance(r, dict):
+                        continue
+                    sid = r.get("supplier_id")
+                    try:
+                        if sid is not None and int(sid) == supplier_id:
+                            has_history = True
+                            break
+                    except (TypeError, ValueError):
+                        pass
+                    sn = str(r.get("supplier_name") or "").strip()
+                    if sn and sn.upper() == str(name).strip().upper():
+                        has_history = True
+                        break
+                if has_history:
+                    showwarning(
+                        "Cannot Delete",
+                        "Supplier has purchase history and cannot be deleted.")
+                    return
+                delete_contact_online("suppliers", supplier_id)
+                invalidate("suppliers")
+            else:
+                self.cursor.execute(
+                    "SELECT COUNT(*) FROM purchases WHERE supplier_id=?", (supplier_id,))
+                if self.cursor.fetchone()[0] > 0:
+                    showwarning(
+                        "Cannot Delete",
+                        "Supplier has purchase history and cannot be deleted.")
+                    return
+                self.cursor.execute("DELETE FROM suppliers WHERE id=?", (supplier_id,))
+                self.conn.commit()
+                from core.sync_coordinator import after_supplier_deleted
+                after_supplier_deleted(self.conn, supplier_id)
             showinfo("Success", "Supplier deleted successfully!")
             self.load()
         except Exception as e:

@@ -1,6 +1,17 @@
 # -*- mode: python ; coding: utf-8 -*-
-# Single-file EXE — Windows 7 / 8 / 8.1  (Python 3.8, 32-bit)
-# Build with:  py -3.8-32 -m PyInstaller VeterinaryApp_Win7.spec --noconfirm
+# Single-file EXE — Windows 7 (Python 3.8, 32-bit)
+# Build with:  build_win7_exe.bat
+
+# A release build must not carry one shop's identity -- their Drive backup
+# folder, the developer's printer, a counter's learned distributor names.
+# That rule lived only in SatpudaEngine_Folder.spec, so every build made from
+# THIS spec shipped all of it to whoever installed it. One shared definition:
+import os as _os
+import sys as _sys
+
+_sys.path.insert(0, _os.path.abspath(SPECPATH))
+from build_release_filter import release_datas as _release_datas
+
 
 import sys
 sys.path.insert(0, SPECPATH)
@@ -14,60 +25,51 @@ try:
 except ImportError:
     _certifi_datas = []
 
+from pyinstaller_extra_bundle import bundle_extras
+_extra_datas, _extra_binaries, _extra_hidden = bundle_extras(
+    include_heavy_ocr=False,
+    include_whisper=False,
+    include_voice=False,
+    include_gemini=False,
+    include_firebase=False,
+)
+
+from pyinstaller_win7_runtime import collect_runtime_dll_paths
+_win7_runtime = [(path, '.') for path in collect_runtime_dll_paths()]
+
 block_cipher = None
 
 a = Analysis(
     ['main.py'],
     pathex=['.'],
-    binaries=_tcl_binaries,
-    datas=[
-        ('config/theme_config.txt',   'config'),
-        ('config/layout_config.txt',  'config'),
-        ('config/font_size.txt',      'config'),
-        ('config/sample_import.json', 'config'),
-        ('config/backup_creds.dat',   'config'),
-        ('config/backup_config.dat',  'config'),
-        ('config/backup_slots.dat',   'config'),
-        ('config/expiry.dat',         'config'),
-        ('config/activation.dat',     'config'),
-        ('config/app_mode.txt',       'config'),
+    datas=_release_datas([
+        ('config/theme_config.txt',    'config'),
+        ('config/layout_config.txt',   'config'),
+        ('config/font_size.txt',       'config'),
+        ('config/sample_import.json',  'config'),
+        ('config/backup_creds.dat',    'config'),
+        ('config/drive_backup_folder.dat', 'config'),
+        ('config/backup_config.dat',   'config'),
+        ('config/backup_slots.dat',    'config'),
+        ('config/expiry.dat',          'config'),
+        ('config/activation.dat',      'config'),
+        ('config/app_mode.txt',         'config'),
         ('config/import_learned.json',  'config'),
         ('config/bill_print_settings.json', 'config'),
-        ('assets',          'assets'),
-        ('web_app',         'web_app'),
-        ('core',            'core'),
-        ('ui',              'ui'),
-        ('widgets',         'widgets'),
-        ('oauth_client.json',   '.'),
-        ('service_account.json', '.'),
-    ] + _tcl_datas + _certifi_datas,
+        ('config/build_profile_win7.txt', 'config/build_profile.txt'),
+        ('config/expiry_config.json', 'config'),
+        ('assets',                     'assets'),
+        ('web_app',                    'web_app'),
+        ('oauth_client.json',          '.'),
+        ('service_account.json',       '.'),
+    ]) + _tcl_datas + _certifi_datas + _extra_datas,
+    binaries=_tcl_binaries + _extra_binaries + _win7_runtime,
     hiddenimports=[
-        '_tkinter',
-        # ttkbootstrap
-        'ttkbootstrap',
-        'ttkbootstrap.constants',
-        'ttkbootstrap.style',
-        'ttkbootstrap.themes',
-        'ttkbootstrap.themes.standard',
-        'ttkbootstrap.widgets',
-        'ttkbootstrap.dialogs',
-        'ttkbootstrap.dialogs.dialogs',
-        'ttkbootstrap.scrolled',
-        'ttkbootstrap.tableview',
-        'ttkbootstrap.tooltip',
-        'ttkbootstrap.validation',
-        'ttkbootstrap.localization',
-        # Pillow
-        'PIL', 'PIL.Image', 'PIL.ImageTk', 'PIL.ImageDraw', 'PIL.ImageFont',
-        'PIL._imaging', 'PIL._imagingtk', 'PIL.ImageColor',
-        'PIL.ImageFilter', 'PIL.ImageOps',
-        # stdlib
-        '_sqlite3', 'sqlite3', 'tkinter', 'tkinter.ttk', 'tkinter.messagebox',
-        'tkinter.filedialog', 'tkinter.simpledialog',
-        'csv', 'json', 'shutil', 'tempfile', 'math', 'datetime',
-        'hashlib', 'subprocess', 'uuid', 'webbrowser', 'base64',
-        'threading', 'logging', 're',
-        # cryptography
+        # -- cryptography: MUST be bundled in every spec ------------------
+        # _encrypt/_decrypt pick Fernet when cryptography imports and XOR
+        # when it does not. A build that disagrees with the one that wrote
+        # the file cannot read the store registry, licence or saved logins,
+        # which is the 'settings wiped after replacing the build' bug.
         'cryptography', 'cryptography.fernet',
         'cryptography.hazmat', 'cryptography.hazmat.primitives',
         'cryptography.hazmat.primitives.hashes',
@@ -75,62 +77,23 @@ a = Analysis(
         'cryptography.hazmat.primitives.kdf.pbkdf2',
         'cryptography.hazmat.backends',
         'cryptography.hazmat.backends.openssl',
-        'certifi',
-        # openpyxl
-        'openpyxl', 'openpyxl.styles', 'openpyxl.utils',
-        'openpyxl.writer.excel', 'et_xmlfile',
-        # reportlab
-        'reportlab', 'reportlab.lib', 'reportlab.lib.pagesizes',
-        'reportlab.lib.colors', 'reportlab.lib.styles',
-        'reportlab.lib.units', 'reportlab.platypus', 'reportlab.pdfgen',
-        # Google Drive backup
-        'googleapiclient', 'googleapiclient.discovery', 'googleapiclient.http',
-        'google.auth', 'google.oauth2', 'google.oauth2.service_account',
-        'google.auth.transport.requests',
-        # App modules — correct subpackage paths
-        'core.alert_colors', 'core.app_setup', 'core.app_version',
-        'core.backup_manager', 'core.github_updater',
-        'core.billing_service', 'core.calc_engine', 'core.custom_themes',
-        'core.customer_service',
-        'core.db_setup', 'core.export_manager', 'core.font_config',
-        'core.font_updater', 'core.input_controller', 'core.layout_config',
-        'core.license_manager', 'core.window_icon', 'core.purchase_calculator',         'core.purchase_importer', 'core.purchase_invoice_engine',
-        'core.purchase_service', 'core.web_purchase_server', 'core.web_purchase_save',
-        'core.general_product_service', 'core.column_config',
-        'core.master_medicine_service', 'core.medicine_type_detector',
-        'core.startup_alerts',
-        'core.scroll_manager', 'core.themed_messagebox',
-        'ui.billing', 'ui.billing.billing', 'ui.billing.billing_form',
-        'ui.billing.billing_nav', 'ui.billing.bill_edit',
-        'ui.inventory', 'ui.inventory.inventory', 'ui.inventory.inventory_dialogs',
-        'ui.purchase', 'ui.purchase.purchase', 'ui.purchase.purchase_form',
-        'ui.purchase.purchase_nav', 'ui.purchase.purchase_history',
-        'ui.purchase.purchase_history_edit',
-        'ui.returns', 'ui.returns.sales_return', 'ui.returns.purchase_return',
-        'ui.sales', 'ui.sales.sales_history', 'ui.sales.sales_history_actions',
-        'ui.sales.sales_history_exports',
-        'ui.settings', 'ui.settings.settings', 'ui.settings.import_purchase_dialog',
-        'ui.settings.settings_tabs', 'ui.settings.settings_tabs.database_tab',
-        'ui.settings.settings_tabs.doctors_tab', 'ui.settings.settings_tabs.layout_tab',
-        'ui.settings.settings_tabs.ledger_tab', 'ui.settings.settings_tabs.misc_tabs',
-        'ui.settings.settings_tabs.payment_tab', 'ui.settings.settings_tabs.pharmacy_tab',
-        'ui.settings.settings_tabs.suppliers_tab',
-        'ui.settings.settings_tabs.customer_payment_tab',
-        'ui.settings.settings_tabs.appearance_scroll',
-        'ui.settings.settings_tabs.contacts_tab',
-        'ui.settings.settings_tabs.updates_tab',
-        'ui.settings.settings_tabs.payment_combined_tab',
-        'ui.general_products', 'ui.general_products.general_products_page',
-        'ui.shared', 'ui.shared.customers', 'ui.shared.home_page',
-        'ui.shared.import_from_mobile', 'ui.shared.import_purchases',
-        'ui.shared.shelf_management',
-        'widgets.activation_dialog', 'widgets.bill_edit', 'widgets.bill_preview',
-        'widgets.searchable_combo', 'widgets.two_step_medicine_combo',
-    ],
+        '_tkinter', 'ttkbootstrap', 'ttkbootstrap.constants', 'ttkbootstrap.style',
+        'ttkbootstrap.themes', 'ttkbootstrap.themes.standard', 'ttkbootstrap.widgets',
+        'ttkbootstrap.dialogs', 'ttkbootstrap.dialogs.dialogs', 'ttkbootstrap.scrolled',
+        'ttkbootstrap.tableview', 'ttkbootstrap.tooltip', 'ttkbootstrap.validation',
+        'ttkbootstrap.localization',
+        'PIL', 'PIL.Image', 'PIL.ImageTk', 'PIL.ImageDraw', 'PIL.ImageFont',
+        'PIL._imaging', 'PIL._imagingtk', 'PIL.ImageColor', 'PIL.ImageWin',
+        '_sqlite3', 'sqlite3', 'tkinter', 'tkinter.ttk', 'tkinter.messagebox',
+        'tkinter.filedialog', 'threading', 'queue',
+        'core.background_workers', 'core.windows_print_dialog', 'core.bill_output',
+        'core.store_images',
+        'core.build_features', 'core.printer_manager',
+    ] + _extra_hidden,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=['rthook_tkinter_win.py', 'rthook_windows_icon.py'],
-    excludes=['matplotlib', 'numpy', 'pandas', 'scipy', 'wx', 'PyQt5', 'PyQt6'],
+    runtime_hooks=['rthook_win7_bootstrap.py', 'rthook_tkinter_win.py', 'rthook_windows_icon.py'],
+    excludes=['matplotlib', 'scipy', 'pandas'],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
@@ -138,6 +101,12 @@ a = Analysis(
 )
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+from pyinstaller_extra_bundle import filter_system_dlls
+a.binaries = filter_system_dlls(a.binaries, keep_ucrt=True)
+
+from PyInstaller.building.datastruct import TOC
+a.scripts = TOC([s for s in a.scripts if 'pyi_rth_multiprocessing' not in s[0]])
 
 exe = EXE(
     pyz,
@@ -150,24 +119,14 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=False,         # UPX breaks Tcl/Tk one-file extraction on some PCs
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
-    target_arch='x86',  # 32-bit — required for Windows 7 compatibility
+    target_arch='x86',
     codesign_identity=None,
     entitlements_file=None,
     icon='assets/satpuda_logo.ico',
-    version_info={
-        'version': (1, 0, 2, 0),
-        'company_name': 'Satpuda Medical',
-        'file_description': 'Satpuda Core — Billing. Management. Simplified.',
-        'internal_name': 'SatpudaCore',
-        'legal_copyright': 'Satpuda Medical',
-        'original_filename': 'SatpudaCore_Win7.exe',
-        'product_name': 'Satpuda Core',
-        'product_version': '1.0.2.0',
-    },
 )

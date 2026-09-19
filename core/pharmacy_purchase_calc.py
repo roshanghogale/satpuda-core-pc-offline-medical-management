@@ -1,43 +1,526 @@
 """
-Indian pharmacy supplier invoice calculation engine.
+Centralized deterministic purchase invoice calculation engine (Indian pharmacy).
 
-Pipeline (GST law compliant):
-  1. Line amount = rate × billed_qty  (free qty is bonus — never reduces billed qty)
-  2. Gross = Σ line amounts
-  3. Group lines by GST slab
-  4. Cash/product discount split proportionally across slabs BEFORE GST
-  5. GST on post-discount taxable per slab; intra-state → CGST + SGST
-  6. Net = gross − discounts + total GST + round_off
+Pipeline:
+  1. Line Evaluation        — qty × rate, item discount → Net_Line_Amount
+  2. Slab Grouping          — group by gst_percent, spark-allocate bill discount
+  3. Tax Extraction Matrix  — Mode A (tax-inclusive) | Mode B (tax-exclusive)
+  4. Matrix Verification    — validate slab totals vs invoice summary
+
+All monetary math uses Decimal (half-up to 2 dp; Mode A CGST/SGST round-up).
 """
 from __future__ import annotations
 
+from decimal import Decimal, ROUND_CEILING, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+_TWO = Decimal("0.01")
+_ZERO = Decimal("0")
 
-def _f(value: Any, default: float = 0.0) -> float:
+
+def _d(value: Any, default: str = "0") -> Decimal:
+    if value is None or value == "":
+        return Decimal(default)
     try:
-        return float(value if value is not None else default)
-    except (TypeError, ValueError):
-        return default
+        return Decimal(str(value))
+    except Exception:
+        return Decimal(default)
 
 
-def _line_goods_amount(item: Dict[str, Any]) -> float:
-    """Pre-GST goods value: rate × billed qty (free items not deducted)."""
-    locked = item.get("import_taxable")
-    if locked is not None and item.get("import_lock_values"):
-        return round(_f(locked), 4)
-    qty = _f(item.get("qty"))
-    rate = _f(item.get("rate"))
-    amount = _f(item.get("amount"))
-    if amount > 0 and qty > 0 and abs(amount - qty * rate) <= max(0.05, amount * 0.01):
-        return round(amount, 4)
-    if amount > 0 and qty <= 0:
-        return round(amount, 4)
-    return round(qty * rate, 4)
+def _round2(value: Decimal) -> Decimal:
+    return value.quantize(_TWO, rounding=ROUND_HALF_UP)
 
 
-def _gst_slab_key(item: Dict[str, Any]) -> float:
-    return round(_f(item.get("gst_pct", item.get("gst_value", 0))), 4)
+def _round_up2(value: Decimal) -> Decimal:
+    if value <= _ZERO:
+        return _ZERO
+    return value.quantize(_TWO, rounding=ROUND_CEILING)
+
+
+def _f(value: Decimal) -> float:
+    return float(_round2(value))
+
+
+def _gst_slab_key(item: Dict[str, Any]) -> Decimal:
+    return _round2(_d(item.get("gst_pct", item.get("gst_percent", item.get("gst_value", 0)))))
+
+
+def _item_disc_percent(item: Dict[str, Any]) -> Decimal:
+    return _d(item.get("item_disc_percent", item.get("discount_pct", item.get("item_discount", 0))))
+
+
+def _line_is_tax_inclusive(item: Dict[str, Any], bill_inclusive: bool) -> bool:
+    if "is_tax_inclusive" in item:
+        return bool(item.get("is_tax_inclusive"))
+    return bill_inclusive
+
+
+def gst_method_to_tax_mode(gst_calc_method: str) -> str:
+    """
+    Map UI gst_calc_method to tax extraction mode.
+
+    discount_after_gst  → Mode A (tax-inclusive / Swami Samarth style)
+    discount_before_gst → Mode B (tax-exclusive / Jai Ganesh style)
+    """
+    method = (gst_calc_method or "discount_after_gst").strip()
+    if method == "discount_before_gst":
+        return "exclusive"
+    return "inclusive"
+
+
+def tax_mode_to_gst_method(tax_mode: str) -> str:
+    mode = (tax_mode or "inclusive").strip().lower()
+    if mode in ("exclusive", "tax_exclusive", "mode_b", "b"):
+        return "discount_before_gst"
+    return "discount_after_gst"
+
+
+# ── STEP 1: LINE ITEM EVALUATION ─────────────────────────────────────────────
+
+def evaluate_line_items(
+    items: Sequence[Dict[str, Any]],
+    bill_tax_inclusive: bool = False,
+) -> List[Dict[str, Any]]:
+    """Compute Gross_Line_Amount, Line_Discount, Net_Line_Amount per row."""
+    working: List[Dict[str, Any]] = []
+    for raw in items:
+        row = dict(raw)
+        qty = _d(row.get("qty"))
+        rate = _d(row.get("rate"))
+        disc_pct = _item_disc_percent(row)
+        gst_pct = _gst_slab_key(row)
+        inclusive = _line_is_tax_inclusive(row, bill_tax_inclusive)
+
+        gross_line = _round2(qty * rate)
+        line_discount = _round2(gross_line * disc_pct / Decimal("100"))
+        net_line = _round2(gross_line - line_discount)
+
+        row["qty"] = _f(qty)
+        row["rate"] = _f(rate)
+        row["free_qty"] = _f(_d(row.get("free_qty")))
+        row["discount_pct"] = _f(disc_pct)
+        row["item_disc_percent"] = _f(disc_pct)
+        row["gst_pct"] = _f(gst_pct)
+        row["gst_percent"] = _f(gst_pct)
+        row["is_tax_inclusive"] = inclusive
+        row["base"] = _f(gross_line)
+        row["gross_line_amount"] = _f(gross_line)
+        row["line_discount"] = _f(line_discount)
+        row["discount_amt"] = _f(line_discount)
+        row["net_line_amount"] = _f(net_line)
+        row["_goods_amount"] = _f(net_line)
+        row["billed_qty"] = _f(qty)
+        working.append(row)
+    return working
+
+
+# ── STEP 2: SLAB GROUPING & DISCOUNT SPARK-ALLOCATION ────────────────────────
+
+def allocate_slab_discounts(
+    items: Sequence[Dict[str, Any]],
+    global_cash_discount: Decimal,
+) -> Tuple[Dict[Decimal, Decimal], Dict[Decimal, Decimal], Dict[Decimal, Decimal], Decimal]:
+    """
+    Group Net_Line_Amount by gst_percent; proportionally allocate bill discount.
+
+    Returns (slab_gross, slab_discount, slab_taxable_basis, total_gross).
+    """
+    global_cash_discount = _round2(max(_ZERO, global_cash_discount))
+    slabs: Dict[Decimal, Decimal] = {}
+    for item in items:
+        key = _gst_slab_key(item)
+        slabs[key] = _round2(slabs.get(key, _ZERO) + _d(item.get("net_line_amount", item.get("_goods_amount", 0))))
+
+    total_gross = _round2(sum(slabs.values(), _ZERO))
+    slab_discounts: Dict[Decimal, Decimal] = {k: _ZERO for k in slabs}
+    slab_basis: Dict[Decimal, Decimal] = dict(slabs)
+
+    if total_gross > _ZERO and global_cash_discount > _ZERO:
+        remaining = global_cash_discount
+        keys = sorted(slabs.keys(), key=lambda k: slabs[k], reverse=True)
+        last_key = keys[-1]
+        for key in keys:
+            if key is last_key:
+                disc = _round2(remaining)
+            else:
+                weight = slabs[key] / total_gross
+                disc = _round2(weight * global_cash_discount)
+                remaining = _round2(remaining - disc)
+            slab_discounts[key] = disc
+            slab_basis[key] = _round2(max(_ZERO, slabs[key] - disc))
+
+    return slabs, slab_discounts, slab_basis, total_gross
+
+
+# ── STEP 3: DUAL-MODE TAX EXTRACTION MATRIX ──────────────────────────────────
+
+def _extract_slab_tax_inclusive(
+    taxable_basis: Decimal,
+    gst_rate: Decimal,
+    supply_type: str,
+) -> Tuple[Decimal, Decimal, Decimal, Decimal]:
+    """Mode A — rate includes GST; extract tax with CGST/SGST round-up."""
+    if taxable_basis <= _ZERO:
+        return _ZERO, _ZERO, _ZERO, _ZERO
+    if gst_rate <= _ZERO:
+        # 0% GST slab: entire basis is taxable, no tax component to extract.
+        return _round2(taxable_basis), _ZERO, _ZERO, _ZERO
+    divisor = Decimal("1") + gst_rate / Decimal("100")
+    real_taxable = _round2(taxable_basis / divisor)
+    total_slab_gst = _round2(taxable_basis - real_taxable)
+    if supply_type.lower() == "inter":
+        return real_taxable, _ZERO, _ZERO, total_slab_gst
+    half = _round_up2(total_slab_gst / Decimal("2"))
+    cgst = half
+    sgst = half
+    return real_taxable, cgst, sgst, _round2(cgst + sgst)
+
+
+def _extract_slab_tax_exclusive(
+    taxable_basis: Decimal,
+    gst_rate: Decimal,
+    supply_type: str,
+) -> Tuple[Decimal, Decimal, Decimal, Decimal]:
+    """Mode B — rate is base price; GST computed on taxable basis."""
+    real_taxable = _round2(taxable_basis)
+    if real_taxable <= _ZERO or gst_rate <= _ZERO:
+        return real_taxable, _ZERO, _ZERO, _ZERO
+    half_rate = gst_rate / Decimal("2")
+    if supply_type.lower() == "inter":
+        igst = _round2(real_taxable * gst_rate / Decimal("100"))
+        return real_taxable, _ZERO, _ZERO, igst
+    cgst = _round2(real_taxable * half_rate / Decimal("100"))
+    sgst = _round2(real_taxable * half_rate / Decimal("100"))
+    return real_taxable, cgst, sgst, _round2(cgst + sgst)
+
+
+def extract_slab_taxes(
+    slab_gross: Dict[Decimal, Decimal],
+    slab_basis: Dict[Decimal, Decimal],
+    items: Sequence[Dict[str, Any]],
+    bill_tax_mode: str,
+    supply_type: str = "intra",
+) -> List[Dict[str, Any]]:
+    """
+    Apply Mode A or Mode B per slab; supports mixed inclusive/exclusive lines
+    within the same GST % by splitting slab basis proportionally.
+    """
+    breakdown: List[Dict[str, Any]] = []
+    items_by_slab: Dict[Decimal, List[Dict[str, Any]]] = {}
+    for item in items:
+        items_by_slab.setdefault(_gst_slab_key(item), []).append(item)
+
+    for gst_rate in sorted(slab_basis.keys()):
+        basis_total = slab_basis[gst_rate]
+        grp = items_by_slab.get(gst_rate, [])
+        slab_g = slab_gross.get(gst_rate, _ZERO)
+        if basis_total <= _ZERO or not grp:
+            breakdown.append({
+                "gst_pct": _f(gst_rate),
+                "taxable_basis": _f(basis_total),
+                "taxable": 0.0,
+                "cgst": 0.0,
+                "sgst": 0.0,
+                "total_gst": 0.0,
+                "tax_mode": bill_tax_mode,
+            })
+            continue
+
+        inc_net = _ZERO
+        exc_net = _ZERO
+        for item in grp:
+            net = _d(item.get("net_line_amount", item.get("_goods_amount", 0)))
+            if item.get("is_tax_inclusive"):
+                inc_net += net
+            else:
+                exc_net += net
+        inc_net = _round2(inc_net)
+        exc_net = _round2(exc_net)
+        slab_net = _round2(inc_net + exc_net) or slab_g
+
+        inc_basis = _round2(basis_total * inc_net / slab_net) if slab_net > _ZERO else _ZERO
+        exc_basis = _round2(basis_total - inc_basis)
+
+        taxable = cgst = sgst = total_gst = _ZERO
+        modes_used: List[str] = []
+
+        if inc_basis > _ZERO:
+            t, c, s, g = _extract_slab_tax_inclusive(inc_basis, gst_rate, supply_type)
+            taxable += t
+            cgst += c
+            sgst += s
+            total_gst += g
+            modes_used.append("inclusive")
+
+        if exc_basis > _ZERO:
+            t, c, s, g = _extract_slab_tax_exclusive(exc_basis, gst_rate, supply_type)
+            taxable += t
+            cgst += c
+            sgst += s
+            total_gst += g
+            modes_used.append("exclusive")
+
+        tax_mode = modes_used[0] if len(modes_used) == 1 else "mixed"
+        breakdown.append({
+            "gst_pct": _f(gst_rate),
+            "taxable_basis": _f(basis_total),
+            "taxable": _f(_round2(taxable)),
+            "cgst": _f(_round2(cgst)),
+            "sgst": _f(_round2(sgst)),
+            "total_gst": _f(_round2(total_gst)),
+            "tax_mode": tax_mode,
+        })
+    return breakdown
+
+
+def _allocate_items_in_slab(
+    grp: List[Dict[str, Any]],
+    slab_gross: Decimal,
+    slab_disc: Decimal,
+    slab_taxable: Decimal,
+    slab_gst: Decimal,
+    supply_type: str,
+) -> None:
+    """Distribute slab discount and tax to line items (display / persistence)."""
+    rem_disc = slab_disc
+    rem_taxable = slab_taxable
+    rem_gst = slab_gst
+    last_item = grp[-1] if grp else None
+    for item in grp:
+        share = (
+            _d(item.get("net_line_amount", item.get("_goods_amount", 0))) / slab_gross
+            if slab_gross > _ZERO else _ZERO
+        )
+        if item is last_item:
+            item_disc = rem_disc
+            item_taxable = rem_taxable
+            item_gst = rem_gst
+        else:
+            item_disc = _round2(slab_disc * share)
+            item_taxable = _round2(slab_taxable * share)
+            item_gst = _round2(slab_gst * share)
+            rem_disc = _round2(rem_disc - item_disc)
+            rem_taxable = _round2(rem_taxable - item_taxable)
+            rem_gst = _round2(rem_gst - item_gst)
+
+        if supply_type.lower() == "inter":
+            item_c = _ZERO
+            item_s = _ZERO
+        else:
+            item_c = _round2(item_gst / Decimal("2"))
+            item_s = _round2(item_gst - item_c)
+
+        # Safety: 0% GST lines — full net goods value is taxable + amount.
+        net_goods = _d(item.get("net_line_amount", item.get("_goods_amount", 0)))
+        if net_goods > _ZERO and item_taxable <= _ZERO and item_gst <= _ZERO:
+            item_taxable = _round2(net_goods - item_disc)
+
+        item["cash_disc_share"] = _f(item_disc)
+        item["overall_discount_amt"] = _f(item_disc)
+        item["taxable"] = _f(item_taxable)
+        item["gst_amt"] = _f(item_gst)
+        item["cgst_amt"] = _f(item_c)
+        item["sgst_amt"] = _f(item_s)
+        item["item_amount"] = _f(_round2(item_taxable + item_gst))
+        item["amount"] = item["item_amount"]
+        item["_taxable_before_overall"] = item.get("net_line_amount", item.get("_goods_amount", 0))
+
+
+# ── STEP 4: GLOBAL SUMMARY + MATRIX VERIFICATION ─────────────────────────────
+
+def verify_invoice_matrix(
+    gross_total: Decimal,
+    global_discount: Decimal,
+    taxable_total: Decimal,
+    total_cgst: Decimal,
+    total_sgst: Decimal,
+    net_payable: Decimal,
+    tax_mode: str,
+    slab_breakdown: Sequence[Dict[str, Any]],
+    items: Sequence[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Dynamic matrix verification — flag slab/summary drift."""
+    flags: List[str] = []
+    inclusive = tax_mode == "inclusive"
+
+    slab_taxable = _round2(sum(_d(s.get("taxable", 0)) for s in slab_breakdown))
+    if abs(slab_taxable - taxable_total) > Decimal("0.02"):
+        flags.append(
+            "Slab taxable {:.2f} vs summary {:.2f}".format(_f(slab_taxable), _f(taxable_total))
+        )
+
+    slab_cgst = _round2(sum(_d(s.get("cgst", 0)) for s in slab_breakdown))
+    slab_sgst = _round2(sum(_d(s.get("sgst", 0)) for s in slab_breakdown))
+    if abs(slab_cgst - total_cgst) > Decimal("0.02"):
+        flags.append("CGST matrix drift")
+    if abs(slab_sgst - total_sgst) > Decimal("0.02"):
+        flags.append("SGST matrix drift")
+
+    total_gst = _round2(total_cgst + total_sgst)
+    if inclusive:
+        expected_pre = _round2(gross_total - global_discount)
+    else:
+        expected_pre = _round2(taxable_total + total_gst)
+    calc_net = _round2(expected_pre)
+    implied_round = _round2(net_payable - calc_net)
+    if abs(implied_round) > Decimal("1.00") and abs(net_payable - calc_net) > Decimal("0.05"):
+        flags.append("Net payable drift {:.2f}".format(_f(net_payable - calc_net)))
+
+    for item in items:
+        mrp = _d(item.get("mrp"))
+        rate = _d(item.get("rate"))
+        if mrp > _ZERO and rate > mrp + Decimal("0.01"):
+            flags.append("{}: rate > MRP".format(str(item.get("name", "?"))[:30]))
+        qty = _d(item.get("qty"))
+        free = _d(item.get("free_qty"))
+        if free > qty and qty > _ZERO:
+            flags.append("{}: free qty >= billed qty".format(str(item.get("name", "?"))[:30]))
+
+    return {
+        "flags": flags,
+        "slab_taxable_sum": _f(slab_taxable),
+        "implied_round_off": _f(implied_round),
+        "gst_split_ok": abs(total_cgst - total_sgst) <= Decimal("0.02"),
+        "tax_mode": tax_mode,
+    }
+
+
+def compute_purchase_invoice(
+    items: Sequence[Dict[str, Any]],
+    global_cash_discount: float = 0.0,
+    product_discount: float = 0.0,
+    round_off: Optional[float] = None,
+    net_payable: Optional[float] = None,
+    supply_type: str = "intra",
+    tax_mode: Optional[str] = None,
+    gst_calc_method: str = "discount_after_gst",
+) -> Dict[str, Any]:
+    """
+    Full 3-step purchase invoice pipeline.
+
+    Parameters
+    ----------
+    global_cash_discount : bill-level cash discount (₹)
+    product_discount     : additional product discount (₹); summed unless deduped by caller
+    tax_mode             : 'inclusive' (Mode A) | 'exclusive' (Mode B); derived from
+                           gst_calc_method when omitted
+    """
+    mode = (tax_mode or gst_method_to_tax_mode(gst_calc_method)).strip().lower()
+    if mode not in ("inclusive", "exclusive"):
+        mode = gst_method_to_tax_mode(gst_calc_method)
+
+    bill_inclusive = mode == "inclusive"
+    cash_disc = _round2(_d(global_cash_discount))
+    prod_disc = _round2(_d(product_discount))
+    total_bill_discount = _round2(cash_disc + prod_disc)
+
+    # Step 1
+    working = evaluate_line_items(items, bill_tax_inclusive=bill_inclusive)
+
+    # Step 2
+    slab_gross, slab_discounts, slab_basis, gross_total = allocate_slab_discounts(
+        working, total_bill_discount,
+    )
+
+    # Step 3
+    tax_rows = extract_slab_taxes(
+        slab_gross, slab_basis, working, mode, supply_type,
+    )
+
+    total_cgst = _round2(sum(_d(r["cgst"]) for r in tax_rows))
+    total_sgst = _round2(sum(_d(r["sgst"]) for r in tax_rows))
+    total_gst = _round2(sum(_d(r["total_gst"]) for r in tax_rows))
+    taxable_total = _round2(sum(_d(r["taxable"]) for r in tax_rows))
+
+    # Item allocation + slab_breakdown (UI / GST slab dialog)
+    slabs: Dict[Decimal, List[Dict[str, Any]]] = {}
+    for item in working:
+        slabs.setdefault(_gst_slab_key(item), []).append(item)
+
+    slab_breakdown: List[Dict[str, Any]] = []
+    for row in tax_rows:
+        gst_rate = _d(row["gst_pct"])
+        grp = slabs.get(gst_rate, [])
+        slab_g = slab_gross.get(gst_rate, _ZERO)
+        slab_d = slab_discounts.get(gst_rate, _ZERO)
+        slab_t = _d(row["taxable"])
+        slab_gst = _d(row["total_gst"])
+        _allocate_items_in_slab(grp, slab_g, slab_d, slab_t, slab_gst, supply_type)
+        slab_breakdown.append({
+            "gst_pct": row["gst_pct"],
+            "gross": _f(slab_g),
+            "discount": _f(slab_d),
+            "taxable": row["taxable"],
+            "taxable_basis": row["taxable_basis"],
+            "cgst": row["cgst"],
+            "sgst": row["sgst"],
+            "total_gst": row["total_gst"],
+            "tax_mode": row["tax_mode"],
+        })
+
+    # Global summary — mixed mode uses taxable + GST; pure inclusive uses gross − discount
+    has_exclusive = any(not i.get("is_tax_inclusive") for i in working)
+    has_inclusive = any(i.get("is_tax_inclusive") for i in working)
+    if has_inclusive and not has_exclusive:
+        pre_round = _round2(gross_total - total_bill_discount)
+    else:
+        pre_round = _round2(taxable_total + total_gst)
+
+    if net_payable is not None and _d(net_payable) > _ZERO:
+        total_amount = _round2(_d(net_payable))
+        if round_off is not None:
+            rounding = _round2(_d(round_off))
+        else:
+            rounding = _round2(total_amount - pre_round)
+    else:
+        if round_off is not None:
+            rounding = _round2(_d(round_off))
+        else:
+            rounded = pre_round.quantize(_TWO, rounding=ROUND_HALF_UP)
+            if pre_round != rounded:
+                rounded = Decimal(int(pre_round + Decimal("0.5")))
+            rounding = _round2(rounded - pre_round)
+        total_amount = _round2(pre_round + rounding)
+
+    validation = verify_invoice_matrix(
+        gross_total=gross_total,
+        global_discount=total_bill_discount,
+        taxable_total=taxable_total,
+        total_cgst=total_cgst,
+        total_sgst=total_sgst,
+        net_payable=total_amount,
+        tax_mode=mode,
+        slab_breakdown=slab_breakdown,
+        items=working,
+    )
+
+    gst_method = tax_mode_to_gst_method(mode)
+
+    return {
+        "gross_total": _f(gross_total),
+        "gross_subtotal": _f(gross_total),
+        "subtotal": _f(taxable_total),
+        "taxable_total": _f(taxable_total),
+        "product_discount": _f(prod_disc),
+        "cash_discount": _f(cash_disc),
+        "discount_amount": _f(total_bill_discount),
+        "overall_discount": _f(total_bill_discount),
+        "total_gst": _f(total_gst),
+        "cgst": _f(total_cgst),
+        "sgst": _f(total_sgst),
+        "pre_round_total": _f(pre_round),
+        "rounding": _f(rounding),
+        "total_amount": _f(total_amount),
+        "net_payable": _f(total_amount),
+        "slab_totals": {float(k): _f(v) for k, v in slab_gross.items()},
+        "slab_discounts": {float(k): _f(v) for k, v in slab_discounts.items()},
+        "slab_breakdown": slab_breakdown,
+        "items": working,
+        "validation": validation,
+        "supply_type": supply_type,
+        "tax_mode": mode,
+        "gst_calc_method": gst_method,
+    }
 
 
 def calc_pharmacy_purchase_bill(
@@ -47,169 +530,20 @@ def calc_pharmacy_purchase_bill(
     round_off: Optional[float] = None,
     net_payable: Optional[float] = None,
     supply_type: str = "intra",
+    gst_calc_method: str = "discount_after_gst",
+    tax_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """
-    Full supplier bill calculation for Indian pharmacy purchases.
-
-    Returns summary + per-item taxable/gst after proportional slab discounts.
-    When net_payable is supplied (from printed bill), it is authoritative.
-    """
-    working = [dict(i) for i in items]
-    cash_discount = round(max(0.0, _f(cash_discount)), 2)
-    product_discount = round(max(0.0, _f(product_discount)), 2)
-    total_bill_discount = round(cash_discount + product_discount, 2)
-
-    # Step 1 — line goods amounts (rate × billed qty)
-    for item in working:
-        goods = _line_goods_amount(item)
-        item["_goods_amount"] = round(goods, 2)
-        item["billed_qty"] = _f(item.get("qty"))
-        item["base"] = round(goods, 2)
-
-    # Step 3 — gross
-    gross_total = round(sum(i["_goods_amount"] for i in working), 2)
-
-    # Step 4 — group by GST slab
-    slabs: Dict[float, List[Dict[str, Any]]] = {}
-    for item in working:
-        key = _gst_slab_key(item)
-        slabs.setdefault(key, []).append(item)
-
-    slab_totals: Dict[float, float] = {
-        k: round(sum(i["_goods_amount"] for i in grp), 2) for k, grp in slabs.items()
-    }
-
-    # Step 5 — proportional discount per slab (before GST)
-    slab_discounts: Dict[float, float] = {}
-    remaining_disc = total_bill_discount
-    slab_keys = sorted(slab_totals.keys(), key=lambda k: slab_totals[k], reverse=True)
-    last_key = slab_keys[-1] if slab_keys else None
-    for key in slab_keys:
-        group_gross = slab_totals[key]
-        if gross_total > 0 and total_bill_discount > 0:
-            if key is last_key:
-                disc = round(remaining_disc, 2)
-            else:
-                disc = round(total_bill_discount * group_gross / gross_total, 2)
-                remaining_disc = round(remaining_disc - disc, 2)
-        else:
-            disc = 0.0
-        slab_discounts[key] = disc
-
-    # Steps 5–6 — item taxable, GST, CGST/SGST
-    total_cgst = 0.0
-    total_sgst = 0.0
-    total_gst = 0.0
-    taxable_total = 0.0
-
-    for key, grp in slabs.items():
-        slab_gross = slab_totals[key]
-        slab_disc = slab_discounts.get(key, 0.0)
-        slab_taxable = round(max(0.0, slab_gross - slab_disc), 2)
-        gst_rate = key
-        slab_gst = round(slab_taxable * gst_rate / 100, 2)
-
-        if supply_type.lower() == "inter":
-            item_igst = slab_gst
-            item_cgst = 0.0
-            item_sgst = 0.0
-        else:
-            item_cgst = round(slab_gst / 2, 2)
-            item_sgst = round(slab_gst - item_cgst, 2)
-            item_igst = 0.0
-
-        total_cgst += item_cgst
-        total_sgst += item_sgst
-        total_gst += slab_gst
-        taxable_total += slab_taxable
-
-        # Allocate slab discount + GST down to items proportionally
-        rem_disc = slab_disc
-        rem_taxable = slab_taxable
-        last_item = grp[-1] if grp else None
-        for item in grp:
-            share = item["_goods_amount"] / slab_gross if slab_gross > 0 else 0.0
-            if item is last_item:
-                item_disc = rem_disc
-                item_taxable = rem_taxable
-            else:
-                item_disc = round(slab_disc * share, 2)
-                item_taxable = round(slab_taxable * share, 2)
-                rem_disc = round(rem_disc - item_disc, 2)
-                rem_taxable = round(rem_taxable - item_taxable, 2)
-
-            item_gst = round(item_taxable * gst_rate / 100, 2)
-            if supply_type.lower() == "inter":
-                item_c = 0.0
-                item_s = 0.0
-            else:
-                item_c = round(item_gst / 2, 2)
-                item_s = round(item_gst - item_c, 2)
-
-            item["cash_disc_share"] = round(item_disc, 2)
-            item["discount_amt"] = round(item_disc, 2)
-            item["overall_discount_amt"] = round(item_disc, 2)
-            item["taxable"] = round(item_taxable, 2)
-            item["gst_amt"] = item_gst
-            item["cgst_amt"] = item_c
-            item["sgst_amt"] = item_s
-            item["item_amount"] = round(item_taxable + item_gst, 2)
-            item["amount"] = item["item_amount"]
-            item["_taxable_before_overall"] = round(item["_goods_amount"], 2)
-
-    total_cgst = round(total_cgst, 2)
-    total_sgst = round(total_sgst, 2)
-    total_gst = round(total_gst, 2)
-    taxable_total = round(taxable_total, 2)
-
-    pre_round = round(gross_total - total_bill_discount + total_gst, 2)
-
-    if net_payable is not None and _f(net_payable) > 0:
-        total_amount = round(_f(net_payable), 2)
-        if round_off is not None:
-            rounding = round(_f(round_off), 2)
-        else:
-            rounding = round(total_amount - pre_round, 2)
-    else:
-        if round_off is not None:
-            rounding = round(_f(round_off), 2)
-        else:
-            rounding = round(round(pre_round) - pre_round, 2)
-        total_amount = round(pre_round + rounding, 2)
-
-    validation = validate_pharmacy_bill(
-        gross_total=gross_total,
-        cash_discount=cash_discount,
+    """Backward-compatible entry — delegates to compute_purchase_invoice."""
+    return compute_purchase_invoice(
+        items=items,
+        global_cash_discount=cash_discount,
         product_discount=product_discount,
-        taxable_total=taxable_total,
-        total_cgst=total_cgst,
-        total_sgst=total_sgst,
-        net_payable=total_amount,
-        items=working,
+        round_off=round_off,
+        net_payable=net_payable,
+        supply_type=supply_type,
+        tax_mode=tax_mode,
+        gst_calc_method=gst_calc_method,
     )
-
-    return {
-        "gross_total": gross_total,
-        "gross_subtotal": gross_total,
-        "subtotal": taxable_total,
-        "product_discount": product_discount,
-        "cash_discount": cash_discount,
-        "discount_amount": total_bill_discount,
-        "overall_discount": total_bill_discount,
-        "taxable_total": taxable_total,
-        "total_gst": total_gst,
-        "cgst": total_cgst,
-        "sgst": total_sgst,
-        "pre_round_total": pre_round,
-        "rounding": rounding,
-        "total_amount": total_amount,
-        "net_payable": total_amount,
-        "slab_totals": slab_totals,
-        "slab_discounts": slab_discounts,
-        "items": working,
-        "validation": validation,
-        "supply_type": supply_type,
-    }
 
 
 def validate_pharmacy_bill(
@@ -222,39 +556,18 @@ def validate_pharmacy_bill(
     net_payable: float,
     items: Sequence[Dict[str, Any]],
 ) -> Dict[str, Any]:
-    """Run post-calculation validation checks."""
-    flags: List[str] = []
-    total_disc = round(cash_discount + product_discount, 2)
-    expected_taxable = round(gross_total - total_disc, 2)
-    if abs(expected_taxable - taxable_total) > 0.05:
-        flags.append(
-            "Taxable mismatch: {:.2f} vs {:.2f}".format(taxable_total, expected_taxable)
-        )
-
-    calc_net = round(gross_total - total_disc + total_cgst + total_sgst, 2)
-    rounding_implied = round(net_payable - calc_net, 2)
-
-    for item in items:
-        mrp = _f(item.get("mrp"))
-        rate = _f(item.get("rate"))
-        if mrp > 0 and rate > mrp + 0.01:
-            flags.append("{}: rate {:.2f} > MRP {:.2f}".format(
-                str(item.get("name", "?"))[:30], rate, mrp
-            ))
-        qty = _f(item.get("qty"))
-        free = _f(item.get("free_qty"))
-        if free > qty and qty > 0:
-            flags.append("{}: free qty {:.2f} >= billed qty {:.2f}".format(
-                str(item.get("name", "?"))[:30], free, qty
-            ))
-
-    return {
-        "flags": flags,
-        "expected_taxable": expected_taxable,
-        "calc_net_before_round": calc_net,
-        "implied_round_off": rounding_implied,
-        "gst_split_ok": abs(total_cgst - total_sgst) <= 0.02,
-    }
+    """Legacy validation wrapper."""
+    return verify_invoice_matrix(
+        gross_total=_d(gross_total),
+        global_discount=_round2(_d(cash_discount) + _d(product_discount)),
+        taxable_total=_d(taxable_total),
+        total_cgst=_d(total_cgst),
+        total_sgst=_d(total_sgst),
+        net_payable=_d(net_payable),
+        tax_mode="exclusive",
+        slab_breakdown=[],
+        items=items,
+    )
 
 
 def items_from_pharmacy_calc(calc: Dict[str, Any]) -> List[Dict[str, Any]]:

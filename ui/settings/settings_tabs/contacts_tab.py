@@ -6,6 +6,7 @@ except ImportError:
     from tkinter import ttk
 
 from ui.settings.settings_tabs.doctors_tab import DoctorsTab
+from ui.settings.settings_tabs.villages_tab import VillagesTab
 from ui.settings.settings_tabs.suppliers_tab import SuppliersTab
 from ui.shared.customers import CustomersPage
 from ui.settings.settings_tabs.appearance_scroll import AppearanceScrollPane
@@ -15,6 +16,7 @@ from core.settings_section_nav import wire_settings_section_nav, bindings_for_se
 _NAV_SECTIONS = [
     ('doctors',   'Doctors'),
     ('customers', 'Customers'),
+    ('villages',  'Villages'),
     ('suppliers', 'Suppliers'),
 ]
 
@@ -22,14 +24,15 @@ _NAV_SECTIONS = [
 class ContactsTab:
     TAB_NAME = 'Contacts'
 
-    def __init__(self, notebook, conn):
+    def __init__(self, notebook, conn, host=None):
         self.conn = conn
         self._panels = {}
         self._nav_buttons = {}
 
-        outer = ttk.Frame(notebook)
+        outer = host if host is not None else ttk.Frame(notebook)
         self.outer = outer
-        notebook.add(outer, text=self.TAB_NAME)
+        if host is None and notebook is not None:
+            notebook.add(outer, text=self.TAB_NAME)
 
         shell = ttk.Frame(outer)
         shell.pack(fill=tk.BOTH, expand=True)
@@ -53,6 +56,7 @@ class ContactsTab:
 
         self._build_doctors_panel()
         self._build_customers_panel()
+        self._build_villages_panel()
         self._build_suppliers_panel()
         self._active_section = 'doctors'
         self._show_section('doctors')
@@ -63,6 +67,8 @@ class ContactsTab:
         def _first():
             if self._active_section == 'customers' and hasattr(self, 'customers'):
                 self.customers.search_entry.focus()
+            elif self._active_section == 'villages' and hasattr(self, 'villages'):
+                self.villages.village_name.focus_set()
             elif self._active_section == 'suppliers' and hasattr(self, 'suppliers'):
                 self.suppliers.supplier_name.focus_set()
             elif hasattr(self, 'doctors'):
@@ -115,6 +121,7 @@ class ContactsTab:
         mapping = {
             'Doctors': 'doctors',
             'Customers': 'customers',
+            'Villages': 'villages',
             'Suppliers': 'suppliers',
         }
         self._show_section(mapping.get(name, 'doctors'))
@@ -126,6 +133,10 @@ class ContactsTab:
     def _build_customers_panel(self):
         frame = self._panel('customers')
         self.customers = CustomersPage(frame, self.conn, embedded=True)
+
+    def _build_villages_panel(self):
+        frame = self._panel('villages')
+        self.villages = VillagesTab(frame, self.conn, embedded=True)
 
     def _build_suppliers_panel(self):
         frame = self._panel('suppliers')

@@ -1,7 +1,5 @@
 """Settings → Import with section navigation."""
 import os
-import sys
-import shutil
 import webbrowser
 import tkinter as tk
 try:
@@ -27,15 +25,16 @@ _NAV_SECTIONS = [
 class ImportTab:
     TAB_NAME = 'Import'
 
-    def __init__(self, notebook, conn, parent_widget):
+    def __init__(self, notebook, conn, parent_widget, host=None):
         self.conn = conn
         self._parent = parent_widget
         self._panels = {}
         self._nav_buttons = {}
 
-        outer = ttk.Frame(notebook)
+        outer = host if host is not None else ttk.Frame(notebook)
         self.outer = outer
-        notebook.add(outer, text=self.TAB_NAME)
+        if host is None and notebook is not None:
+            notebook.add(outer, text=self.TAB_NAME)
 
         shell = ttk.Frame(outer)
         shell.pack(fill=tk.BOTH, expand=True)
@@ -110,13 +109,83 @@ class ImportTab:
             text="Import Purchase Bill",
             command=self._open_import_purchase_bill,
         ).pack(side=tk.LEFT, padx=8, pady=8)
+        from core.build_features import is_gemini_supported
         ttk.Label(
             bill_bar,
-            text="Pick a PDF, CSV or Excel bill — the Purchase page opens with rows "
-                 "filled in for you to verify and save.",
+            text=(
+                "Opens file picker for PDF, CSV, or Excel. "
+                + (
+                    "Ctrl+click multiple images when the same bill spans pages "
+                    "(carry-forward / “Continued…”). Bill photos use Gemini AI (internet required)."
+                    if is_gemini_supported()
+                    else "Bill photo / Gemini import is not available in this build."
+                )
+            ),
             foreground='gray',
             wraplength=520,
         ).pack(side=tk.LEFT, padx=8, pady=8)
+
+        if is_gemini_supported():
+            self._build_gemini_panel(frame)
+
+    def _build_gemini_panel(self, frame):
+        from core.gemini_bill_config import (
+            is_gemini_enabled,
+            is_gemini_configured,
+            load_import_default_schedule,
+            set_gemini_enabled,
+        )
+        from core.layout_config import get_configured_schedules
+
+        gemini_bar = ttk.LabelFrame(frame, text="Gemini AI — Bill Photo Import")
+        gemini_bar.pack(fill=tk.X, padx=10, pady=(0, 10))
+        self._gemini_enabled_var = tk.BooleanVar(value=is_gemini_enabled())
+        ttk.Checkbutton(
+            gemini_bar,
+            text="Use Gemini AI for bill photos (required — needs internet)",
+            variable=self._gemini_enabled_var,
+            command=self._save_gemini_settings,
+        ).pack(anchor=tk.W, padx=8, pady=(8, 4))
+        ttk.Label(
+            gemini_bar,
+            text=(
+                "API key is built into this app (same as EXE / web). "
+                "Configured." if is_gemini_configured() else
+                "Bill photo import is not available in this build."
+            ),
+            foreground="gray",
+        ).pack(anchor=tk.W, padx=8, pady=(0, 4))
+        sched_row = ttk.Frame(gemini_bar)
+        sched_row.pack(fill=tk.X, padx=8, pady=(0, 4))
+        ttk.Label(sched_row, text="Fallback schedule (if Gemini unsure):").pack(side=tk.LEFT)
+        sched_values = ["", *(s for s in get_configured_schedules() if s)] or ["", "H"]
+        self._import_schedule_var = tk.StringVar(
+            value=load_import_default_schedule(),
+        )
+        try:
+            ttk.Combobox(
+                sched_row,
+                textvariable=self._import_schedule_var,
+                values=sched_values,
+                width=8,
+                state="readonly",
+            ).pack(side=tk.LEFT, padx=6)
+        except Exception:
+            ttk.Entry(sched_row, textvariable=self._import_schedule_var, width=8).pack(
+                side=tk.LEFT, padx=6,
+            )
+        ttk.Label(
+            sched_row,
+            text="(Used only if Gemini cannot look up a medicine — leave blank for none)",
+            foreground="gray",
+        ).pack(side=tk.LEFT)
+        ttk.Label(
+            gemini_bar,
+            text="Gemini reads bill photos in the cloud (internet required) and fills supplier "
+                 "fields, each medicine row, and totals. PDF/Excel import works offline.",
+            foreground='gray',
+            wraplength=520,
+        ).pack(anchor=tk.W, padx=8, pady=(4, 8))
 
     def _build_web_panel(self):
         frame = self._panel('web')
@@ -144,6 +213,19 @@ class ImportTab:
         mobile_lf = ttk.LabelFrame(frame, text="Import from Mobile")
         mobile_lf.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         ImportFromMobilePage(mobile_lf, self.conn)
+
+    def _save_gemini_settings(self):
+        from core.gemini_bill_config import (
+            save_import_default_schedule,
+            set_gemini_enabled,
+        )
+        set_gemini_enabled(bool(self._gemini_enabled_var.get()))
+        save_import_default_schedule(getattr(self, "_import_schedule_var", tk.StringVar(value="")).get())
+        messagebox.showinfo(
+            "Gemini AI",
+            "Import settings saved. Gemini will look up schedule (H, H1, X, …) and content for each medicine.",
+            parent=self._parent.winfo_toplevel(),
+        )
 
     def _open_import_purchase_bill(self):
         root = self._parent.winfo_toplevel()
@@ -177,48 +259,29 @@ class ImportTab:
 
     def _open_web_purchase(self):
         from core.web_purchase_server import (
-            start_web_purchase_server, stop_web_purchase_server,
-            get_api_base_url, write_runtime_catalog,
+            prepare_web_purchase_root,
+            start_web_purchase_server,
+            get_api_base_url,
+            write_runtime_catalog,
         )
 
-        web_root = None
-        if getattr(sys, 'frozen', False):
-            dst_dir = os.path.join(
-                os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
-                'VeterinaryApp', 'web_app',
-            )
-            os.makedirs(dst_dir, exist_ok=True)
-            src = os.path.join(sys._MEIPASS, 'web_app', 'index.html')
-            dst = os.path.join(dst_dir, 'index.html')
-            try:
-                shutil.copy2(src, dst)
-                src_meds = os.path.join(sys._MEIPASS, 'web_app', 'medicines.json')
-                if os.path.isfile(src_meds):
-                    shutil.copy2(src_meds, os.path.join(dst_dir, 'medicines.json'))
-                src_assets = os.path.join(sys._MEIPASS, 'web_app', 'assets')
-                dst_assets = os.path.join(dst_dir, 'assets')
-                if os.path.isdir(src_assets):
-                    if os.path.exists(dst_assets):
-                        shutil.rmtree(dst_assets)
-                    shutil.copytree(src_assets, dst_assets)
-            except Exception as e:
-                messagebox.showerror('Web App Error', f'Could not extract web app:\n{e}')
-                return
-            web_root = dst_dir
-        else:
-            web_root = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-                'web_app',
-            )
+        try:
+            web_root = prepare_web_purchase_root()
+        except Exception as e:
+            messagebox.showerror('Web App Error', f'Could not prepare web app files:\n{e}')
+            return
 
         index = os.path.join(web_root, 'index.html')
         if not os.path.isfile(index):
-            messagebox.showerror('Not Found', f'Web app not found at:\n{index}')
+            messagebox.showerror(
+                'Not Found',
+                f'Web app not found at:\n{index}\n\n'
+                'Rebuild the EXE or run: cd purchase-entry-web && npm run build',
+            )
             return
 
         try:
             write_runtime_catalog(web_root, self.conn)
-            stop_web_purchase_server()
             start_web_purchase_server(self.conn, web_root=web_root)
             url = get_api_base_url() + '/'
             webbrowser.open(url)

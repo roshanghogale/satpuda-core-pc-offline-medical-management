@@ -154,13 +154,19 @@ def focus_tree(tree):
         return False
 
 
-def wire_combo_filter_chain(*combos):
-    """Enter on each SearchableCombo applies filter and moves to the next combo."""
+def wire_combo_filter_chain(*combos, on_last_return=None):
+    """Return moves to the next combo; the last combo runs ``on_last_return`` (e.g. apply filter)."""
     items = list(combos)
     for i, combo in enumerate(items):
-        nxt = items[i + 1] if i < len(items) - 1 else None
-        if nxt is not None:
-            combo.next_focus_widget = nxt.focus
+        is_last = i == len(items) - 1
+        if not is_last:
+            combo.next_focus_widget = items[i + 1].focus
+            if hasattr(combo, 'apply_on_return'):
+                combo.apply_on_return = False
+        elif callable(on_last_return):
+            combo.next_focus_widget = on_last_return
+            if hasattr(combo, 'apply_on_return'):
+                combo.apply_on_return = False
 
 
 def wire_entry_filter_chain(*entries, last_action=None):

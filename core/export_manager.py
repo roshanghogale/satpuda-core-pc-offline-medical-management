@@ -13,12 +13,37 @@ export_all_combined(parent, sections)
     -> sections = list of (title, headers, rows)
     -> one dialog, one file with all sections combined
 """
+from __future__ import annotations
 
 import os
+import re
 import csv
 import tempfile
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+
+# Tk is deliberately EXCLUDED from the headless data-engine build, exactly as it
+# is for core/themed_messagebox.py -- and for the same reason this file must not
+# import it at module scope. Four things the desktop engine does reach into this
+# module for its Tk-FREE helpers:
+#
+#   core/desktop_export_service.py:1773  Export dialog -> PDF / Print (every page)
+#   core/desktop_startup_service.py:207  Startup alerts -> Export PDF
+#   core/desktop_settings_service.py     Settings -> data export / export contacts
+#
+# and every one of them died at `import tkinter` before reaching a single line of
+# export code, so the desktop API answered 500 and the shop saw "Export failed".
+# Nothing above the function bodies touches tk, so degrading here costs the Tk
+# app nothing: it always has tkinter, and the engine never calls a dialog.
+try:
+    import tkinter as tk
+    from tkinter import ttk, filedialog, messagebox
+
+    HAS_TK = True
+except Exception:  # frozen sidecar / no display
+    tk = None
+    ttk = None
+    filedialog = None
+    messagebox = None
+    HAS_TK = False
 
 
 def _apply_icon(window):
@@ -39,7 +64,7 @@ def show_export_option_dialog(parent, title, options, *, width=360, height=None)
     options: sequence of (label, callable).
     Navigate with ↑↓, confirm with Enter or double-click, cancel with Escape.
     """
-    from core.scroll_manager import open_dialog
+    from core.scroll_manager import DIALOG_SIZE_MEDIUM, dialog_root, open_dialog
     from core.font_config import FONT_FAMILY, FONT_SIZE_LABELS
     from core.dialog_escape import bind_escape_to_close
     from core.dialog_keyboard import wire_export_option_listbox
@@ -50,9 +75,10 @@ def show_export_option_dialog(parent, title, options, *, width=360, height=None)
 
     top = parent.winfo_toplevel()
     n = len(items)
-    dlg_h = height or min(400, 96 + n * 28)
-    dlg = open_dialog(top, title, width=width, height=dlg_h, resizable=False)
-    body = dlg.content
+    dlg_h = height or min(DIALOG_SIZE_MEDIUM[1], 140 + n * 30)
+    dlg_w = max(width, DIALOG_SIZE_MEDIUM[0])
+    dlg = open_dialog(top, title, width=dlg_w, height=dlg_h, resizable=True)
+    body = dialog_root(dlg.content, padding=8)
 
     lb = tk.Listbox(
         body,
@@ -84,24 +110,127 @@ def show_export_option_dialog(parent, title, options, *, width=360, height=None)
     bind_escape_to_close(dlg)
     wire_export_option_listbox(dlg, lb, _run_selected)
 
+    from core.voice.voice_dialog import (
+        consume_voice_dialog_hints,
+        register_export_option_dialog,
+        speak_voice_dialog_hint,
+    )
+
+    register_export_option_dialog(dlg, lb, items)
+    if consume_voice_dialog_hints():
+        dlg.after(50, lambda: speak_voice_dialog_hint("Select export type."))
+
+
+# ── Voice / preset format (skip format picker) ───────────────────────────────
+
+_voice_export_fmt: str | None = None
+
+
+def set_voice_export_format(fmt: str | None) -> None:
+    """Satpuda voice sets this before opening an export; consumed by export_data."""
+    global _voice_export_fmt
+    _voice_export_fmt = (fmt or "").strip().lower() or None
+
+
+def _take_voice_export_format() -> str | None:
+    global _voice_export_fmt
+    fmt = _voice_export_fmt
+    _voice_export_fmt = None
+    return fmt
+
+
+def _dot_matrix_print_available() -> bool:
+    try:
+        from core.printer_manager import PrinterManager
+        return PrinterManager.is_dot_matrix_mode()
+    except Exception:
+        return False
+
+
+def _export_format_options() -> list[tuple[str, str]]:
+    opts: list[tuple[str, str]] = [
+        ('CSV', 'csv'),
+        ('Excel (.xlsx)', 'xlsx'),
+        ('PDF', 'pdf'),
+    ]
+    if _dot_matrix_print_available():
+        opts.append(('Dot Matrix Print (A4 Portrait)', 'dm_a4'))
+    return opts
+
+
+def _print_dot_matrix_report(parent, title, headers, rows) -> None:
+    from core.dot_matrix_print import print_dot_matrix_report, DotMatrixPrintError
+    try:
+        print_dot_matrix_report(title, list(headers), list(rows), paper='A4')
+        messagebox.showinfo("Printed", f'"{title}" sent to dot matrix printer.', parent=parent)
+    except DotMatrixPrintError as exc:
+        messagebox.showerror("Print Error", str(exc), parent=parent)
+    except Exception as exc:
+        messagebox.showerror("Print Error", str(exc), parent=parent)
+
+
+def _print_dot_matrix_reports_combined(parent, sections) -> None:
+    from core.dot_matrix_print import print_dot_matrix_reports_combined, DotMatrixPrintError
+    try:
+        print_dot_matrix_reports_combined(sections, paper='A4')
+        messagebox.showinfo("Printed", "Report sent to dot matrix printer.", parent=parent)
+    except DotMatrixPrintError as exc:
+        messagebox.showerror("Print Error", str(exc), parent=parent)
+    except Exception as exc:
+        messagebox.showerror("Print Error", str(exc), parent=parent)
+
+
+def _run_single_export(parent, title, headers, rows, default_name, fmt: str) -> None:
+    top = parent.winfo_toplevel()
+    if fmt == "csv":
+        _save_csv(top, headers, rows, default_name)
+    elif fmt == "xlsx":
+        _save_xlsx(top, headers, rows, default_name)
+    elif fmt == "dm_a4":
+        _print_dot_matrix_report(top, title, headers, rows)
+    else:
+        _save_pdf(top, title, headers, rows, default_name)
+
+
+def _run_all_export(parent, sections, fmt: str) -> None:
+    top = parent.winfo_toplevel()
+    if fmt == "csv":
+        _save_all_csv(top, sections)
+    elif fmt == "xlsx":
+        _save_all_xlsx(top, sections)
+    elif fmt == "dm_a4":
+        _print_dot_matrix_reports_combined(top, sections)
+    else:
+        _save_all_pdf(top, sections)
+
 
 # ── Format chooser dialog ─────────────────────────────────────────────────────
 
 def export_data(parent, title, headers, rows, default_name='export'):
     """Show format picker then save. rows = list of tuples/lists."""
-    from core.scroll_manager import open_dialog
+    from core.export_prefs import load_default_export_format
+
+    voice_fmt = _take_voice_export_format()
+    if voice_fmt:
+        from core.voice.voice_dialog import speak_voice_dialog_hint
+        speak_voice_dialog_hint("Choose save location.")
+        _run_single_export(parent, title, headers, rows, default_name, voice_fmt)
+        return
+
+    from core.scroll_manager import DIALOG_SIZE_SMALL, dialog_root, open_dialog
     from core.dialog_keyboard import wire_export_format_dialog
 
     top = parent.winfo_toplevel()
-    dlg = open_dialog(top, f"Export — {title}", width=360, height=200, resizable=False)
-    body = dlg.content
+    w, h = DIALOG_SIZE_SMALL
+    dlg = open_dialog(top, f"Export — {title}", width=w, height=h + 40, resizable=True)
+    body = dialog_root(dlg.content)
 
     ttk.Label(body, text=f"Export: {title}",
               font=('Segoe UI', 11, 'bold')).pack(pady=(12, 6), padx=12)
     ttk.Label(body, text="Choose format:").pack(padx=12)
 
-    fmt_var = tk.StringVar(value='csv')
-    fmt_options = [('CSV', 'csv'), ('Excel (.xlsx)', 'xlsx'), ('PDF (HTML)', 'pdf')]
+    fmt_var = tk.StringVar(value=load_default_export_format())
+    fmt_options = _export_format_options()
     btn_row = ttk.Frame(body)
     btn_row.pack(pady=10, padx=12)
     radios = []
@@ -117,6 +246,8 @@ def export_data(parent, title, headers, rows, default_name='export'):
             _save_csv(top, headers, rows, default_name)
         elif fmt == 'xlsx':
             _save_xlsx(top, headers, rows, default_name)
+        elif fmt == 'dm_a4':
+            _print_dot_matrix_report(top, title, headers, rows)
         else:
             _save_pdf(top, title, headers, rows, default_name)
 
@@ -127,6 +258,13 @@ def export_data(parent, title, headers, rows, default_name='export'):
     wire_export_format_dialog(
         dlg, radios, fmt_var, [v for _, v in fmt_options], export_btn, cancel_btn,
     )
+    try:
+        from core.voice.voice_dialog import register_export_format_dialog
+        register_export_format_dialog(
+            dlg, fmt_var=fmt_var, on_export=_do_export, on_cancel=dlg.destroy,
+        )
+    except Exception:
+        pass
 
 
 # ── Export All Combined ───────────────────────────────────────────────────────
@@ -138,12 +276,22 @@ def export_all_combined(parent, sections):
     Excel: one sheet per section.
     HTML: one page with all sections.
     """
-    from core.scroll_manager import open_dialog
+    from core.export_prefs import load_default_export_format
+
+    voice_fmt = _take_voice_export_format()
+    if voice_fmt:
+        from core.voice.voice_dialog import speak_voice_dialog_hint
+        speak_voice_dialog_hint("Choose save location.")
+        _run_all_export(parent, sections, voice_fmt)
+        return
+
+    from core.scroll_manager import DIALOG_SIZE_SMALL, dialog_root, open_dialog
     from core.dialog_keyboard import wire_export_format_dialog
 
     top = parent.winfo_toplevel()
-    dlg = open_dialog(top, "Export All Data", width=380, height=220, resizable=False)
-    body = dlg.content
+    w, h = DIALOG_SIZE_SMALL
+    dlg = open_dialog(top, "Export All Data", width=w + 20, height=h + 60, resizable=True)
+    body = dialog_root(dlg.content)
 
     ttk.Label(body, text="Export All Data",
               font=('Segoe UI', 12, 'bold')).pack(pady=(12, 4), padx=12)
@@ -152,8 +300,8 @@ def export_all_combined(parent, sections):
               foreground='gray').pack(pady=(0, 8), padx=12)
     ttk.Label(body, text="Choose format:").pack(padx=12)
 
-    fmt_var = tk.StringVar(value='xlsx')
-    fmt_options = [('CSV', 'csv'), ('Excel (.xlsx)', 'xlsx'), ('PDF (HTML)', 'pdf')]
+    fmt_var = tk.StringVar(value=load_default_export_format())
+    fmt_options = _export_format_options()
     btn_row = ttk.Frame(body)
     btn_row.pack(pady=8, padx=12)
     radios = []
@@ -169,6 +317,8 @@ def export_all_combined(parent, sections):
             _save_all_csv(top, sections)
         elif fmt == 'xlsx':
             _save_all_xlsx(top, sections)
+        elif fmt == 'dm_a4':
+            _print_dot_matrix_reports_combined(top, sections)
         else:
             _save_all_pdf(top, sections)
 
@@ -179,6 +329,13 @@ def export_all_combined(parent, sections):
     wire_export_format_dialog(
         dlg, radios, fmt_var, [v for _, v in fmt_options], export_btn, cancel_btn,
     )
+    try:
+        from core.voice.voice_dialog import register_export_format_dialog
+        register_export_format_dialog(
+            dlg, fmt_var=fmt_var, on_export=_do_export, on_cancel=dlg.destroy,
+        )
+    except Exception:
+        pass
 
 
 def _save_all_csv(parent, sections):
@@ -260,13 +417,6 @@ def _save_all_xlsx(parent, sections):
 
 
 def _save_all_pdf(parent, sections):
-    path = filedialog.asksaveasfilename(
-        parent=parent,
-        defaultextension='.html',
-        filetypes=[('HTML/PDF files', '*.html')],
-        initialfile='export_all.html')
-    if not path:
-        return
     try:
         from datetime import datetime
         date_str = datetime.now().strftime('%d/%m/%Y %H:%M')
@@ -303,26 +453,12 @@ def _save_all_pdf(parent, sections):
   thead th {{ background:#2c3e50; color:#fff; padding:1.5mm 2mm; text-align:left; border:0.3pt solid #000; }}
   tbody td {{ padding:1.2mm 2mm; border:0.3pt solid #ccc; }}
   tr.even {{ background:#f7f7f7; }} tr.odd {{ background:#fff; }}
-  .print-btn {{ display:block; margin:5mm auto; padding:2mm 10mm; font-size:11pt;
-                background:#2c3e50; color:white; border:none; border-radius:3px; cursor:pointer; }}
-  @media print {{ .print-btn {{ display:none; }} }}
 </style></head><body>
 <h2>Full Data Export</h2>
 <p class="meta" style="text-align:center">Generated: {date_str}</p>
 {body}
-<button class="print-btn" onclick="window.print()">&#128424; Print / Save as PDF</button>
 </body></html>"""
-
-        with open(path, 'w', encoding='utf-8') as f:
-            f.write(html)
-        if os.name == 'nt':
-            os.startfile(path)
-        else:
-            import subprocess
-            subprocess.Popen(['xdg-open', path])
-        messagebox.showinfo("Exported",
-            f"Opened in browser.\nUse Ctrl+P → Save as PDF.\n\nFile: {path}",
-            parent=parent)
+        _write_export_pdf(parent, html, 'export_all')
     except Exception as e:
         messagebox.showerror("Export Error", str(e), parent=parent)
 
@@ -412,28 +548,36 @@ def _save_xlsx(parent, headers, rows, default_name):
 
 # ── PDF (HTML) ────────────────────────────────────────────────────────────────
 
-def _save_pdf(parent, title, headers, rows, default_name):
+def _offer_export_open(parent, saved_path: str) -> None:
+    try:
+        from core.document_output import offer_open_saved_file
+        offer_open_saved_file(parent, saved_path, title="Exported")
+    except Exception:
+        messagebox.showinfo("Exported", f"Saved to:\n{saved_path}", parent=parent)
+
+
+def _write_export_pdf(parent, html: str, default_name: str) -> None:
     path = filedialog.asksaveasfilename(
         parent=parent,
-        defaultextension='.html',
-        filetypes=[('HTML/PDF files', '*.html')],
-        initialfile=f'{default_name}.html')
+        defaultextension='.pdf',
+        filetypes=[('PDF files', '*.pdf'), ('HTML files', '*.html')],
+        initialfile=f'{default_name}.pdf')
     if not path:
         return
-    try:
-        html = _build_html(title, headers, rows)
+    if path.lower().endswith('.html'):
         with open(path, 'w', encoding='utf-8') as f:
             f.write(html)
-        # Open in browser for printing
-        if os.name == 'nt':
-            os.startfile(path)
-        else:
-            import subprocess
-            subprocess.Popen(['xdg-open', path])
-        messagebox.showinfo(
-            "Exported",
-            f"Opened in browser.\nUse Ctrl+P → Save as PDF.\n\nFile: {path}",
-            parent=parent)
+        _offer_export_open(parent, path)
+        return
+    from core.document_output import save_html_as_pdf
+    pdf_path, html_path = save_html_as_pdf(html, path)
+    _offer_export_open(parent, pdf_path or html_path)
+
+
+def _save_pdf(parent, title, headers, rows, default_name):
+    try:
+        html = _build_html(title, headers, rows)
+        _write_export_pdf(parent, html, default_name)
     except Exception as e:
         messagebox.showerror("Export Error", str(e), parent=parent)
 
@@ -486,3 +630,138 @@ def _build_html(title, headers, rows):
 <button class="print-btn" onclick="window.print()">&#128424; Print / Save as PDF</button>
 </body>
 </html>"""
+
+
+# ── Voice / auto-save to Downloads (no file picker) ───────────────────────────
+
+def downloads_folder() -> str:
+    home = os.path.expanduser("~")
+    path = os.path.join(home, "Downloads")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _voice_export_path(default_name: str, fmt: str) -> str:
+    from datetime import datetime
+    safe = re.sub(r'[^\w\-]+', '_', (default_name or "export").strip())[:60]
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ext = fmt if fmt == "pdf" else fmt
+    if fmt == "pdf":
+        ext = "pdf"
+    return os.path.join(downloads_folder(), f"{safe}_{ts}.{ext}")
+
+
+def export_data_direct(parent, title, headers, rows, default_name="export", fmt="csv", *, speak_path=True):
+    """Save export straight to Downloads — used by Satpuda voice."""
+    fmt = (fmt or "csv").lower()
+    path = _voice_export_path(default_name, fmt)
+    try:
+        if fmt == "csv":
+            with open(path, "w", newline="", encoding="utf-8-sig") as f:
+                w = csv.writer(f)
+                w.writerow(headers)
+                w.writerows(rows)
+        elif fmt == "xlsx":
+            import openpyxl
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = (title or "Export")[:31]
+            for ci, h in enumerate(headers, 1):
+                ws.cell(row=1, column=ci, value=h)
+            for ri, row in enumerate(rows, 2):
+                for ci, val in enumerate(row, 1):
+                    ws.cell(row=ri, column=ci, value=val)
+            wb.save(path)
+        else:
+            saved = _save_pdf_to_path(path, title, headers, rows)
+        if speak_path:
+            return saved, f"Saved to Downloads folder. File name {os.path.basename(saved)}."
+        return saved, f"Saved to:\n{saved}"
+    except Exception as e:
+        return None, f"Export failed. {e}"
+
+
+def export_all_combined_direct(parent, sections, fmt="xlsx"):
+    """Combined export to Downloads for voice."""
+    fmt = (fmt or "xlsx").lower()
+    path = _voice_export_path("export_all", fmt)
+    try:
+        if fmt == "csv":
+            with open(path, "w", newline="", encoding="utf-8-sig") as f:
+                w = csv.writer(f)
+                for i, (title, headers, rows) in enumerate(sections):
+                    if i > 0:
+                        w.writerow([])
+                    w.writerow([f"=== {title} ==="])
+                    w.writerow(headers)
+                    w.writerows(rows)
+        elif fmt == "xlsx":
+            import openpyxl
+            wb = openpyxl.Workbook()
+            wb.remove(wb.active)
+            for title, headers, rows in sections:
+                ws = wb.create_sheet(title=title[:31])
+                for ci, h in enumerate(headers, 1):
+                    ws.cell(row=1, column=ci, value=h)
+                for ri, row in enumerate(rows, 2):
+                    for ci, val in enumerate(row, 1):
+                        ws.cell(row=ri, column=ci, value=val)
+            wb.save(path)
+        else:
+            saved = _save_all_pdf_to_path(path, sections)
+        return saved, f"Saved to Downloads folder. File name {os.path.basename(saved)}."
+    except Exception as e:
+        return None, f"Export failed. {e}"
+
+
+def _save_pdf_to_path(path, title, headers, rows):
+    from datetime import datetime
+    date_str = datetime.now().strftime("%d/%m/%Y %H:%M")
+
+    def esc(v):
+        return str(v).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    hdr_html = "".join(f"<th>{esc(h)}</th>" for h in headers)
+    rows_html = "".join(
+        f'<tr class="{"even" if i % 2 == 0 else "odd"}">'
+        + "".join(f"<td>{esc(v)}</td>" for v in row)
+        + "</tr>"
+        for i, row in enumerate(rows)
+    )
+    html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><title>{esc(title)}</title>
+<style>@page{{size:A4 landscape;margin:10mm}}body{{font-family:Segoe UI,Arial;font-size:9pt}}
+table{{width:100%;border-collapse:collapse}}th{{background:#2c3e50;color:#fff;padding:4px}}
+td{{border:1px solid #ccc;padding:3px}}tr.even{{background:#f7f7f7}}</style></head><body>
+<h2>{esc(title)}</h2><p>{date_str} — {len(rows)} records</p>
+<table><thead><tr>{hdr_html}</tr></thead><tbody>{rows_html}</tbody></table>
+</body></html>"""
+    if not path.lower().endswith(".pdf"):
+        path = path.rsplit(".", 1)[0] + ".pdf"
+    from core.document_output import save_html_as_pdf
+    pdf_path, html_path = save_html_as_pdf(html, path)
+    return pdf_path or html_path
+
+
+def _save_all_pdf_to_path(path, sections):
+    from datetime import datetime
+    date_str = datetime.now().strftime("%d/%m/%Y %H:%M")
+
+    def esc(v):
+        return str(v).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    body = ""
+    for title, headers, rows in sections:
+        hdr = "".join(f"<th>{esc(h)}</th>" for h in headers)
+        rows_html = "".join(
+            "<tr>" + "".join(f"<td>{esc(v)}</td>" for v in row) + "</tr>" for row in rows
+        )
+        body += f"<h3>{esc(title)}</h3><table><thead><tr>{hdr}</tr></thead><tbody>{rows_html}</tbody></table>"
+    html = (
+        f"<!DOCTYPE html><html><head><meta charset=UTF-8><title>Export All</title></head><body>"
+        f"<h2>Full Export</h2><p>{date_str}</p>{body}</body></html>"
+    )
+    if not path.lower().endswith(".pdf"):
+        path = path.rsplit(".", 1)[0] + ".pdf"
+    from core.document_output import save_html_as_pdf
+    pdf_path, html_path = save_html_as_pdf(html, path)
+    return pdf_path or html_path

@@ -46,6 +46,8 @@ class ImportFromMobilePage:
 
         ttk.Button(btn_frame, text="📂 Load JSON File",
                    command=self._load_file).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btn_frame, text="📶 Receive from Phone (WiFi)",
+                   command=self._start_wifi_receive).pack(side=tk.LEFT, padx=4)
         ttk.Button(btn_frame, text="▶ Parse & Import",
                    command=self._parse_and_import).pack(side=tk.LEFT, padx=4)
         ttk.Button(btn_frame, text="✖ Clear",
@@ -81,6 +83,7 @@ class ImportFromMobilePage:
             'Format 2 — Medicines:  { "export_type": "medicines", '
             '"medicines": [ { "name": "...", "type": "...", "batch_no": "...", '
             '"expiry_date": "MM/YY or YYYY-MM-DD", "stock_qty": 10, "unit": "10", '
+            '"extra_medicine": 4, '
             '"mrp": 60.0, "rate": 45.0, '
             '"supplier": {"name": "...", "address": "...", "phone": "...", "gstin": "...", "dl_numbers": "..."}, ... } ] }\n'
             'Supplier field in each medicine is optional — saved to suppliers table if present.'
@@ -88,6 +91,153 @@ class ImportFromMobilePage:
         ttk.Label(guide_frame, text=guide, justify=tk.LEFT,
                   font=(FONT_FAMILY, FONT_SIZE_TABLES)).pack(
             padx=10, pady=6, anchor='w')
+
+        self._qr_window = None
+
+    def _start_wifi_receive(self):
+        from core.mobile_import_server import (
+            start_mobile_import_server,
+            stop_mobile_import_server,
+            is_running,
+        )
+        if is_running():
+            self._show_qr_window()
+            return
+
+        root = self.parent.winfo_toplevel()
+
+        def on_receive(raw, data):
+            def apply():
+                self._text.delete('1.0', tk.END)
+                self._text.insert('1.0', raw)
+                device = data.get('device_name', 'Phone')
+                export_type = data.get('export_type', 'data')
+                self._status_var.set(f"Received {export_type} from {device} — click Parse & Import")
+                messagebox.showinfo(
+                    "Received from Phone",
+                    f"JSON received from {device}.\n\nClick 'Parse & Import' to import.",
+                )
+            root.after(0, apply)
+
+        try:
+            url, port = start_mobile_import_server(on_receive)
+        except Exception as exc:
+            messagebox.showerror("WiFi Receive", f"Could not start receiver:\n{exc}")
+            return
+
+        self._status_var.set(f"Waiting for phone on {url}")
+        self._show_qr_window(url, port)
+
+    def _show_qr_window(self, url=None, port=None):
+        from core.mobile_import_server import (
+            get_receive_url,
+            is_running,
+            stop_mobile_import_server,
+            current_port,
+        )
+        if self._qr_window and self._qr_window.winfo_exists():
+            self._qr_window.lift()
+            return
+
+        if url is None:
+            if not is_running():
+                messagebox.showinfo("WiFi Receive", "Receiver is not running. Click the button again.")
+                return
+            url = get_receive_url(current_port())
+            port = current_port()
+
+        top = tk.Toplevel(self.parent.winfo_toplevel())
+        self._qr_window = top
+        top.title("Mobile Import — this PC's address")
+        top.resizable(False, False)
+
+        # There is no Export tab and no scanner in the phone app: the address
+        # is typed in Satpuda → Settings → Mobile Import. The QR only carries
+        # the same address, for a general scanner app.
+        ttk.Label(
+            top,
+            text="On your phone: Satpuda → Settings → Mobile Import → type the "
+                 "address below. The QR carries the same address.",
+            wraplength=360,
+        ).pack(padx=16, pady=(14, 8))
+
+        qr_frame = ttk.Frame(top)
+        qr_frame.pack(padx=16, pady=4)
+        qr_shown = False
+        qr_error = ""
+        try:
+            import qrcode
+            from PIL import ImageTk
+            qr = qrcode.QRCode(version=1, box_size=6, border=2)
+            qr.add_data(url)
+            qr.make(fit=True)
+            img = qr.make_image(fill_color="black", back_color="white")
+            photo = ImageTk.PhotoImage(img)
+            # tk.Label (not ttk) — ttk.Label often fails to show PhotoImage
+            lbl = tk.Label(qr_frame, image=photo, borderwidth=0)
+            lbl.pack()
+            top._qr_photo = photo
+            qr_shown = True
+        except Exception as exc:
+            qr_error = str(exc)
+
+        if not qr_shown:
+            ttk.Label(
+                qr_frame,
+                text="QR image could not be loaded.\n"
+                     "Run: pip install \"qrcode[pil]\"\n"
+                     "You can still type/copy the URL below on the phone.",
+                foreground='gray',
+                justify=tk.CENTER,
+            ).pack()
+            if qr_error:
+                ttk.Label(
+                    qr_frame,
+                    text=qr_error,
+                    foreground='red',
+                    wraplength=340,
+                ).pack(pady=4)
+
+        url_lf = ttk.LabelFrame(top, text="PC address (same network as phone)")
+        url_lf.pack(fill=tk.X, padx=16, pady=8)
+        url_entry = ttk.Entry(url_lf, width=48)
+        url_entry.pack(padx=10, pady=8, fill=tk.X)
+        url_entry.insert(0, url)
+
+        def copy_url():
+            top.clipboard_clear()
+            top.clipboard_append(url)
+            top.update_idletasks()
+            messagebox.showinfo(
+                "Copy URL",
+                "PC address copied.\nType or paste it in Settings → Mobile Import on the phone.",
+            )
+
+        url_btn_row = ttk.Frame(url_lf)
+        url_btn_row.pack(fill=tk.X, padx=10, pady=(0, 8))
+        ttk.Button(url_btn_row, text="Copy URL for Phone", command=copy_url).pack(side=tk.LEFT)
+
+        ttk.Label(
+            top,
+            text="Same network required: home WiFi, shop router, OR turn on phone hotspot\n"
+                 "and connect this PC to that hotspot. Allow Windows Firewall if asked.\n"
+                 "No internet needed. Works on Windows 7–11.",
+            wraplength=360,
+            foreground='gray',
+        ).pack(padx=16, pady=(0, 8))
+
+        def stop():
+            stop_mobile_import_server()
+            self._status_var.set("WiFi receiver stopped.")
+            if self._qr_window and self._qr_window.winfo_exists():
+                self._qr_window.destroy()
+            self._qr_window = None
+
+        btn_row = ttk.Frame(top)
+        btn_row.pack(pady=(0, 14))
+        ttk.Button(btn_row, text="Stop Receiver", command=stop).pack(side=tk.LEFT, padx=6)
+        ttk.Button(btn_row, text="Close", command=top.destroy).pack(side=tk.LEFT, padx=6)
+        top.protocol("WM_DELETE_WINDOW", stop)
 
     # ── File loading ───────────────────────────────────────────────────────
 
@@ -157,105 +307,42 @@ class ImportFromMobilePage:
                 "Confirm Import",
                 f"Import {len(medicines)} medicine(s) from device '{device}' "
                 f"(exported {export_date})?\n\n"
-                "Existing medicines with same name+batch will have stock updated.\n"
+                "Existing medicines with same name+batch will have stock updated "
+                "and un-hidden so they show in Inventory.\n"
                 "New medicines will be inserted."):
             return
 
-        cursor = self.conn.cursor()
-        inserted = 0
-        updated = 0
-        errors = []
+        from core.mobile_import_apply import apply_mobile_data
 
-        for med in medicines:
-            try:
-                name     = med.get('name', '').strip()
-                batch    = med.get('batch_no', '').strip()
-                exp_raw  = med.get('expiry_date', '')
-                stock    = int(med.get('stock_qty', 0))
-                unit     = str(med.get('unit', ''))
-                mrp      = float(med.get('mrp', 0))
-                rate     = float(med.get('rate', 0))
-                gst      = float(med.get('gst_percent', 0))
-                hsn      = med.get('hsn_code', '')
-                mfg      = med.get('manufacturer', '')
-                schedule = med.get('schedule', '')
-                med_type = med.get('type', '')
-                content  = med.get('content_drug', '')
+        result = apply_mobile_data(self.conn, data)
+        if not result.get("ok"):
+            messagebox.showerror("Import Failed", result.get("error") or "Unknown error")
+            self._status_var.set("Medicine import failed.")
+            return
 
-                if not name or not batch:
-                    errors.append(f"Skipped: missing name or batch_no")
-                    continue
-
-                # Save supplier if present
-                sup = med.get('supplier')
-                if isinstance(sup, dict) and sup.get('name', '').strip():
-                    from core.purchase_service import get_or_create_supplier
-                    get_or_create_supplier(
-                        self.conn,
-                        sup.get('name', '').strip(),
-                        sup.get('address', ''),
-                        sup.get('phone', ''),
-                        sup.get('gstin', ''),
-                        sup.get('dl_numbers', ''),
-                    )
-
-                # expiry_date: handles MM/YY or YYYY-MM-DD
-                db_expiry = self._parse_expiry_to_db(exp_raw)
-
-                # For Tablet/Bolus: stock_qty from Android = number of strips
-                # unit = tablets per strip (e.g. "10")
-                # Desktop stores total tablets = strips * tablets_per_strip
-                is_tablet_bolus = med_type.lower() in ['tablet', 'bolus']
-                if is_tablet_bolus:
-                    try:
-                        tps = int(float(unit))  # unit field = tablets per strip
-                        stock = stock * tps
-                    except (ValueError, ZeroDivisionError):
-                        pass  # unit not numeric, use stock_qty as-is
-
-                # Check if medicine exists (name + batch + expiry)
-                cursor.execute(
-                    "SELECT id, stock_qty FROM medicines "
-                    "WHERE name=? AND batch_no=? AND expiry_date=?",
-                    (name, batch, db_expiry))
-                existing = cursor.fetchone()
-
-                if existing:
-                    # Replace stock with imported value (not additive — prevents double-import)
-                    cursor.execute(
-                        "UPDATE medicines SET stock_qty=?, unit=?, "
-                        "mrp=?, rate=?, gst_percent=?, hsn_code=?, "
-                        "manufacturer=?, schedule=?, type=?, content_drug=? "
-                        "WHERE id=?",
-                        (stock, unit, mrp, rate, gst, hsn,
-                         mfg, schedule, med_type, content, existing[0]))
-                    updated += 1
-                else:
-                    cursor.execute(
-                        "INSERT INTO medicines "
-                        "(name, type, batch_no, expiry_date, stock_qty, unit, "
-                        "mrp, rate, gst_percent, hsn_code, manufacturer, "
-                        "schedule, content_drug, location) "
-                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'')",
-                        (name, med_type, batch, db_expiry, stock, unit,
-                         mrp, rate, gst, hsn, mfg, schedule, content))
-                    inserted += 1
-
-            except Exception as e:
-                errors.append(f"{med.get('name', '?')}: {e}")
-
-        self.conn.commit()
-
-        msg = f"Medicines imported successfully!\n\nInserted: {inserted}\nUpdated: {updated}"
+        inserted = int(result.get("inserted") or 0)
+        updated = int(result.get("updated") or 0)
+        skipped = int(result.get("skipped") or 0)
+        errors = list(result.get("errors") or [])
+        msg = (
+            f"Medicines imported successfully!\n\n"
+            f"Inserted: {inserted}\nUpdated: {updated}"
+            + (f"\nSkipped: {skipped}" if skipped else "")
+            + "\n\nOpen Inventory and refresh to see them."
+        )
+        if result.get("sync_warning"):
+            msg += f"\n\nOnline sync warning:\n{result['sync_warning']}"
         if errors:
-            msg += f"\n\nErrors ({len(errors)}):\n" + "\n".join(errors[:10])
-            messagebox.showwarning("Import Complete with Errors", msg)
+            msg += f"\n\nNotes ({len(errors)}):\n" + "\n".join(errors[:10])
+            messagebox.showwarning("Import Complete with Notes", msg)
         else:
             messagebox.showinfo("Import Complete", msg)
             self._clear()
 
         self._status_var.set(
-            f"Done: {inserted} inserted, {updated} updated, {len(errors)} errors.")
+            f"Done: {inserted} inserted, {updated} updated, "
+            f"{skipped} skipped, {len(errors)} notes."
+        )
 
     # ── Purchases import ───────────────────────────────────────────────────
 
@@ -341,10 +428,10 @@ class ImportFromMobilePage:
         items = []
         for it in raw_items:
             med_type = it.get('type', '')
-            is_tb    = med_type.lower() in ('tablet', 'bolus')
+            from core.layout_config import is_strip_count_type
+            is_tb    = is_strip_count_type(med_type)
             qty      = float(it.get('qty', 0))
             free_qty = float(it.get('free_qty', 0))
-            tps      = int(it.get('tablets_per_stripe', 1))
             exp_raw  = it.get('expiry_date', '')
             # normalise expiry to MM/YY
             if '/' in exp_raw:
@@ -354,26 +441,25 @@ class ImportFromMobilePage:
                 expiry = exp_raw
 
             item = {
-                'name':          it.get('medicine_name', '').strip(),
+                # Android: name / gst_pct · older web: medicine_name / gst_percent
+                'name':          str(it.get('name') or it.get('medicine_name') or '').strip(),
                 'type':          med_type,
-                'batch':         it.get('batch_no', '').strip(),
+                'batch':         str(it.get('batch_no') or it.get('batch') or '').strip() or '-',
                 'expiry':        expiry,
                 'qty':           qty,
                 'free_qty':      free_qty,
                 'rate':          float(it.get('rate', 0)),
                 'mrp':           float(it.get('mrp', 0)),
-                'discount_pct':  float(it.get('item_discount', 0)),
-                'gst_pct':       float(it.get('gst_percent', 0)),
+                'discount_pct':  float(it.get('item_discount', it.get('discount_pct', 0)) or 0),
+                'gst_pct':       float(it.get('gst_pct', it.get('gst_percent', 0)) or 0),
                 'hsn_code':      it.get('hsn_code', ''),
                 'manufacturer':  it.get('manufacturer', ''),
                 'schedule':      it.get('schedule', ''),
                 'content_drug':  it.get('content_drug', ''),
-                'tablets_per_stripe': tps,
-                'total_tablets': qty * tps if is_tb else 0,
-                'free_tablets':  free_qty * tps if is_tb else 0,
-                'quantity_value': str(it.get('quantity_value', '1')),
                 'auto_unit':     '',
             }
+            if not item['name']:
+                raise ValueError("Purchase item missing medicine name")
             item['medicine_id'] = get_or_create_medicine(
                 self.conn,
                 item['name'], item['type'], item['batch'], item['expiry'],
@@ -381,9 +467,21 @@ class ImportFromMobilePage:
                 item['manufacturer'], item['hsn_code'],
                 item['schedule'], item['content_drug'],
             )
+            # The line's own pack when the export carries one, else the catalogue's -- never an
+            # invented 1 (core.mobile_import_apply.import_line_pack).
+            from core.mobile_import_apply import import_line_pack
+            item.update(import_line_pack(self.conn, it, item['medicine_id'], med_type))
+            tps = int(item.get('tablets_per_stripe') or 1)
+            item['total_tablets'] = qty * tps if is_tb else 0
+            item['free_tablets'] = free_qty * tps if is_tb else 0
             items.append(item)
 
         prev_due, prev_credit = get_supplier_due(self.conn, supplier_name)
+
+        cash = float(purchase.get('cash_paid', purchase.get('amount_paid', 0)) or 0)
+        online = float(purchase.get('online_paid', 0) or 0)
+        if cash <= 0 and online <= 0 and float(purchase.get('amount_paid', 0) or 0) > 0:
+            cash = float(purchase.get('amount_paid', 0) or 0)
 
         result = PurchaseCalculator(
             items=items,
@@ -391,7 +489,9 @@ class ImportFromMobilePage:
             rounding=0.0,
             previous_due=prev_due,
             previous_credit=prev_credit,
-            amount_paid=float(purchase.get('amount_paid', 0)),
+            cash_paid=cash,
+            online_paid=online,
+            gst_calc_method=(purchase.get('gst_calc_method') or 'discount_after_gst').strip(),
         ).calculate()
 
         svc_save_purchase(

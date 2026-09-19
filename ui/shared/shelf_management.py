@@ -19,8 +19,9 @@ class ShelfManagementPage:
         self._selected_type = None       # 'rack' | 'section' | 'box'
         self._selected_id = None         # DB id of selected node
         self._build_ui()
-        self._load_tree()
-        self._load_location_setting()
+        self._loc_counts = {}
+        self.parent.after(0, self._load_tree)
+        self.parent.after(50, self._load_location_setting)
 
     # ── helpers ──────────────────────────────────────────────────────────
 
@@ -46,18 +47,58 @@ class ShelfManagementPage:
             return f"r{nums[0]}s{nums[1]}"
         return location
 
+    def _is_online(self) -> bool:
+        try:
+            from core.sync_prefs import is_online_mode
+            return bool(is_online_mode())
+        except Exception:
+            return False
+
+    def _after_shelf_saved(self, collection: str, local_id: int) -> None:
+        try:
+            from core.sync_coordinator import after_shelf_entity_saved
+            after_shelf_entity_saved(self.conn, collection, int(local_id))
+        except Exception as exc:
+            print(f"[shelf] push {collection}/{local_id}: {exc}")
+
+    def _after_shelf_deleted(self, collection: str, local_id: int) -> None:
+        try:
+            from core.sync_coordinator import after_shelf_entity_deleted
+            after_shelf_entity_deleted(collection, int(local_id))
+        except Exception as exc:
+            print(f"[shelf] delete push {collection}/{local_id}: {exc}")
+
+    def _catalog_medicines(self):
+        from core.online_catalog import medicines as oc_medicines
+        return oc_medicines()
+
+    def _refresh_location_counts(self):
+        self._loc_counts = {}
+        try:
+            if self._is_online():
+                for m in self._catalog_medicines():
+                    loc = (m.get("location") or "").strip()
+                    if loc:
+                        self._loc_counts[loc] = self._loc_counts.get(loc, 0) + 1
+                return
+            self.cursor.execute(
+                "SELECT location FROM medicines WHERE location IS NOT NULL AND location != ''")
+            for (loc,) in self.cursor.fetchall():
+                self._loc_counts[loc] = self._loc_counts.get(loc, 0) + 1
+        except Exception:
+            self._loc_counts = {}
+
     def _med_count(self, location, prefix=False):
-        """Count medicines at a location (prefix=True uses LIKE for subtree)."""
+        """Count medicines at a location (prefix=True uses startswith for subtree)."""
+        if not self._loc_counts:
+            self._refresh_location_counts()
         try:
             if prefix:
-                self.cursor.execute(
-                    "SELECT COUNT(*) FROM medicines WHERE location LIKE ?",
-                    (location + '%',))
-            else:
-                self.cursor.execute(
-                    "SELECT COUNT(*) FROM medicines WHERE location = ?",
-                    (location,))
-            return self.cursor.fetchone()[0]
+                return sum(
+                    c for loc, c in self._loc_counts.items()
+                    if loc.startswith(location)
+                )
+            return self._loc_counts.get(location, 0)
         except Exception:
             return 0
 
@@ -243,6 +284,7 @@ class ShelfManagementPage:
 
     def _load_tree(self):
         """Reload the entire shelf tree from DB."""
+        self._refresh_location_counts()
         # Remember expanded nodes
         expanded = {self._tree.item(n, 'text')
                     for n in self._tree.get_children('')
@@ -316,6 +358,42 @@ class ShelfManagementPage:
 
     # ── CRUD: Rename ──────────────────────────────────────────────────────
 
+    def _relocate_medicines(self, old_prefix: str, new_prefix: str, *, exact: bool = False):
+        """Update medicine location strings after rack/section/box rename or delete."""
+        if self._is_online():
+            from core.online_catalog import invalidate, medicines as oc_medicines
+            from core.server_crud import upsert_medicine_online
+            for m in oc_medicines():
+                loc = (m.get("location") or "").strip()
+                if not loc:
+                    continue
+                if exact:
+                    if loc != old_prefix:
+                        continue
+                    new_loc = new_prefix
+                else:
+                    if not loc.startswith(old_prefix):
+                        continue
+                    new_loc = new_prefix + loc[len(old_prefix):]
+                doc = dict(m)
+                doc["location"] = new_loc
+                upsert_medicine_online(doc)
+            invalidate("medicines")
+            return
+        if exact:
+            self.cursor.execute(
+                "UPDATE medicines SET location=? WHERE location=?",
+                (new_prefix, old_prefix))
+            return
+        self.cursor.execute(
+            "SELECT id, location FROM medicines WHERE location LIKE ?",
+            (old_prefix + '%',))
+        for mid, mloc in self.cursor.fetchall():
+            new_mloc = new_prefix + mloc[len(old_prefix):]
+            self.cursor.execute(
+                "UPDATE medicines SET location=? WHERE id=?",
+                (new_mloc, mid))
+
     def _rename_selected(self):
         """Inline rename for the selected rack / section / box."""
         if self._selected_type is None:
@@ -350,15 +428,7 @@ class ShelfManagementPage:
                 # Build old and new location prefixes
                 old_prefix = self._loc(old_name)
                 new_prefix = self._loc(new_name)
-                # Update all medicine locations that start with old prefix
-                self.cursor.execute(
-                    "SELECT id, location FROM medicines "
-                    "WHERE location LIKE ?", (old_prefix + '%',))
-                for mid, mloc in self.cursor.fetchall():
-                    new_mloc = new_prefix + mloc[len(old_prefix):]
-                    self.cursor.execute(
-                        "UPDATE medicines SET location=? WHERE id=?",
-                        (new_mloc, mid))
+                self._relocate_medicines(old_prefix, new_prefix)
                 self.cursor.execute(
                     "UPDATE racks SET name=? WHERE id=?", (new_name, iid))
 
@@ -370,14 +440,7 @@ class ShelfManagementPage:
                 rack_name = self.cursor.fetchone()[0]
                 old_prefix = self._loc(rack_name, old_name)
                 new_prefix = self._loc(rack_name, new_name)
-                self.cursor.execute(
-                    "SELECT id, location FROM medicines "
-                    "WHERE location LIKE ?", (old_prefix + '%',))
-                for mid, mloc in self.cursor.fetchall():
-                    new_mloc = new_prefix + mloc[len(old_prefix):]
-                    self.cursor.execute(
-                        "UPDATE medicines SET location=? WHERE id=?",
-                        (new_mloc, mid))
+                self._relocate_medicines(old_prefix, new_prefix)
                 self.cursor.execute(
                     "UPDATE sections SET name=? WHERE id=?", (new_name, iid))
 
@@ -390,13 +453,14 @@ class ShelfManagementPage:
                 rack_name, sec_name = self.cursor.fetchone()
                 old_loc = self._loc(rack_name, sec_name, old_name)
                 new_loc = self._loc(rack_name, sec_name, new_name)
-                self.cursor.execute(
-                    "UPDATE medicines SET location=? WHERE location=?",
-                    (new_loc, old_loc))
+                self._relocate_medicines(old_loc, new_loc, exact=True)
                 self.cursor.execute(
                     "UPDATE boxes SET name=? WHERE id=?", (new_name, iid))
 
             self.conn.commit()
+            col = {"rack": "racks", "section": "sections", "box": "boxes"}.get(t)
+            if col:
+                self._after_shelf_saved(col, iid)
             # Update selected location to reflect new name
             self._selected_location = self._selected_location.replace(
                 loc, self._selected_location)  # will be refreshed by _load_tree
@@ -452,7 +516,10 @@ class ShelfManagementPage:
             return
         try:
             self.cursor.execute("INSERT INTO racks (name) VALUES (?)", (name,))
+            rack_id = int(self.cursor.lastrowid or 0)
             self.conn.commit()
+            if rack_id:
+                self._after_shelf_saved("racks", rack_id)
             self._name_var.set('')
             self._load_tree()
         except sqlite3.IntegrityError:
@@ -480,7 +547,10 @@ class ShelfManagementPage:
             self.cursor.execute(
                 "INSERT INTO sections (rack_id, name) VALUES (?, ?)",
                 (self._selected_id, name))
+            section_id = int(self.cursor.lastrowid or 0)
             self.conn.commit()
+            if section_id:
+                self._after_shelf_saved("sections", section_id)
             self._name_var.set('')
             self._load_tree()
         except sqlite3.IntegrityError:
@@ -509,7 +579,10 @@ class ShelfManagementPage:
             self.cursor.execute(
                 "INSERT INTO boxes (section_id, name) VALUES (?, ?)",
                 (self._selected_id, name))
+            box_id = int(self.cursor.lastrowid or 0)
             self.conn.commit()
+            if box_id:
+                self._after_shelf_saved("boxes", box_id)
             self._name_var.set('')
             self._load_tree()
         except sqlite3.IntegrityError:
@@ -537,9 +610,21 @@ class ShelfManagementPage:
         try:
             if t == 'rack':
                 # Clear all medicines whose location starts with this rack prefix
-                self.cursor.execute(
-                    "UPDATE medicines SET location='' WHERE location LIKE ?",
-                    (loc + '%',))
+                if self._is_online():
+                    from core.online_catalog import invalidate, medicines as oc_medicines
+                    from core.server_crud import upsert_medicine_online
+                    for m in oc_medicines():
+                        mloc = (m.get("location") or "").strip()
+                        if mloc.startswith(loc):
+                            doc = dict(m)
+                            doc["location"] = ""
+                            upsert_medicine_online(doc)
+                    invalidate("medicines")
+                else:
+                    self.cursor.execute(
+                        "UPDATE medicines SET location='' WHERE location LIKE ?",
+                        (loc + '%',))
+                self._after_shelf_deleted("racks", item_id)
                 # Delete all boxes → sections → rack (cascade via FK or manual)
                 self.cursor.execute(
                     "DELETE FROM boxes WHERE section_id IN "
@@ -550,18 +635,29 @@ class ShelfManagementPage:
                     "DELETE FROM racks WHERE id=?", (item_id,))
 
             elif t == 'section':
-                self.cursor.execute(
-                    "UPDATE medicines SET location='' WHERE location LIKE ?",
-                    (loc + '%',))
+                if self._is_online():
+                    from core.online_catalog import invalidate, medicines as oc_medicines
+                    from core.server_crud import upsert_medicine_online
+                    for m in oc_medicines():
+                        mloc = (m.get("location") or "").strip()
+                        if mloc.startswith(loc):
+                            doc = dict(m)
+                            doc["location"] = ""
+                            upsert_medicine_online(doc)
+                    invalidate("medicines")
+                else:
+                    self.cursor.execute(
+                        "UPDATE medicines SET location='' WHERE location LIKE ?",
+                        (loc + '%',))
+                self._after_shelf_deleted("sections", item_id)
                 self.cursor.execute(
                     "DELETE FROM boxes WHERE section_id=?", (item_id,))
                 self.cursor.execute(
                     "DELETE FROM sections WHERE id=?", (item_id,))
 
             elif t == 'box':
-                self.cursor.execute(
-                    "UPDATE medicines SET location='' WHERE location=?",
-                    (loc,))
+                self._relocate_medicines(loc, "", exact=True)
+                self._after_shelf_deleted("boxes", item_id)
                 self.cursor.execute(
                     "DELETE FROM boxes WHERE id=?", (item_id,))
 
@@ -714,11 +810,24 @@ class ShelfManagementPage:
             # Assigned
             for row in assigned_tree.get_children():
                 assigned_tree.delete(row)
-            self.cursor.execute(
-                "SELECT id, name, batch_no, stock_qty FROM medicines "
-                "WHERE location=? ORDER BY name",
-                (location,))
-            a_rows = self.cursor.fetchall()
+            if self._is_online():
+                a_rows = []
+                for m in self._catalog_medicines():
+                    if (m.get("location") or "").strip() != location:
+                        continue
+                    a_rows.append((
+                        m.get("id") or m.get("local_id"),
+                        m.get("name") or "",
+                        m.get("batch_no") or "",
+                        m.get("stock_qty") or 0,
+                    ))
+                a_rows.sort(key=lambda r: str(r[1]).lower())
+            else:
+                self.cursor.execute(
+                    "SELECT id, name, batch_no, stock_qty FROM medicines "
+                    "WHERE location=? ORDER BY name",
+                    (location,))
+                a_rows = self.cursor.fetchall()
             a_s = a_search.lower()
             for mid, name, batch, stock in a_rows:
                 if a_s and a_s not in name.lower() and a_s not in (batch or '').lower():
@@ -730,10 +839,23 @@ class ShelfManagementPage:
             # Unassigned
             for row in unassigned_tree.get_children():
                 unassigned_tree.delete(row)
-            self.cursor.execute(
-                "SELECT id, name, batch_no, stock_qty FROM medicines "
-                "WHERE (location='' OR location IS NULL) ORDER BY name")
-            u_rows = self.cursor.fetchall()
+            if self._is_online():
+                u_rows = []
+                for m in self._catalog_medicines():
+                    if (m.get("location") or "").strip():
+                        continue
+                    u_rows.append((
+                        m.get("id") or m.get("local_id"),
+                        m.get("name") or "",
+                        m.get("batch_no") or "",
+                        m.get("stock_qty") or 0,
+                    ))
+                u_rows.sort(key=lambda r: str(r[1]).lower())
+            else:
+                self.cursor.execute(
+                    "SELECT id, name, batch_no, stock_qty FROM medicines "
+                    "WHERE (location='' OR location IS NULL) ORDER BY name")
+                u_rows = self.cursor.fetchall()
             u_s = u_search.lower()
             sw, co = [], []
             for mid, name, batch, stock in u_rows:
@@ -756,6 +878,23 @@ class ShelfManagementPage:
             self._status_var.set(
                 f"{a_total} assigned  •  {u_total} unassigned shown")
 
+        def _set_medicine_location(mid, new_loc: str):
+            if self._is_online():
+                from core.online_catalog import medicine_by_id, invalidate
+                from core.server_crud import upsert_medicine_online
+                med = medicine_by_id(mid)
+                if not med:
+                    raise RuntimeError("Medicine not found on server")
+                doc = dict(med)
+                doc["location"] = new_loc or ""
+                upsert_medicine_online(doc)
+                invalidate("medicines")
+                return
+            self.cursor.execute(
+                "UPDATE medicines SET location=? WHERE id=?",
+                (new_loc or "", mid))
+            self.conn.commit()
+
         # ── Actions ───────────────────────────────────────────────────────
 
         def _assign(event=None):
@@ -765,10 +904,7 @@ class ShelfManagementPage:
                 return
             mid = unassigned_tree.item(sel[0], 'tags')[0]
             try:
-                self.cursor.execute(
-                    "UPDATE medicines SET location=? WHERE id=?",
-                    (location, mid))
-                self.conn.commit()
+                _set_medicine_location(mid, location)
                 _load(a_search_var.get(), u_search_var.get())
                 self._load_tree()
             except Exception as e:
@@ -781,9 +917,7 @@ class ShelfManagementPage:
                 return
             mid = assigned_tree.item(sel[0], 'tags')[0]
             try:
-                self.cursor.execute(
-                    "UPDATE medicines SET location='' WHERE id=?", (mid,))
-                self.conn.commit()
+                _set_medicine_location(mid, "")
                 _load(a_search_var.get(), u_search_var.get())
                 self._load_tree()
             except Exception as e:

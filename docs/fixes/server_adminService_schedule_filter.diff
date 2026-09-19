@@ -1,0 +1,58 @@
+--- a/src/services/adminService.js
++++ b/src/services/adminService.js
+@@ -274,17 +274,30 @@
+   if (schedule && String(schedule).trim() && String(schedule).trim().toLowerCase() !== 'all') {
+     const sch = String(schedule).trim();
+     if (sch.toLowerCase() === 'non-scheduled') {
++      // COALESCE onto the medicines master, the same rule listPurchases uses.
++      // A sale line written by the Online desktop carries no schedule of its
++      // own -- save_new_sale_online never sent one -- so judging the line
++      // alone called every one of those bills "not scheduled", and answered
++      // every NAMED schedule with nothing at all. Resolving through the master
++      // fixes the bills already written, which the shop cannot re-enter.
+       where += ` AND EXISTS (
+-        SELECT 1 FROM sales_items si WHERE si.sale_id = sales.id
+-          AND (si.schedule IS NULL OR TRIM(si.schedule) = '')
++        SELECT 1 FROM sales_items si
++          LEFT JOIN medicines m ON m.store_pk = si.store_pk AND m.local_id = si.medicine_id
++         WHERE si.sale_id = sales.id
++           AND COALESCE(NULLIF(BTRIM(si.schedule), ''), NULLIF(BTRIM(m.schedule), '')) IS NULL
+       ) AND NOT EXISTS (
+-        SELECT 1 FROM sales_items si2 WHERE si2.sale_id = sales.id
+-          AND si2.schedule IS NOT NULL AND TRIM(si2.schedule) <> ''
++        SELECT 1 FROM sales_items si2
++          LEFT JOIN medicines m2 ON m2.store_pk = si2.store_pk AND m2.local_id = si2.medicine_id
++         WHERE si2.sale_id = sales.id
++           AND COALESCE(NULLIF(BTRIM(si2.schedule), ''), NULLIF(BTRIM(m2.schedule), '')) IS NOT NULL
+       )`;
+     } else {
+       params.push(sch);
+       where += ` AND EXISTS (
+-        SELECT 1 FROM sales_items si WHERE si.sale_id = sales.id AND si.schedule = $${params.length}
++        SELECT 1 FROM sales_items si
++          LEFT JOIN medicines m ON m.store_pk = si.store_pk AND m.local_id = si.medicine_id
++         WHERE si.sale_id = sales.id
++           AND COALESCE(NULLIF(BTRIM(si.schedule), ''), BTRIM(m.schedule)) = $${params.length}
+       )`;
+     }
+   }
+@@ -318,10 +331,15 @@
+   const schedByPk = new Map();
+   if (pks.length) {
+     const { rows: sched } = await query(
+-      `SELECT sale_id,
+-              string_agg(DISTINCT NULLIF(TRIM(schedule), ''), ',' ORDER BY NULLIF(TRIM(schedule), '')) AS schedules
+-       FROM sales_items WHERE sale_id = ANY($1::bigint[])
+-       GROUP BY sale_id`,
++      // Resolved the same way the filter above resolves, or the row's Schedule
++      // chip would read blank on a bill the H1 filter had just matched.
++      `SELECT si.sale_id,
++              string_agg(DISTINCT COALESCE(NULLIF(BTRIM(si.schedule), ''), NULLIF(BTRIM(m.schedule), '')), ','
++                         ORDER BY COALESCE(NULLIF(BTRIM(si.schedule), ''), NULLIF(BTRIM(m.schedule), ''))) AS schedules
++       FROM sales_items si
++       LEFT JOIN medicines m ON m.store_pk = si.store_pk AND m.local_id = si.medicine_id
++       WHERE si.sale_id = ANY($1::bigint[])
++       GROUP BY si.sale_id`,
+       [pks],
+     );
+     for (const r of sched) schedByPk.set(Number(r.sale_id), r.schedules);

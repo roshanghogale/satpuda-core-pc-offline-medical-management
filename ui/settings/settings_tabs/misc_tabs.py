@@ -18,8 +18,8 @@ class ThresholdsTab:
         self._load()
 
     def _build(self, frame):
-        from core.layout_config import load_layout, _DEFAULT_MED_TYPES
-        medicine_types = load_layout().get('med_types', list(_DEFAULT_MED_TYPES))
+        from core.layout_config import get_med_types
+        medicine_types = get_med_types()
         self.low_stock_entries = {}
         self.near_expiry_entries = {}
         low_widgets = []
@@ -45,6 +45,37 @@ class ThresholdsTab:
             self.near_expiry_entries[mt.lower()] = e
             near_widgets.append(e)
 
+        df = ttk.LabelFrame(frame, text="Outstanding Due Alert Settings")
+        df.pack(fill=tk.X, padx=10, pady=5)
+        ttk.Label(df, text="Minimum Due Amount (Rs):").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
+        self.due_min_amount_entry = ttk.Entry(df, width=12)
+        self.due_min_amount_entry.grid(row=0, column=1, padx=5, pady=5, sticky=tk.W)
+        self.due_min_amount_entry.insert(0, "0")
+        ttk.Label(df, text="Minimum Due Days:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
+        self.due_min_days_entry = ttk.Entry(df, width=12)
+        self.due_min_days_entry.grid(row=1, column=1, padx=5, pady=5, sticky=tk.W)
+        self.due_min_days_entry.insert(0, "0")
+        ttk.Label(
+            df,
+            text="Alerts appear only when due amount and bill age meet these minimums.",
+            font=(FONT_FAMILY, FONT_SIZE_SUPPORTING_TEXT),
+            foreground="#666",
+        ).grid(row=2, column=0, columnspan=2, sticky=tk.W, padx=5, pady=(0, 5))
+
+        rf = ttk.LabelFrame(frame, text="Reorder Defaults")
+        rf.pack(fill=tk.X, padx=10, pady=5)
+        ttk.Label(rf, text="Default order quantity (when stock is OK):").grid(
+            row=0, column=0, sticky=tk.W, padx=5, pady=5)
+        self.reorder_default_qty_entry = ttk.Entry(rf, width=12)
+        self.reorder_default_qty_entry.grid(row=0, column=1, padx=5, pady=5, sticky=tk.W)
+        self.reorder_default_qty_entry.insert(0, "10")
+        ttk.Label(
+            rf,
+            text="Used on Reorder page when current stock is above minimum level.",
+            font=(FONT_FAMILY, FONT_SIZE_SUPPORTING_TEXT),
+            foreground="#666",
+        ).grid(row=1, column=0, columnspan=2, sticky=tk.W, padx=5, pady=(0, 5))
+
         try:
             save_btn = ttk.Button(frame, text="Save Thresholds", command=self.save, style='Large.TButton')
         except Exception:
@@ -52,7 +83,9 @@ class ThresholdsTab:
         save_btn.pack(pady=20)
         save_btn.bind('<Return>', lambda e: self.save())
 
-        all_w = low_widgets + near_widgets
+        all_w = low_widgets + near_widgets + [
+            self.due_min_amount_entry, self.due_min_days_entry, self.reorder_default_qty_entry,
+        ]
         for idx, w in enumerate(all_w):
             if idx < len(all_w) - 1:
                 nxt = all_w[idx + 1]
@@ -84,6 +117,15 @@ class ThresholdsTab:
             if r:
                 self.near_expiry_entries[mt].delete(0, tk.END)
                 self.near_expiry_entries[mt].insert(0, r[0])
+        for name, entry, default in (
+            ("customer_due_min_amount", self.due_min_amount_entry, "0"),
+            ("customer_due_min_days", self.due_min_days_entry, "0"),
+            ("reorder_default_qty", self.reorder_default_qty_entry, "10"),
+        ):
+            self.cursor.execute("SELECT value FROM settings WHERE name=?", (name,))
+            r = self.cursor.fetchone()
+            entry.delete(0, tk.END)
+            entry.insert(0, r[0] if r else default)
 
     def save(self):
         try:
@@ -95,6 +137,15 @@ class ThresholdsTab:
                 self.cursor.execute(
                     "INSERT OR REPLACE INTO settings (name,value) VALUES (?,?)",
                     (f'near_expiry_{mt}', e.get() or "3"))
+            self.cursor.execute(
+                "INSERT OR REPLACE INTO settings (name,value) VALUES (?,?)",
+                ("customer_due_min_amount", self.due_min_amount_entry.get() or "0"))
+            self.cursor.execute(
+                "INSERT OR REPLACE INTO settings (name,value) VALUES (?,?)",
+                ("customer_due_min_days", self.due_min_days_entry.get() or "0"))
+            self.cursor.execute(
+                "INSERT OR REPLACE INTO settings (name,value) VALUES (?,?)",
+                ("reorder_default_qty", self.reorder_default_qty_entry.get() or "10"))
             self.conn.commit()
             showinfo("Success", "Thresholds saved successfully!")
         except Exception as e:
@@ -161,7 +212,8 @@ class ShortcutsTab:
                 ("4", "Sales History"),
                 ("5", "Purchase History"),
                 ("6", "Returns — S = Sales Return, P = Purchase Return"),
-                ("7", "Settings — Ctrl+1…9 for tabs (see below)"),
+                ("7", "Payment — S = Supplier, C = Customer payment"),
+                ("8", "Settings — Ctrl+1…9 and Ctrl+0 for tabs (see below)"),
             ]),
             ("Global Actions", [
                 ("Alt", "Focus first input on the current page"),
@@ -169,6 +221,10 @@ class ShortcutsTab:
                 ("F3", "Focus secondary list (Returns sub-pages)"),
                 ("Shift+F2", "Import Purchase bill (Purchase page)"),
                 ("F5 / Ctrl+G", "Save Sales / Save Purchase / Save Return / Save Payment"),
+                ("F7", "Print Sales 1 — save bill, silent print (Sales page)"),
+                ("F8", "Print Sales 2 — save bill, silent print (Sales page)"),
+                ("F9", "Silent reprint last saved sale (Sales page) · Print Sales 1 on selected row (Sales History)"),
+                ("F10", "Sales/Purchase: recent records picker · Appearance: Save & Restart"),
                 ("F6", "Overall discount % (Sales & Purchase) · Clear (Returns)"),
                 ("End", "Cash Paid (Sales) · Amount Paid (Purchase)"),
                 ("Ctrl+P", "Print last saved sale (Sales page)"),
@@ -193,13 +249,36 @@ class ShortcutsTab:
                 ("F2", "Focus quick actions · list dialogs: F2 → table, Enter → close, Esc → close"),
             ]),
             ("Sales / Billing", [
-                ("F5 / Ctrl+G", "Save Sales — saves, opens browser print (A5), clears form"),
+                ("F5 / Ctrl+G", "Save Sales — saves bill, saves PDF to configured folder, clears form"),
+                ("F7", "Print Sales 1 — save bill, clear form, silent print (paper/copies from Settings)"),
+                ("F8", "Print Sales 2 — save bill, clear form, silent print (paper/copies from Settings)"),
+                ("F9", "Silent reprint last saved sale (Print Sales 1 preset, no save)"),
                 ("F6", "Overall discount %"),
                 ("End", "Cash Paid"),
-                ("Ctrl+P", "Reprint last sale"),
+                ("Ctrl+P", "Reprint last sale (Print Sales 1 preset)"),
+                ("Ctrl+Shift+C", "Clear form"),
+                ("Ctrl+Shift+M", "Add medicine without stock (quick dialog)"),
+                ("C / D", "Payment mode field — C = Cash, D = Due"),
+                ("Enter on Online", "When not Due: run action set in Pharmacy Profile (save or print)"),
+                ("Enter on Rounding", "When Due: run action set in Pharmacy Profile (save or print)"),
                 ("F2", "Medicine items list"),
                 ("Enter on list", "Edit qty/disc · Delete removes row"),
                 ("Enter on medicine", "Add medicine → back to medicine search"),
+                ("", "F7/F8 slot names & keys configurable in Pharmacy Profile → Print Sales"),
+            ]),
+            ("Sales — Multi-tab & Quick Edit", [
+                ("Ctrl+Shift+N", "New sale tab"),
+                ("Ctrl+Shift+W", "Close current sale tab"),
+                ("Ctrl+PgUp", "Previous sale tab (keyboards with PgUp)"),
+                ("Ctrl+PgDn", "Next sale tab (keyboards with PgDn)"),
+                ("Ctrl+[", "Previous sale tab (no PgUp key needed)"),
+                ("Ctrl+]", "Next sale tab (no PgDn key needed)"),
+                ("Ctrl+Alt+←", "Previous sale tab (arrow-key alternative)"),
+                ("Ctrl+Alt+→", "Next sale tab (arrow-key alternative)"),
+                ("F10", "Open 5 recent sales — first row focused, Enter loads into form"),
+                ("F11", "Load last sale into form for editing"),
+                ("", "Tab title shows customer first name when entered"),
+                ("", "Shortcut debug log: config/keyboard.log (Ctrl/Shift keys always logged)"),
             ]),
             ("Purchase", [
                 ("Shift+F2", "Import Purchase"),
@@ -207,6 +286,20 @@ class ShortcutsTab:
                 ("F5 / Ctrl+G", "Save Purchase"),
                 ("F6", "Overall discount %"),
                 ("End", "Amount Paid"),
+                ("Ctrl+Shift+C", "Clear form"),
+            ]),
+            ("Purchase — Multi-tab & Quick Edit", [
+                ("Ctrl+Shift+N", "New purchase tab"),
+                ("Ctrl+Shift+W", "Close current purchase tab"),
+                ("Ctrl+PgUp", "Previous purchase tab (keyboards with PgUp)"),
+                ("Ctrl+PgDn", "Next purchase tab (keyboards with PgDn)"),
+                ("Ctrl+[", "Previous purchase tab (no PgUp key needed)"),
+                ("Ctrl+]", "Next purchase tab (no PgDn key needed)"),
+                ("Ctrl+Alt+←", "Previous purchase tab (arrow-key alternative)"),
+                ("Ctrl+Alt+→", "Next purchase tab (arrow-key alternative)"),
+                ("F10", "Open 5 recent purchases — first row focused, Enter loads into form"),
+                ("F11", "Load last purchase into form for editing"),
+                ("", "Tab title shows supplier first name when entered"),
             ]),
             ("Inventory / History", [
                 ("Ctrl+F", "Focus search / customer / supplier filter"),
@@ -215,6 +308,8 @@ class ShortcutsTab:
                 ("Ctrl+Shift+C", "Clear filters (Inventory: refresh + clear)"),
                 ("Ctrl+E", "Export"),
                 ("F2", "Data table"),
+                ("F7 / F9", "Print Sales 1 — silent print selected bill (Sales History)"),
+                ("F8", "Print Sales 2 — silent print selected bill (Sales History)"),
                 ("Enter on table", "Keyboard action menu (↑↓ pick, Enter run, Esc close)"),
                 ("Delete", "Delete row (Inventory / Sales History)"),
             ]),
@@ -225,19 +320,31 @@ class ShortcutsTab:
                 ("F5", "Save return"),
                 ("F6", "Clear form"),
             ]),
+            ("Alert & Monitoring", [
+                ("Ctrl+7", "Open Settings → Alert & Monitoring (from Settings page)"),
+                ("F5", "Refresh all alert sections (low stock, near expiry, customer due, etc.)"),
+                ("", "Home → 🔔 Alerts button also opens this tab"),
+            ]),
+            ("Payment", [
+                ("7", "Open Payment from any page (press Escape first if typing)"),
+                ("S / C", "Supplier Payment / Customer Payment"),
+                ("F5", "Save Payment"),
+                ("F2", "Payment history table"),
+            ]),
             ("Settings", [
                 ("Ctrl+1", "Pharmacy Profile"),
                 ("Ctrl+2", "Contacts"),
                 ("Ctrl+3", "Shelf Management"),
-                ("Ctrl+4", "Appearance"),
-                ("Ctrl+5", "Import"),
-                ("Ctrl+6", "Management"),
-                ("Ctrl+7", "Payment — S = Supplier, C = Customer payment"),
-                ("Ctrl+8", "Ledger — S = Supplier, C = Customer ledger"),
-                ("Ctrl+9", "This Shortcuts page"),
-                ("Ctrl+Tab", "Next settings tab"),
-                ("Ctrl+Shift+Tab", "Previous settings tab"),
-                ("F4", "Focus section sidebar (Pharmacy, Contacts, Import, Management, Appearance)"),
+                ("Ctrl+4", "Appearance (theme, font, banner, dashboard)"),
+                ("Ctrl+5", "Layout & Lists (columns, rows, indicators, app mode)"),
+                ("Ctrl+6", "Import"),
+                ("Ctrl+7", "Alert & Monitoring"),
+                ("Ctrl+8", "Management — stores, autosave, sales screen, bill save folder, UPI QR"),
+                ("Ctrl+9", "Opens the Payment page (same as top nav Payment)"),
+                ("Ctrl+0", "Ledger — S = Supplier, C = Customer ledger"),
+                ("Ctrl+Tab / Ctrl+Shift+Tab", "Next / previous settings tab (includes Shortcuts)"),
+                ("F4", "Focus section sidebar (Pharmacy, Contacts, Import, Management, Appearance, Layout & Lists)"),
+                ("F10", "Save Appearance & Restart (Appearance or Layout & Lists tab)"),
                 ("↑ ↓ Enter", "Move and select section buttons when sidebar focused"),
                 ("Alt+1…4", "Jump to section (on sectioned tabs)"),
             ]),

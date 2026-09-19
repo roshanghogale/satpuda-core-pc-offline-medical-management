@@ -105,14 +105,67 @@ class DoctorsTab:
         except Exception:
             pass
 
-    def load(self):
+    def _fetch_online_doctors(self):
+        from core.online_catalog import doctors
+
+        rows = []
+        for d in doctors(force=True):
+            try:
+                did = int(d.get("id") or d.get("local_id") or 0)
+            except (TypeError, ValueError):
+                continue
+            if did <= 0:
+                continue
+            rows.append((
+                d.get("name") or "",
+                d.get("registration_number") or "",
+                d.get("phone") or "",
+                d.get("created_at") or d.get("updated_at") or "",
+                did,
+            ))
+        rows.sort(key=lambda r: str(r[0]).upper())
+        return rows
+
+    def _apply_doctor_rows(self, rows):
         for item in self.tree.get_children():
             self.tree.delete(item)
-        self.cursor.execute(
-            "SELECT name, registration_number, phone, created_at, id FROM doctors ORDER BY name")
-        self.doctors_data = self.cursor.fetchall()
+        self.doctors_data = list(rows or [])
         for row in self.doctors_data:
             self.tree.insert('', tk.END, values=row[:-1])
+
+    def load(self):
+        try:
+            from core.sync_prefs import is_online_mode
+
+            if is_online_mode():
+                from core.background_workers import run_in_thread
+                self._load_gen = int(getattr(self, "_load_gen", 0) or 0) + 1
+                gen = self._load_gen
+
+                def _apply(rows):
+                    if gen != getattr(self, "_load_gen", 0):
+                        return
+                    self._apply_doctor_rows(rows)
+
+                def _err(exc):
+                    if gen != getattr(self, "_load_gen", 0):
+                        return
+                    showerror("Error", f"Failed to load doctors: {exc}")
+
+                run_in_thread(
+                    self._fetch_online_doctors,
+                    name="DoctorsLoad",
+                    root=self.tree,
+                    on_success=_apply,
+                    on_error=_err,
+                )
+                return
+        except Exception as e:
+            showerror("Error", f"Failed to load doctors: {e}")
+            return
+        self.cursor.execute(
+            "SELECT name, registration_number, phone, created_at, id FROM doctors ORDER BY name")
+        self._apply_doctor_rows(self.cursor.fetchall())
 
     def add(self):
         name   = self.doctor_name.get().strip().upper()
@@ -127,6 +180,37 @@ class DoctorsTab:
             showwarning("Missing Information", "Please enter registration number.")
             return
         try:
+            from core.sync_prefs import is_online_mode
+
+            if is_online_mode():
+                from core.online_catalog import doctors, invalidate
+                from core.server_crud import allocate_id, upsert_contact_online
+
+                for d in doctors():
+                    if str(d.get("name") or "").strip().upper() == name:
+                        showwarning("Duplicate", "Doctor with this name already exists.")
+                        return
+                did = allocate_id("doctors")
+                upsert_contact_online(
+                    "doctors",
+                    {
+                        "id": did,
+                        "local_id": did,
+                        "name": name,
+                        "registration_number": reg_no,
+                        "phone": phone,
+                    },
+                )
+                invalidate("doctors")
+                showinfo("Success", "Doctor added successfully!")
+                self.doctor_name.delete(0, tk.END)
+                self.doctor_reg_no.delete(0, tk.END)
+                self.doctor_reg_no.insert(0, "e.g. MMC/2021/67890")
+                self.doctor_phone.delete(0, tk.END)
+                self.load()
+                self.doctor_name.focus()
+                return
+
             self.cursor.execute("SELECT id FROM doctors WHERE UPPER(name)=?", (name,))
             if self.cursor.fetchone():
                 showwarning("Duplicate", "Doctor with this name already exists.")
@@ -191,10 +275,28 @@ class DoctorsTab:
                 showwarning("Missing", "Registration number cannot be empty.", parent=dlg)
                 return
             try:
-                self.cursor.execute(
-                    "UPDATE doctors SET name=?,registration_number=?,phone=? WHERE id=?",
-                    (new_name, new_reg, new_phone, doctor_id))
-                self.conn.commit()
+                from core.sync_prefs import is_online_mode
+
+                if is_online_mode():
+                    from core.online_catalog import invalidate
+                    from core.server_crud import upsert_contact_online
+
+                    upsert_contact_online(
+                        "doctors",
+                        {
+                            "id": int(doctor_id),
+                            "local_id": int(doctor_id),
+                            "name": new_name,
+                            "registration_number": new_reg,
+                            "phone": new_phone,
+                        },
+                    )
+                    invalidate("doctors")
+                else:
+                    self.cursor.execute(
+                        "UPDATE doctors SET name=?,registration_number=?,phone=? WHERE id=?",
+                        (new_name, new_reg, new_phone, doctor_id))
+                    self.conn.commit()
                 showinfo("Success", "Doctor updated successfully!")
                 dlg.destroy()
                 self.load()
@@ -234,8 +336,19 @@ class DoctorsTab:
             showerror("Error", "Could not find doctor record.")
             return
         try:
-            self.cursor.execute("DELETE FROM doctors WHERE id=?", (doctor_id,))
-            self.conn.commit()
+            from core.sync_prefs import is_online_mode
+
+            if is_online_mode():
+                from core.online_catalog import invalidate
+                from core.server_crud import delete_contact_online
+
+                delete_contact_online("doctors", int(doctor_id))
+                invalidate("doctors")
+            else:
+                self.cursor.execute("DELETE FROM doctors WHERE id=?", (doctor_id,))
+                self.conn.commit()
+                from core.sync_coordinator import after_doctor_deleted
+                after_doctor_deleted(self.conn, int(doctor_id))
             showinfo("Success", "Doctor deleted successfully!")
             self.load()
         except Exception as e:

@@ -15,11 +15,12 @@ from core.keyboard_registry import PageBindings
 class PaymentCombinedTab:
     TAB_NAME = 'Payment'
 
-    def __init__(self, notebook, conn):
+    def __init__(self, notebook, conn, host=None):
         self.conn = conn
         self._active = None
-        outer = ttk.Frame(notebook)
-        notebook.add(outer, text="Payment")
+        outer = host if host is not None else ttk.Frame(notebook)
+        if host is None and notebook is not None:
+            notebook.add(outer, text="Payment")
 
         btn_bar = ttk.Frame(outer)
         btn_bar.pack(fill=tk.X, padx=10, pady=10)

@@ -399,7 +399,7 @@ export default function PurchasePage({
 
   const HEADER_FIELDS = [
     'supplier_name','supplier_address','supplier_phone','supplier_gstin','supplier_dl',
-    'purchase_date','bill_number','gst_calc_method','overall_discount','overall_discount_pct','amount_paid'
+    'purchase_date','bill_number','gst_calc_method','overall_discount','overall_discount_pct','cash_paid','online_paid'
   ]
 
   function onHeaderEnter(field) {
@@ -488,7 +488,9 @@ export default function PurchasePage({
   const itemGross = grossBeforeOverallDiscount(bill.items)
   const purchaseSummary = calcPurchaseSummary(
     bill.items,
-    parseFloat(bill.overall_discount) || 0
+    parseFloat(bill.overall_discount) || 0,
+    0,
+    bill.gst_calc_method || 'discount_after_gst',
   )
   const grandSubtotal = purchaseSummary.grossSubtotalNoGST
   const grandGST      = purchaseSummary.totalGST
@@ -613,13 +615,26 @@ export default function PurchasePage({
               style={{background:'transparent', cursor:'default', opacity:0.7}} />
           </Field>
 
-          <Field label="Amount Paid (₹)">
-            <input type="number"
-              ref={r => inputRefs.current[`${activeBill}-h-amount_paid`] = r}
-              value={bill.amount_paid}
-              onChange={e => updateBillField('amount_paid', e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && onHeaderEnter('amount_paid')}
+          <Field label="Cash Paid (₹)">
+            <input type="number" step="0.01" min="0"
+              ref={r => inputRefs.current[`${activeBill}-h-cash_paid`] = r}
+              value={bill.cash_paid ?? ''}
+              onChange={e => updateBillField('cash_paid', e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && onHeaderEnter('cash_paid')}
               className={styles.input} />
+          </Field>
+
+          <Field label="Online Paid (₹)">
+            <input type="number" step="0.01" min="0"
+              ref={r => inputRefs.current[`${activeBill}-h-online_paid`] = r}
+              value={bill.online_paid ?? ''}
+              onChange={e => updateBillField('online_paid', e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && onHeaderEnter('online_paid')}
+              className={styles.input} />
+            <span className={styles.hint}>
+              Paid ₹{((parseFloat(bill.cash_paid) || 0) + (parseFloat(bill.online_paid) || 0)).toFixed(2)}
+              {' · '}Due ₹{Math.max(0, grandTotal - ((parseFloat(bill.cash_paid) || 0) + (parseFloat(bill.online_paid) || 0))).toFixed(2)}
+            </span>
           </Field>
 
         </div>

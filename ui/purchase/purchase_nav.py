@@ -18,6 +18,8 @@ class PurchaseNavMixin:
     # ── public entry point ────────────────────────────────────────────────
 
     def _setup_arrow_nav(self):
+        if getattr(self, '_arrow_nav_ready', False):
+            return
         def _e(w):
             return w.entry if hasattr(w, 'entry') else w
 
@@ -45,26 +47,29 @@ class PurchaseNavMixin:
             self.overall_discount_pct, # 20
             self.overall_discount,    # 21
             self.rounding_entry,      # 22
-            self.amount_paid,         # 23
-            self.clear_btn,           # 24
-            self.save_btn,            # 25
+            self.expenditure_entry,   # 23
+            self.cash_paid,           # 24
+            self.online_paid,         # 25
+            self.clear_btn,           # 26
+            self.save_btn,            # 27
+            self.gst_slab_btn,        # 28
+            self.recalculate_btn,     # 29 (edit purchase only, when packed)
         ]
         self._qty_attrs = ('stripes', 'tablets_per_stripe', 'free_stripes',
                            'quantity', 'units', 'free_items')
         self._medicine_type_entry = _e(self.medicine_type)
 
-        plain_static = {1,2,3,4,5,6,9,10,11,12,13,14,15,17,18,19,20,21,22,23,24,25}
+        plain_static = {1,2,3,4,5,6,7,8,11,12,13,14,15,16,17,19,20,21,22,23,24,25,26,27,28,29,30}
         self._bind_nav_on_list(self._nav_static, plain_static)
-
-        for w in [self.supplier_name, self.medicine_name, self.medicine_type]:
-            _e(w).bind('<Escape>',
-                lambda e, _w=w: _w.hide_list() if hasattr(_w, 'hide_list') else None,
-                add='+')
+        for w in (getattr(self, 'tablet_mrp', None), getattr(self, 'tablet_rate', None)):
+            if w is not None:
+                self._bind_nav_on_list([w], {0})
 
         self.parent.winfo_toplevel().bind(
             '<FocusIn>', lambda e: self._scroll_to_widget(e.widget), add='+')
 
         self._bind_end_to_payment()
+        self._arrow_nav_ready = True
 
     def _focus_medicine_combo(self, event=None):
         try:
@@ -97,15 +102,15 @@ class PurchaseNavMixin:
 
     def _focus_payment_field(self, event=None):
         try:
-            self.amount_paid.focus_set()
-            self.amount_paid.select_range(0, tk.END)
-            self._scroll_to_widget(self.amount_paid)
+            self.cash_paid.focus_set()
+            self.cash_paid.select_range(0, tk.END)
+            self._scroll_to_widget(self.cash_paid)
         except Exception:
             pass
         return 'break'
 
     def _bind_end_to_payment(self):
-        skip = {self.amount_paid}
+        skip = {self.cash_paid, self.online_paid}
 
         def handler(event):
             return self._focus_payment_field()
@@ -143,9 +148,29 @@ class PurchaseNavMixin:
                     pass
         result = []
         for w in self._nav_static:
+            if w is getattr(self, 'recalculate_btn', None):
+                try:
+                    if not w.winfo_ismapped():
+                        continue
+                except tk.TclError:
+                    continue
             result.append(w)
             if w is mt and qty:
                 result.extend(qty)
+            if w is getattr(self, 'mrp', None):
+                tm = getattr(self, 'tablet_mrp', None)
+                try:
+                    if tm is not None and tm.winfo_exists() and tm.winfo_ismapped():
+                        result.append(tm)
+                except tk.TclError:
+                    pass
+            if w is getattr(self, 'rate', None):
+                tr = getattr(self, 'tablet_rate', None)
+                try:
+                    if tr is not None and tr.winfo_exists() and tr.winfo_ismapped():
+                        result.append(tr)
+                except tk.TclError:
+                    pass
         return result
 
     # ── bind helpers ──────────────────────────────────────────────────────

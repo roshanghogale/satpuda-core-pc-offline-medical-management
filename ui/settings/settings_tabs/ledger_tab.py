@@ -9,6 +9,23 @@ from datetime import date
 from core.font_config import *
 from core.alert_colors import get_alert_color
 from widgets.searchable_combo import SearchableCombo
+from core.record_indicators import (
+    extend_columns,
+    indicator_column_widths,
+    column_heading,
+    ledger_status,
+    prepare_tree_row,
+    register_tree_tags,
+)
+
+
+def _ledger_insert(tree, ledger_tag, values, *, return_kind='sales_return'):
+    if ledger_tag == 'return':
+        status = return_kind
+    else:
+        status = ledger_status(ledger_tag)
+    row_vals, tags = prepare_tree_row(values, status)
+    tree.insert('', tk.END, values=row_vals, tags=tags)
 
 
 # -- Shared running-balance engine ---------------------------------------------
@@ -22,13 +39,17 @@ def _calc_due_credit(running):
 def _build_ledger_tree(parent, cols, col_widths):
     lf = ttk.LabelFrame(parent, text="")
     lf.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 4))
-    tree = ttk.Treeview(lf, columns=cols, show='headings',
+    ext_cols = extend_columns(cols)
+    widths = dict(col_widths)
+    widths.update(indicator_column_widths())
+    tree = ttk.Treeview(lf, columns=ext_cols, show='headings',
                         height=12, style='Large.Treeview')
-    for c in cols:
-        tree.heading(c, text=c)
-        tree.column(c, width=col_widths.get(c, 90), anchor='e')
+    for c in ext_cols:
+        heading = column_heading(c)
+        tree.heading(c, text=heading)
+        tree.column(c, width=widths.get(c, 90), anchor='e')
     for c in ('Date', 'Type', 'Reference', 'Details', 'Bill No'):
-        if c in cols:
+        if c in ext_cols:
             tree.column(c, anchor='center' if c == 'Date' else 'w')
     vsb = ttk.Scrollbar(lf, orient=tk.VERTICAL,   command=tree.yview)
     hsb = ttk.Scrollbar(lf, orient=tk.HORIZONTAL, command=tree.xview)
@@ -38,6 +59,7 @@ def _build_ledger_tree(parent, cols, col_widths):
     hsb.grid(row=1, column=0, sticky='ew')
     lf.grid_rowconfigure(0, weight=1)
     lf.grid_columnconfigure(0, weight=1)
+    register_tree_tags(tree)
     return lf, tree
 
 
@@ -47,14 +69,183 @@ def _tag_for_running(running):
     return 'clear'
 
 
-def _apply_tags(tree):
-    from core.alert_colors import get_tree_tag_colors as _gtc
-    _clr = _gtc()
-    tree.tag_configure('due',     background=_clr['due_bg'],     foreground=_clr['due_fg'])
-    tree.tag_configure('credit',  background=_clr['cleared_bg'], foreground=_clr['cleared_fg'])
-    tree.tag_configure('clear',   background=_clr['partial_bg'], foreground=_clr['partial_fg'])
-    tree.tag_configure('payment', background=_clr['cleared_bg'], foreground=_clr['cleared_fg'])
-    tree.tag_configure('return',  background=_clr['partial_bg'], foreground=_clr['partial_fg'])
+def _fnum(v, default=0.0):
+    try:
+        return float(v if v is not None else default)
+    except (TypeError, ValueError):
+        return default
+
+
+def _in_range(d, fd, td):
+    ds = str(d or "")
+    if fd and ds < fd:
+        return False
+    if td and ds and ds > td:
+        return False
+    return True
+
+
+def _online_supplier_ledger(name, fd, td):
+    """Assemble supplier ledger from store list + payment endpoints."""
+    from core import store_query_client as sq
+    from core.online_catalog import find_supplier_by_name, supplier_names
+    from core.due_fifo import purchase_entry_paid
+
+    found = find_supplier_by_name(name)
+    try:
+        sid = int((found or {}).get("id") or (found or {}).get("local_id") or 0)
+    except (TypeError, ValueError):
+        sid = 0
+    name_u = (name or "").strip().upper()
+
+    purchases_raw = (sq.list_purchases(q=name, limit=5000) or {}).get("rows") or []
+    payments_raw = (sq.list_supplier_payments(limit=5000) or {}).get("rows") or []
+    returns_raw = []
+    try:
+        returns_raw = (sq.list_purchase_returns(limit=5000) or {}).get("rows") or []
+    except Exception:
+        returns_raw = []
+
+    def _match_sup(r):
+        if not isinstance(r, dict):
+            return False
+        try:
+            if sid and int(r.get("supplier_id") or 0) == sid:
+                return True
+        except (TypeError, ValueError):
+            pass
+        sn = str(r.get("supplier_name") or r.get("party") or "").strip().upper()
+        return bool(name_u) and sn == name_u
+
+    all_txns = []
+    opening = 0.0
+    for r in purchases_raw:
+        if not _match_sup(r):
+            continue
+        d = str(r.get("purchase_date") or "")
+        amt = _fnum(r.get("final_amount")) or _fnum(r.get("total_amount"))
+        paid = purchase_entry_paid(r)
+        ref = str(r.get("purchase_no") or "")
+        details = str(r.get("bill_number") or "") or ref
+        if fd and d and d < fd:
+            opening = round(opening + amt - paid, 2)
+            continue
+        if not _in_range(d, fd, td):
+            continue
+        all_txns.append((d, ref, details, amt, paid, "purchase"))
+
+    for r in payments_raw:
+        if not _match_sup(r):
+            continue
+        d = str(r.get("payment_date") or r.get("date") or "")
+        amt = _fnum(r.get("amount"))
+        ref = str(r.get("payment_no") or r.get("id") or "")
+        details = str(r.get("mode") or "Cash")
+        if fd and d and d < fd:
+            opening = round(opening - amt, 2)
+            continue
+        if not _in_range(d, fd, td):
+            continue
+        all_txns.append((d, ref, details, amt, 0.0, "payment"))
+
+    for r in returns_raw:
+        if not _match_sup(r):
+            continue
+        d = str(r.get("return_date") or "")
+        amt = _fnum(r.get("refund_amount"))
+        ref = str(r.get("return_no") or "")
+        details = str(r.get("bill_number") or r.get("purchase_no") or "")
+        if fd and d and d < fd:
+            opening = round(opening - amt, 2)
+            continue
+        if not _in_range(d, fd, td):
+            continue
+        all_txns.append((d, ref, details, amt, 0.0, "return"))
+
+    all_txns.sort(key=lambda x: x[0] or "")
+    return sid, opening, all_txns, supplier_names()
+
+
+def _online_customer_ledger(name, fd, td):
+    """Assemble customer ledger from store list + payment endpoints."""
+    from core import store_query_client as sq
+    from core.online_catalog import customer_names, find_customer_by_name
+
+    found = find_customer_by_name(name)
+    try:
+        cid = int((found or {}).get("id") or 0)
+    except (TypeError, ValueError):
+        cid = 0
+    name_u = (name or "").strip().upper()
+
+    sales_raw = (sq.list_sales(q=name, limit=5000) or {}).get("rows") or []
+    payments_raw = (sq.list_customer_payments(limit=5000) or {}).get("rows") or []
+    returns_raw = []
+    try:
+        returns_raw = (sq.list_sales_returns(limit=5000) or {}).get("rows") or []
+    except Exception:
+        returns_raw = []
+
+    def _match_cust(r):
+        if not isinstance(r, dict):
+            return False
+        try:
+            if cid and int(r.get("customer_id") or 0) == cid:
+                return True
+        except (TypeError, ValueError):
+            pass
+        cn = str(r.get("customer_name") or r.get("party") or "").strip().upper()
+        return bool(name_u) and cn == name_u
+
+    all_txns = []
+    opening = 0.0
+    for r in sales_raw:
+        if not _match_cust(r):
+            continue
+        d = str(r.get("bill_date") or "")
+        amt = _fnum(r.get("total_amount"))
+        paid = _fnum(r.get("amount_paid"))
+        ref = str(r.get("bill_no") or "")
+        details = str(r.get("doctor_name") or "")
+        if fd and d and d < fd:
+            opening = round(opening + amt - paid, 2)
+            continue
+        if not _in_range(d, fd, td):
+            continue
+        all_txns.append((d, ref, details, amt, paid, "sale"))
+
+    for r in returns_raw:
+        if not _match_cust(r):
+            continue
+        d = str(r.get("return_date") or "")
+        amt = _fnum(r.get("refund_amount"))
+        ref = str(r.get("return_no") or "")
+        details = str(r.get("bill_no") or "")
+        if fd and d and d < fd:
+            opening = round(opening - amt, 2)
+            continue
+        if not _in_range(d, fd, td):
+            continue
+        all_txns.append((d, ref, details, amt, 0.0, "return"))
+
+    for r in payments_raw:
+        if not _match_cust(r):
+            continue
+        d = str(r.get("payment_date") or r.get("date") or "")
+        amt = _fnum(r.get("amount"))
+        if amt == 0.0:
+            amt = _fnum(r.get("cash_amount")) + _fnum(r.get("online_amount"))
+        ref = f"PAY-{r.get('id')}" if r.get("id") is not None else "PAY"
+        details = str(r.get("payment_mode") or r.get("mode") or "cash")
+        if fd and d and d < fd:
+            opening = round(opening - amt, 2)
+            continue
+        if not _in_range(d, fd, td):
+            continue
+        all_txns.append((d, ref, details, amt, 0.0, "payment"))
+
+    all_txns.sort(key=lambda x: x[0] or "")
+    return cid, opening, all_txns, customer_names(include_from_sales=False)
 
 
 # -- Main class ----------------------------------------------------------------
@@ -62,13 +253,14 @@ def _apply_tags(tree):
 class LedgerTab:
     TAB_NAME = 'Ledger'
 
-    def __init__(self, notebook, conn):
+    def __init__(self, notebook, conn, host=None):
         self.conn   = conn
         self.cursor = conn.cursor()
         self._kind = 'supplier'
-        outer = ttk.Frame(notebook)
+        outer = host if host is not None else ttk.Frame(notebook)
         self.outer = outer
-        notebook.add(outer, text=self.TAB_NAME)
+        if host is None and notebook is not None:
+            notebook.add(outer, text=self.TAB_NAME)
         self._build(outer)
 
     def get_keyboard_bindings(self):
@@ -187,12 +379,92 @@ class LedgerTab:
                 bal_label = lbl
 
         def reload():
+            last = getattr(self, "_last_ledger_supplier_names", None) or []
+            try:
+                from core.sync_prefs import is_online_mode
+
+                if is_online_mode():
+                    if last:
+                        try:
+                            sl_name.configure(values=last)
+                        except Exception:
+                            pass
+                    if getattr(self, "_ledger_sup_reload_busy", False):
+                        return
+                    self._ledger_sup_reload_busy = True
+                    from core.background_workers import run_in_thread
+                    try:
+                        from core.online_catalog import prefetch_hot
+                        prefetch_hot()
+                    except Exception:
+                        pass
+
+                    def _load():
+                        from core.online_catalog import supplier_names
+                        return list(supplier_names() or [])
+
+                    def _done(names):
+                        self._ledger_sup_reload_busy = False
+                        names = list(names or [])
+                        if names:
+                            self._last_ledger_supplier_names = names
+                        try:
+                            sl_name.configure(
+                                values=getattr(self, "_last_ledger_supplier_names", None) or names
+                            )
+                        except Exception:
+                            pass
+
+                    def _err(_exc):
+                        self._ledger_sup_reload_busy = False
+                        kept = getattr(self, "_last_ledger_supplier_names", None) or []
+                        if kept:
+                            try:
+                                sl_name.configure(values=kept)
+                            except Exception:
+                                pass
+
+                    run_in_thread(
+                        _load,
+                        name="LedgerSuppliersReload",
+                        root=parent,
+                        on_success=_done,
+                        on_error=_err,
+                    )
+                    return
+            except Exception:
+                try:
+                    from core.sync_prefs import is_online_mode as _online
+                    if _online():
+                        if last:
+                            sl_name.configure(values=last)
+                        return
+                except Exception:
+                    pass
             self.cursor.execute("SELECT name FROM suppliers ORDER BY name")
             sl_name.configure(values=[r[0] for r in self.cursor.fetchall()])
 
         def on_select(event=None):
             name = sl_name.get().strip()
             if not name: return
+            try:
+                from core.sync_prefs import is_online_mode
+
+                if is_online_mode():
+                    from core.online_catalog import find_supplier_by_name
+
+                    found = find_supplier_by_name(name)
+                    if found:
+                        try:
+                            sid = int(found.get("id") or found.get("local_id") or 0)
+                            if sid:
+                                sl_id_var.set(f"S-{sid:04d}")
+                        except (TypeError, ValueError):
+                            pass
+                    sl_to.focus()
+                    return
+            except Exception:
+                pass
             self.cursor.execute("SELECT id FROM suppliers WHERE name=? LIMIT 1", (name,))
             row = self.cursor.fetchone()
             if row: sl_id_var.set(f"S-{row[0]:04d}")
@@ -206,93 +478,109 @@ class LedgerTab:
             for item in tree.get_children(): tree.delete(item)
             fd, td = sl_from.get().strip(), sl_to.get().strip()
 
-            self.cursor.execute("""
-                SELECT p.purchase_date, p.purchase_no,
-                       COALESCE(p.bill_number, ''),
-                       p.total_amount,
-                       COALESCE(p.amount_paid_at_entry, p.amount_paid, 0),
-                       'purchase'
-                FROM purchases p JOIN suppliers s ON p.supplier_id = s.id
-                WHERE s.name = ?
-                  AND (? = '' OR p.purchase_date >= ?)
-                  AND (? = '' OR p.purchase_date <= ?)
-                ORDER BY p.purchase_date ASC, p.id ASC
-            """, (name, fd, fd, td, td))
-            purchases = self.cursor.fetchall()
-
-            self.cursor.execute("""
-                SELECT sp.payment_date, sp.payment_no,
-                       COALESCE(sp.mode, 'Cash'), sp.amount, 'payment'
-                FROM supplier_payments sp JOIN suppliers s ON sp.supplier_id = s.id
-                WHERE s.name = ?
-                  AND (? = '' OR sp.payment_date >= ?)
-                  AND (? = '' OR sp.payment_date <= ?)
-                ORDER BY sp.payment_date ASC, sp.id ASC
-            """, (name, fd, fd, td, td))
-            payments = self.cursor.fetchall()
-
-            returns = []
+            online = False
             try:
-                self.cursor.execute("""
-                    SELECT pr.return_date, pr.return_no,
-                           COALESCE(p.bill_number, p.purchase_no, ''),
-                           pr.refund_amount, 'return'
-                    FROM purchase_returns pr
-                    JOIN purchases p ON pr.purchase_id = p.id
-                    JOIN suppliers s ON p.supplier_id  = s.id
-                    WHERE s.name = ?
-                      AND (? = '' OR pr.return_date >= ?)
-                      AND (? = '' OR pr.return_date <= ?)
-                    ORDER BY pr.return_date ASC, pr.id ASC
-                """, (name, fd, fd, td, td))
-                returns = self.cursor.fetchall()
+                from core.sync_prefs import is_online_mode
+                online = is_online_mode()
             except Exception:
-                pass
+                online = False
 
-            # PHASE 5.2: compute opening balance from transactions BEFORE fd
-            opening = 0.0
-            if fd:
+            if online:
+                try:
+                    sid, opening, all_txns, _names = _online_supplier_ledger(name, fd, td)
+                    if sid:
+                        sl_id_var.set(f"S-{sid:04d}")
+                except Exception as e:
+                    showerror("Error", f"Failed to load supplier ledger: {e}")
+                    return
+            else:
                 self.cursor.execute("""
-                    SELECT COALESCE(SUM(p.total_amount),0),
-                           COALESCE(SUM(COALESCE(p.amount_paid_at_entry,p.amount_paid,0)),0)
-                    FROM purchases p JOIN suppliers s ON p.supplier_id=s.id
-                    WHERE s.name=? AND p.purchase_date < ?
-                """, (name, fd))
-                r = self.cursor.fetchone()
-                opening = round(float(r[0] or 0) - float(r[1] or 0), 2)
+                    SELECT p.purchase_date, p.purchase_no,
+                           COALESCE(p.bill_number, ''),
+                           p.total_amount,
+                           COALESCE(p.amount_paid_at_entry, p.amount_paid, 0),
+                           'purchase'
+                    FROM purchases p JOIN suppliers s ON p.supplier_id = s.id
+                    WHERE s.name = ?
+                      AND (? = '' OR p.purchase_date >= ?)
+                      AND (? = '' OR p.purchase_date <= ?)
+                    ORDER BY p.purchase_date ASC, p.id ASC
+                """, (name, fd, fd, td, td))
+                purchases = self.cursor.fetchall()
+
+                self.cursor.execute("""
+                    SELECT sp.payment_date, sp.payment_no,
+                           COALESCE(sp.mode, 'Cash'), sp.amount, 'payment'
+                    FROM supplier_payments sp JOIN suppliers s ON sp.supplier_id = s.id
+                    WHERE s.name = ?
+                      AND (? = '' OR sp.payment_date >= ?)
+                      AND (? = '' OR sp.payment_date <= ?)
+                    ORDER BY sp.payment_date ASC, sp.id ASC
+                """, (name, fd, fd, td, td))
+                payments = self.cursor.fetchall()
+
+                returns = []
                 try:
                     self.cursor.execute("""
-                        SELECT COALESCE(SUM(sp.amount),0)
-                        FROM supplier_payments sp JOIN suppliers s ON sp.supplier_id=s.id
-                        WHERE s.name=? AND sp.payment_date < ?
-                    """, (name, fd))
-                    opening = round(opening - float(self.cursor.fetchone()[0] or 0), 2)
-                    self.cursor.execute("""
-                        SELECT COALESCE(SUM(pr.refund_amount),0)
+                        SELECT pr.return_date, pr.return_no,
+                               COALESCE(p.bill_number, p.purchase_no, ''),
+                               pr.refund_amount, 'return'
                         FROM purchase_returns pr
-                        JOIN purchases p ON pr.purchase_id=p.id
-                        JOIN suppliers s ON p.supplier_id=s.id
-                        WHERE s.name=? AND pr.return_date < ?
-                    """, (name, fd))
-                    opening = round(opening - float(self.cursor.fetchone()[0] or 0), 2)
+                        JOIN purchases p ON pr.purchase_id = p.id
+                        JOIN suppliers s ON p.supplier_id  = s.id
+                        WHERE s.name = ?
+                          AND (? = '' OR pr.return_date >= ?)
+                          AND (? = '' OR pr.return_date <= ?)
+                        ORDER BY pr.return_date ASC, pr.id ASC
+                    """, (name, fd, fd, td, td))
+                    returns = self.cursor.fetchall()
                 except Exception:
                     pass
 
-            all_txns = []
-            for r in purchases:
-                all_txns.append((r[0], r[1], r[2], float(r[3] or 0), float(r[4] or 0), 'purchase'))
-            for r in payments:
-                all_txns.append((r[0], r[1], r[2], float(r[3] or 0), 0.0, 'payment'))
-            for r in returns:
-                all_txns.append((r[0], r[1], r[2], float(r[3] or 0), 0.0, 'return'))
-            all_txns.sort(key=lambda x: x[0])
+                # PHASE 5.2: compute opening balance from transactions BEFORE fd
+                opening = 0.0
+                if fd:
+                    self.cursor.execute("""
+                        SELECT COALESCE(SUM(p.total_amount),0),
+                               COALESCE(SUM(COALESCE(p.amount_paid_at_entry,p.amount_paid,0)),0)
+                        FROM purchases p JOIN suppliers s ON p.supplier_id=s.id
+                        WHERE s.name=? AND p.purchase_date < ?
+                    """, (name, fd))
+                    r = self.cursor.fetchone()
+                    opening = round(float(r[0] or 0) - float(r[1] or 0), 2)
+                    try:
+                        self.cursor.execute("""
+                            SELECT COALESCE(SUM(sp.amount),0)
+                            FROM supplier_payments sp JOIN suppliers s ON sp.supplier_id=s.id
+                            WHERE s.name=? AND sp.payment_date < ?
+                        """, (name, fd))
+                        opening = round(opening - float(self.cursor.fetchone()[0] or 0), 2)
+                        self.cursor.execute("""
+                            SELECT COALESCE(SUM(pr.refund_amount),0)
+                            FROM purchase_returns pr
+                            JOIN purchases p ON pr.purchase_id=p.id
+                            JOIN suppliers s ON p.supplier_id=s.id
+                            WHERE s.name=? AND pr.return_date < ?
+                        """, (name, fd))
+                        opening = round(opening - float(self.cursor.fetchone()[0] or 0), 2)
+                    except Exception:
+                        pass
+
+                all_txns = []
+                for r in purchases:
+                    all_txns.append((r[0], r[1], r[2], float(r[3] or 0), float(r[4] or 0), 'purchase'))
+                for r in payments:
+                    all_txns.append((r[0], r[1], r[2], float(r[3] or 0), 0.0, 'payment'))
+                for r in returns:
+                    all_txns.append((r[0], r[1], r[2], float(r[3] or 0), 0.0, 'return'))
+                all_txns.sort(key=lambda x: x[0])
 
             running = opening
             total_purchase = total_paid = total_returns = 0.0
 
             if opening != 0.0:
                 due_ob, credit_ob = _calc_due_credit(opening)
-                tree.insert('', tk.END, tags=(_tag_for_running(opening),), values=(
+                _ledger_insert(tree, _tag_for_running(opening), (
                     fd or '-', 'Opening Balance', '', '',
                     '-', '-',
                     f"Rs.{due_ob:.2f}" if due_ob else '-',
@@ -306,7 +594,7 @@ class LedgerTab:
                     due, credit = _calc_due_credit(running)
                     total_purchase += amt
                     total_paid     += paid_at_txn
-                    tree.insert('', tk.END, tags=(_tag_for_running(running),), values=(
+                    _ledger_insert(tree, _tag_for_running(running), (
                         txn_date, 'Purchase', ref, details,
                         f"Rs.{amt:.2f}", f"Rs.{paid_at_txn:.2f}" if paid_at_txn else "-",
                         f"Rs.{due:.2f}" if due else "-",
@@ -317,7 +605,7 @@ class LedgerTab:
                     running = round(running - amt, 2)
                     due, credit = _calc_due_credit(running)
                     total_paid += amt
-                    tree.insert('', tk.END, tags=('payment',), values=(
+                    _ledger_insert(tree, 'payment', (
                         txn_date, 'Payment', ref, details,
                         "-", f"Rs.{amt:.2f}",
                         f"Rs.{due:.2f}" if due else "-",
@@ -328,16 +616,15 @@ class LedgerTab:
                     running = round(running - amt, 2)
                     due, credit = _calc_due_credit(running)
                     total_returns += amt
-                    tree.insert('', tk.END, tags=('return',), values=(
+                    _ledger_insert(tree, 'return', (
                         txn_date, 'Return', ref, details,
                         f"Rs.{amt:.2f}", "-",
                         f"Rs.{due:.2f}" if due else "-",
                         f"Rs.{credit:.2f}" if credit else "-",
                         f"Rs.{running:.2f}",
-                    ))
+                    ), return_kind='purchase_return')
 
-            _apply_tags(tree)
-            expected = round(total_purchase - total_paid - total_returns, 2)
+            expected = round(opening + total_purchase - total_paid - total_returns, 2)
             if abs(running - expected) > 0.01:
                 print(f"[LEDGER WARN] Supplier '{name}': running={running} expected={expected}")
 
@@ -440,12 +727,92 @@ class LedgerTab:
                 bal_label = lbl
 
         def reload():
+            last = getattr(self, "_last_ledger_customer_names", None) or []
+            try:
+                from core.sync_prefs import is_online_mode
+
+                if is_online_mode():
+                    if last:
+                        try:
+                            cl_name.configure(values=last)
+                        except Exception:
+                            pass
+                    if getattr(self, "_ledger_cust_reload_busy", False):
+                        return
+                    self._ledger_cust_reload_busy = True
+                    from core.background_workers import run_in_thread
+                    try:
+                        from core.online_catalog import prefetch_hot
+                        prefetch_hot()
+                    except Exception:
+                        pass
+
+                    def _load():
+                        from core.online_catalog import customer_names
+                        return list(customer_names(include_from_sales=False) or [])
+
+                    def _done(names):
+                        self._ledger_cust_reload_busy = False
+                        names = list(names or [])
+                        if names:
+                            self._last_ledger_customer_names = names
+                        try:
+                            cl_name.configure(
+                                values=getattr(self, "_last_ledger_customer_names", None) or names
+                            )
+                        except Exception:
+                            pass
+
+                    def _err(_exc):
+                        self._ledger_cust_reload_busy = False
+                        kept = getattr(self, "_last_ledger_customer_names", None) or []
+                        if kept:
+                            try:
+                                cl_name.configure(values=kept)
+                            except Exception:
+                                pass
+
+                    run_in_thread(
+                        _load,
+                        name="LedgerCustomersReload",
+                        root=parent,
+                        on_success=_done,
+                        on_error=_err,
+                    )
+                    return
+            except Exception:
+                try:
+                    from core.sync_prefs import is_online_mode as _online
+                    if _online():
+                        if last:
+                            cl_name.configure(values=last)
+                        return
+                except Exception:
+                    pass
             self.cursor.execute("SELECT name FROM customers ORDER BY name")
             cl_name.configure(values=[r[0] for r in self.cursor.fetchall()])
 
         def on_select(event=None):
             name = cl_name.get().strip()
             if not name: return
+            try:
+                from core.sync_prefs import is_online_mode
+
+                if is_online_mode():
+                    from core.online_catalog import find_customer_by_name
+
+                    found = find_customer_by_name(name)
+                    if found:
+                        try:
+                            cid = int(found.get("id") or 0)
+                            if cid:
+                                cl_id_var.set(f"C-{cid:04d}")
+                        except (TypeError, ValueError):
+                            pass
+                    cl_to.focus()
+                    return
+            except Exception:
+                pass
             self.cursor.execute(
                 "SELECT id FROM customers WHERE UPPER(name)=UPPER(?) LIMIT 1", (name,))
             row = self.cursor.fetchone()
@@ -460,95 +827,111 @@ class LedgerTab:
             for item in tree.get_children(): tree.delete(item)
             fd, td = cl_from.get().strip(), cl_to.get().strip()
 
-            # 1. Sales
-            self.cursor.execute("""
-                SELECT s.bill_date, s.bill_no,
-                       COALESCE(s.doctor_name, ''),
-                       s.total_amount, COALESCE(s.amount_paid, 0), 'sale'
-                FROM sales s JOIN customers c ON s.customer_id = c.id
-                WHERE UPPER(c.name) = UPPER(?)
-                  AND (? = '' OR s.bill_date >= ?)
-                  AND (? = '' OR s.bill_date <= ?)
-                ORDER BY s.bill_date ASC, s.id ASC
-            """, (name, fd, fd, td, td))
-            sales = self.cursor.fetchall()
-
-            # 2. Sales Returns
-            returns = []
+            online = False
             try:
-                self.cursor.execute("""
-                    SELECT sr.return_date, sr.return_no,
-                           COALESCE(s.bill_no, ''),
-                           sr.refund_amount, 'return'
-                    FROM sales_returns sr
-                    JOIN sales s     ON sr.sale_id     = s.id
-                    JOIN customers c ON sr.customer_id = c.id
-                    WHERE UPPER(c.name) = UPPER(?)
-                      AND (? = '' OR sr.return_date >= ?)
-                      AND (? = '' OR sr.return_date <= ?)
-                    ORDER BY sr.return_date ASC, sr.id ASC
-                """, (name, fd, fd, td, td))
-                returns = self.cursor.fetchall()
+                from core.sync_prefs import is_online_mode
+                online = is_online_mode()
             except Exception:
-                pass
+                online = False
 
-            # 3. Standalone customer payments
-            cust_payments = []
-            try:
+            if online:
+                try:
+                    cid, opening, all_txns, _names = _online_customer_ledger(name, fd, td)
+                    if cid:
+                        cl_id_var.set(f"C-{cid:04d}")
+                except Exception as e:
+                    showerror("Error", f"Failed to load customer ledger: {e}")
+                    return
+            else:
+                # 1. Sales
                 self.cursor.execute("""
-                    SELECT cp.payment_date,
-                           'PAY-' || cp.id,
-                           COALESCE(cp.payment_mode, 'cash'),
-                           cp.amount, 'payment'
-                    FROM customer_payments cp
-                    JOIN customers c ON cp.customer_id = c.id
+                    SELECT s.bill_date, s.bill_no,
+                           COALESCE(s.doctor_name, ''),
+                           s.total_amount, COALESCE(s.amount_paid, 0), 'sale'
+                    FROM sales s JOIN customers c ON s.customer_id = c.id
                     WHERE UPPER(c.name) = UPPER(?)
-                      AND (? = '' OR cp.payment_date >= ?)
-                      AND (? = '' OR cp.payment_date <= ?)
-                    ORDER BY cp.payment_date ASC, cp.id ASC
+                      AND (? = '' OR s.bill_date >= ?)
+                      AND (? = '' OR s.bill_date <= ?)
+                    ORDER BY s.bill_date ASC, s.id ASC
                 """, (name, fd, fd, td, td))
-                cust_payments = self.cursor.fetchall()
-            except Exception:
-                pass
+                sales = self.cursor.fetchall()
 
-            # PHASE 5.2: compute opening balance from transactions BEFORE fd
-            opening = 0.0
-            if fd:
-                self.cursor.execute("""
-                    SELECT COALESCE(SUM(s.total_amount),0),
-                           COALESCE(SUM(s.amount_paid),0)
-                    FROM sales s JOIN customers c ON s.customer_id=c.id
-                    WHERE UPPER(c.name)=UPPER(?) AND s.bill_date < ?
-                """, (name, fd))
-                r = self.cursor.fetchone()
-                opening = round(float(r[0] or 0) - float(r[1] or 0), 2)
+                # 2. Sales Returns
+                returns = []
                 try:
                     self.cursor.execute("""
-                        SELECT COALESCE(SUM(sr.refund_amount),0)
+                        SELECT sr.return_date, sr.return_no,
+                               COALESCE(s.bill_no, ''),
+                               sr.refund_amount, 'return'
                         FROM sales_returns sr
-                        JOIN customers c ON sr.customer_id=c.id
-                        WHERE UPPER(c.name)=UPPER(?) AND sr.return_date < ?
-                    """, (name, fd))
-                    opening = round(opening - float(self.cursor.fetchone()[0] or 0), 2)
-                    self.cursor.execute("""
-                        SELECT COALESCE(SUM(cp.amount),0)
-                        FROM customer_payments cp
-                        JOIN customers c ON cp.customer_id=c.id
-                        WHERE UPPER(c.name)=UPPER(?) AND cp.payment_date < ?
-                    """, (name, fd))
-                    opening = round(opening - float(self.cursor.fetchone()[0] or 0), 2)
+                        JOIN sales s     ON sr.sale_id     = s.id
+                        JOIN customers c ON sr.customer_id = c.id
+                        WHERE UPPER(c.name) = UPPER(?)
+                          AND (? = '' OR sr.return_date >= ?)
+                          AND (? = '' OR sr.return_date <= ?)
+                        ORDER BY sr.return_date ASC, sr.id ASC
+                    """, (name, fd, fd, td, td))
+                    returns = self.cursor.fetchall()
                 except Exception:
                     pass
 
-            # Merge and sort by date ASC
-            all_txns = []
-            for r in sales:
-                all_txns.append((r[0], r[1], r[2], float(r[3] or 0), float(r[4] or 0), 'sale'))
-            for r in returns:
-                all_txns.append((r[0], r[1], r[2], float(r[3] or 0), 0.0, 'return'))
-            for r in cust_payments:
-                all_txns.append((r[0], r[1], r[2], float(r[3] or 0), 0.0, 'payment'))
-            all_txns.sort(key=lambda x: x[0])
+                # 3. Standalone customer payments
+                cust_payments = []
+                try:
+                    self.cursor.execute("""
+                        SELECT cp.payment_date,
+                               'PAY-' || cp.id,
+                               COALESCE(cp.payment_mode, 'cash'),
+                               cp.amount, 'payment'
+                        FROM customer_payments cp
+                        JOIN customers c ON cp.customer_id = c.id
+                        WHERE UPPER(c.name) = UPPER(?)
+                          AND (? = '' OR cp.payment_date >= ?)
+                          AND (? = '' OR cp.payment_date <= ?)
+                        ORDER BY cp.payment_date ASC, cp.id ASC
+                    """, (name, fd, fd, td, td))
+                    cust_payments = self.cursor.fetchall()
+                except Exception:
+                    pass
+
+                # PHASE 5.2: compute opening balance from transactions BEFORE fd
+                opening = 0.0
+                if fd:
+                    self.cursor.execute("""
+                        SELECT COALESCE(SUM(s.total_amount),0),
+                               COALESCE(SUM(s.amount_paid),0)
+                        FROM sales s JOIN customers c ON s.customer_id=c.id
+                        WHERE UPPER(c.name)=UPPER(?) AND s.bill_date < ?
+                    """, (name, fd))
+                    r = self.cursor.fetchone()
+                    opening = round(float(r[0] or 0) - float(r[1] or 0), 2)
+                    try:
+                        self.cursor.execute("""
+                            SELECT COALESCE(SUM(sr.refund_amount),0)
+                            FROM sales_returns sr
+                            JOIN customers c ON sr.customer_id=c.id
+                            WHERE UPPER(c.name)=UPPER(?) AND sr.return_date < ?
+                        """, (name, fd))
+                        opening = round(opening - float(self.cursor.fetchone()[0] or 0), 2)
+                        self.cursor.execute("""
+                            SELECT COALESCE(SUM(cp.amount),0)
+                            FROM customer_payments cp
+                            JOIN customers c ON cp.customer_id=c.id
+                            WHERE UPPER(c.name)=UPPER(?) AND cp.payment_date < ?
+                        """, (name, fd))
+                        opening = round(opening - float(self.cursor.fetchone()[0] or 0), 2)
+                    except Exception:
+                        pass
+
+                # Merge and sort by date ASC
+                all_txns = []
+                for r in sales:
+                    all_txns.append((r[0], r[1], r[2], float(r[3] or 0), float(r[4] or 0), 'sale'))
+                for r in returns:
+                    all_txns.append((r[0], r[1], r[2], float(r[3] or 0), 0.0, 'return'))
+                for r in cust_payments:
+                    all_txns.append((r[0], r[1], r[2], float(r[3] or 0), 0.0, 'payment'))
+                all_txns.sort(key=lambda x: x[0])
 
             # Bank-statement loop
             running = opening
@@ -556,7 +939,7 @@ class LedgerTab:
 
             if opening != 0.0:
                 due_ob, credit_ob = _calc_due_credit(opening)
-                tree.insert('', tk.END, tags=(_tag_for_running(opening),), values=(
+                _ledger_insert(tree, _tag_for_running(opening), (
                     fd or '-', 'Opening Balance', '', '',
                     '-', '-',
                     f"Rs.{due_ob:.2f}" if due_ob else '-',
@@ -570,7 +953,7 @@ class LedgerTab:
                     due, credit = _calc_due_credit(running)
                     total_billed += amt
                     total_paid   += paid_at_txn
-                    tree.insert('', tk.END, tags=(_tag_for_running(running),), values=(
+                    _ledger_insert(tree, _tag_for_running(running), (
                         txn_date, 'Sale', ref, details,
                         f"Rs.{amt:.2f}",
                         f"Rs.{paid_at_txn:.2f}" if paid_at_txn else "-",
@@ -582,19 +965,19 @@ class LedgerTab:
                     running = round(running - amt, 2)
                     due, credit = _calc_due_credit(running)
                     total_returns += amt
-                    tree.insert('', tk.END, tags=('return',), values=(
+                    _ledger_insert(tree, 'return', (
                         txn_date, 'Return', ref, details,
                         f"Rs.{amt:.2f}", "-",
                         f"Rs.{due:.2f}" if due else "-",
                         f"Rs.{credit:.2f}" if credit else "-",
                         f"Rs.{running:.2f}",
-                    ))
+                    ), return_kind='sales_return')
                 elif txn_type == 'payment':
                     running = round(running - amt, 2)
                     due, credit = _calc_due_credit(running)
                     total_payments += amt
                     total_paid     += amt
-                    tree.insert('', tk.END, tags=('payment',), values=(
+                    _ledger_insert(tree, 'payment', (
                         txn_date, 'Payment', ref, details,
                         "-", f"Rs.{amt:.2f}",
                         f"Rs.{due:.2f}" if due else "-",
@@ -602,10 +985,8 @@ class LedgerTab:
                         f"Rs.{running:.2f}",
                     ))
 
-            _apply_tags(tree)
-
             # Integrity check
-            expected = round(total_billed - total_paid - total_returns, 2)
+            expected = round(opening + total_billed - total_paid - total_returns, 2)
             if abs(running - expected) > 0.01:
                 print(f"[LEDGER WARN] Customer '{name}': "
                       f"running={running} expected={expected} diff={running - expected}")

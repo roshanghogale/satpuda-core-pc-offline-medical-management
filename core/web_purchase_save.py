@@ -100,10 +100,12 @@ def json_bill_to_internal(b):
         'supplier': _normalize_supplier(b),
         'purchase_date': (b.get('purchase_date') or datetime.now().strftime('%Y-%m-%d')).strip(),
         'bill_number': (b.get('bill_number') or '').strip(),
-        'gst_calc_method': (b.get('gst_calc_method') or 'discount_before_gst').strip(),
+        'gst_calc_method': (b.get('gst_calc_method') or 'discount_after_gst').strip(),
         'overall_discount': overall_rs,
         'overall_discount_pct': overall_pct,
         'amount_paid': float(b.get('amount_paid', 0) or 0),
+        'cash_paid': float(b.get('cash_paid', b.get('amount_paid', 0)) or 0),
+        'online_paid': float(b.get('online_paid', 0) or 0),
         'items': items,
     }
 
@@ -143,14 +145,19 @@ def save_internal_bill(conn, bill):
     prev_due, prev_credit = get_supplier_due(conn, sup.get('name', '').strip())
 
     overall_discount = float(bill.get('overall_discount', 0) or 0)
-    amount_paid = float(bill.get('amount_paid', 0) or 0)
+    cash_paid = float(bill.get('cash_paid', bill.get('amount_paid', 0)) or 0)
+    online_paid = float(bill.get('online_paid', 0) or 0)
+    if cash_paid <= 0 and online_paid <= 0:
+        cash_paid = float(bill.get('amount_paid', 0) or 0)
 
     calc_kw = dict(
         items=items,
         overall_discount=overall_discount,
         previous_due=prev_due,
         previous_credit=prev_credit,
-        amount_paid=amount_paid,
+        cash_paid=cash_paid,
+        online_paid=online_paid,
+        gst_calc_method=(bill.get('gst_calc_method') or 'discount_after_gst').strip(),
     )
 
     if bill.get('rounding') is not None:
@@ -162,7 +169,7 @@ def save_internal_bill(conn, bill):
 
     result = PurchaseCalculator(**calc_kw, rounding=rounding).calculate()
 
-    result['gst_calc_method'] = bill.get('gst_calc_method', 'discount_before_gst')
+    result['gst_calc_method'] = bill.get('gst_calc_method', 'discount_after_gst')
 
     purchase_no = svc_save_purchase(
         conn, supplier_id,

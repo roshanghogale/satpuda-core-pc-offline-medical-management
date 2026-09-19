@@ -60,6 +60,7 @@ class TreeActionMenu:
         """Double-click only; use wire_tree_list(on_return=...) for Enter."""
         if on_double:
             def _dbl(event=None):
+                self._close()
                 on_double()
                 return "break"
 
@@ -119,8 +120,14 @@ class TreeActionMenu:
                 self._close()
                 try:
                     actions[idx][1]()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    import traceback
+                    traceback.print_exc()
+                    try:
+                        from core.themed_messagebox import showerror
+                        showerror("Action failed", str(exc), parent=self.parent.winfo_toplevel())
+                    except Exception:
+                        pass
 
         def _on_key(event):
             if event.keysym in ("Return", "KP_Enter"):

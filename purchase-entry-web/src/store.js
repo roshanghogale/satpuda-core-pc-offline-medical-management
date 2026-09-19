@@ -6,8 +6,11 @@ const API_BASE_KEY    = 'vet_api_base'
 
 const DEFAULT_SCHEDULES = ['', 'H', 'H1', 'X', 'G', 'K', 'C', 'C1', 'P', 'N', 'M']
 const DEFAULT_MED_TYPES = [
-  'Tablet','Syrup','Injection','Injection - Vial',
-  'Ointment','Powder','Bolus','Liquid','Liniment','Gel','Vaccine','Granules'
+  'Bolus', 'Bolus Pack', 'Capsule', 'Cream', 'Drops', 'Ear Drops', 'Eye Drops',
+  'Feed Supplement', 'Gel', 'Granules', 'Inhaler', 'Injection', 'Injection - Vial',
+  'Instrument / Medical Device', 'Liniment', 'Liquid', 'Lotion', 'Nasal Drops',
+  'Ointment', 'Others', 'Powder', 'Sachet', 'Shampoo', 'Soap', 'Spray',
+  'Suspension', 'Syrup', 'Tablet', 'Tablet Pack', 'Vaccine',
 ]
 
 export function getApiBase() {

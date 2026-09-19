@@ -39,26 +39,30 @@ class BillEditPage:
         self.previous_due    = self.sale_data[9] or 0
         self.previous_credit = self.sale_data[17] or 0
 
+        # GST % as sold, not today's rate: saving the edit writes these lines back.
+        # A line with no rate on it or on the medicine stays blank (NULL), not 0%.
         self.cursor.execute("""
-            SELECT si.*, m.name, m.batch_no, m.expiry_date, m.type, m.schedule, m.gst_percent,
-                   COALESCE(si.item_discount, 0)
+            SELECT si.medicine_id, si.qty, si.rate, si.amount,
+                   COALESCE(si.item_discount, 0),
+                   m.name, m.batch_no, m.expiry_date, m.type, m.schedule,
+                   COALESCE(si.gst_percent, m.gst_percent)
             FROM sales_items si JOIN medicines m ON si.medicine_id=m.id
             WHERE si.sale_id=?
         """, (self.sale_id,))
         for item in self.cursor.fetchall():
             self.selected_medicines.append({
-                'id':               item[2],
-                'name':             item[7],
-                'batch':            item[8],
-                'expiry':           item[9],
-                'qty':              item[3],
-                'rate':             item[4],
-                'amount':           item[6],
-                'schedule':         item[11] or '',
-                'type':             item[10] or '',
-                'display_type':     item[10] or 'N/A',
-                'gst_percent':      item[12] or 0,
-                'medicine_discount':item[15],
+                'id':                item[0],
+                'qty':               item[1],
+                'rate':              item[2],
+                'amount':            item[3],
+                'medicine_discount': item[4],
+                'name':              item[5],
+                'batch':             item[6],
+                'expiry':            item[7],
+                'type':              item[8] or '',
+                'display_type':      item[8] or 'N/A',
+                'schedule':          item[9] or '',
+                'gst_percent':       item[10] if item[10] not in (None, '') else None,
             })
 
     # ── UI ────────────────────────────────────────────────────────────────
@@ -285,6 +289,21 @@ class BillEditPage:
             "SELECT gst_percent FROM medicines WHERE id=? LIMIT 1", (sel['id'],))
         gst_row = self.cursor.fetchone()
         gst_pct = float(gst_row[0]) if gst_row and gst_row[0] else 0.0
+        try:
+            from core.sync_prefs import is_online_mode
+            if is_online_mode():
+                from core.online_catalog import medicine_by_id
+                m = medicine_by_id(sel['id']) or {}
+                if m.get("gst_percent") is not None:
+                    gst_pct = float(m.get("gst_percent") or 0)
+                elif sel.get("gst_percent") is not None:
+                    gst_pct = float(sel.get("gst_percent") or 0)
+        except Exception:
+            if sel.get("gst_percent") is not None:
+                try:
+                    gst_pct = float(sel.get("gst_percent") or 0)
+                except (TypeError, ValueError):
+                    pass
 
         self.selected_medicines.append({
             'id':               sel['id'],
@@ -403,7 +422,7 @@ class BillEditPage:
         self.net_amount_var.set(f"{round(summary['total_amount'] + self.previous_due - self.previous_credit, 2):.2f}")
         self.amount_paid_var.set(f"{pay['amount_paid']:.2f}")
         self.due_amount_var.set(f"{pay['due_amount']:.2f}")
-        self.total_due_var.set(f"{pay['due_amount']:.2f}")
+        self.total_due_var.set(f"{pay['total_due']:.2f}")
 
     # ── Save ──────────────────────────────────────────────────────────────
 

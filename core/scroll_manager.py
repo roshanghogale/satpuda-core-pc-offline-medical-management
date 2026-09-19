@@ -91,6 +91,7 @@ def make_scrollable(parent, horizontal=False):
 
     _vsb_shown = [False]
     _hsb_shown = [False]
+    _configure_job = [None]
 
     def _content_height():
         try:
@@ -109,17 +110,18 @@ def make_scrollable(parent, horizontal=False):
         content_h = _content_height()
         iw = inner.winfo_reqwidth()
 
-        need_v = content_h > ch
+        need_v = content_h > ch + 4
         if need_v != _vsb_shown[0]:
             _vsb_shown[0] = need_v
             if need_v:
                 vsb.grid(row=0, column=1, sticky='ns')
             else:
                 vsb.grid_remove()
-                canvas.yview_moveto(0)
+                if content_h <= ch:
+                    canvas.yview_moveto(0)
 
         if hsb is not None:
-            need_h = iw > cw
+            need_h = iw > cw + 4
             if need_h != _hsb_shown[0]:
                 _hsb_shown[0] = need_h
                 if need_h:
@@ -128,9 +130,18 @@ def make_scrollable(parent, horizontal=False):
                     hsb.grid_remove()
                     canvas.xview_moveto(0)
 
-    def _on_inner_configure(event):
+    def _apply_scroll_layout():
         canvas.configure(scrollregion=canvas.bbox('all'))
         _update_scrollbars()
+
+    def _on_inner_configure(event):
+        job = _configure_job[0]
+        if job is not None:
+            try:
+                inner.after_cancel(job)
+            except Exception:
+                pass
+        _configure_job[0] = inner.after(32, _apply_scroll_layout)
 
     def _on_canvas_configure(event):
         # Width only — setting height on the window item breaks scrolling on Windows.
@@ -325,6 +336,53 @@ def _apply_dialog_theme(dlg):
         pass
 
 
+# Standard dialog size presets (width, height) — always clamped to screen in finalize.
+DIALOG_SIZE_SMALL = (400, 280)
+DIALOG_SIZE_MEDIUM = (520, 520)
+DIALOG_SIZE_LARGE = (560, 640)
+DIALOG_SIZE_XLARGE = (720, 700)
+
+_DIALOG_FINALIZE_DELAYS_MS = (1, 80, 200, 450, 800)
+
+
+def dialog_root(body, padding=12):
+    """Padded root frame inside dlg.content / dlg.body."""
+    root = ttk.Frame(body)
+    root.pack(fill=tk.BOTH, expand=True, padx=padding, pady=padding)
+    return root
+
+
+def dialog_section(parent, text: str = ""):
+    """
+    LabelFrame with inner frame (avoids ttkbootstrap LabelFrame padding issues).
+    Returns (outer, inner) — pack/grid into inner.
+    """
+    if text:
+        outer = ttk.LabelFrame(parent, text=text)
+    else:
+        outer = ttk.Frame(parent)
+    inner = ttk.Frame(outer)
+    inner.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+    return outer, inner
+
+
+def refresh_dialog_geometry(dlg):
+    """Re-run sizing after dynamic UI changes (lists, counts, etc.)."""
+    finalize_dialog_geometry(
+        dlg,
+        getattr(dlg, '_dialog_width', None),
+        getattr(dlg, '_dialog_height', None),
+        getattr(dlg, '_dialog_resizable', True),
+    )
+    try:
+        inner = dlg.content
+        canvas = getattr(inner, '_dialog_canvas', None)
+        if canvas:
+            inner.event_generate('<Configure>')
+    except Exception:
+        pass
+
+
 def make_dialog_scrollable(parent):
     """
     Scrollable body for a dialog. Pack/grid widgets into the returned inner frame.
@@ -397,26 +455,72 @@ def finalize_dialog_geometry(dlg, width=None, height=None, resizable=True):
     dlg.update_idletasks()
     max_w, max_h, _sw, _sh = get_screen_work_area(dlg)
 
+    footer_h = 56
+    try:
+        if hasattr(dlg, 'footer') and dlg.footer.winfo_exists():
+            dlg.update_idletasks()
+            footer_h = max(footer_h, dlg.footer.winfo_reqheight() + 24)
+    except Exception:
+        pass
+
+    content_h = 0
+    try:
+        if hasattr(dlg, 'content') and dlg.content.winfo_exists():
+            dlg.content.update_idletasks()
+            content_h = int(dlg.content.winfo_reqheight())
+    except Exception:
+        pass
+
     req_w = max(dlg.winfo_reqwidth(), 280)
-    req_h = max(dlg.winfo_reqheight(), 120)
+    req_h = max(dlg.winfo_reqheight(), footer_h + 100)
+    natural_h = max(req_h, content_h + footer_h + 12)
 
     if width:
-        w = min(max(int(width), 280), max_w)
+        w = min(max(int(width), 320), max_w)
     else:
-        w = min(req_w, max_w)
+        w = min(max(req_w, 320), max_w)
 
     if height:
-        h = min(int(height), max_h)
+        h = min(max(int(height), footer_h + 120), max_h)
     else:
-        h = min(req_h, max_h)
+        h = min(max(natural_h, footer_h + 120), max_h)
+
+    h = max(h, footer_h + 120)
+    h = min(h, max_h)
+    w = min(max(w, 320), max_w)
 
     center_window_on_screen(dlg, w, h)
     if resizable:
-        dlg.minsize(min(280, w), min(120, h))
+        dlg.minsize(min(320, w), min(footer_h + 120, h))
         dlg.maxsize(max_w, max_h)
     else:
         dlg.minsize(w, h)
         dlg.maxsize(w, h)
+
+
+def pack_centered_buttons(parent, specs, pady=(8, 0), padx=0):
+    """
+    Pack a horizontal row of buttons centered in parent.
+
+    specs: list of dicts with keys text, command, and optional bootstyle, width.
+    """
+    bar = ttk.Frame(parent)
+    bar.pack(fill=tk.X, padx=padx, pady=pady)
+    inner = ttk.Frame(bar)
+    inner.pack(anchor=tk.CENTER)
+    for i, spec in enumerate(specs):
+        kw = {"text": spec["text"], "command": spec["command"]}
+        if spec.get("width"):
+            kw["width"] = spec["width"]
+        pad = (6, 0) if i else (0, 0)
+        try:
+            if spec.get("bootstyle"):
+                kw["bootstyle"] = spec["bootstyle"]
+            ttk.Button(inner, **kw).pack(side=tk.LEFT, padx=pad)
+        except Exception:
+            kw.pop("bootstyle", None)
+            ttk.Button(inner, **kw).pack(side=tk.LEFT, padx=pad)
+    return bar
 
 
 def ensure_toplevel_fits_screen(
@@ -462,6 +566,11 @@ def _show_dialog_modal(dlg, parent):
             dlg.grab_set()
         except Exception:
             pass
+        try:
+            from core.voice.voice_dialog import track_modal_dialog
+            track_modal_dialog(dlg)
+        except Exception:
+            pass
 
 
 def open_dialog(parent, title, width=None, height=None, resizable=True):
@@ -505,7 +614,9 @@ def open_dialog(parent, title, width=None, height=None, resizable=True):
         finalize_dialog_geometry(
             dlg, dlg._dialog_width, dlg._dialog_height, dlg._dialog_resizable,
         )
-        _show_dialog_modal(dlg, parent)
+        if not getattr(dlg, '_modal_shown', False):
+            _show_dialog_modal(dlg, parent)
+            dlg._modal_shown = True
         try:
             inner = dlg.content
             canvas = getattr(inner, '_dialog_canvas', None)
@@ -514,8 +625,8 @@ def open_dialog(parent, title, width=None, height=None, resizable=True):
         except Exception:
             pass
 
-    dlg.after(1, _finalise)
-    dlg.after(120, _finalise)
+    for delay in _DIALOG_FINALIZE_DELAYS_MS:
+        dlg.after(delay, _finalise)
 
     from core.dialog_escape import bind_escape_to_close
     bind_escape_to_close(dlg)

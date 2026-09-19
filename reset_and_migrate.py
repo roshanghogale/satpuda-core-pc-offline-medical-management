@@ -185,6 +185,7 @@ def ensure_columns(conn):
 
     # purchases — new write-once column
     add_col_if_missing(cur, 'purchases', 'amount_paid_at_entry', 'REAL DEFAULT 0')
+    add_col_if_missing(cur, 'purchases', 'expenditure', 'REAL DEFAULT 0')
 
     # purchases — legacy columns kept for backward compat
     for col, typ in [

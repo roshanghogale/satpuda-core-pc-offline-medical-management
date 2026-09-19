@@ -118,6 +118,10 @@ def _register_filename(filename: str, trigger: str):
     elif trigger == 'close':
         _slots['close_last'] = filename
         _logger.info(f"Slot close_last = {filename}")
+    elif trigger == 'manual':
+        # Protect today's manual Backup Now the same way as close.
+        _slots['close_last'] = filename
+        _logger.info(f"Slot manual/close_last = {filename}")
 
     _save_slots()
 
@@ -131,6 +135,12 @@ def _setup_logger():
     if logger.handlers:
         return logger
     logger.setLevel(logging.INFO)
+    try:
+        from core.log_policy import should_write_logs
+        if not should_write_logs():
+            return logger
+    except Exception:
+        pass
     try:
         fh = logging.FileHandler(_log_path(), encoding='utf-8')
         fh.setFormatter(logging.Formatter('%(asctime)s  %(levelname)s  %(message)s',
@@ -202,17 +212,21 @@ def _should_reseed_backup_file(fname: str, bundled: str, dst: str, force: bool) 
     bundled_id = (bundled_cfg.get('folder_id') or '').strip()
     dst_id = (dst_cfg.get('folder_id') or '').strip()
     if bundled_id and dst_id and bundled_id != dst_id:
-        # Update folder ID only — keep the active/local store name.
-        keep_name = get_backup_store_name(dst_cfg)
-        try:
-            _write_config_file(dst, bundled_id, keep_name)
-            _logger.info(
-                f"Updated backup_config.dat folder ID from EXE bundle; "
-                f"kept store name: {keep_name}"
-            )
-        except Exception as e:
-            _logger.error(f"Failed to merge backup_config.dat: {e}")
-            return True
+        # LEAVE THE SHOP'S OWN FOLDER ALONE.
+        #
+        # This used to overwrite dst_id with the bundled one and keep only the
+        # local store NAME -- so the visible field looked right while the folder
+        # the backups actually go to had been changed underneath. A shop that
+        # corrected its Drive folder was dragged back to whichever folder the
+        # build happened to carry, on the next start after every update, and the
+        # screen still showed its own name.
+        #
+        # An installed shop's backup destination is its own. A build has no
+        # business moving it.
+        _logger.info(
+            "backup_config.dat: keeping this PC's own Drive folder; the bundled "
+            "one differs and is not applied."
+        )
         return False
     return False
 
@@ -286,16 +300,34 @@ def _auto_backup_pref_path() -> str:
     return os.path.join(_appdata_dir(), 'backup_auto_enabled.txt')
 
 
+#: What a PC with no backup_auto_enabled.txt does. See is_auto_backup_enabled.
+AUTO_BACKUP_DEFAULT = True
+
+
 def is_auto_backup_enabled() -> bool:
-    """When False, skip backup on open, close, and hourly scheduler."""
+    """When False, skip backup on open, close, and hourly scheduler.
+
+    The default is ON, and it used to be OFF.
+    Nothing ever wrote this file except the two Settings checkboxes, so a PC
+    where nobody thought to tick the box did no automatic backup at all and
+    said nothing about it -- the shop found out only when it needed the data.
+    Four of the seventeen stores in the vendor's Drive folder have not uploaded
+    since June 2026, which is exactly what an unticked box looks like.
+    A shop that deliberately turned it off wrote '0' here and stays off; only
+    the "nobody ever decided" case changes, and for that case backing up is the
+    safe answer. An unreadable file is treated as absent for the same reason.
+    """
     path = _auto_backup_pref_path()
     if not os.path.exists(path):
-        return False
+        return AUTO_BACKUP_DEFAULT
     try:
         with open(path, encoding='utf-8') as f:
-            return f.read().strip().lower() in ('1', 'true', 'yes', 'on')
+            raw = f.read().strip().lower()
     except Exception:
-        return False
+        return AUTO_BACKUP_DEFAULT
+    if not raw:
+        return AUTO_BACKUP_DEFAULT
+    return raw in ('1', 'true', 'yes', 'on')
 
 
 def set_auto_backup_enabled(enabled: bool) -> None:
@@ -321,6 +353,92 @@ def _bundled_config_path():
             return bundled
     proj = _project_config_path()
     return proj if os.path.exists(proj) else ''
+
+
+# ── The vendor's own Drive parent folder ─────────────────────────────────────
+#
+# Every shop backs up into ONE folder on the vendor's Google account, under a
+# per-store subfolder that _ensure_store_subfolder creates at runtime. That
+# parent folder is PRODUCT DATA -- the destination half of the same pair as
+# backup_creds.dat, which is useless without it and which the build already
+# ships on purpose.
+#
+# It used to travel inside config/backup_config.dat. That file also carries a
+# STORE NAME, so the clean-release rule of 2026-09-11 classified the whole file
+# as one shop's identity and build_release_filter.clean_release() stripped it
+# from all seven specs -- and scripts/audit_release_folder.py refuses any clean
+# build that contains a file by that name. Correct for the store name, fatal for
+# the folder id: since then a FRESH install has had no backup destination at all
+# and _do_backup returned before it wrote anything. Shops that had ever run an
+# older build kept working, because their %LOCALAPPDATA%\VeterinaryApp copy
+# survived -- which is why it stayed invisible.
+#
+# So the destination now travels in its own file that holds the folder id and
+# NOTHING else: no store name, so there is no shop identity in it to leak, and
+# it is listed as a vendor credential in both guards. Keep it a FALLBACK, never
+# an override: a shop that set its own folder keeps it (see
+# _should_reseed_backup_file).
+_VENDOR_FOLDER_FILENAME = 'drive_backup_folder.dat'
+
+
+def _project_vendor_folder_path():
+    """config/drive_backup_folder.dat in the project — embedded into the EXE."""
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'config', _VENDOR_FOLDER_FILENAME,
+    )
+
+
+def _bundled_vendor_folder_path():
+    if getattr(sys, 'frozen', False):
+        bundled = os.path.join(sys._MEIPASS, 'config', _VENDOR_FOLDER_FILENAME)
+        if os.path.exists(bundled):
+            return bundled
+    proj = _project_vendor_folder_path()
+    return proj if os.path.exists(proj) else ''
+
+
+def read_vendor_drive_folder() -> str:
+    """The vendor's shared Drive parent folder id, or '' when this build has none.
+
+    AppData first so the vendor can correct the destination on one PC without a
+    rebuild, then the copy shipped inside the build.
+    """
+    try:
+        from core.license_manager import _appdata_dir
+
+        appdata_copy = os.path.join(_appdata_dir(), _VENDOR_FOLDER_FILENAME)
+    except Exception:
+        appdata_copy = ''
+    for path in (appdata_copy, _bundled_vendor_folder_path() or ''):
+        if not path or not os.path.exists(path):
+            continue
+        try:
+            with open(path, 'rb') as f:
+                folder_id = (_decrypt_dict(f.read()).get('folder_id') or '').strip()
+        except Exception:
+            continue
+        if folder_id:
+            return folder_id
+    return ''
+
+
+def write_vendor_drive_folder(folder_id: str, path: str = '') -> str:
+    """Write the vendor folder file (folder id only — never a store name).
+
+    Used by scripts/make_vendor_drive_folder.py to (re)generate the shipped file
+    from whatever destination the vendor already uses, so the id never has to be
+    typed out or pasted anywhere.
+    """
+    folder_id = (folder_id or '').strip()
+    if not folder_id:
+        raise ValueError('folder_id is empty')
+    target = path or _project_vendor_folder_path()
+    os.makedirs(os.path.dirname(target) or '.', exist_ok=True)
+    with open(target, 'wb') as f:
+        f.write(_encrypt_dict({'folder_id': folder_id}))
+    return target
+
 
 def _db_path():
     try:
@@ -448,6 +566,14 @@ def sync_backup_config_to_active_store():
         folder_id = (cfg.get('folder_id') or '').strip()
         if not folder_id:
             return
+        if cfg.get('source') == 'vendor':
+            # The vendor default is read fresh on every backup. Writing it here
+            # would freeze today's parent folder into this PC's own file, and
+            # _should_reseed_backup_file deliberately never moves a folder a PC
+            # already holds -- so a later change of destination could no longer
+            # reach it. The subfolder name comes from the ACTIVE store anyway
+            # (get_backup_store_name), so there is nothing to keep in step.
+            return
         if (cfg.get('store_name') or '').strip() != name:
             write_backup_config(folder_id, name)
     except Exception as e:
@@ -455,7 +581,12 @@ def sync_backup_config_to_active_store():
 
 
 def get_backup_config_status() -> dict:
-    """Return {configured, folder_id, store_name, creds_ok} for UI."""
+    """Return {configured, folder_id, store_name, creds_ok, ...} for UI.
+
+    folder_ok and creds_ok are reported separately on purpose: the Tauri screen
+    used to say "check backup_creds.dat" for every unconfigured state, which
+    pointed at the one file that was never missing.
+    """
     cfg = _read_backup_config()
     folder_id = (cfg.get('folder_id') or '').strip()
     store_name = get_backup_store_name(cfg)
@@ -466,21 +597,37 @@ def get_backup_config_status() -> dict:
         'folder_id': folder_id,
         'store_name': store_name,
         'creds_ok': creds_ok,
+        'folder_ok': bool(folder_id),
+        'folder_source': cfg.get('source', ''),
+        'usb_connected': bool(_detect_pendrives()),
     }
 
 
 def _read_backup_config() -> dict:
-    """AppData override first, then EXE-bundled config (works on any new PC)."""
-    for path in (_config_path(), _bundled_config_path() or ''):
+    """AppData override first, then EXE-bundled config, then the vendor default.
+
+    The returned dict carries a 'source' key so callers can tell a destination
+    this PC actually chose ('appdata'/'bundled') from the vendor default every
+    build now ships ('vendor'). Nothing may write the vendor default back into
+    backup_config.dat: that would pin today's parent folder into the shop's own
+    file, and _should_reseed_backup_file would then refuse to ever move it.
+    """
+    for path, source in ((_config_path(), 'appdata'),
+                         (_bundled_config_path() or '', 'bundled')):
         if not path or not os.path.exists(path):
             continue
         try:
             with open(path, 'rb') as f:
                 cfg = _decrypt_dict(f.read())
             if cfg.get('folder_id'):
+                cfg['source'] = source
                 return cfg
         except Exception:
             continue
+    vendor = read_vendor_drive_folder()
+    if vendor:
+        return {'folder_id': vendor, 'store_name': '',
+                'backup_count': _MAX_BACKUPS, 'source': 'vendor'}
     return {}
 
 def _read_oauth_token() -> dict:
@@ -527,6 +674,8 @@ def _is_internet_available() -> bool:
 
 # Drive service using OAuth2 refresh token
 def _get_drive_service(token_data: dict):
+    from core.ssl_utils import configure_ssl_certificates, httplib2_http
+    configure_ssl_certificates()
     from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
     from googleapiclient.discovery import build
@@ -541,7 +690,10 @@ def _get_drive_service(token_data: dict):
     )
     if not creds.valid:
         creds.refresh(Request())
-    return build('drive', 'v3', credentials=creds, cache_discovery=False)
+    # googleapiclient rejects credentials + http together; authorize http instead.
+    from google_auth_httplib2 import AuthorizedHttp
+    http = AuthorizedHttp(creds, http=httplib2_http())
+    return build('drive', 'v3', http=http, cache_discovery=False)
 
 
 def _drive_subfolder_name(store_name: str) -> str:
@@ -552,16 +704,33 @@ def _drive_subfolder_name(store_name: str) -> str:
         return f"Store_{store_name.replace(' ', '_')}"
 
 
+def _pick_store_subfolder(files: list) -> str:
+    """One id out of however many folders came back with the store's name.
+
+    The vendor's Drive already holds two Store_Bramhandnayak_Medical folders a
+    second apart -- list-then-create is not atomic, so two PCs (or a retry after
+    a slow list) can both create it. Whichever is picked, BACKUP and RESTORE
+    must pick the same one, or a shop's copies split and the restore list shows
+    half of them. Oldest wins: it is stable, and it is the one with the history.
+    """
+    if not files:
+        return ''
+    ordered = sorted(
+        files, key=lambda f: (f.get('createdTime') or '9999', f.get('id') or '')
+    )
+    return ordered[0].get('id', '')
+
+
 def _ensure_store_subfolder(service, parent_folder_id: str, store_name: str) -> str:
     safe_name = _drive_subfolder_name(store_name)
     q = (f"'{parent_folder_id}' in parents "
          f"and name='{safe_name}' "
          f"and mimeType='application/vnd.google-apps.folder' "
          f"and trashed=false")
-    res = service.files().list(q=q, fields='files(id)').execute()
+    res = service.files().list(q=q, fields='files(id, createdTime)').execute()
     files = res.get('files', [])
     if files:
-        return files[0]['id']
+        return _pick_store_subfolder(files)
     meta = {
         'name': safe_name,
         'mimeType': 'application/vnd.google-apps.folder',
@@ -572,9 +741,34 @@ def _ensure_store_subfolder(service, parent_folder_id: str, store_name: str) -> 
 
 def _upload_file(service, file_path: str, folder_id: str, filename: str):
     from googleapiclient.http import MediaFileUpload
+    import time
+
     meta = {'name': filename, 'parents': [folder_id]}
-    media = MediaFileUpload(file_path, mimetype='application/gzip', resumable=False)
-    service.files().create(body=meta, media_body=media, fields='id').execute()
+    # Resumable uploads hit httplib2 redirect bugs on Windows; multipart is fine under 100 MB.
+    file_size = os.path.getsize(file_path)
+    use_resumable = file_size > 100 * 1024 * 1024
+    media_kwargs = {'mimetype': 'application/gzip', 'resumable': use_resumable}
+    if use_resumable:
+        media_kwargs['chunksize'] = 256 * 1024
+    media = MediaFileUpload(file_path, **media_kwargs)
+    request = service.files().create(body=meta, media_body=media, fields='id')
+    last_err = None
+    for attempt in range(3):
+        try:
+            if use_resumable:
+                response = None
+                while response is None:
+                    status, response = request.next_chunk(num_retries=3)
+            else:
+                request.execute()
+            return
+        except Exception as exc:
+            last_err = exc
+            if attempt >= 2:
+                raise
+            time.sleep(2 * (attempt + 1))
+    if last_err:
+        raise last_err
 
 def _cleanup_old_backups(service, folder_id: str, protected: set):
     """Rules:
@@ -633,19 +827,31 @@ def _cleanup_old_backups(service, folder_id: str, protected: set):
 
 
 # Pendrive backup
-def _detect_pendrive() -> str:
-    """Return drive letter of first connected removable USB drive, or empty string."""
+def _detect_pendrives() -> list:
+    """Every connected removable USB drive root, in letter order.
+
+    Backup writes to the first one; RESTORE looks at all of them, because the
+    stick somebody brings back with last week's copy is rarely the one that
+    happens to sort first.
+    """
     import ctypes
     DRIVE_REMOVABLE = 2
+    found = []
     for letter in 'DEFGHIJKLMNOPQRSTUVWXYZ':
         root = f"{letter}:\\"
         try:
             if ctypes.windll.kernel32.GetDriveTypeW(root) == DRIVE_REMOVABLE:
                 if os.path.exists(root):
-                    return root
+                    found.append(root)
         except Exception:
             pass
-    return ''
+    return found
+
+
+def _detect_pendrive() -> str:
+    """Return drive letter of first connected removable USB drive, or empty string."""
+    drives = _detect_pendrives()
+    return drives[0] if drives else ''
 
 def _cleanup_pendrive_backups(folder: str, protected: set):
     """Same rules as Drive cleanup:
@@ -692,10 +898,12 @@ def _cleanup_pendrive_backups(folder: str, protected: set):
             except Exception:
                 pass
 
-def _do_pendrive_backup(gz_path: str, filename: str, store_name: str, protected: set):
-    drive = _detect_pendrive()
+def _do_pendrive_backup(gz_path: str, filename: str, store_name: str, protected: set,
+                        drive: str = '') -> str:
+    """Copy the snapshot to a USB stick. Returns 'ok' | 'no_drive' | 'failed'."""
+    drive = drive or _detect_pendrive()
     if not drive:
-        return
+        return 'no_drive'
     safe_name = _drive_subfolder_name(store_name)
     dest_dir = os.path.join(drive, 'SatpudaCore_Backup', safe_name)
     try:
@@ -703,16 +911,76 @@ def _do_pendrive_backup(gz_path: str, filename: str, store_name: str, protected:
         shutil.copy2(gz_path, os.path.join(dest_dir, filename))
         _cleanup_pendrive_backups(dest_dir, protected)
         _logger.info(f"Pendrive backup OK - {filename} -> {drive}")
+        return 'ok'
     except Exception as e:
         _logger.error(f"Pendrive backup failed: {e}")
+        return 'failed'
+
+
+def _snapshot_db_for_backup(src_path: str, dst_path: str) -> None:
+    """Copy veterinary.db including recent WAL writes while the app is still open."""
+    import sqlite3
+    abs_src = os.path.abspath(src_path)
+    try:
+        src = sqlite3.connect(f'file:{abs_src}?mode=ro', uri=True, timeout=60)
+        try:
+            dst = sqlite3.connect(dst_path)
+            try:
+                src.backup(dst)
+            finally:
+                dst.close()
+        finally:
+            src.close()
+        return
+    except Exception as e:
+        _logger.warning(f"SQLite backup API failed, falling back to WAL checkpoint: {e}")
+    conn = sqlite3.connect(abs_src, timeout=60)
+    try:
+        conn.execute('PRAGMA wal_checkpoint(FULL)')
+    finally:
+        conn.close()
+    shutil.copy2(src_path, dst_path)
 
 
 # Core backup logic
-def _do_backup(force: bool = False, trigger: str = 'open', on_error=None):
-    """Run a backup.
+def _backup_result(status: str, code: str, message: str, **extra) -> dict:
+    """The answer _do_backup hands back to whoever asked for the backup.
+
+    The desktop screen used to guess the outcome from the last line of
+    backup_log.txt, failing only on the substrings "fail" and "error" -- so
+    "Backup skipped - backup_config.dat missing or invalid." was shown to the
+    shop as a green "Backup finished." A result the caller can read means the
+    screen says what happened, and it keeps working if logging is ever turned
+    off in a release profile (core/log_policy.py), which would leave the log
+    empty and the old guess with nothing at all to read.
+    """
+    out = {
+        'ok': status == 'ok',
+        'status': status,          # 'ok' | 'skipped' | 'error'
+        'code': code,
+        'message': message,
+        'drive': '',               # 'ok'|'failed'|'not_configured'|'no_internet'|'no_creds'|''
+        'pendrive': '',            # 'ok'|'failed'|'no_drive'|''
+        'filename': '',
+        'store_name': '',
+        'trigger': '',
+    }
+    out.update(extra)
+    return out
+
+
+def _do_backup(force: bool = False, trigger: str = 'open', on_error=None) -> dict:
+    """Run a backup. Returns a result dict (see _backup_result).
+
     force=False  → skip if a backup ran within _DEDUP_MINUTES (used on app open).
     force=True   → always run (used on app close and hourly scheduler).
-    trigger      → 'open' | 'close' | 'hourly'  — determines which slot to fill.
+    trigger      → 'open' | 'close' | 'hourly' | 'manual' — which slot to fill.
+
+    The Drive folder id no longer gates the whole routine. It used to: a PC with
+    no folder configured returned here before the snapshot was even taken, so it
+    got no USB copy either, and the one message that named the missing folder
+    was written to a log nobody reads. A shop with a pendrive and no internet is
+    a normal shop; its local copy does not depend on Google.
     """
     global _last_backup_time
     if getattr(sys, 'frozen', False):
@@ -721,24 +989,109 @@ def _do_backup(force: bool = False, trigger: str = 'open', on_error=None):
         except Exception:
             pass
     tmp_dir = None
+    online_tmp = None
     try:
+        sync_backup_config_to_active_store()
 
         # On-open dedup: skip if app was just closed and reopened within 5 min
         if not force and _last_backup_time is not None:
             elapsed = (datetime.now() - _last_backup_time).total_seconds() / 60
             if elapsed < _DEDUP_MINUTES:
                 _logger.info(f"On-open backup skipped - last backup was {elapsed:.1f} min ago.")
-                return
+                return _backup_result(
+                    'skipped', 'recent',
+                    f"Backup skipped - one ran {elapsed:.0f} min ago.",
+                    trigger=trigger,
+                )
 
         cfg = _read_backup_config()
-        if not cfg or not cfg.get('folder_id'):
-            _logger.info("Backup skipped - backup_config.dat missing or invalid.")
-            return
+        folder_id = (cfg.get('folder_id') or '').strip()
+        usb_root = _detect_pendrive()
+        if not folder_id and not usb_root:
+            # Nowhere to put it. Say so plainly, and do not spend an Online
+            # store's server round-trip materialising a snapshot with no home.
+            _logger.info(
+                "Backup skipped - no Drive folder configured and no USB drive connected."
+            )
+            return _backup_result(
+                'skipped', 'no_destination',
+                "Backup skipped: no Google Drive folder is set for this PC and no "
+                "USB drive is connected.\n"
+                "Settings → Data & System → Administrator → Drive folder ID, or "
+                "plug in a pendrive.",
+                drive='not_configured', pendrive='no_drive', trigger=trigger,
+            )
 
         db = _db_path()
+
+        # An Online store keeps its data on the SERVER. The local veterinary.db
+        # is either absent or frozen at whatever it held before the store went
+        # online, so backing it up captured nothing new -- one store's last
+        # backup held 4,142 sales while the server had moved on to 4,410, and a
+        # store with no local file at all was skipped silently. Materialise the
+        # server store into a throwaway database and back THAT up instead.
+        try:
+            from core.sync_prefs import is_online_mode
+
+            _is_online = bool(is_online_mode())
+        except Exception:
+            _is_online = False
+
+        if _is_online:
+            try:
+                from core.online_migrate import download_store_for_offline
+
+                online_tmp = tempfile.mkdtemp(prefix='satpuda_backup_online_')
+                snap = os.path.join(online_tmp, 'veterinary.db')
+                res = download_store_for_offline(
+                    db_path=snap, preserve_sync_state=True
+                )
+                if res.get('ok') and os.path.exists(snap):
+                    db = snap
+                    _logger.info(
+                        "Backup: captured Online store from server (%s rows).",
+                        res.get('rows'),
+                    )
+                else:
+                    # Do NOT fall back to the local file. For an Online store that
+                    # file is stale or absent, so the fallback uploaded a backup
+                    # that LOOKED current while being months behind -- one store's
+                    # newest backup held 4,142 sales against 4,410 live. Skipping
+                    # is honest; a confidently wrong backup is worse than none.
+                    _logger.error(
+                        "Backup ABORTED: could not capture Online store (%s). "
+                        "Refusing to upload the stale local file.",
+                        res.get('error'),
+                    )
+                    msg = (
+                        "Backup skipped: could not read this store from the "
+                        "server, and the local copy is not current.\n"
+                        f"{res.get('error') or ''}"
+                    )
+                    if on_error:
+                        on_error(msg)
+                    return _backup_result(
+                        'error', 'online_capture_failed', msg, trigger=trigger
+                    )
+            except Exception as exc:
+                _logger.error("Backup ABORTED: online capture failed: %s", exc)
+                msg = (
+                    "Backup skipped: could not read the store from the server.\n"
+                    f"{exc}"
+                )
+                if on_error:
+                    on_error(msg)
+                return _backup_result(
+                    'error', 'online_capture_failed', msg, trigger=trigger
+                )
+
         if not os.path.exists(db):
             _logger.warning("Backup skipped - veterinary.db not found.")
-            return
+            return _backup_result(
+                'skipped', 'no_database',
+                "Backup skipped: this store has no database file yet.",
+                trigger=trigger,
+            )
 
         store_name = get_backup_store_name(cfg)
         ts         = datetime.now().strftime('%Y-%m-%d_%H-%M')
@@ -747,7 +1100,7 @@ def _do_backup(force: bool = False, trigger: str = 'open', on_error=None):
         tmp_dir = tempfile.mkdtemp()
         tmp_db  = os.path.join(tmp_dir, 'veterinary.db')
         tmp_gz  = os.path.join(tmp_dir, filename)
-        shutil.copy2(db, tmp_db)
+        _snapshot_db_for_backup(db, tmp_db)
         with open(tmp_db, 'rb') as f_in, gzip.open(tmp_gz, 'wb') as f_out:
             shutil.copyfileobj(f_in, f_out)
 
@@ -756,36 +1109,343 @@ def _do_backup(force: bool = False, trigger: str = 'open', on_error=None):
         _last_backup_time = datetime.now()
         protected = _protected_filenames()
 
-        # Pendrive backup (always runs, no internet needed)
-        _do_pendrive_backup(tmp_gz, filename, store_name, protected)
+        # Pendrive backup — no internet and no Drive folder needed.
+        pendrive = _do_pendrive_backup(
+            tmp_gz, filename, store_name, protected, drive=usb_root
+        )
+
+        def _done(status, code, message, drive_state):
+            return _backup_result(
+                status, code, message, drive=drive_state, pendrive=pendrive,
+                filename=filename, store_name=store_name, trigger=trigger,
+            )
+
+        usb_note = (
+            f"\nUSB copy saved to SatpudaCore_Backup on {usb_root}."
+            if pendrive == 'ok' else ''
+        )
+
+        if not folder_id:
+            _logger.info(
+                "Drive upload skipped - no Drive folder configured for this PC. "
+                "Local USB copy: %s", pendrive,
+            )
+            return _done(
+                'ok' if pendrive == 'ok' else 'skipped',
+                'drive_not_configured',
+                "No Google Drive folder is set for this PC, so nothing was "
+                "uploaded.\nSettings → Data & System → Administrator → Drive "
+                "folder ID." + usb_note,
+                'not_configured',
+            )
 
         # Google Drive backup (only if internet available)
         if not _is_internet_available():
             _logger.info("Drive backup skipped - no internet.")
-            return
+            return _done(
+                'ok' if pendrive == 'ok' else 'skipped', 'no_internet',
+                "No internet connection, so nothing was uploaded to Google "
+                "Drive." + usb_note,
+                'no_internet',
+            )
 
         token_data = _read_oauth_token()
         if not token_data or not token_data.get('refresh_token'):
             _logger.info("Drive backup skipped - backup_creds.dat missing or invalid.")
-            return
+            return _done(
+                'ok' if pendrive == 'ok' else 'skipped', 'no_creds',
+                "Google Drive credentials are missing or invalid on this PC "
+                "(backup_creds.dat)." + usb_note,
+                'no_creds',
+            )
 
         try:
             service   = _get_drive_service(token_data)
-            subfolder = _ensure_store_subfolder(service, cfg['folder_id'], store_name)
+            subfolder = _ensure_store_subfolder(service, folder_id, store_name)
             _upload_file(service, tmp_gz, subfolder, filename)
             _cleanup_old_backups(service, subfolder, protected)
-            _logger.info(f"Backup OK [{trigger}] - {filename} -> {store_name}")
+            stats = _sale_stats(tmp_db)
+            _logger.info(
+                f"Backup OK [{trigger}] - {filename} -> {store_name} "
+                f"({stats['count']} sales, latest {stats['latest']})"
+            )
+            return _done(
+                'ok', 'ok',
+                f"Backup OK - {filename} -> {store_name} "
+                f"({stats['count']} sales, latest {stats['latest']})" + usb_note,
+                'ok',
+            )
         except Exception as drive_err:
             err_msg = str(drive_err)
             _logger.error(f"Backup Drive error: {err_msg}")
             if on_error:
-                on_error(err_msg)
+                on_error(
+                    f"Google Drive upload failed: {err_msg}\n"
+                    "If a USB drive is connected, check SatpudaCore_Backup on the pendrive."
+                )
+            return _done(
+                'error', 'drive_failed',
+                _drive_error_hint(err_msg) + usb_note,
+                'failed',
+            )
 
     except Exception as e:
         _logger.error(f"Backup failed: {e}")
+        return _backup_result('error', 'failed', f"Backup failed: {e}", trigger=trigger)
     finally:
         if tmp_dir:
             shutil.rmtree(tmp_dir, ignore_errors=True)
+        if online_tmp:
+            shutil.rmtree(online_tmp, ignore_errors=True)
+
+
+def _drive_error_hint(err_msg: str) -> str:
+    """Turn a Drive exception into something a shop can act on.
+
+    The same wording Classic shows (ui/settings/settings_tabs/database_tab.py),
+    kept here so both front-ends say one thing.
+    """
+    low = (err_msg or '').lower()
+    if 'disabled_client' in low:
+        return ("Google Drive upload failed: the OAuth client is disabled. "
+                "This needs a new build from the developer.")
+    if '404' in low or 'not found' in low:
+        return ("Google Drive upload failed: folder not found. Check the Drive "
+                "folder ID in Settings → Data & System → Administrator.")
+    if '403' in low:
+        return ("Google Drive upload failed: no access to that Drive folder. "
+                "Share it with the backup Google account.")
+    if 'timed out' in low or 'timeout' in low or '10054' in low:
+        return ("Google Drive upload timed out or the connection dropped. Try "
+                "again on a stable connection.")
+    return f"Google Drive upload failed: {err_msg}"
+
+
+def _sale_stats(db_path: str) -> dict:
+    """Return counts used for backup/restore verification messages."""
+    out = {
+        'count': 0,
+        'latest': '—',
+        'medicines': 0,
+        'customers': 0,
+        'purchases': 0,
+    }
+    try:
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        try:
+            cur = conn.cursor()
+            cur.execute('SELECT COUNT(*) FROM sales')
+            out['count'] = int(cur.fetchone()[0] or 0)
+            cur.execute('SELECT bill_no FROM sales ORDER BY id DESC LIMIT 1')
+            row = cur.fetchone()
+            out['latest'] = row[0] if row and row[0] else '—'
+            for table, key in (
+                ('medicines', 'medicines'),
+                ('customers', 'customers'),
+                ('purchases', 'purchases'),
+            ):
+                try:
+                    cur.execute(f'SELECT COUNT(*) FROM {table}')
+                    out[key] = int(cur.fetchone()[0] or 0)
+                except Exception:
+                    pass
+            return out
+        finally:
+            conn.close()
+    except Exception:
+        return out
+
+
+def _close_all_db_users(extra_conn=None) -> None:
+    """Stop pollers and close every known open connection before file replace."""
+    try:
+        from core.sync_coordinator import stop_online_sync
+        stop_online_sync()
+    except Exception:
+        pass
+    try:
+        from core.desktop_sync_launch import stop_desktop_online_sync
+        stop_desktop_online_sync()
+    except Exception:
+        pass
+    if extra_conn is not None:
+        try:
+            extra_conn.close()
+        except Exception:
+            pass
+    try:
+        from core import desktop_api as dap
+        old = dap._db.get("conn")
+        dap._db["conn"] = None
+        if old is not None and old is not extra_conn:
+            try:
+                old.close()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def _after_restore_sync_policy() -> None:
+    """Treat restored local DB as source of truth until user Pull/Push manually.
+
+    Clears incremental watermarks and stamps "now" so the Online poller does
+    not immediately overwrite the Drive restore with older/newer server rows.
+    """
+    try:
+        from core.sync_bootstrap import clear_pending_bootstrap, mark_bootstrap_done
+        clear_pending_bootstrap()
+        mark_bootstrap_done()
+    except Exception:
+        pass
+    try:
+        from core.sync_watermarks import clear_all, seed_all_now
+        clear_all()
+        seed_all_now()
+    except Exception:
+        pass
+
+
+def _is_drive_backup_filename(name: str) -> bool:
+    """True for SatpudaCore_*.db.gz or legacy plain SatpudaCore_*.db."""
+    n = (name or '').strip()
+    if not n.lower().startswith('satpudacore_'):
+        return False
+    lower = n.lower()
+    return lower.endswith('.db.gz') or lower.endswith('.db')
+
+
+def _backup_name_sort_key(item) -> str:
+    name = item.get('name', '') if isinstance(item, dict) else str(item or '')
+    base = name
+    for suffix in ('.db.gz', '.db'):
+        if base.lower().endswith(suffix):
+            base = base[: -len(suffix)]
+            break
+    parts = base.split('_', 2)
+    if len(parts) >= 3 and parts[0] == 'SatpudaCore':
+        return parts[1] + '_' + parts[2]
+    if isinstance(item, dict):
+        return item.get('modifiedTime', '') or ''
+    return ''
+
+
+def _looks_like_gzip(path: str) -> bool:
+    try:
+        with open(path, 'rb') as f:
+            return f.read(2) == b'\x1f\x8b'
+    except Exception:
+        return False
+
+
+def _looks_like_sqlite(path: str) -> bool:
+    try:
+        with open(path, 'rb') as f:
+            return f.read(16).startswith(b'SQLite format 3')
+    except Exception:
+        return False
+
+
+def _materialize_backup_file(src_path: str, db_path: str) -> bool:
+    """Write a usable SQLite file to db_path from .db.gz or plain .db (possibly misnamed)."""
+    try:
+        if os.path.getsize(src_path) < 100:
+            return False
+        name = os.path.basename(src_path).lower()
+        if name.endswith('.db.gz') or _looks_like_gzip(src_path):
+            with gzip.open(src_path, 'rb') as f_in, open(db_path, 'wb') as f_out:
+                shutil.copyfileobj(f_in, f_out)
+        else:
+            shutil.copy2(src_path, db_path)
+        if not os.path.isfile(db_path) or os.path.getsize(db_path) < 100:
+            return False
+        if not _looks_like_sqlite(db_path):
+            # Some older uploads were gzip with a plain .db name already handled above;
+            # reject non-sqlite payloads.
+            return False
+        return True
+    except Exception as e:
+        _logger.error(f"Failed to materialize backup {src_path}: {e}")
+        return False
+
+
+def _upgrade_restored_db(db_path: str) -> None:
+    """Run current schema migrations on an old restored backup before it goes live."""
+    import sqlite3
+    conn = sqlite3.connect(db_path, timeout=60)
+    try:
+        conn.execute('PRAGMA busy_timeout=60000')
+        from core.db_setup import initialise
+        initialise(conn)
+        conn.commit()
+        # Stock is NOT recomputed here any more.
+        #
+        # A restore must reproduce the file it was given, not reinterpret it.
+        # rebuild_stock_from_ledger derives every medicine's stock from purchase
+        # and sale rows, so any quantity that has no ledger behind it -- opening
+        # stock typed in when the shop started, an imported inventory, a manual
+        # correction -- was silently reset to zero on EVERY Sync from Drive. The
+        # backup held the right numbers; the restore threw them away.
+        #
+        # If a store's stock really does look wrong, rebuild it deliberately from
+        # the Inventory tools, where the user can see what changed.
+        _logger.info("Drive restore: keeping stock exactly as backed up")
+        try:
+            conn.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+            conn.commit()
+        except Exception:
+            pass
+    finally:
+        conn.close()
+
+
+def _remove_sqlite_sidecars(db_path: str) -> None:
+    """Delete -wal/-shm/-journal next to db_path so a replaced DB is not mixed with old WAL."""
+    for suffix in ('-wal', '-shm', '-journal'):
+        side = db_path + suffix
+        try:
+            if os.path.isfile(side):
+                os.remove(side)
+        except OSError:
+            pass
+
+
+def _replace_store_database(src_db: str, dest_db: str) -> None:
+    """Atomically replace store veterinary.db and clear leftover WAL/SHM files."""
+    os.makedirs(os.path.dirname(dest_db) or '.', exist_ok=True)
+    _remove_sqlite_sidecars(dest_db)
+    tmp_dest = dest_db + '.restore_tmp'
+    try:
+        if os.path.isfile(tmp_dest):
+            os.remove(tmp_dest)
+    except OSError:
+        pass
+    shutil.copy2(src_db, tmp_dest)
+    _remove_sqlite_sidecars(dest_db)
+    os.replace(tmp_dest, dest_db)
+    _remove_sqlite_sidecars(dest_db)
+
+
+def _list_drive_files_in_folder(service, folder_id: str) -> list:
+    """List all non-trashed files in a Drive folder (paginated)."""
+    files = []
+    page_token = None
+    while True:
+        kwargs = dict(
+            q=f"'{folder_id}' in parents and trashed=false and name contains 'SatpudaCore_'",
+            fields='nextPageToken, files(id, name, modifiedTime, size)',
+            orderBy='modifiedTime desc',
+            pageSize=100,
+        )
+        if page_token:
+            kwargs['pageToken'] = page_token
+        res = service.files().list(**kwargs).execute()
+        files.extend(res.get('files', []) or [])
+        page_token = res.get('nextPageToken')
+        if not page_token:
+            break
+    return files
 
 
 def _find_store_subfolder_id(service, parent_folder_id: str, store_name: str) -> str:
@@ -794,28 +1454,45 @@ def _find_store_subfolder_id(service, parent_folder_id: str, store_name: str) ->
          f"and name='{safe_name}' "
          f"and mimeType='application/vnd.google-apps.folder' "
          f"and trashed=false")
-    res = service.files().list(q=q, fields='files(id)').execute()
-    files = res.get('files', [])
-    return files[0]['id'] if files else ''
+    res = service.files().list(q=q, fields='files(id, createdTime)').execute()
+    return _pick_store_subfolder(res.get('files', []))
 
 
-def restore_latest_backup_from_drive(store_name: str) -> tuple:
-    """Download the most recent Drive backup for store_name.
-    Returns (True, dest_db_path) or (False, error_message)."""
+def _drive_auth_for_restore():
+    """Shared pre-checks for list/restore. Returns (service, cfg) or (None, error_msg)."""
     cfg = _read_backup_config()
     if not cfg or not cfg.get('folder_id'):
-        return False, 'Backup is not configured. Set the Drive folder ID in Administrator settings.'
+        return None, (
+            'No Google Drive folder is set for this PC.\n'
+            'Settings → Data & System → Administrator → Drive folder ID, '
+            'or restore from a USB backup instead.'
+        )
 
     if not _is_internet_available():
-        return False, 'No internet connection. Connect and try again.'
+        return None, 'No internet connection. Connect and try again.'
 
     token_data = _read_oauth_token()
     if not token_data or not token_data.get('refresh_token'):
-        return False, 'Backup credentials are missing or invalid.'
+        return None, 'Backup credentials are missing or invalid.'
 
-    tmp_dir = None
     try:
         service = _get_drive_service(token_data)
+    except Exception as e:
+        return None, str(e)
+    return service, cfg
+
+
+def list_drive_backups(store_name: str) -> tuple:
+    """List Drive backup files for a store (newest first).
+
+    Returns (True, [{'id','name','modifiedTime','label'}, ...]) or (False, error_message).
+    Accepts both current .db.gz and legacy plain .db backups.
+    """
+    service, cfg_or_err = _drive_auth_for_restore()
+    if service is None:
+        return False, cfg_or_err
+    cfg = cfg_or_err
+    try:
         subfolder_id = _find_store_subfolder_id(service, cfg['folder_id'], store_name)
         if not subfolder_id:
             return False, (
@@ -823,45 +1500,134 @@ def restore_latest_backup_from_drive(store_name: str) -> tuple:
                 f'Expected folder: {_drive_subfolder_name(store_name)}'
             )
 
-        res = service.files().list(
-            q=f"'{subfolder_id}' in parents and trashed=false and name contains 'SatpudaCore_'",
-            fields='files(id, name)',
-            orderBy='name desc',
-        ).execute()
-        files = [f for f in res.get('files', []) if f.get('name', '').endswith('.db.gz')]
+        raw = _list_drive_files_in_folder(service, subfolder_id)
+        files = [f for f in raw if _is_drive_backup_filename(f.get('name', ''))]
+        if not files:
+            return False, (
+                f'No backup files found in Drive folder for store "{store_name}".\n'
+                'Ask the admin device to run at least one backup first.\n'
+                'Supported names: SatpudaCore_YYYY-MM-DD_HH-MM.db.gz or .db'
+            )
+
+        files.sort(key=_backup_name_sort_key, reverse=True)
+        out = []
+        for f in files:
+            name = f.get('name', '')
+            mod = (f.get('modifiedTime') or '')[:19].replace('T', ' ')
+            label = f"{name}" + (f"  ({mod} UTC)" if mod else "")
+            out.append({
+                'id': f.get('id'),
+                'name': name,
+                'modifiedTime': f.get('modifiedTime', ''),
+                'size': f.get('size'),
+                'label': label,
+            })
+        return True, out
+    except Exception as e:
+        _logger.error(f"List Drive backups failed: {e}")
+        return False, str(e)
+
+
+def _download_drive_backup_file(service, file_meta: dict, tmp_dir: str) -> tuple:
+    """Download one Drive backup and materialize to veterinary.db.
+    Returns (True, result_dict) or (False, None)."""
+    from googleapiclient.http import MediaIoBaseDownload
+
+    name = file_meta.get('name', 'backup.db.gz')
+    src_path = os.path.join(tmp_dir, name)
+    db_path = os.path.join(tmp_dir, 'veterinary.db')
+
+    request = service.files().get_media(fileId=file_meta['id'])
+    with open(src_path, 'wb') as fh:
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+
+    if not _materialize_backup_file(src_path, db_path):
+        return False, None
+
+    stats = _sale_stats(db_path)
+    if stats['count'] <= 0 and os.path.getsize(db_path) <= 500_000:
+        # Allow old but valid DBs that may have few sales; only skip tiny empty shells.
+        if os.path.getsize(db_path) < 50_000 and stats['count'] == 0:
+            return False, None
+
+    try:
+        _upgrade_restored_db(db_path)
+    except Exception as e:
+        _logger.error(f"Schema upgrade after restore failed for {name}: {e}")
+        return False, None
+    # Re-read counts after upgrade/rebuild so UI message matches live file.
+    stats = _sale_stats(db_path)
+    return True, {
+        'db_path': db_path,
+        'backup_file': name,
+        'tmp_dir': tmp_dir,
+        'sale_count': stats['count'],
+        'medicine_count': stats.get('medicines', 0),
+        'customer_count': stats.get('customers', 0),
+        'purchase_count': stats.get('purchases', 0),
+        'latest_bill': stats.get('latest', '—'),
+    }
+
+
+def restore_backup_from_drive(store_name: str, file_id: str = None) -> tuple:
+    """Download a specific Drive backup (or the newest usable one if file_id is None).
+
+    Returns (True, dest_info_dict) or (False, error_message).
+    dest_info_dict includes db_path, backup_file, store_name, tmp_dir.
+    """
+    service, cfg_or_err = _drive_auth_for_restore()
+    if service is None:
+        return False, cfg_or_err
+    cfg = cfg_or_err
+
+    tmp_dir = None
+    try:
+        subfolder_id = _find_store_subfolder_id(service, cfg['folder_id'], store_name)
+        if not subfolder_id:
+            return False, (
+                f'No backup folder found on Drive for store "{store_name}".\n'
+                f'Expected folder: {_drive_subfolder_name(store_name)}'
+            )
+
+        raw = _list_drive_files_in_folder(service, subfolder_id)
+        files = [f for f in raw if _is_drive_backup_filename(f.get('name', ''))]
         if not files:
             return False, (
                 f'No backup files found in Drive folder for store "{store_name}".\n'
                 'Ask the admin device to run at least one backup first.'
             )
 
-        latest = files[0]['name']
+        files.sort(key=_backup_name_sort_key, reverse=True)
+
+        if file_id:
+            chosen = [f for f in files if f.get('id') == file_id]
+            if not chosen:
+                return False, 'Selected backup was not found on Drive. Refresh the list and try again.'
+            candidates = chosen
+        else:
+            candidates = files
+
         tmp_dir = tempfile.mkdtemp()
-        gz_path = os.path.join(tmp_dir, latest)
-        db_path = os.path.join(tmp_dir, 'veterinary.db')
+        last_err = None
+        for candidate in candidates:
+            ok, result = _download_drive_backup_file(service, candidate, tmp_dir)
+            if ok and result:
+                _logger.info(f"Restore OK - {result['backup_file']} for store {store_name}")
+                result['store_name'] = store_name
+                return True, result
+            last_err = candidate.get('name')
 
-        from googleapiclient.http import MediaIoBaseDownload
-        import io
-        request = service.files().get_media(fileId=files[0]['id'])
-        with open(gz_path, 'wb') as fh:
-            downloader = MediaIoBaseDownload(fh, request)
-            done = False
-            while not done:
-                _, done = downloader.next_chunk()
-
-        with gzip.open(gz_path, 'rb') as f_in, open(db_path, 'wb') as f_out:
-            shutil.copyfileobj(f_in, f_out)
-
-        if not os.path.isfile(db_path) or os.path.getsize(db_path) < 100:
-            return False, 'Downloaded backup file is empty or corrupt.'
-
-        _logger.info(f"Restore OK - {latest} for store {store_name}")
-        return True, {
-            'db_path': db_path,
-            'backup_file': latest,
-            'store_name': store_name,
-            'tmp_dir': tmp_dir,
-        }
+        if tmp_dir:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            tmp_dir = None
+        return False, (
+            f'Drive backup for "{store_name}" looks empty or corrupt'
+            + (f' ({last_err}).' if last_err else '.')
+            + '\nTry another file from the backup list, or run Backup Now from a device that has your data.'
+        )
     except Exception as e:
         _logger.error(f"Restore failed: {e}")
         if tmp_dir:
@@ -869,32 +1635,81 @@ def restore_latest_backup_from_drive(store_name: str) -> tuple:
         return False, str(e)
 
 
-def restore_latest_backup_to_store(store_name: str, store_key: str, *, close_conn=None) -> tuple:
-    """Restore Drive backup into the store's local veterinary.db.
-    Pass close_conn (sqlite3.Connection) so the file can be replaced on Windows."""
-    ok, result = restore_latest_backup_from_drive(store_name)
+def restore_latest_backup_from_drive(store_name: str) -> tuple:
+    """Download the most recent usable Drive backup for store_name.
+    Returns (True, dest_info_dict) or (False, error_message)."""
+    return restore_backup_from_drive(store_name, file_id=None)
+
+
+def restore_latest_backup_to_store(
+    store_name: str, store_key: str, *, close_conn=None, file_id: str = None,
+) -> tuple:
+    """Restore a Drive backup into the store's local veterinary.db.
+
+    Closes every live DB user (API conn + poller), replaces the file, clears
+    Online watermarks so the poller cannot overwrite the restore, and returns
+    verification counts.
+    """
+    ok, result = restore_backup_from_drive(store_name, file_id=file_id)
     if not ok:
         return False, result
+    return _apply_restored_db(result, store_name, store_key, close_conn=close_conn)
 
+
+def _apply_restored_db(result: dict, store_name: str, store_key: str,
+                       *, close_conn=None) -> tuple:
+    """Put a downloaded/copied backup in place as the store's veterinary.db.
+
+    Shared by the Drive restore and the USB restore so a pendrive copy lands
+    with exactly the same care: live connections closed, WAL sidecars cleared,
+    Online watermarks reset, and the row counts verified afterwards.
+    """
     tmp_dir = result.get('tmp_dir')
     try:
         from core.store_manager import get_store_db_path, get_store_dir
         get_store_dir(store_key)
         dest = get_store_db_path(store_key)
 
-        if close_conn is not None:
-            try:
-                close_conn.close()
-            except Exception:
-                pass
+        # Must close the live desktop/Tk connection + stop Online poller first,
+        # otherwise Windows keeps the old DB and the UI looks "not updated".
+        _close_all_db_users(extra_conn=close_conn)
 
-        shutil.copy2(result['db_path'], dest)
+        before = _sale_stats(dest) if os.path.isfile(dest) else {'count': 0}
+        _replace_store_database(result['db_path'], dest)
+        after = _sale_stats(dest)
+        _after_restore_sync_policy()
+
+        expected = int(result.get('sale_count') or 0)
+        got = int(after.get('count') or 0)
+        if expected and got and got < expected:
+            return False, (
+                f"Restore incomplete: backup had {expected} sales but local DB "
+                f"now has {got}. Close the app fully and try again."
+            )
+
         msg = (
             f"Store: {store_name}\n"
             f"Backup file: {result.get('backup_file', '')}\n"
-            f"Local database: {dest}"
+            f"Local database: {dest}\n"
+            f"Before: {before.get('count', 0)} sales → After: {got} sales "
+            f"(latest {after.get('latest', '—')})\n"
+            f"Medicines: {after.get('medicines', 0)} · "
+            f"Customers: {after.get('customers', 0)} · "
+            f"Purchases: {after.get('purchases', 0)}\n"
+            "Restart the app to load the restored database.\n"
+            "Online poller will not auto-overwrite this restore "
+            "(use Pull/Push manually if needed)."
         )
-        return True, msg
+        return True, {
+            "message": msg,
+            "sale_count": got,
+            "medicine_count": after.get('medicines', 0),
+            "customer_count": after.get('customers', 0),
+            "purchase_count": after.get('purchases', 0),
+            "backup_file": result.get('backup_file', ''),
+            "db_path": dest,
+            "needs_restart": True,
+        }
     except Exception as e:
         return False, str(e)
     finally:
@@ -902,8 +1717,157 @@ def restore_latest_backup_to_store(store_name: str, store_key: str, *, close_con
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-def sync_active_store_from_drive(*, close_conn=None) -> tuple:
-    """One-click sync: replace the active store DB with the latest Drive backup."""
+# ── Restore from a USB stick / local folder ──────────────────────────────────
+#
+# Backup has written to a pendrive since the beginning; restore could only ever
+# read from Google Drive. So the copy on the stick in the shop's drawer -- the
+# one that survives a dead internet connection, a disabled OAuth client, or a
+# PC that was never given a Drive folder -- could not be put back without the
+# developer. It goes through exactly the same _apply_restored_db as the Drive
+# path, so the safety around it (close connections, clear WAL, reset Online
+# watermarks, verify counts) is not a second implementation.
+def _local_backup_dirs_for_store(store_name: str, roots=None) -> list:
+    """Every SatpudaCore_Backup/<store>/ folder on the given roots."""
+    safe_name = _drive_subfolder_name(store_name)
+    out = []
+    for root in (roots if roots is not None else _detect_pendrives()):
+        if not root:
+            continue
+        folder = os.path.join(root, 'SatpudaCore_Backup', safe_name)
+        if os.path.isdir(folder):
+            out.append(folder)
+        elif os.path.isdir(root) and os.path.basename(
+            os.path.normpath(root)
+        ) == safe_name:
+            # The owner may point straight at the store folder.
+            out.append(root)
+    return out
+
+
+def list_local_backups(store_name: str, roots=None) -> tuple:
+    """List USB / local backup files for a store, newest first.
+
+    Returns (True, [{'path','name','label','size','modifiedTime','source'}, ...])
+    or (False, error_message).
+    """
+    folders = _local_backup_dirs_for_store(store_name, roots)
+    if not folders:
+        drives = roots if roots is not None else _detect_pendrives()
+        if not drives:
+            return False, (
+                'No USB drive is connected. Plug in the pendrive that holds the '
+                'backups and try again.'
+            )
+        return False, (
+            f'No backup folder for store "{store_name}" on the connected drive(s).\n'
+            f'Expected: SatpudaCore_Backup\\{_drive_subfolder_name(store_name)}'
+        )
+
+    items = []
+    for folder in folders:
+        try:
+            names = os.listdir(folder)
+        except OSError:
+            continue
+        for name in names:
+            if not _is_drive_backup_filename(name):
+                continue
+            full = os.path.join(folder, name)
+            if not os.path.isfile(full):
+                continue
+            try:
+                stat = os.stat(full)
+            except OSError:
+                continue
+            mod = datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M')
+            items.append({
+                'path': full,
+                'name': name,
+                'size': stat.st_size,
+                'modifiedTime': mod,
+                'source': folder,
+                'label': f"{name}  ({mod})",
+            })
+    if not items:
+        return False, (
+            f'No backup files found on the USB drive for store "{store_name}".\n'
+            'Supported names: SatpudaCore_YYYY-MM-DD_HH-MM.db.gz or .db'
+        )
+    items.sort(key=_backup_name_sort_key, reverse=True)
+    return True, items
+
+
+def _read_local_backup_file(path: str, tmp_dir: str) -> tuple:
+    """Copy one local backup into tmp_dir and materialize veterinary.db."""
+    name = os.path.basename(path)
+    src_path = os.path.join(tmp_dir, name)
+    db_path = os.path.join(tmp_dir, 'veterinary.db')
+    shutil.copy2(path, src_path)
+
+    if not _materialize_backup_file(src_path, db_path):
+        return False, None
+    stats = _sale_stats(db_path)
+    if os.path.getsize(db_path) < 50_000 and stats['count'] == 0:
+        return False, None
+    try:
+        _upgrade_restored_db(db_path)
+    except Exception as e:
+        _logger.error(f"Schema upgrade after USB restore failed for {name}: {e}")
+        return False, None
+    stats = _sale_stats(db_path)
+    return True, {
+        'db_path': db_path,
+        'backup_file': name,
+        'tmp_dir': tmp_dir,
+        'sale_count': stats['count'],
+        'medicine_count': stats.get('medicines', 0),
+        'customer_count': stats.get('customers', 0),
+        'purchase_count': stats.get('purchases', 0),
+        'latest_bill': stats.get('latest', '—'),
+    }
+
+
+def restore_local_backup_to_store(store_name: str, store_key: str, *,
+                                  path: str = '', close_conn=None,
+                                  roots=None) -> tuple:
+    """Restore a USB / local backup into the store's veterinary.db.
+
+    path='' picks the newest usable file found on the connected drives.
+    """
+    candidates = []
+    if path:
+        if not os.path.isfile(path):
+            return False, f'Backup file not found: {path}'
+        candidates = [{'path': path, 'name': os.path.basename(path)}]
+    else:
+        ok, listing = list_local_backups(store_name, roots)
+        if not ok:
+            return False, listing
+        candidates = listing
+
+    tmp_dir = tempfile.mkdtemp()
+    last_err = ''
+    for candidate in candidates:
+        ok, result = _read_local_backup_file(candidate['path'], tmp_dir)
+        if ok and result:
+            _logger.info(
+                f"USB restore - {result['backup_file']} for store {store_name}"
+            )
+            result['store_name'] = store_name
+            return _apply_restored_db(
+                result, store_name, store_key, close_conn=close_conn
+            )
+        last_err = candidate.get('name', '')
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    return False, (
+        f'The USB backup for "{store_name}" looks empty or corrupt'
+        + (f' ({last_err}).' if last_err else '.')
+        + '\nTry another file from the list.'
+    )
+
+
+def sync_active_store_from_drive(*, close_conn=None, file_id: str = None) -> tuple:
+    """One-click sync: replace the active store DB with a Drive backup (latest or selected)."""
     try:
         from core.store_manager import get_active_store, get_active_display_name, has_registry
     except Exception as e:
@@ -925,9 +1889,14 @@ def sync_active_store_from_drive(*, close_conn=None) -> tuple:
         from core.store_manager import display_name_key
         store_key = display_name_key(display_name)
 
-    return restore_latest_backup_to_store(
-        display_name, store_key, close_conn=close_conn,
+    ok, result = restore_latest_backup_to_store(
+        display_name, store_key, close_conn=close_conn, file_id=file_id,
     )
+    if not ok:
+        return False, result
+    if isinstance(result, dict):
+        return True, str(result.get("message") or result)
+    return True, str(result)
 
 
 # Public API
@@ -946,17 +1915,38 @@ def run_backup_silently(on_error=None):
     t = threading.Thread(target=lambda: _do_backup(force=True, trigger='hourly', on_error=on_error), daemon=True)
     t.start()
 
-def run_backup_now(manual: bool = False):
+def run_backup_now(manual: bool = False) -> dict:
     """Backup on close (when auto enabled) or manual 'Backup Now' from settings.
-    Waits up to 90 seconds for the backup thread to finish before returning.
+
+    Waits up to 90 seconds for the backup thread to finish, then returns what
+    the backup actually did (see _backup_result). Callers that only want the
+    side effect can keep ignoring the return value.
     """
     if not manual and not is_auto_backup_enabled():
-        return
+        return _backup_result(
+            'skipped', 'auto_disabled',
+            'Automatic backup is turned off for this PC.', trigger='close',
+        )
     trigger = 'manual' if manual else 'close'
-    t = threading.Thread(
-        target=lambda: _do_backup(force=True, trigger=trigger), daemon=True)
+    holder: dict = {}
+
+    def _run():
+        holder['result'] = _do_backup(force=True, trigger=trigger)
+
+    t = threading.Thread(target=_run, daemon=True)
     t.start()
     t.join(timeout=90)
+    if 'result' in holder:
+        return holder['result']
+    if t.is_alive():
+        return _backup_result(
+            'error', 'timeout',
+            'Backup is still running after 90 seconds. Check again in a minute.',
+            trigger=trigger,
+        )
+    return _backup_result(
+        'error', 'failed', 'Backup did not finish.', trigger=trigger
+    )
 
 
 def last_backup_log_message() -> str:

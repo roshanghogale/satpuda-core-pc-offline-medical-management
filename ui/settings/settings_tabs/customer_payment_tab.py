@@ -25,6 +25,8 @@ class CustomerPaymentTab:
         self.conn   = conn
         self.cursor = conn.cursor()
         self._editing_id = None   # None = new, int = editing existing
+        self._last_customer_names: list[str] = []
+        self._reload_busy = False
 
         if parent is not None:
             self.outer = parent
@@ -145,12 +147,96 @@ class CustomerPaymentTab:
         self.note_entry.bind('<Return>', lambda e: self._save())
         outer.bind('<F5>', lambda e: self._save(), add='+')
 
-        self._reload_customers()
+        self._prefetch_and_reload_customers()
         self._load_history()
+        try:
+            from core.store_live_refresh import subscribe as live_sub
+
+            def _on_live(_evt):
+                try:
+                    self.outer.after(350, self._load_history)
+                except Exception:
+                    pass
+
+            self._live_token = live_sub(
+                {"customer_payments", "customers", "sales"},
+                _on_live,
+            )
+        except Exception:
+            self._live_token = None
 
     # -- Helpers --------------------------------------------------------------
 
+    def _apply_customer_names(self, names):
+        names = list(names or [])
+        if names:
+            self._last_customer_names = names
+        try:
+            self.cust_combo.configure(values=self._last_customer_names or names)
+        except Exception:
+            pass
+
+    def _prefetch_and_reload_customers(self):
+        """Prefetch catalog on tab open, then reload dropdown off UI thread."""
+        try:
+            from core.sync_prefs import is_online_mode
+            if is_online_mode():
+                from core.online_catalog import prefetch_hot
+                prefetch_hot()
+        except Exception:
+            pass
+        self._reload_customers()
+
     def _reload_customers(self):
+        try:
+            from core.sync_prefs import is_online_mode
+            if is_online_mode():
+                # Keep last successful names; never fall back to empty local SQLite.
+                if self._last_customer_names:
+                    try:
+                        self.cust_combo.configure(values=self._last_customer_names)
+                    except Exception:
+                        pass
+                if self._reload_busy:
+                    return
+                self._reload_busy = True
+                from core.background_workers import run_in_thread
+                from core.customer_service import COUNTER_SALE
+
+                def _load():
+                    from core.online_catalog import customer_names
+                    return [n for n in customer_names() if n.upper() != COUNTER_SALE]
+
+                def _done(names):
+                    self._reload_busy = False
+                    self._apply_customer_names(names)
+
+                def _err(_exc):
+                    self._reload_busy = False
+                    if self._last_customer_names:
+                        try:
+                            self.cust_combo.configure(values=self._last_customer_names)
+                        except Exception:
+                            pass
+
+                run_in_thread(
+                    _load,
+                    name="CustPayCustomersReload",
+                    root=self.outer,
+                    on_success=_done,
+                    on_error=_err,
+                )
+                return
+        except Exception:
+            # Online must not wipe the combo with empty SQLite.
+            try:
+                from core.sync_prefs import is_online_mode as _online
+                if _online():
+                    if self._last_customer_names:
+                        self.cust_combo.configure(values=self._last_customer_names)
+                    return
+            except Exception:
+                pass
         self.cursor.execute("SELECT name FROM customers ORDER BY name")
         self.cust_combo.configure(values=[r[0] for r in self.cursor.fetchall()])
 
@@ -158,6 +244,28 @@ class CustomerPaymentTab:
         name = self.cust_combo.get().strip()
         if not name:
             return
+        try:
+            from core.sync_prefs import is_online_mode
+            if is_online_mode():
+                from core.online_catalog import find_customer_by_name
+                # Always force-refresh so repaired dues (e.g. Chandu) show immediately.
+                c = find_customer_by_name(name, force=True) or {}
+                due = float(c.get("total_due") or 0)
+                credit = float(c.get("total_credit") or 0)
+                if due > 0:
+                    self.cust_due_var.set(f"Outstanding Due: Rs.{due:.2f}")
+                elif credit > 0:
+                    self.cust_due_var.set(f"Credit Balance: Rs.{credit:.2f}")
+                else:
+                    self.cust_due_var.set("Outstanding Due: Rs.0.00")
+                if due > 0 and not self._editing_id:
+                    self.cash_entry.delete(0, tk.END)
+                    self.cash_entry.insert(0, f"{due:.2f}")
+                    self._update_total()
+                self.cash_entry.focus()
+                return
+        except Exception:
+            pass
         self.cursor.execute(
             "SELECT COALESCE(total_due,0), COALESCE(total_credit,0) "
             "FROM customers WHERE UPPER(name)=UPPER(?) LIMIT 1", (name,))
@@ -186,6 +294,15 @@ class CustomerPaymentTab:
             self.total_var.set("Rs.0.00")
 
     def _get_customer_id(self, name):
+        try:
+            from core.sync_prefs import is_online_mode
+            if is_online_mode():
+                from core.online_catalog import find_customer_by_name
+                c = find_customer_by_name(name) or {}
+                cid = int(c.get("id") or c.get("local_id") or 0)
+                return cid if cid > 0 else None
+        except Exception:
+            pass
         self.cursor.execute(
             "SELECT id FROM customers WHERE UPPER(name)=UPPER(?) LIMIT 1", (name,))
         row = self.cursor.fetchone()
@@ -194,13 +311,10 @@ class CustomerPaymentTab:
     # -- Save -----------------------------------------------------------------
 
     def _save(self):
+        # Online Hybrid A: allow enqueue during short drops (no ensure_can_mutate).
         name = self.cust_combo.get().strip()
         if not name:
             showwarning("Missing", "Please select a customer.")
-            return
-        customer_id = self._get_customer_id(name)
-        if not customer_id:
-            showerror("Not Found", f"Customer '{name}' not found.")
             return
         try:
             cash   = float(self.cash_entry.get() or 0)
@@ -222,7 +336,71 @@ class CustomerPaymentTab:
 
         pdate     = self.date_entry.get().strip() or date.today().strftime('%Y-%m-%d')
         reference = self.ref_entry.get().strip()
+        # Saved as typed; a date after today is only pointed out.
+        try:
+            from core.save_warnings import payment_warnings
+
+            date_note = "".join(f"\n\nPlease check: {w}" for w in payment_warnings(pdate))
+        except Exception:
+            date_note = ""
         note      = self.note_entry.get().strip()
+
+        try:
+            from core.sync_prefs import is_online_mode
+            if is_online_mode():
+                from core.desktop_settings_service import save_payment
+                from core.online_catalog import invalidate
+                data = save_payment(self.conn, {
+                    "kind": "customer",
+                    "party": name,
+                    "cash": cash,
+                    "online": online,
+                    "date": pdate,
+                    "reference": reference,
+                    "note": note,
+                })
+                invalidate("customers")
+                due = float((data or {}).get("due_after") or 0)
+                credit = 0.0
+                if (data or {}).get("due_after") is None:
+                    due = 0.0
+                    for p in (data or {}).get("parties") or []:
+                        if str(p.get("name") or "").strip().upper() == name.upper():
+                            due = float(p.get("due") or 0)
+                            credit = float(p.get("credit") or 0)
+                            break
+                # Payment already saved — UI/dialog errors must not look like save failures.
+                try:
+                    self.cust_due_var.set(f"Outstanding Due: Rs.{due:.2f}")
+                except Exception:
+                    pass
+                try:
+                    self._clear()
+                except Exception:
+                    pass
+                try:
+                    self._load_history()
+                except Exception:
+                    pass
+                try:
+                    showinfo(
+                        "Success",
+                        f"Payment saved.\n"
+                        f"Amount: Rs.{amount:.2f}  |  Mode: {mode}\n"
+                        f"New Due: Rs.{due:.2f}  |  Credit: Rs.{credit:.2f}" + date_note,
+                        parent=getattr(self, "outer", None),
+                    )
+                except Exception:
+                    pass
+                return
+        except Exception as e:
+            showerror("Error", f"Failed to save payment: {e}", parent=getattr(self, "outer", None))
+            return
+
+        customer_id = self._get_customer_id(name)
+        if not customer_id:
+            showerror("Not Found", f"Customer '{name}' not found.")
+            return
 
         # Read old balance for debug log
         self.cursor.execute(
@@ -248,7 +426,10 @@ class CustomerPaymentTab:
                 """, (customer_id, pdate, amount, mode, cash, online, reference, note))
 
             self.conn.commit()
+            payment_id = self._editing_id or self.cursor.lastrowid
             new_due, new_credit = recalculate_customer_due(self.conn, customer_id)
+            from core.sync_coordinator import after_customer_payment_saved
+            after_customer_payment_saved(self.conn, int(payment_id), customer_id)
 
             print(f"[PAYMENT] customer={name} old_due={old_due:.2f} old_credit={old_credit:.2f} "
                   f"payment={amount:.2f} new_due={new_due:.2f} new_credit={new_credit:.2f}")
@@ -257,7 +438,7 @@ class CustomerPaymentTab:
             showinfo("Success",
                 f"Payment {action}.\n"
                 f"Amount: Rs.{amount:.2f}  |  Mode: {mode}\n"
-                f"New Due: Rs.{new_due:.2f}  |  Credit: Rs.{new_credit:.2f}")
+                f"New Due: Rs.{new_due:.2f}  |  Credit: Rs.{new_credit:.2f}" + date_note)
             self._clear()
             self._load_history()
 
@@ -278,12 +459,32 @@ class CustomerPaymentTab:
                                    f"Delete this payment for {cust_name}?\n"
                                    "Customer balance will be recalculated."):
             return
+        try:
+            from core.sync_prefs import is_online_mode
+            if is_online_mode():
+                from core.desktop_settings_service import delete_payment
+                from core.online_catalog import invalidate
+                delete_payment(self.conn, {
+                    "kind": "customer",
+                    "id": int(pay_id),
+                    "party": cust_name,
+                })
+                invalidate("customers")
+                showinfo("Deleted", "Payment deleted and balance recalculated.")
+                self._clear()
+                self._load_history()
+                return
+        except Exception as e:
+            showerror("Error", f"Failed to delete: {e}")
+            return
         customer_id = self._get_customer_id(cust_name)
         try:
             self.cursor.execute("DELETE FROM customer_payments WHERE id=?", (pay_id,))
             self.conn.commit()
             if customer_id:
                 recalculate_customer_due(self.conn, customer_id)
+            from core.sync_coordinator import after_customer_payment_deleted
+            after_customer_payment_deleted(self.conn, int(pay_id), customer_id)
             showinfo("Deleted", "Payment deleted and balance recalculated.")
             self._clear()
             self._load_history()
@@ -323,6 +524,59 @@ class CustomerPaymentTab:
     def _load_history(self):
         for item in self.hist_tree.get_children():
             self.hist_tree.delete(item)
+        try:
+            from core.sync_prefs import is_online_mode
+            if is_online_mode():
+                from core.desktop_settings_service import get_payments
+
+                # Optional repair only — must not share import with get_payments
+                # (repair_customer_dues_online does not exist; ImportError used to
+                # abort Online history and fall through to empty local SQLite).
+                try:
+                    from core.desktop_settings_service import repair_customer_dues_online
+
+                    repair_customer_dues_online()
+                except Exception:
+                    pass
+                data = get_payments(self.conn, "customer") or {}
+                total = 0.0
+                for r in data.get("history") or []:
+                    amt = float(r.get("amount") or 0)
+                    total += amt
+                    pay_id = r.get("id") or ""
+                    values = (
+                        pay_id,
+                        r.get("date") or "",
+                        r.get("party") or "",
+                        f"Rs.{float(r.get('cash') or 0):.2f}",
+                        f"Rs.{float(r.get('online') or 0):.2f}",
+                        f"Rs.{amt:.2f}",
+                        r.get("mode") or "",
+                        r.get("reference") or "",
+                        r.get("note") or "",
+                    )
+                    try:
+                        if pay_id not in ("", None):
+                            self.hist_tree.insert("", tk.END, iid=str(pay_id), values=values)
+                        else:
+                            self.hist_tree.insert("", tk.END, values=values)
+                    except Exception:
+                        self.hist_tree.insert("", tk.END, values=values)
+                self.total_paid_var.set(f"Total Paid (all): Rs.{total:.2f}")
+                return
+        except Exception as exc:
+            try:
+                print(f"[customer_payment] online history: {exc}")
+            except Exception:
+                pass
+            # Online must not fall through to empty local SQLite.
+            try:
+                from core.sync_prefs import is_online_mode as _online
+                if _online():
+                    self.total_paid_var.set("Total Paid (all): Rs.0.00")
+                    return
+            except Exception:
+                pass
         self.cursor.execute("""
             SELECT cp.id, cp.payment_date, c.name,
                    cp.cash_amount, cp.online_amount, cp.amount,

@@ -66,6 +66,8 @@ class PurchaseFormMixin:
     # ── top-level builder ─────────────────────────────────────────────────
 
     def _build_interface(self):
+        if hasattr(self, '_build_tab_bar'):
+            self._build_tab_bar(self.parent)
         main_frame = make_scrollable(self.parent)
         self._inner_frame = main_frame
         self._page_canvas = getattr(main_frame, '_canvas', None)
@@ -89,8 +91,9 @@ class PurchaseFormMixin:
         self.supplier_name = SearchableCombo(sf, width=25)
         self.supplier_name.grid(row=0, column=1, padx=5, pady=2)
         self.supplier_name.bind('<<ComboboxSelected>>', self.load_supplier_details)
+        self.supplier_name.bind('<KeyRelease>', self._on_supplier_name_key)
         self.supplier_name.entry.bind('<FocusIn>', lambda e: self.load_suppliers(), add='+')
-        self.supplier_name.next_focus_widget = lambda: self.supplier_address.focus()
+        self.supplier_name.next_focus_widget = self._supplier_name_next_focus
 
         for row, (lbl, attr) in enumerate([
             ("Address:",    'supplier_address'),
@@ -127,6 +130,35 @@ class PurchaseFormMixin:
 
         self.load_suppliers()
 
+    def _supplier_name_next_focus(self):
+        """Skip address/phone when already filled from server catalog."""
+        try:
+            self.load_supplier_details()
+        except Exception:
+            pass
+        if not (self.supplier_address.get() or "").strip():
+            try:
+                self.supplier_address.focus_set()
+            except Exception:
+                pass
+            return
+        if not (self.supplier_phone.get() or "").strip():
+            try:
+                self.supplier_phone.focus_set()
+            except Exception:
+                pass
+            return
+        if not (self.supplier_gstin.get() or "").strip():
+            try:
+                self.supplier_gstin.focus_set()
+            except Exception:
+                pass
+            return
+        try:
+            self.purchase_date.focus_set()
+        except Exception:
+            pass
+
     # ── medicine panel ────────────────────────────────────────────────────
 
     def _build_medicine_panel(self, parent):
@@ -161,12 +193,10 @@ class PurchaseFormMixin:
         self.qty_frame.grid(row=2, column=0, columnspan=4, sticky=tk.EW, padx=5, pady=5)
         self._create_tablet_qty_fields()
 
-        # Fields: (row, col, label, attr, width, next_attr)
+        # Fields excluding pricing — pricing row is built separately (strip + tablet).
         fields = [
             (3, 0, "HSN Code:",    'hsn_code',    20, 'gst_value'),
             (3, 2, "GST %:",       'gst_value',   15, 'mrp'),
-            (4, 0, "MRP:",         'mrp',         20, 'rate'),
-            (4, 2, "Rate (per strip/unit):", 'rate', 15, 'manufacturer'),
             (5, 0, "Manufacturer:",'manufacturer',30, 'batch_no'),
             (5, 2, "Batch No:",    'batch_no',    15, 'expiry_date'),
             (6, 0, "Expiry (MM/YY):", 'expiry_date', 20, 'schedule'),
@@ -176,10 +206,54 @@ class PurchaseFormMixin:
             ttk.Label(mf, text=lbl).grid(row=row, column=col, sticky=tk.W, padx=5, pady=5)
             e = ttk.Entry(mf, width=width)
             e.grid(row=row, column=col+1, sticky=tk.EW, padx=5, pady=5)
-            e.bind('<Return>', lambda ev, n=next_attr: getattr(self, n).focus())
+            if next_attr:
+                e.bind('<Return>', lambda ev, n=next_attr: getattr(self, n).focus())
             setattr(self, attr, e)
+
+        # Pricing row — same grid slots as before (MRP left, Rate right).
+        # For tablet/bolus/capsule each slot splits in half (strip | tablet).
+        self._mrp_label = ttk.Label(mf, text="MRP:")
+        self._mrp_label.grid(row=4, column=0, sticky=tk.W, padx=5, pady=5)
+        self._mrp_slot = ttk.Frame(mf)
+        self._mrp_slot.grid(row=4, column=1, sticky=tk.EW, padx=5, pady=5)
+        self._mrp_slot.columnconfigure(0, weight=1)
+        self._mrp_slot.columnconfigure(1, weight=1)
+
+        self._mrp_strip_lbl = ttk.Label(self._mrp_slot, text="strip", font=(FONT_FAMILY, 8))
+        self._mrp_tab_lbl = ttk.Label(self._mrp_slot, text="tablet", font=(FONT_FAMILY, 8))
+        self.mrp = ttk.Entry(self._mrp_slot, width=10)
+        self.tablet_mrp = ttk.Entry(self._mrp_slot, width=10)
+
+        self._rate_label = ttk.Label(mf, text="Rate:")
+        self._rate_label.grid(row=4, column=2, sticky=tk.W, padx=5, pady=5)
+        self._rate_slot = ttk.Frame(mf)
+        self._rate_slot.grid(row=4, column=3, sticky=tk.EW, padx=5, pady=5)
+        self._rate_slot.columnconfigure(0, weight=1)
+        self._rate_slot.columnconfigure(1, weight=1)
+
+        self._rate_strip_lbl = ttk.Label(self._rate_slot, text="strip", font=(FONT_FAMILY, 8))
+        self._rate_tab_lbl = ttk.Label(self._rate_slot, text="tablet", font=(FONT_FAMILY, 8))
+        self.rate = ttk.Entry(self._rate_slot, width=10)
+        self.tablet_rate = ttk.Entry(self._rate_slot, width=10)
+
+        self._price_syncing = False
+        self.gst_value.bind('<Return>', lambda e: self.mrp.focus())
+        self.mrp.bind('<Return>', lambda e: self.tablet_mrp.focus() if self._uses_strip_qty() else self.rate.focus())
+        self.tablet_mrp.bind('<Return>', lambda e: self.rate.focus())
+        self.rate.bind('<Return>', lambda e: self.tablet_rate.focus() if self._uses_strip_qty() else self._on_rate_enter(e))
+        self.tablet_rate.bind('<Return>', self._on_rate_enter)
+        self.mrp.bind('<KeyRelease>', lambda e: self._tablet_price_from_strip(), add='+')
+        self.mrp.bind('<FocusOut>', lambda e: self._tablet_price_from_strip(), add='+')
+        self.rate.bind('<KeyRelease>', lambda e: self._tablet_price_from_strip(), add='+')
+        self.rate.bind('<FocusOut>', lambda e: self._tablet_price_from_strip(), add='+')
+        self.tablet_mrp.bind('<KeyRelease>', lambda e: self._strip_price_from_tablet())
+        self.tablet_mrp.bind('<FocusOut>', lambda e: self._strip_price_from_tablet())
+        self.tablet_rate.bind('<KeyRelease>', lambda e: self._strip_price_from_tablet())
+        self.tablet_rate.bind('<FocusOut>', lambda e: self._strip_price_from_tablet())
         self.expiry_date.bind('<KeyRelease>', self._on_expiry_key_release, add='+')
         self.expiry_date.bind('<FocusOut>', self._on_expiry_focus_out, add='+')
+        self._refresh_price_labels()
+
 
         ttk.Label(mf, text="Schedule:").grid(row=6, column=2, sticky=tk.W, padx=5, pady=5)
         self.schedule = SearchableCombo(mf, values=[s for s in self._schedules if s],
@@ -210,6 +284,8 @@ class PurchaseFormMixin:
         self.tablets_per_stripe = ttk.Entry(self.qty_frame, width=10)
         self.tablets_per_stripe.grid(row=0, column=3, padx=5, pady=5)
         self.tablets_per_stripe.bind('<Return>', lambda e: self.free_stripes.focus())
+        self.tablets_per_stripe.bind('<KeyRelease>', lambda e: self._tablet_price_from_strip(), add='+')
+        self.tablets_per_stripe.bind('<FocusOut>', lambda e: self._tablet_price_from_strip(), add='+')
 
         ttk.Label(self.qty_frame, text="Free Strips:").grid(row=0, column=4, padx=5, pady=5)
         self.free_stripes = ttk.Entry(self.qty_frame, width=10)
@@ -217,6 +293,7 @@ class PurchaseFormMixin:
         self.free_stripes.insert(0, "0")
         self.free_stripes.bind('<Return>', lambda e: self.hsn_code.focus())
         self._bind_qty_nav()
+        self._tablet_price_from_strip()
 
     def _create_other_qty_fields(self):
         for w in self.qty_frame.winfo_children():
@@ -251,6 +328,143 @@ class PurchaseFormMixin:
         self.free_items.bind('<Return>', lambda e: self.hsn_code.focus())
         self._bind_qty_nav()
 
+    def _fmt_price(self, val):
+        try:
+            v = float(val)
+        except (TypeError, ValueError):
+            return ""
+        if v <= 0:
+            return ""
+        if abs(v - round(v, 2)) < 1e-9:
+            return f"{v:.2f}"
+        return f"{v:.4f}".rstrip("0").rstrip(".")
+
+    def _current_tablets_per_strip(self):
+        try:
+            if hasattr(self, 'tablets_per_stripe') and self.tablets_per_stripe.winfo_exists():
+                return max(1, int(float(self.tablets_per_stripe.get() or 1)))
+        except Exception:
+            pass
+        return 1
+
+    def _set_entry_value(self, entry, value):
+        if entry is None:
+            return
+        try:
+            if not entry.winfo_exists():
+                return
+        except Exception:
+            return
+        entry.delete(0, tk.END)
+        entry.insert(0, value)
+
+    def _refresh_price_labels(self):
+        """Keep MRP/Rate in original grid slots; split each slot for strip types."""
+        strip = self._uses_strip_qty()
+        for w in (
+            self._mrp_strip_lbl, self._mrp_tab_lbl, self.mrp, self.tablet_mrp,
+            self._rate_strip_lbl, self._rate_tab_lbl, self.rate, self.tablet_rate,
+        ):
+            try:
+                w.grid_forget()
+            except Exception:
+                pass
+
+        # Slot columns: label | entry | label | entry  (same row)
+        for slot in (self._mrp_slot, self._rate_slot):
+            for c in range(4):
+                slot.columnconfigure(c, weight=1 if c in (1, 3) else 0)
+
+        if strip:
+            self._mrp_label.config(text="MRP:")
+            self._rate_label.config(text="Rate:")
+            self._mrp_strip_lbl.config(text="strip")
+            self._mrp_tab_lbl.config(text="per tab")
+            self._rate_strip_lbl.config(text="strip")
+            self._rate_tab_lbl.config(text="per tab")
+            # MRP: strip [ ] tablet [ ]
+            self._mrp_strip_lbl.grid(row=0, column=0, sticky=tk.W)
+            self.mrp.grid(row=0, column=1, sticky=tk.EW, padx=(2, 6))
+            self._mrp_tab_lbl.grid(row=0, column=2, sticky=tk.W)
+            self.tablet_mrp.grid(row=0, column=3, sticky=tk.EW, padx=(2, 0))
+            # Rate: strip [ ] tablet [ ]
+            self._rate_strip_lbl.grid(row=0, column=0, sticky=tk.W)
+            self.rate.grid(row=0, column=1, sticky=tk.EW, padx=(2, 6))
+            self._rate_tab_lbl.grid(row=0, column=2, sticky=tk.W)
+            self.tablet_rate.grid(row=0, column=3, sticky=tk.EW, padx=(2, 0))
+            self._tablet_price_from_strip()
+        else:
+            self._mrp_label.config(text="MRP:")
+            self._rate_label.config(text="Rate (per unit):")
+            for slot in (self._mrp_slot, self._rate_slot):
+                slot.columnconfigure(0, weight=1)
+                slot.columnconfigure(1, weight=0)
+                slot.columnconfigure(2, weight=0)
+                slot.columnconfigure(3, weight=0)
+            self.mrp.grid(row=0, column=0, columnspan=4, sticky=tk.EW)
+            self.rate.grid(row=0, column=0, columnspan=4, sticky=tk.EW)
+            try:
+                self.tablet_mrp.delete(0, tk.END)
+                self.tablet_rate.delete(0, tk.END)
+            except Exception:
+                pass
+
+    def _tablet_price_from_strip(self):
+        """Fill per-tablet helpers from strip MRP/Rate (display only)."""
+        if getattr(self, '_price_syncing', False):
+            return
+        if not self._uses_strip_qty():
+            return
+        self._price_syncing = True
+        try:
+            tps = self._current_tablets_per_strip()
+            raw_mrp = (self.mrp.get() or '').strip()
+            if raw_mrp:
+                sm = float(raw_mrp)
+                self._set_entry_value(
+                    self.tablet_mrp,
+                    self._fmt_price(sm / tps) if sm > 0 else '',
+                )
+            else:
+                self._set_entry_value(self.tablet_mrp, '')
+            raw_rate = (self.rate.get() or '').strip()
+            if raw_rate:
+                sr = float(raw_rate)
+                self._set_entry_value(
+                    self.tablet_rate,
+                    self._fmt_price(sr / tps) if sr > 0 else '',
+                )
+            else:
+                self._set_entry_value(self.tablet_rate, '')
+        finally:
+            self._price_syncing = False
+
+    def _strip_price_from_tablet(self):
+        """User typed per-tablet price → write strip MRP/Rate (what gets saved)."""
+        if getattr(self, '_price_syncing', False):
+            return
+        if not self._uses_strip_qty():
+            return
+        self._price_syncing = True
+        try:
+            tps = self._current_tablets_per_strip()
+            raw_tm = (self.tablet_mrp.get() or '').strip()
+            if raw_tm:
+                tm = float(raw_tm)
+                self._set_entry_value(
+                    self.mrp,
+                    self._fmt_price(tm * tps) if tm > 0 else '',
+                )
+            raw_tr = (self.tablet_rate.get() or '').strip()
+            if raw_tr:
+                tr = float(raw_tr)
+                self._set_entry_value(
+                    self.rate,
+                    self._fmt_price(tr * tps) if tr > 0 else '',
+                )
+        finally:
+            self._price_syncing = False
+
     def _uses_strip_qty(self, med_type=None):
         med_type = med_type or self.medicine_type.get()
         return is_strip_count_type(med_type, self._sched_unit.get(med_type, ''))
@@ -264,6 +478,7 @@ class PurchaseFormMixin:
                 self.tablets_per_stripe.insert(0, "1")
         else:
             self._create_other_qty_fields()
+        self._refresh_price_labels()
         self._apply_type_qty_default(med_type)
 
     def _apply_type_qty_default(self, med_type):
@@ -274,15 +489,15 @@ class PurchaseFormMixin:
         try:
             if self._uses_strip_qty(med_type):
                 if hasattr(self, 'stripes') and self.stripes.winfo_exists():
-                    if not self.stripes.get().strip():
+                    if not (self.stripes.get() or '').strip():
                         self.stripes.delete(0, tk.END); self.stripes.insert(0, val)
             else:
                 if hasattr(self, 'units') and self.units.winfo_exists():
-                    if not self.units.get().strip():
+                    if not (self.units.get() or '').strip():
                         self.units.delete(0, tk.END); self.units.insert(0, val)
                 unit_label = get_type_measure_unit(med_type)
                 if unit_label and hasattr(self, 'quantity') and self.quantity.winfo_exists():
-                    if not self.quantity.get().strip():
+                    if not (self.quantity.get() or '').strip():
                         self.quantity.delete(0, tk.END); self.quantity.insert(0, unit_label)
         except Exception:
             pass
@@ -317,9 +532,10 @@ class PurchaseFormMixin:
         self.items_frame = items_frame
 
         self._all_columns = tuple(all_column_names('purchase'))
-        widths = {'Medicine':120,'Type':70,'Batch':70,'Expiry':65,'Qty':50,
-                  'Pack':48,'HSN':52,'Free':45,'Rate':65,'Disc%':45,'GST%':45,
-                  'Taxable':70,'GST Amt':65,'Amount':75}
+        widths = {'Medicine':110,'Type':65,'Batch':65,'Expiry':60,'Qty':45,
+                  'Pack':45,'HSN':48,'Free':40,
+                  'MRP':58,'MRP/Tab':58,'Rate':58,'Rate/Tab':58,
+                  'Disc%':42,'GST%':42,'Taxable':65,'GST Amt':60,'Amount':70}
         self.items_tree = ttk.Treeview(items_frame, columns=self._all_columns,
                                        show='headings', height=PURCHASE_ROWS,
                                        style='Large.Treeview')
@@ -351,124 +567,158 @@ class PurchaseFormMixin:
 
     # ── summary / payment section ─────────────────────────────────────────
 
+    def _summary_var(self, value="0.00"):
+        try:
+            master = self.parent.winfo_toplevel()
+        except Exception:
+            master = None
+        return tk.StringVar(master=master, value=value)
+
     def _build_summary(self, parent):
         tf = ttk.LabelFrame(parent, text="Purchase Summary")
         tf.pack(fill=tk.X, pady=5)
 
-        # ── Row 0: Subtotal | CGST | SGST | Total Amount | Total Due | [Clear] ──
-        display_row0 = [
-            ("Subtotal:",      'subtotal_var',     None),
-            ("CGST:",          'cgst_var',         None),
-            ("SGST:",          'sgst_var',         None),
-            ("Total Amount:",  'total_amount_var', 'bold'),
-        ]
-        for col, (lbl, attr, weight) in enumerate(display_row0):
-            ttk.Label(tf, text=lbl).grid(row=0, column=col*2, sticky=tk.W, padx=4, pady=2)
-            var = tk.StringVar(value="0.00")
-            setattr(self, attr, var)
-            kw = {'font': (FONT_FAMILY, FONT_SIZE_LABELS, weight or 'normal')}
-            ttk.Label(tf, textvariable=var, **kw).grid(
-                row=0, column=col*2+1, sticky=tk.W, padx=4, pady=2)
+        for c in range(10):
+            tf.columnconfigure(c, weight=0)
 
+        # ── Row 0: editable inputs ────────────────────────────────────────
+        ttk.Label(tf, text="Overall Disc %:").grid(row=0, column=0, sticky=tk.W, padx=4, pady=2)
+        self.overall_discount_pct = ttk.Entry(tf, width=7)
+        self.overall_discount_pct.grid(row=0, column=1, padx=4, pady=2, sticky=tk.W)
+        self.overall_discount_pct.insert(0, "0")
+        self.overall_discount_pct.bind('<FocusIn>', lambda e: e.widget.select_range(0, tk.END))
+
+        ttk.Label(tf, text="Overall Disc ₹:").grid(row=0, column=2, sticky=tk.W, padx=4, pady=2)
+        self.overall_discount = ttk.Entry(tf, width=9)
+        self.overall_discount.grid(row=0, column=3, padx=4, pady=2, sticky=tk.W)
+        self.overall_discount.insert(0, "0")
+        self.overall_discount.bind('<FocusIn>', lambda e: e.widget.select_range(0, tk.END))
+
+        ttk.Label(tf, text="Rounding:").grid(row=0, column=4, sticky=tk.W, padx=4, pady=2)
+        self.rounding_entry = ttk.Entry(tf, width=8)
+        self.rounding_entry.grid(row=0, column=5, padx=4, pady=2, sticky=tk.W)
+        self.rounding_entry.insert(0, "0.00")
+        self.rounding_entry.bind('<FocusIn>', lambda e: e.widget.select_range(0, tk.END))
+
+        ttk.Label(tf, text="Delivery ₹:").grid(row=0, column=6, sticky=tk.W, padx=4, pady=2)
+        self.expenditure_entry = ttk.Entry(tf, width=9)
+        self.expenditure_entry.grid(row=0, column=7, padx=4, pady=2, sticky=tk.W)
+        self.expenditure_entry.insert(0, "0.00")
+        self.expenditure_entry.bind('<FocusIn>', lambda e: e.widget.select_range(0, tk.END))
+
+        # ── Row 1: bill totals (read-only) ────────────────────────────────
+        row1 = [
+            ("Gross:",         'gross_var'),
+            ("Taxable:",       'subtotal_var'),
+            ("CGST:",          'cgst_var'),
+            ("SGST:",          'sgst_var'),
+            ("Bill Total:",    'total_amount_var'),
+        ]
+        for col, (lbl, attr) in enumerate(row1):
+            ttk.Label(tf, text=lbl).grid(row=1, column=col * 2, sticky=tk.W, padx=4, pady=2)
+            var = self._summary_var("0.00")
+            setattr(self, attr, var)
+            weight = 'bold' if attr == 'total_amount_var' else 'normal'
+            ttk.Label(tf, textvariable=var, font=(FONT_FAMILY, FONT_SIZE_LABELS, weight),
+                      width=10, anchor='w').grid(
+                row=1, column=col * 2 + 1, sticky=tk.W, padx=4, pady=2)
+
+        # ── Row 2: payment totals (read-only) ─────────────────────────────
+        ttk.Label(tf, text="Prev Due:").grid(row=2, column=0, sticky=tk.W, padx=4, pady=2)
+        self.previous_due_var = tk.StringVar(value="0.00")
+        ttk.Label(tf, textvariable=self.previous_due_var,
+                  font=(FONT_FAMILY, FONT_SIZE_LABELS),
+                  width=10, anchor='w').grid(row=2, column=1, sticky=tk.W, padx=4, pady=2)
+
+        ttk.Label(tf, text="Prev Credit:").grid(row=2, column=2, sticky=tk.W, padx=4, pady=2)
+        self.previous_credit_var = tk.StringVar(value="0.00")
+        ttk.Label(tf, textvariable=self.previous_credit_var,
+                  font=(FONT_FAMILY, FONT_SIZE_LABELS),
+                  width=10, anchor='w').grid(row=2, column=3, sticky=tk.W, padx=4, pady=2)
+
+        ttk.Label(tf, text="Final Amount:",
+                  font=(FONT_FAMILY, FONT_SIZE_LABELS, 'bold')).grid(
+            row=2, column=4, sticky=tk.W, padx=4, pady=2)
+        self.final_amount_var = self._summary_var("0.00")
+        ttk.Label(tf, textvariable=self.final_amount_var,
+                  font=(FONT_FAMILY, FONT_SIZE_LABELS, 'bold'),
+                  width=10, anchor='w').grid(row=2, column=5, sticky=tk.W, padx=4, pady=2)
+
+        ttk.Label(tf, text="Need to Pay:").grid(row=2, column=6, sticky=tk.W, padx=4, pady=2)
+        self.need_to_pay_var = self._summary_var("0.00")
+        ttk.Label(tf, textvariable=self.need_to_pay_var,
+                  font=(FONT_FAMILY, FONT_SIZE_LABELS),
+                  width=10, anchor='w').grid(row=2, column=7, sticky=tk.W, padx=4, pady=2)
+
+        ttk.Label(tf, text="Curr. Credit:").grid(row=2, column=8, sticky=tk.W, padx=4, pady=2)
+        self.current_credit_var = self._summary_var("0.00")
+        ttk.Label(tf, textvariable=self.current_credit_var,
+                  font=(FONT_FAMILY, FONT_SIZE_LABELS),
+                  width=10, anchor='w').grid(row=2, column=9, sticky=tk.W, padx=4, pady=2)
+
+        # ── Row 3: total due + cash/online payment ────────────────────────
         ttk.Label(tf, text="Total Due:",
                   font=(FONT_FAMILY, FONT_SIZE_LABELS, 'bold')).grid(
-            row=0, column=8, sticky=tk.W, padx=8, pady=2)
-        self.total_due_var = tk.StringVar(value="0.00")
+            row=3, column=0, sticky=tk.W, padx=4, pady=2)
+        self.total_due_var = self._summary_var("0.00")
         self.due_label = ttk.Label(tf, textvariable=self.total_due_var,
                                    font=(FONT_FAMILY, FONT_SIZE_LABELS, 'bold'))
-        self.due_label.grid(row=0, column=9, sticky=tk.W, padx=4, pady=2)
+        self.due_label.grid(row=3, column=1, columnspan=2, sticky=tk.W, padx=4, pady=2)
 
+        ttk.Label(tf, text="Cash:").grid(row=3, column=4, sticky=tk.W, padx=4, pady=2)
+        self.cash_paid = ttk.Entry(tf, width=9)
+        self.cash_paid.grid(row=3, column=5, padx=4, pady=2, sticky=tk.W)
+        self.cash_paid.bind('<FocusIn>', lambda e: e.widget.select_range(0, tk.END))
+
+        ttk.Label(tf, text="Online:").grid(row=3, column=6, sticky=tk.W, padx=4, pady=2)
+        self.online_paid = ttk.Entry(tf, width=9)
+        self.online_paid.grid(row=3, column=7, padx=4, pady=2, sticky=tk.W)
+        self.online_paid.bind('<FocusIn>', lambda e: e.widget.select_range(0, tk.END))
+
+        ttk.Label(tf, text="Total Paid:").grid(row=3, column=8, sticky=tk.W, padx=4, pady=2)
+        self.amount_paid_var = self._summary_var("")
+        ttk.Label(tf, textvariable=self.amount_paid_var,
+                  font=(FONT_FAMILY, FONT_SIZE_LABELS, 'bold'),
+                  width=10, anchor='w').grid(row=3, column=9, sticky=tk.W, padx=4, pady=2)
+
+        # ── Action buttons (right column) ─────────────────────────────────
         action_col = ttk.Frame(tf)
         action_col.grid(row=0, column=10, rowspan=4, padx=10, pady=2, sticky=tk.N)
-        self.clear_btn = ttk.Button(action_col, text="Clear", command=self.clear_form)
+
+        btn_stack = ttk.Frame(action_col)
+        btn_stack.pack(side=tk.LEFT, anchor=tk.N)
+
+        self.clear_btn = ttk.Button(btn_stack, text="Clear", command=self.clear_form)
         self.clear_btn.pack(fill=tk.X, pady=(0, 4))
-        self.save_btn = ttk.Button(action_col, text="Save Purchase (F5)", command=self.save_purchase)
+        self.save_btn = ttk.Button(btn_stack, text="Save Purchase (F5)", command=self.save_purchase)
         try:
             self.save_btn.configure(bootstyle='primary')
         except Exception:
             pass
         self.save_btn.pack(fill=tk.X, pady=(0, 4))
         self.import_bill_btn = ttk.Button(
-            action_col, text="Import Purchase (Shift+F2)",
+            btn_stack, text="Import Purchase (Shift+F2)",
             command=self.open_import_purchase_bill,
         )
         self.import_bill_btn.pack(fill=tk.X)
 
-        # ── Row 1: Need to Pay | Final Amount | Current Credit ────────────
-        ttk.Label(tf, text="Need to Pay:",
-                  font=(FONT_FAMILY, FONT_SIZE_LABELS)).grid(
-            row=1, column=0, sticky=tk.W, padx=4, pady=2)
-        self.need_to_pay_var = tk.StringVar(value="0.00")
-        ttk.Label(tf, textvariable=self.need_to_pay_var,
-                  font=(FONT_FAMILY, FONT_SIZE_LABELS)).grid(
-            row=1, column=1, sticky=tk.W, padx=4, pady=2)
+        action_right = ttk.Frame(action_col)
+        action_right.pack(side=tk.LEFT, padx=(8, 0), anchor=tk.N, fill=tk.Y)
 
-        ttk.Label(tf, text="Final Amount:",
-                  font=(FONT_FAMILY, FONT_SIZE_LABELS, 'bold')).grid(row=1, column=6, sticky=tk.W, padx=8, pady=2)
-        self.final_amount_var = tk.StringVar(value="0.00")
-        ttk.Label(tf, textvariable=self.final_amount_var,
-                  font=(FONT_FAMILY, FONT_SIZE_LABELS, 'bold')).grid(row=1, column=7, sticky=tk.W, padx=4, pady=2)
+        self.gst_slab_btn = ttk.Button(
+            action_right, text="GST Slab Table",
+            command=self.show_gst_slab_breakdown,
+        )
+        self.gst_slab_btn.pack(fill=tk.X)
 
-        ttk.Label(tf, text="Current Credit:",
-                  font=(FONT_FAMILY, FONT_SIZE_LABELS)).grid(
-            row=1, column=8, sticky=tk.W, padx=8, pady=2)
-        self.current_credit_var = tk.StringVar(value="0.00")
-        ttk.Label(tf, textvariable=self.current_credit_var,
-                  font=(FONT_FAMILY, FONT_SIZE_LABELS)).grid(row=1, column=9, sticky=tk.W, padx=4, pady=2)
+        self.recalculate_btn = ttk.Button(
+            action_right, text="Recalculate",
+            command=self.recalculate_purchase_totals,
+        )
+        # Shown only in edit-purchase mode (purchase_history_edit.py)
 
-        # ── Row 2: Overall Disc % | Overall Disc ₹ | Rounding | Prev Due | Prev Credit | Amount Paid | [Save] ──
-        ttk.Label(tf, text="Overall Disc %:").grid(row=2, column=0, sticky=tk.W, padx=4, pady=2)
-        self.overall_discount_pct = ttk.Entry(tf, width=7)
-        self.overall_discount_pct.grid(row=2, column=1, padx=4, pady=2)
-        self.overall_discount_pct.insert(0, "0")
-        self.overall_discount_pct.bind('<FocusIn>', lambda e: e.widget.select_range(0, tk.END))
-
-        ttk.Label(tf, text="Overall Disc ₹:").grid(row=2, column=2, sticky=tk.W, padx=4, pady=2)
-        self.overall_discount = ttk.Entry(tf, width=8)
-        self.overall_discount.grid(row=2, column=3, padx=4, pady=2)
-        self.overall_discount.insert(0, "0")
-        self.overall_discount.bind('<FocusIn>', lambda e: e.widget.select_range(0, tk.END))
-
-        ttk.Label(tf, text="Rounding:").grid(row=2, column=4, sticky=tk.W, padx=4, pady=2)
-        self.rounding_entry = ttk.Entry(tf, width=8)
-        self.rounding_entry.grid(row=2, column=5, padx=4, pady=2)
-        self.rounding_entry.insert(0, "0.00")
-        self.rounding_entry.bind('<FocusIn>', lambda e: e.widget.select_range(0, tk.END))
-
-        # Previous Due — read-only display
-        ttk.Label(tf, text="Prev Due:").grid(row=2, column=6, sticky=tk.W, padx=4, pady=2)
-        self.previous_due_var = tk.StringVar(value="0.00")
-        ttk.Label(tf, textvariable=self.previous_due_var,
-                  font=(FONT_FAMILY, FONT_SIZE_LABELS),
-                  width=8, anchor='w').grid(
-            row=2, column=7, padx=4, pady=2)
-
-        # Previous Credit — read-only display
-        ttk.Label(tf, text="Prev Credit:").grid(row=2, column=8, sticky=tk.W, padx=4, pady=2)
-        self.previous_credit_var = tk.StringVar(value="0.00")
-        ttk.Label(tf, textvariable=self.previous_credit_var,
-                  font=(FONT_FAMILY, FONT_SIZE_LABELS),
-                  width=8, anchor='w').grid(
-            row=2, column=9, padx=4, pady=2)
-
-        ttk.Label(tf, text="Amount Paid:").grid(row=3, column=0, sticky=tk.W, padx=4, pady=2)
-        self.amount_paid = ttk.Entry(tf, width=10)
-        self.amount_paid.grid(row=3, column=1, padx=4, pady=2)
-        self.amount_paid.insert(0, "0.00")
-        self.amount_paid.bind('<FocusIn>', lambda e: e.widget.select_range(0, tk.END))
-
-        self.import_bill_info_var = tk.StringVar(value="")
-        ttk.Label(
-            tf,
-            textvariable=self.import_bill_info_var,
-            font=(FONT_FAMILY, FONT_SIZE_SUPPORTING_TEXT),
-            wraplength=920,
-            justify=tk.LEFT,
-        ).grid(row=4, column=0, columnspan=12, sticky=tk.W, padx=6, pady=(0, 4))
-
-        # Trigger recalculation on any input change
-        for w in (self.overall_discount_pct, self.overall_discount,
-                  self.rounding_entry, self.amount_paid):
+        # Recalc on keystroke for rounding, delivery, cash/online; discount sync on FocusOut
+        for w in (self.rounding_entry, self.expenditure_entry, self.cash_paid, self.online_paid):
             w.bind('<KeyRelease>', self.calculate_total)
         self.overall_discount_pct.bind(
             '<FocusOut>',
@@ -497,6 +747,29 @@ class PurchaseFormMixin:
                 return str(tps)
         return qv
 
+    def _item_tps(self, item):
+        if not is_strip_count_type(item.get('type', ''), self._sched_unit.get(item.get('type', ''), '')):
+            return 0
+        try:
+            return max(1, int(float(item.get('tablets_per_stripe', 1) or 1)))
+        except (TypeError, ValueError):
+            return 1
+
+    def _fmt_strip_price(self, item, key):
+        try:
+            return f"{float(item.get(key, 0) or 0):.2f}"
+        except (TypeError, ValueError):
+            return "0.00"
+
+    def _fmt_tab_price(self, item, key):
+        tps = self._item_tps(item)
+        if not tps:
+            return ""
+        try:
+            return self._fmt_price(float(item.get(key, 0) or 0) / tps)
+        except (TypeError, ValueError):
+            return ""
+
     def _purchase_row_values(self, item):
         disc = item.get("discount_display")
         if not disc:
@@ -509,6 +782,21 @@ class PurchaseFormMixin:
         pack_val = (item.get("pack") or "").strip()
         if not pack_val:
             pack_val = self._format_unit_display(item)
+        taxable = float(item.get('taxable', 0) or 0)
+        gst_amt = float(item.get('gst_amt', 0) or 0)
+        amount = float(item.get('item_amount', item.get('amount', 0)) or 0)
+        if amount <= 0 and taxable <= 0:
+            qty = float(item.get('qty', 0) or 0)
+            rate = float(item.get('rate', 0) or 0)
+            disc = float(item.get('discount_pct', item.get('item_discount', 0)) or 0)
+            net = round(qty * rate * (1 - disc / 100), 2)
+            if net > 0:
+                taxable = net
+                amount = net
+        elif amount <= 0:
+            amount = round(taxable + gst_amt, 2)
+        elif taxable <= 0 and amount > 0:
+            taxable = round(amount - gst_amt, 2)
         return {
             "Medicine": item.get("name", ""),
             "Type": item.get("type", ""),
@@ -517,13 +805,17 @@ class PurchaseFormMixin:
             "Qty": f"{float(item.get('qty', 0) or 0):.1f}",
             "Pack": pack_val,
             "HSN": item.get("hsn_code", "") or "",
+            "Schedule": item.get("schedule", "") or "",
             "Free": f"{float(item.get('free_qty', 0) or 0):.1f}",
-            "Rate": f"{float(item.get('rate', 0) or 0):.2f}",
+            "MRP": self._fmt_strip_price(item, 'mrp'),
+            "MRP/Tab": self._fmt_tab_price(item, 'mrp'),
+            "Rate": self._fmt_strip_price(item, 'rate'),
+            "Rate/Tab": self._fmt_tab_price(item, 'rate'),
             "Disc%": disc,
             "GST%": f"{float(item.get('gst_pct', 0) or 0):.1f}%",
-            "Taxable": f"{float(item.get('taxable', 0) or 0):.2f}",
-            "GST Amt": f"{float(item.get('gst_amt', 0) or 0):.2f}",
-            "Amount": f"{float(item.get('item_amount', 0) or 0):.2f}",
+            "Taxable": f"{taxable:.2f}",
+            "GST Amt": f"{gst_amt:.2f}",
+            "Amount": f"{amount:.2f}",
         }
 
     def update_items_tree(self):

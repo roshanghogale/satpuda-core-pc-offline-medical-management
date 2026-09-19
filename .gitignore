@@ -1,4 +1,8 @@
-# Python cache
+# Secrets — keep bundled locally, do not commit
+config/firebase_service_account.json
+service_account.json
+**/firebase_service_account.json
+
 __pycache__/
 *.pyc
 *.pyo
@@ -9,8 +13,13 @@ venv/
 env/
 .env
 
-# Node modules (web app)
+# Node modules (web app / Tauri)
 node_modules/
+
+# Tauri / Rust build artifacts
+desktop/dist/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
 
 # PyInstaller build output
 dist/
@@ -20,6 +29,80 @@ build/
 # Runtime logs
 startup_log.txt
 
+# API keys (never commit)
+config/gemini_api_key.txt
+
+# Local secrets and live store data
+config/*.dat
+config/*.key
+config/*service_account*.json
+config/server_session_*.json
+config/server_sync_watermarks_*.json
+config/stores/
+config/stores_registry.dat
+config/android_store_key.txt
+config/upi_id.txt
+config/desktop_api.log
+config/desktop_api.pid
+config/online_catalog_snapshot/
+config/online_mutation_queue/
+oauth_client.json
+
 # Database files (live data - exclude)
 veterinary.db
 veterinary_backup_*.db
+*.db
+
+# ── Secrets — never commit ────────────────────────────────────────────────────
+# These were tracked and pushed to two PUBLIC GitHub repos. The .dat files are
+# not protection: _get_secret() returns a constant that lives in this same
+# repository, so anyone who can read the code can decrypt them.
+service_account.json
+oauth_client.json
+**/service_account.json
+**/*service_account*.json
+**/firebase*.json
+config/*.dat
+*.pem
+*.p12
+.env
+.env.*
+generate_oauth_token.py
+encrypt_backup_creds.py
+
+# Scratch database dumps left by debugging (hundreds of MB)
+_chk_*.db
+_check_*.db
+*.db.gz
+
+# Runtime artefacts of ONE shop, never product files. catalog.json is rebuilt
+# from the store's own database every time web purchase is opened; launcher.html
+# was a stale 857 KB copy carrying 12 GSTINs and 19 drug licence numbers of real
+# suppliers, referenced by nothing. Both were being bundled into the EXE and
+# copied over every shop's own catalog on launch.
+web_app/catalog.json
+web_app/launcher.html
+
+# ── Kept out of git (2026-09-19): secrets, this PC's state, build output ──
+# Firebase admin SDK keys - not matched by the *service_account* patterns above
+**/*adminsdk*.json
+# config/ holds this machine's runtime state (install id, printer settings,
+# queued sync data for stores, logs). Build profiles are source.
+config/*
+!config/build_profile_*.txt
+# Build output and caches
+desktop/engine/
+desktop/satpuda-vite-cache/
+desktop/dist-demo/
+desktop/dist-demo-root/
+desktop/src-tauri/C*satpuda-rs/
+Build_Windows_10_11/
+installer/Output/
+# Logs, editor state, local backups, one-off files
+*.log
+*.bak
+*.bak-*
+.vscode/
+/=
+/EPSON LX-310
+*_Report.pdf

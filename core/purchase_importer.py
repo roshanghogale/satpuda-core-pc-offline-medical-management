@@ -5,17 +5,18 @@ This module has no Tkinter UI code. It parses PDF/CSV/Excel invoices into a
 small, validated structure and can then populate an existing PurchasePage using
 the same item format that the normal manual entry flow already uses.
 """
+from __future__ import annotations
+
 import csv
 import json
 import os
 import re
 import sys
-import tkinter as tk
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from core.purchase_service import get_or_create_medicine
+from core.purchase_service import find_medicine_id, get_or_create_medicine
 from core.layout_config import is_strip_count_type, get_type_measure_unit
 from core.purchase_invoice_engine import (
     PROMPT_VERSION,
@@ -25,11 +26,15 @@ from core.purchase_invoice_engine import (
     enrich_purchase_invoice,
     is_skip_row,
     merge_multiline_item_records,
+    hsn_chapter_code,
+    normalize_hsn_code,
     resolve_line_pricing,
     save_import_alias,
 )
+from core.medicine_metadata_resolver import enrich_invoice_item_metadata
 from core.medicine_type_detector import (
     enrich_invoice_medicine_types,
+    match_type_to_available,
     resolve_medicine_type,
 )
 
@@ -183,6 +188,10 @@ class PurchaseInvoice:
     product_discount_pct: float = 0.0
     item_discount_total: float = 0.0
     round_off: float = 0.0
+    added_charges: float = 0.0
+    amount_paid: float = 0.0
+    expected_item_count: int = 0
+    footer_gst_slabs: List[Dict[str, Any]] = field(default_factory=list)
     confidence_scores: Dict[str, Any] = field(default_factory=dict)
     validation: Dict[str, Any] = field(default_factory=dict)
     review_flags: List[str] = field(default_factory=list)
@@ -202,13 +211,122 @@ class PurchaseInvoice:
         return round(total, 2)
 
 
+def invoice_bill_discount(invoice: Any) -> float:
+    """Single bill-level discount ₹; dedupe when cash and product match."""
+    cash = round(float(getattr(invoice, "cash_discount", 0) or 0), 2)
+    prod = round(float(getattr(invoice, "product_discount", 0) or 0), 2)
+    if cash > 0 and prod > 0:
+        if abs(cash - prod) <= 0.05:
+            return cash
+        return round(cash + prod, 2)
+    return round(cash or prod, 2)
+
+
+def invoice_gst_calc_method(invoice: Any) -> str:
+    """Pick tax mode for imported supplier bills."""
+    from core.purchase_invoice_engine import detect_purchase_gst_calc_method
+
+    return detect_purchase_gst_calc_method(invoice)
+
+
+# What a shop is told when a PDF's item table cannot be read.
+#
+# It used to be "No purchase rows were found in this PDF. Parser messages:
+# camelot is not installed; tabula-py is not installed" -- true, and useless at
+# a counter. camelot and tabula-py are excluded from the frozen build on
+# purpose (both import pandas at module scope and no spec bundles pandas), so
+# nobody can ever act on that sentence: there is no pip inside a PyInstaller
+# folder. The engine has to say what the shopkeeper can do instead.
+PDF_NO_ROWS_MESSAGE = (
+    "No medicine rows could be read from this PDF.\n\n"
+    "What usually works:\n"
+    "• Ask the distributor to send the same bill as CSV or Excel, and import that\n"
+    "• Or take a clear photo of the bill and import it as a bill photo\n"
+    "• Or enter this bill by hand"
+)
+
+# Only pdfplumber is meant to be in the build; if IT is missing the install is
+# damaged, and that is something a shop can act on.
+PDF_READER_MISSING_MESSAGE = (
+    "The PDF reader is missing from this installation. "
+    "Reinstall Satpuda Core, then try the import again."
+)
+
+# The one PDF condition a shop can do something about.
+PDF_LOCKED_MESSAGE = (
+    "This PDF looks password-protected. Ask the distributor to send it "
+    "without a password."
+)
+
+_LOCKED_PDF_SIGNS = ("decrypt", "password", "encrypt")
+
+
+def pdf_no_rows_message(
+    issues: Sequence[str] = (),
+    missing_parsers: Sequence[str] = (),
+) -> str:
+    """The message for a PDF that yielded no rows. Never names a Python package.
+
+    The raw parser failures are deliberately NOT pasted in. Every one of them
+    reads like "pdfplumber failed: 'NoneType' object is not iterable" -- a
+    Python traceback in a dialog at a shop counter, which tells the shopkeeper
+    nothing and cannot be acted on. They go to purchase_import.log instead,
+    where support can read them. Only the two conditions a shop CAN act on get
+    a sentence: a damaged install, and a locked PDF.
+    """
+    parts = [PDF_NO_ROWS_MESSAGE]
+    if "pdfplumber" in missing_parsers:
+        parts.append(PDF_READER_MISSING_MESSAGE)
+    blob = " ".join(str(i) for i in issues).lower()
+    if any(sign in blob for sign in _LOCKED_PDF_SIGNS):
+        parts.append(PDF_LOCKED_MESSAGE)
+    return "\n\n".join(parts)
+
+
+def log_pdf_parse_failure(
+    path: str,
+    issues: Sequence[str] = (),
+    missing_parsers: Sequence[str] = (),
+) -> None:
+    """Keep the parser diagnostics -- in the log, where they belong.
+
+    Same file and format as write_import_log, but this runs before there is an
+    invoice to log against.
+    """
+    try:
+        from core.log_policy import should_write_logs
+
+        if not should_write_logs():
+            return
+    except Exception:
+        pass
+    try:
+        log_dir = _config_dir()
+        os.makedirs(log_dir, exist_ok=True)
+        payload = {
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "status": "pdf_unreadable",
+            "source_path": path,
+            "source_type": "pdf",
+            "parser_failures": [str(i) for i in issues][:20],
+            "parsers_not_in_this_build": [str(m) for m in missing_parsers],
+        }
+        with open(os.path.join(log_dir, "purchase_import.log"), "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=True) + "\n")
+    except Exception:
+        pass
+
+
 def parse_purchase_pdf(path: str) -> PurchaseInvoice:
-    """Parse a PDF invoice using pdfplumber, camelot, then tabula-py fallback."""
+    """Parse a PDF invoice: pdfplumber, then camelot / tabula-py if they exist,
+    then the built-in text reader. A parser that is not in this build is not an
+    error -- it is skipped, and only the last resort speaks to the shop."""
     _ensure_file(path)
     raw_text_parts: List[str] = []
     table_rows: List[List[Any]] = []
     parsers_used: List[str] = []
     issues: List[str] = []
+    missing_parsers: List[str] = []
 
     try:
         rows, text = _parse_pdf_with_pdfplumber(path)
@@ -218,7 +336,7 @@ def parse_purchase_pdf(path: str) -> PurchaseInvoice:
         if text:
             raw_text_parts.append(text)
     except ImportError:
-        issues.append("pdfplumber is not installed")
+        missing_parsers.append("pdfplumber")
     except Exception as exc:
         issues.append("pdfplumber failed: {}".format(exc))
 
@@ -229,7 +347,7 @@ def parse_purchase_pdf(path: str) -> PurchaseInvoice:
                 table_rows.extend(rows)
                 parsers_used.append("camelot")
         except ImportError:
-            issues.append("camelot is not installed")
+            missing_parsers.append("camelot")
         except Exception as exc:
             issues.append("camelot failed: {}".format(exc))
 
@@ -240,7 +358,7 @@ def parse_purchase_pdf(path: str) -> PurchaseInvoice:
                 table_rows.extend(rows)
                 parsers_used.append("tabula-py")
         except ImportError:
-            issues.append("tabula-py is not installed")
+            missing_parsers.append("tabula-py")
         except Exception as exc:
             issues.append("tabula-py failed: {}".format(exc))
 
@@ -265,12 +383,7 @@ def parse_purchase_pdf(path: str) -> PurchaseInvoice:
         marg_invoice.source_type = "pdf"
         marg_invoice.raw_text = raw_text
         marg_invoice.document_format = detect_document_format(path, table_rows, raw_text)
-        combined_issues = list(marg_invoice.issues) + list(issues)
-        if parsers_used:
-            combined_issues = [
-                issue for issue in combined_issues if "is not installed" not in issue
-            ]
-        marg_invoice.issues = combined_issues
+        marg_invoice.issues = list(marg_invoice.issues) + list(issues)
         _finalize_parsed_invoice(marg_invoice)
         _apply_ganesh_line_corrections(marg_invoice)
         return marg_invoice
@@ -285,10 +398,7 @@ def parse_purchase_pdf(path: str) -> PurchaseInvoice:
         tuljai_invoice.source_type = "pdf"
         tuljai_invoice.raw_text = raw_text
         tuljai_invoice.document_format = detect_document_format(path, table_rows, raw_text)
-        combined_issues = list(tuljai_invoice.issues) + list(issues)
-        if parsers_used:
-            combined_issues = [issue for issue in combined_issues if "is not installed" not in issue]
-        tuljai_invoice.issues = combined_issues
+        tuljai_invoice.issues = list(tuljai_invoice.issues) + list(issues)
         _finalize_parsed_invoice(tuljai_invoice)
         _apply_ganesh_line_corrections(tuljai_invoice)
         return tuljai_invoice
@@ -307,12 +417,8 @@ def parse_purchase_pdf(path: str) -> PurchaseInvoice:
         )
 
     if not items:
-        hint = "No purchase rows were found in this PDF."
-        if issues:
-            hint += " Parser messages: " + "; ".join(issues[:3])
-        raise InvoiceParseError(hint)
-    if parsers_used:
-        issues = [issue for issue in issues if "is not installed" not in issue]
+        log_pdf_parse_failure(path, issues, missing_parsers)
+        raise InvoiceParseError(pdf_no_rows_message(issues, missing_parsers))
 
     invoice = _invoice_from_details(
         details,
@@ -395,10 +501,86 @@ def parse_purchase_excel(path: str) -> PurchaseInvoice:
     return invoice
 
 
-def _finalize_parsed_invoice(invoice: PurchaseInvoice, conn: Any = None) -> None:
+def _gemini_bill_import_enabled() -> bool:
+    from core.gemini_bill_config import bill_photo_import_message
+    return not bill_photo_import_message()
+
+
+def _parse_bill_images_gemini(
+    paths: Sequence[str],
+    on_progress=None,
+) -> PurchaseInvoice:
+    """Parse bill photo(s) with Gemini AI only."""
+    from core.gemini_bill_config import gemini_availability_message
+    from core.gemini_bill_parser import parse_bill_images_with_gemini
+
+    pkg_msg = gemini_availability_message()
+    if pkg_msg:
+        raise InvoiceParseError(pkg_msg)
+    try:
+        invoice = parse_bill_images_with_gemini(paths, on_progress=on_progress)
+        _finalize_parsed_invoice(invoice, enrich_metadata=False)
+        _apply_ganesh_line_corrections(invoice)
+        return invoice
+    except InvoiceParseError:
+        raise
+    except Exception as exc:
+        raise InvoiceParseError(
+            "The bill could not be read:\n{}\n\n"
+            "Try a clearer photo, or import PDF / Excel instead.".format(exc)
+        ) from exc
+
+
+def _require_gemini_for_bill_photos() -> None:
+    from core.gemini_bill_config import bill_photo_import_message
+
+    msg = bill_photo_import_message()
+    if msg:
+        raise InvoiceParseError(msg)
+
+
+def parse_purchase_image(
+    path: str,
+    on_progress=None,
+) -> PurchaseInvoice:
+    """Parse a photographed purchase bill with Gemini AI (internet required)."""
+    _ensure_file(path)
+    _require_gemini_for_bill_photos()
+    return _parse_bill_images_gemini([path], on_progress=on_progress)
+
+
+def parse_purchase_images(
+    paths: Sequence[str],
+    on_progress=None,
+) -> PurchaseInvoice:
+    """Parse multiple bill images with Gemini AI (internet required)."""
+    clean_paths = [p for p in paths if p and os.path.isfile(p)]
+    if not clean_paths:
+        raise InvoiceParseError("No valid image files were selected.")
+    for path in clean_paths:
+        _ensure_file(path)
+
+    _require_gemini_for_bill_photos()
+    invoice = _parse_bill_images_gemini(clean_paths, on_progress=on_progress)
+    invoice.source_path = clean_paths[0]
+    if len(clean_paths) > 1:
+        invoice.parser = (invoice.parser or "gemini") + " ({} pages)".format(
+            len(clean_paths),
+        )
+    return invoice
+
+
+def _finalize_parsed_invoice(
+    invoice: PurchaseInvoice,
+    conn: Any = None,
+    *,
+    enrich_metadata: bool = True,
+) -> None:
     """Totals/validation plus medicine type detection on all lines."""
     enrich_purchase_invoice(invoice)
     enrich_invoice_medicine_types(invoice, conn=conn)
+    if enrich_metadata:
+        enrich_invoice_item_metadata(invoice, conn=conn, use_gemini=False)
 
 
 def _type_from_record(
@@ -411,7 +593,7 @@ def _type_from_record(
     qty_unit = _clean_cell(rec.get("qty_unit") or rec.get("unit"))
     pkg_unit = _clean_cell(rec.get("pkg_unit") or rec.get("pack"))
     explicit = _clean_cell(rec.get("medicine_type"))
-    if explicit:
+    if explicit and not rec.get("gemini_import") and not rec.get("hsn_chapter"):
         return explicit
     return resolve_medicine_type(
         conn=conn,
@@ -422,6 +604,7 @@ def _type_from_record(
         bill_text=" ".join(filter(None, [name, pack, qty_unit, pkg_unit])),
         available_types=available_types,
         save_learned=bool(conn),
+        prefer_name_detection=bool(rec.get("gemini_import") or rec.get("hsn_chapter")),
     )
 
 
@@ -668,16 +851,72 @@ def _invoice_from_details(
     )
 
 
+def _sync_converted_import_line_totals(
+    converted: List[Dict[str, Any]],
+    invoice: PurchaseInvoice,
+) -> None:
+    """Apply slab-based GST (Indian pharmacy rules) to imported line lock values."""
+    if not converted:
+        return
+    from core.pharmacy_purchase_calc import compute_purchase_invoice
+
+    inv_net = float(getattr(invoice, "invoice_total", 0) or 0)
+    inv_round = float(getattr(invoice, "round_off", 0) or 0)
+    cash_disc = invoice_bill_discount(invoice)
+    prod_disc = 0.0
+    footer_cgst = float(getattr(invoice, "total_cgst", 0) or 0)
+    footer_sgst = float(getattr(invoice, "total_sgst", 0) or 0)
+    gst_method = invoice_gst_calc_method(invoice)
+    use_footer = bool(
+        getattr(invoice, "footer_gst_authoritative", False)
+        and inv_net > 0
+        and (footer_cgst + footer_sgst) > 0
+    )
+
+    calc = compute_purchase_invoice(
+        items=[dict(i) for i in converted],
+        global_cash_discount=cash_disc,
+        product_discount=prod_disc,
+        round_off=inv_round if inv_round else None,
+        net_payable=inv_net if use_footer else None,
+        gst_calc_method=gst_method,
+    )
+    worked = calc.get("items") or converted
+    for conv, item in zip(converted, worked):
+        goods = round(
+            float(item.get("_goods_amount", item.get("import_taxable", 0)) or 0),
+            2,
+        )
+        taxable = round(float(item.get("taxable", goods) or goods), 2)
+        gst_amt = round(float(item.get("gst_amt", 0) or 0), 2)
+        conv["import_taxable"] = goods
+        conv["import_gst_amt"] = gst_amt
+        conv["import_item_amount"] = round(taxable + gst_amt, 2)
+        conv["import_lock_values"] = True
+
+
 def import_into_purchase_page(
     purchase_page: Any,
     invoice: PurchaseInvoice,
     items: Optional[Sequence[ImportedPurchaseItem]] = None,
     replace_existing: bool = True,
+    *,
+    conn: Any = None,
+    on_progress: Any = None,
+    ui_apply: bool = True,
+    prepared: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Populate an existing PurchasePage with imported invoice data."""
     if purchase_page is None:
         raise ValueError("Purchase page is not available.")
-    selected_items = list(items if items is not None else invoice.items)
+
+    if prepared is not None and ui_apply:
+        return _apply_prepared_import(purchase_page, invoice, prepared, replace_existing)
+
+    db = conn if conn is not None else getattr(purchase_page, "conn", None)
+    selected_items = sort_import_items_by_bill_order(
+        list(items if items is not None else invoice.items)
+    )
     apply_import_placeholders_to_items(selected_items)
     invalid = [item for item in selected_items if not item.is_valid]
     if invalid:
@@ -688,37 +927,62 @@ def import_into_purchase_page(
             )
         )
 
-    supplier_name = (invoice.supplier_name or "").strip()
-    bill_number = (invoice.invoice_number or "").strip()
-    purchase_date = normalize_invoice_date(invoice.invoice_date)
+    payload = _build_import_payload(
+        purchase_page,
+        invoice,
+        selected_items,
+        db,
+        on_progress=on_progress,
+    )
+    payload["replace_existing"] = replace_existing
 
-    if supplier_name:
-        purchase_page.supplier_name.set(supplier_name)
-    _set_entry(purchase_page.bill_number, bill_number)
-    _set_entry(purchase_page.purchase_date, purchase_date or datetime.now().strftime("%Y-%m-%d"))
+    if not ui_apply:
+        return payload
 
-    try:
-        purchase_page.load_supplier_details()
-    except Exception:
-        pass
+    return _apply_prepared_import(purchase_page, invoice, payload, replace_existing)
 
-    if (invoice.supplier_address or "").strip():
-        _set_entry(purchase_page.supplier_address, invoice.supplier_address)
-    if (invoice.supplier_phone or "").strip():
-        _set_entry(purchase_page.supplier_phone, invoice.supplier_phone)
-    if (invoice.supplier_gstin or "").strip():
-        _set_entry(purchase_page.supplier_gstin, invoice.supplier_gstin)
-    if (invoice.supplier_dl or "").strip():
-        _set_entry(purchase_page.supplier_dl, invoice.supplier_dl)
 
+def _build_import_payload(
+    purchase_page: Any,
+    invoice: PurchaseInvoice,
+    selected_items: Sequence[ImportedPurchaseItem],
+    conn: Any,
+    on_progress: Any = None,
+) -> Dict[str, Any]:
+    """DB-heavy row prep — safe on a background thread with check_same_thread=False."""
     available_types = getattr(purchase_page, "_med_types", [])
     converted: List[Dict[str, Any]] = []
-    for item in selected_items:
+    total = len(selected_items)
+    for idx, item in enumerate(selected_items, 1):
+        if on_progress and (idx == 1 or idx == total or idx % 5 == 0):
+            on_progress("Preparing row {} of {}…".format(idx, total))
+
+        from core.bill_import_normalize import (
+            normalize_bill_hsn,
+            normalize_bill_manufacturer,
+            normalize_bill_pack,
+        )
+
+        is_bill_photo = (getattr(invoice, "parser", "") or "").startswith((
+            "gemini", "image",
+        ))
+        if is_bill_photo:
+            item.hsn_code = normalize_bill_hsn(item.hsn_code)
+            item.pack = normalize_bill_pack(
+                item.pack, item.medicine_type, item.name,
+            )
+            item.manufacturer = normalize_bill_manufacturer(item.manufacturer)
+            if conn is not None:
+                _enrich_item_metadata_from_db(conn, item)
+        else:
+            item.hsn_code = normalize_hsn_code(item.hsn_code)
+            if conn is not None:
+                _enrich_item_hsn_from_db(conn, item)
         raw = item.raw or {}
         qty_u = str(raw.get("qty_unit") or raw.get("unit") or "")
         pkg_u = str(raw.get("pkg_unit") or item.pack or "")
         med_type = resolve_medicine_type(
-            conn=purchase_page.conn,
+            conn=conn,
             name=item.name.strip(),
             pack=item.pack or pkg_u,
             qty_unit=qty_u,
@@ -727,23 +991,23 @@ def import_into_purchase_page(
                 p for p in [item.name, item.pack, item.content_drug] if p
             ),
             available_types=available_types,
+            prefer_name_detection=is_bill_photo,
+            # Do not write import_learned.json / DB during background import —
+            # that races the UI connection and causes "database is locked".
+            save_learned=False,
         )
-        med_type = _match_type(med_type or item.medicine_type, available_types)
+        med_type = match_type_to_available(
+            med_type or item.medicine_type, available_types,
+        ) or med_type or item.medicine_type
         manufacturer = item.manufacturer.strip() or _lookup_manufacturer(
-            purchase_page.conn, item.name.strip())
-        medicine_id = get_or_create_medicine(
-            purchase_page.conn,
+            conn, item.name.strip())
+        # Read-only match here. Create/update medicines on the UI thread after
+        # the progress dialog so we never hold a second writable store lock.
+        medicine_id = find_medicine_id(
+            conn,
             item.name.strip(),
-            med_type,
             item.batch.strip(),
             item.expiry,
-            float(item.gst_pct or 0),
-            float(item.mrp or 0),
-            float(item.rate or 0),
-            manufacturer,
-            item.hsn_code.strip(),
-            item.schedule.strip(),
-            item.content_drug.strip(),
         )
         from core.purchase_invoice_engine import format_discount_display
         disc_label = format_discount_display(
@@ -751,10 +1015,9 @@ def import_into_purchase_page(
             item.disc_column_value,
             item.disc_column_type,
         )
-        import_taxable = float(item.amount or (item.qty * item.rate) or 0)
-        import_gst_amt = round(import_taxable * float(item.gst_pct or 0) / 100, 2)
         converted_item = {
             "medicine_id": medicine_id,
+            "source_row": int(item.source_row or 0),
             "name": item.name.strip(),
             "type": med_type,
             "batch": item.batch.strip(),
@@ -773,23 +1036,37 @@ def import_into_purchase_page(
             "manufacturer": manufacturer,
             "schedule": item.schedule.strip(),
             "content_drug": item.content_drug.strip(),
-            # Pre-GST goods value = rate × billed qty (free qty is bonus only)
-            "import_lock_values": True,
-            "import_taxable": import_taxable,
-            "import_gst_amt": import_gst_amt,
-            "import_item_amount": round(import_taxable + import_gst_amt, 2),
+            "is_tax_inclusive": invoice_gst_calc_method(invoice) == "discount_after_gst",
         }
+        bill_amt = round(float(item.amount or 0), 2)
+        qty_val = float(converted_item["qty"] or 0)
+        if bill_amt > 0 and qty_val > 0:
+            synced_rate = round(bill_amt / qty_val, 4)
+            converted_item["rate"] = synced_rate
+            converted_item["amount"] = bill_amt
+            converted_item["item_amount"] = bill_amt
         _add_quantity_metadata(converted_item, item.pack)
         converted.append(converted_item)
 
-    if replace_existing:
-        purchase_page.purchase_items = converted
-    else:
-        purchase_page.purchase_items.extend(converted)
-    purchase_page.purchase_items = _merge_purchase_page_items(purchase_page.purchase_items)
+    _sync_converted_import_line_totals(converted, invoice)
 
-    # Mark page in import-as-is mode so totals use imported invoice values.
-    setattr(purchase_page, "_import_bill_mode", True)
+    supplier_name = (invoice.supplier_name or "").strip()
+    return {
+        "converted": converted,
+        "supplier_name": supplier_name,
+        "bill_number": (invoice.invoice_number or "").strip(),
+        "purchase_date": normalize_invoice_date(invoice.invoice_date),
+        "edi_manual_supplier": (getattr(invoice, "parser", "") or "").startswith("EDI H/T/F"),
+        "supplier_address": (invoice.supplier_address or "").strip(),
+        "supplier_phone": (invoice.supplier_phone or "").strip(),
+        "supplier_gstin": (invoice.supplier_gstin or "").strip(),
+        "supplier_dl": (invoice.supplier_dl or "").strip(),
+        "items_imported": len(converted),
+    }
+
+
+def _build_import_invoice_summary(invoice: PurchaseInvoice) -> Dict[str, Any]:
+    """Summary dict for purchase page import-as-is totals (footer GST when parsed)."""
     line_gross = round(
         float(getattr(invoice, "line_gross", 0) or 0)
         or sum(float(it.amount or 0) for it in invoice.items),
@@ -800,60 +1077,193 @@ def import_into_purchase_page(
     footer_sgst = float(getattr(invoice, "total_sgst", 0) or 0)
     inv_net = float(invoice.invoice_total or 0)
     footer_gst = round(footer_cgst + footer_sgst, 2)
+    import_gst_method = invoice_gst_calc_method(invoice)
+    added_charges = float(getattr(invoice, "added_charges", 0) or 0)
+    round_off = float(getattr(invoice, "round_off", 0) or 0)
+    footer_auth = bool(getattr(invoice, "footer_gst_authoritative", False))
+    if not footer_auth and footer_cgst > 0 and footer_sgst > 0 and inv_net > 0:
+        footer_auth = True
+    use_footer = bool(
+        footer_auth and inv_net > 0 and footer_gst > 0
+    ) or bool(
+        inv_net > 0
+        and footer_gst > 0
+        and gross_amount > 0
+        and gross_amount > line_gross * 1.003
+    )
+    footer_slabs = list(getattr(invoice, "footer_gst_slabs", None) or [])
+    if not footer_slabs and footer_cgst > 0 and gross_amount > 0:
+        line_0 = round(
+            sum(
+                float(it.amount or (it.qty or 0) * (it.rate or 0) or 0)
+                for it in invoice.items
+                if float(it.gst_pct or 0) <= 0
+            ),
+            2,
+        )
+        gst_slab_12_est = round((footer_cgst + footer_sgst) / 0.12, 2)
+        gst_slab_0 = line_0 if line_0 > 0 else round(gross_amount - gst_slab_12_est, 2)
+        gst_slab_12 = round(gross_amount - gst_slab_0, 2)
+        if gst_slab_0 >= 0 and gst_slab_12 > 0:
+            footer_slabs = [
+                {"gst_pct": 0, "taxable": gst_slab_0, "gross": gst_slab_0},
+                {
+                    "gst_pct": 12,
+                    "taxable": gst_slab_12,
+                    "gross": gst_slab_12,
+                    "cgst": footer_cgst,
+                    "sgst": footer_sgst,
+                },
+            ]
+    gst_slab_0 = gst_slab_12 = 0.0
+    for slab in footer_slabs:
+        pct = float(slab.get("gst_pct") or 0)
+        taxable = float(slab.get("taxable") or slab.get("gross") or 0)
+        if pct <= 0:
+            gst_slab_0 = taxable
+        elif pct >= 12:
+            gst_slab_12 = taxable
+    return {
+        "invoice_total": inv_net,
+        "taxable_amount": float(getattr(invoice, "taxable_amount", 0) or 0),
+        "gross_amount": gross_amount,
+        "line_gross": line_gross,
+        "discount_base": float(getattr(invoice, "discount_base", 0) or 0),
+        "cash_discount_pct": float(getattr(invoice, "cash_discount_pct", 0) or 0),
+        "product_discount_pct": float(getattr(invoice, "product_discount_pct", 0) or 0),
+        "product_discount": float(getattr(invoice, "product_discount", 0) or 0),
+        "cash_discount": float(getattr(invoice, "cash_discount", 0) or 0),
+        "parsed_total_discount": invoice_bill_discount(invoice),
+        "gst_calc_method": import_gst_method,
+        "supplier_gross": float(getattr(invoice, "gross_amount", 0) or 0),
+        "item_discount_total": float(getattr(invoice, "item_discount_total", 0) or 0),
+        "expected_item_count": int(getattr(invoice, "expected_item_count", 0) or 0),
+        "footer_gst_slabs": footer_slabs,
+        "gst_slab_0_taxable": gst_slab_0,
+        "gst_slab_12_taxable": gst_slab_12,
+        "edi_format": (
+            "seema_legacy" if "seema_legacy" in (getattr(invoice, "parser", "") or "").lower()
+            else "seema" if "seema" in (getattr(invoice, "parser", "") or "").lower()
+            else "marg" if "marg" in (getattr(invoice, "parser", "") or "").lower()
+            else ""
+        ),
+        "total_cgst": footer_cgst,
+        "total_sgst": footer_sgst,
+        "round_off": round_off,
+        "added_charges": added_charges,
+        "footer_gst_authoritative": footer_auth,
+        "use_footer_totals": use_footer,
+    }
+
+
+def _ensure_import_medicine_ids(purchase_page: Any, converted: List[Dict[str, Any]]) -> None:
+    """Attach existing medicine ids only — never create rows until Save Purchase.
+
+    Creating on import polluted Online inventory with zero-stock stubs when the
+    user cancelled without saving.
+    """
+    conn = getattr(purchase_page, "conn", None)
+    if conn is None or not converted:
+        return
+    for item in converted:
+        mid = item.get("medicine_id")
+        try:
+            if mid is not None and int(mid) > 0:
+                continue
+        except (TypeError, ValueError):
+            pass
+        found = find_medicine_id(
+            conn,
+            item.get("name") or "",
+            item.get("batch") or "",
+            item.get("expiry") or "",
+        )
+        if found:
+            item["medicine_id"] = int(found)
+    try:
+        conn.commit()
+    except Exception:
+        pass
+
+
+def _apply_prepared_import(
+    purchase_page: Any,
+    invoice: PurchaseInvoice,
+    payload: Dict[str, Any],
+    replace_existing: bool,
+) -> Dict[str, Any]:
+    """Apply prepared rows to PurchasePage widgets (UI thread only)."""
+    converted = list(payload.get("converted") or [])
+    _ensure_import_medicine_ids(purchase_page, converted)
+    supplier_name = payload.get("supplier_name") or ""
+    bill_number = payload.get("bill_number") or ""
+    purchase_date = payload.get("purchase_date") or ""
+    edi_manual_supplier = bool(payload.get("edi_manual_supplier"))
+
+    if supplier_name:
+        purchase_page.supplier_name.set(supplier_name)
+    elif edi_manual_supplier:
+        purchase_page.supplier_name.set("")
+        for field in (
+            purchase_page.supplier_address,
+            purchase_page.supplier_phone,
+            purchase_page.supplier_gstin,
+            purchase_page.supplier_dl,
+        ):
+            _set_entry(field, "")
+    _set_entry(purchase_page.bill_number, bill_number)
+    _set_entry(
+        purchase_page.purchase_date,
+        purchase_date or datetime.now().strftime("%Y-%m-%d"),
+    )
+
+    try:
+        purchase_page.load_supplier_details()
+    except Exception:
+        pass
+
+    if payload.get("supplier_address"):
+        _set_entry(purchase_page.supplier_address, payload["supplier_address"])
+    if payload.get("supplier_phone"):
+        _set_entry(purchase_page.supplier_phone, payload["supplier_phone"])
+    if payload.get("supplier_gstin"):
+        _set_entry(purchase_page.supplier_gstin, payload["supplier_gstin"])
+    if payload.get("supplier_dl"):
+        _set_entry(purchase_page.supplier_dl, payload["supplier_dl"])
+
+    if replace_existing:
+        purchase_page.purchase_items = converted
+    else:
+        purchase_page.purchase_items.extend(converted)
+        purchase_page.purchase_items = _merge_purchase_page_items(purchase_page.purchase_items)
+
+    # Mark page in import-as-is mode so totals use imported invoice values.
+    setattr(purchase_page, "_import_bill_mode", True)
+    import_gst_method = invoice_gst_calc_method(invoice)
     setattr(
         purchase_page,
         "_import_invoice_summary",
-        {
-            "invoice_total": inv_net,
-            "taxable_amount": float(getattr(invoice, "taxable_amount", 0) or 0),
-            "gross_amount": gross_amount,
-            "line_gross": line_gross,
-            "discount_base": float(getattr(invoice, "discount_base", 0) or 0),
-            "cash_discount_pct": float(getattr(invoice, "cash_discount_pct", 0) or 0),
-            "product_discount_pct": float(getattr(invoice, "product_discount_pct", 0) or 0),
-            "product_discount": float(getattr(invoice, "product_discount", 0) or 0),
-            "cash_discount": float(getattr(invoice, "cash_discount", 0) or 0),
-            "parsed_total_discount": round(
-                float(getattr(invoice, "product_discount", 0) or 0)
-                + float(getattr(invoice, "cash_discount", 0) or 0),
-                2,
-            ),
-            "supplier_gross": float(getattr(invoice, "gross_amount", 0) or 0),
-            "item_discount_total": float(getattr(invoice, "item_discount_total", 0) or 0),
-            "edi_format": (
-                "seema_legacy" if "seema_legacy" in (getattr(invoice, "parser", "") or "").lower()
-                else "seema" if "seema" in (getattr(invoice, "parser", "") or "").lower()
-                else "marg" if "marg" in (getattr(invoice, "parser", "") or "").lower()
-                else ""
-            ),
-            "total_cgst": footer_cgst,
-            "total_sgst": footer_sgst,
-            "round_off": float(getattr(invoice, "round_off", 0) or 0),
-            "footer_gst_authoritative": bool(
-                getattr(invoice, "footer_gst_authoritative", False)
-                or (footer_cgst > 0 and footer_sgst > 0 and inv_net > 0)
-            ),
-            "use_footer_totals": bool(
-                inv_net > 0
-                and footer_gst > 0
-                and (gross_amount > 0 or line_gross > 0)
-            ),
-        },
+        _build_import_invoice_summary(invoice),
     )
-    total_disc = round(
-        float(getattr(invoice, "product_discount", 0) or 0)
-        + float(getattr(invoice, "cash_discount", 0) or 0),
-        2,
-    )
+    if hasattr(purchase_page, "set_gst_calc_method"):
+        purchase_page.set_gst_calc_method(import_gst_method)
+    elif hasattr(purchase_page, "gst_calc_method_var"):
+        purchase_page.gst_calc_method_var.set(import_gst_method)
+    total_disc = invoice_bill_discount(invoice)
+    added_charges = float(getattr(invoice, "added_charges", 0) or 0)
     if hasattr(purchase_page, "overall_discount"):
         _set_entry(purchase_page.overall_discount, "{:.2f}".format(total_disc))
-    cash_pct = float(getattr(invoice, "cash_discount_pct", 0) or 0)
-    if cash_pct and hasattr(purchase_page, "overall_discount_pct"):
-        _set_entry(purchase_page.overall_discount_pct, "{:.2f}".format(cash_pct))
-    elif hasattr(purchase_page, "sync_overall_discount_fields"):
+    if hasattr(purchase_page, "expenditure_entry") and added_charges > 0:
+        _set_entry(purchase_page.expenditure_entry, "{:.2f}".format(added_charges))
+    if hasattr(purchase_page, "sync_overall_discount_fields"):
         purchase_page.sync_overall_discount_fields('rupees')
-    purchase_page.calculate_total()
-    # calculate_total applies shared auto-rounding (same as manual purchase entry).
+    import_paid = float(getattr(invoice, "amount_paid", 0) or 0)
+    if import_paid > 0 and hasattr(purchase_page, "cash_paid"):
+        _set_entry(purchase_page.cash_paid, "{:.2f}".format(import_paid))
+        if hasattr(purchase_page, "online_paid"):
+            _set_entry(purchase_page.online_paid, "")
+    purchase_page.recalculate_purchase_totals()
+    # Full slab recalc + auto-rounding (same as manual purchase entry).
     purchase_page.update_items_tree()
 
     if supplier_name:
@@ -926,6 +1336,57 @@ def _normalize_compact_expiry(value: Any) -> str:
     return ""
 
 
+def normalize_gemini_item_rows(raw_items: Any) -> List[Dict[str, Any]]:
+    """Coerce Gemini items to a list; sort dict keys numerically when needed."""
+    if isinstance(raw_items, list):
+        return [row for row in raw_items if isinstance(row, dict)]
+    if isinstance(raw_items, dict):
+        def _key_order(key: Any) -> Tuple[int, Any]:
+            text = str(key).strip()
+            if text.isdigit():
+                return (0, int(text))
+            return (1, text.lower())
+
+        ordered = sorted(raw_items.keys(), key=_key_order)
+        return [raw_items[k] for k in ordered if isinstance(raw_items[k], dict)]
+    return []
+
+
+def _bill_order_key_from_raw(
+    raw: Dict[str, Any],
+    source_row: int = 0,
+) -> Tuple[int, int, int]:
+    page = 1
+    for field in ("page", "bill_page", "image_page"):
+        try:
+            page = int(float(str(raw.get(field) or 1)))
+            break
+        except (TypeError, ValueError):
+            continue
+    line = source_row
+    for field in ("line_no", "sno", "serial", "sr_no", "sr"):
+        try:
+            val = raw.get(field)
+            if val is not None and str(val).strip():
+                line = int(float(str(val)))
+                break
+        except (TypeError, ValueError):
+            continue
+    return (page, line, source_row or 0)
+
+
+def sort_import_items_by_bill_order(
+    items: Sequence[ImportedPurchaseItem],
+) -> List[ImportedPurchaseItem]:
+    """Keep imported lines in bill print order (page, S.No, then parse index)."""
+    keyed = [
+        (_bill_order_key_from_raw(item.raw or {}, item.source_row), item)
+        for item in items
+    ]
+    keyed.sort(key=lambda pair: pair[0])
+    return [item for _, item in keyed]
+
+
 def merge_duplicate_items(
     items: Sequence[ImportedPurchaseItem],
     issues: Optional[List[str]] = None,
@@ -953,11 +1414,17 @@ def merge_duplicate_items(
                     item.source_row or "?", target.name
                 )
             )
-    return output
+    return sort_import_items_by_bill_order(output)
 
 
 def write_import_log(invoice: PurchaseInvoice, status: str, message: str = "") -> None:
     """Append a compact JSONL log entry for support/debugging."""
+    try:
+        from core.log_policy import should_write_logs
+        if not should_write_logs():
+            return
+    except Exception:
+        pass
     try:
         log_dir = _config_dir()
         os.makedirs(log_dir, exist_ok=True)
@@ -1025,10 +1492,17 @@ def _try_parse_marg_erp_invoice(
     )
     from core.marg_erp_parser import extract_marg_erp_footer_discounts
     marg_totals = extract_marg_erp_footer_discounts(raw_text)
-    if marg_totals.get("product_discount"):
-        invoice.product_discount = marg_totals["product_discount"]
-    if marg_totals.get("cash_discount"):
-        invoice.cash_discount = marg_totals["cash_discount"]
+    marg_prod = float(marg_totals.get("product_discount") or 0)
+    marg_cash = float(marg_totals.get("cash_discount") or 0)
+    if marg_cash > 0:
+        invoice.cash_discount = marg_cash
+    if marg_prod > 0:
+        if marg_cash > 0 and abs(marg_prod - marg_cash) <= 0.05:
+            invoice.product_discount = 0.0
+        elif not invoice.cash_discount:
+            invoice.product_discount = marg_prod
+        elif abs(invoice.cash_discount - marg_prod) > 0.05:
+            invoice.product_discount = marg_prod
     if marg_totals.get("subtotal") and not invoice.taxable_amount:
         invoice.taxable_amount = marg_totals["subtotal"]
     return invoice
@@ -1287,16 +1761,9 @@ def _looks_like_tuljai_item_line_start(line: str) -> bool:
 
 def _is_tuljai_page_artifact(line: str) -> bool:
     """Page-break / carry-forward lines that must not merge into product rows."""
-    low = _clean_cell(line).lower()
-    if not low:
-        return True
-    if re.search(r"total\s+c/f|total\s+b/f|\bc/f\s*:|b/f\s*:", low):
-        return True
-    if "continued on" in low or "continued from" in low:
-        return True
-    if re.match(r"^page\s+\d", low):
-        return True
-    return False
+    from core.bill_page_utils import is_bill_page_artifact_line
+
+    return is_bill_page_artifact_line(_clean_cell(line))
 
 
 def _is_tuljai_orphan_continuation(line: str) -> bool:
@@ -1746,8 +2213,15 @@ def _looks_like_non_item_name(value: Any) -> bool:
     blocked = (
         "message", "cgst", "sgst", "taxable", "gross", "declaration",
         "amount in words", "net amt", "bank name", "authorised",
+        "no. of items", "no of items", "sub total", "grand total",
+        "add gst", "gst amount", "credit memo",
     )
-    return any(token in name for token in blocked)
+    if any(token in name for token in blocked):
+        return True
+    if re.match(r"^total\s+[bc]", name, flags=re.I):
+        return True
+    from core.bill_page_utils import is_bill_page_artifact_line
+    return is_bill_page_artifact_line(name)
 
 
 def _is_expiry_token(value: Any) -> bool:
@@ -1994,15 +2468,26 @@ def _read_csv_rows(path: str) -> List[List[Any]]:
     raise InvoiceParseError("Could not read CSV encoding: {}".format(last_error))
 
 
-# Seema / Micropro EDI CSV (~33 T columns, T[1]=='0'):
-#   H[2]=invoice no, H[3]=invoice date (DDMMYYYY), H[16]=customer name
+# Jay Ganesh Pharmavet JCR EDI CSV (~33 T columns, bill no starts with JCR):
+#   Filename e.g. 2627_SJCR00609.CSV — H[2]=JCR00609, H[3]=date (DDMMYYYY).
+#   T[20]=qty, T[21]=free qty, T[13]=rate, T[16]=MRP, T[30]=HSN (use 4-digit chapter)
+#   T[26]/T[27]/T[28]=CGST%/SGST%/GST%, amount = rate × qty
+#   F[1]=gross, F[2]=total bill discount ₹, F[22]=round, F[23]=net payable
+#   F[24]=CGST ₹, F[25]=SGST ₹
+JAI_GANESH_PHARMAVET_SUPPLIER = {
+    "supplier_name": "JAI GANESH PHARMAVET",
+    "supplier_address": "SHRI CHATRAPATI TOWER 3RD FLOOR GANDHI CHOWK, KHAMGAON",
+    "supplier_phone": "8983008800",
+    "supplier_gstin": "27AJCPD5972D1ZE",
+    "supplier_dl": "20B-BUL223156, 21B-BUL223158, 20D-BUL223160",
+}
+# Seema / Micropro EDI CSV (~33 T columns, T[1]=='0', bill no NOT JCR):
 #   T[4]=product code, T[5]=name, T[6]=pack, T[7]=mfg, T[8]=batch, T[9]=expiry
 #   T[10]=qty, T[11]=free qty, T[13]=PTR rate, T[14]=line gross, T[16]=MRP
 #   T[20]=line CD%, T[21]=line PD%, T[26]=CGST%, T[27]=SGST%, T[28]=GST%
 #   T[30]=HSN, T[31]=line amount (usually = T[14])
-#   F[1]=supplier gross (internal), F[2]=total GST (≈3% of F[1] on Seema bills)
-#   F[22]=round off, F[23]=net payable, F[24]=cash disc ₹, F[25]=product disc ₹
-#   F[24] and F[25] are each the same % (usually 3%) of one shared discount base.
+#   F[1]=supplier gross, F[2]=total GST, F[22]=round, F[23]=net payable
+#   F[24]=cash disc ₹, F[25]=product disc ₹
 #
 # Seema legacy EDI (~31 cols, empty T[1], product code in T[3]):
 #   T[5]=name, T[6]=pack, T[7]=mfg, T[8]=batch, T[9]=expiry, T[10]=rate, T[12]=MRP
@@ -2018,12 +2503,23 @@ def _read_csv_rows(path: str) -> List[List[Any]]:
 #   F[9]=total GST
 
 
-def _detect_edi_htf_format(row: Sequence[Any], header_text: str = "") -> str:
+def _is_jcr_bill_number(invoice_number: str) -> bool:
+    return re.sub(r"\s+", "", (invoice_number or "").upper()).startswith("JCR")
+
+
+def _detect_edi_htf_format(
+    row: Sequence[Any],
+    header_text: str = "",
+    invoice_number: str = "",
+) -> str:
     """
     Distinguish EDI CSV variants:
+      jcr   — Jay Ganesh Pharmavet (bill no starts with JCR)
       seema — Seema / Micropro (~33 cols, T[1]=='0')
       marg  — MARG ERP Nano export (~51 cols, alphanumeric T[1])
     """
+    if _is_jcr_bill_number(invoice_number):
+        return "jcr"
     ncol = len(row or [])
     marker = _clean_cell(_cell_at(row, 1))
     if "MARGERP" in (header_text or "").upper():
@@ -2035,6 +2531,21 @@ def _detect_edi_htf_format(row: Sequence[Any], header_text: str = "") -> str:
     if ncol >= 28 and not marker and _clean_cell(_cell_at(row, 5)):
         return "seema_legacy"
     return "legacy"
+
+
+def _edi_line_gst_percent(
+    row: Sequence[Any],
+    total_col: int,
+    cgst_col: Optional[int] = None,
+    sgst_col: Optional[int] = None,
+) -> float:
+    """Read GST % from EDI T-row; explicit 0 must not fall back to CGST+SGST."""
+    from core.purchase_invoice_engine import resolve_line_gst_percent
+
+    total_raw = _cell_at(row, total_col)
+    cgst_raw = _cell_at(row, cgst_col) if cgst_col is not None else ""
+    sgst_raw = _cell_at(row, sgst_col) if sgst_col is not None else ""
+    return resolve_line_gst_percent(total_raw, cgst_raw, sgst_raw)
 
 
 def _edi_htf_line_amounts(
@@ -2059,7 +2570,17 @@ def _edi_htf_line_amounts(
             amount = round(max(0.0, rate * qty - disc), 2)
         gst_amt = _to_float(_cell_at(row, 26))
         gst_pct = round(gst_amt / amount * 100, 2) if amount > 0 and gst_amt else 0.0
-        hsn_code = _clean_cell(_cell_at(row, 38))
+        hsn_code = normalize_hsn_code(_cell_at(row, 38))
+        return rate, mrp, qty, free_qty, amount, gst_pct, hsn_code
+
+    if fmt == "jcr":
+        rate = _to_float(_cell_at(row, 13))
+        mrp = _to_float(_cell_at(row, 16))
+        qty = _to_float(_cell_at(row, 20))
+        free_qty = _to_float(_cell_at(row, 21))
+        amount = round(rate * qty, 2) if rate and qty else _to_float(_cell_at(row, 31))
+        gst_pct = _edi_line_gst_percent(row, 28, 26, 27)
+        hsn_code = hsn_chapter_code(_cell_at(row, 30))
         return rate, mrp, qty, free_qty, amount, gst_pct, hsn_code
 
     if fmt == "seema":
@@ -2070,11 +2591,8 @@ def _edi_htf_line_amounts(
         amount = _to_float(_cell_at(row, 31)) or _to_float(_cell_at(row, 14))
         if not amount and rate and qty:
             amount = round(rate * qty, 2)
-        gst_pct = _to_float(_cell_at(row, 28))
-        if not gst_pct:
-            # T[26]/T[27] are CGST%/SGST% slabs, not rupee amounts.
-            gst_pct = _to_float(_cell_at(row, 26)) + _to_float(_cell_at(row, 27))
-        hsn_code = _clean_cell(_cell_at(row, 30))
+        gst_pct = _edi_line_gst_percent(row, 28, 26, 27)
+        hsn_code = normalize_hsn_code(_cell_at(row, 30))
         return rate, mrp, qty, free_qty, amount, gst_pct, hsn_code
 
     if fmt == "seema_legacy":
@@ -2085,10 +2603,8 @@ def _edi_htf_line_amounts(
         amount = _to_float(_cell_at(row, 21)) or round(rate * qty, 2)
         if not amount and rate and qty:
             amount = round(rate * qty, 2)
-        gst_pct = _to_float(_cell_at(row, 24))
-        if not gst_pct:
-            gst_pct = _to_float(_cell_at(row, 22)) + _to_float(_cell_at(row, 26))
-        hsn_code = _clean_cell(_cell_at(row, 30))
+        gst_pct = _edi_line_gst_percent(row, 24, 22, 26)
+        hsn_code = normalize_hsn_code(_cell_at(row, 30))
         return rate, mrp, qty, free_qty, amount, gst_pct, hsn_code
 
     if ncol >= 25:
@@ -2099,8 +2615,8 @@ def _edi_htf_line_amounts(
         amount = _to_float(_cell_at(row, 31)) or _to_float(_cell_at(row, 14))
         if not amount and rate and qty:
             amount = round(rate * qty, 2)
-        gst_pct = _to_float(_cell_at(row, 28)) or _to_float(_cell_at(row, 24))
-        hsn_code = _clean_cell(_cell_at(row, 30))
+        gst_pct = _edi_line_gst_percent(row, 28) if _clean_cell(_cell_at(row, 28)) else _edi_line_gst_percent(row, 24)
+        hsn_code = normalize_hsn_code(_cell_at(row, 30))
         return rate, mrp, qty, free_qty, amount, gst_pct, hsn_code
 
     rate = _to_float(_cell_at(row, 10)) or _to_float(_cell_at(row, 11))
@@ -2108,10 +2624,8 @@ def _edi_htf_line_amounts(
     qty = _to_float(_cell_at(row, 15))
     free_qty = _to_float(_cell_at(row, 16))
     amount = _to_float(_cell_at(row, 21))
-    gst_pct = _to_float(_cell_at(row, 24))
-    if not gst_pct:
-        gst_pct = _to_float(_cell_at(row, 22)) + _to_float(_cell_at(row, 26))
-    hsn_code = _clean_cell(_cell_at(row, 30)) if ncol > 30 else ""
+    gst_pct = _edi_line_gst_percent(row, 24, 22, 26)
+    hsn_code = normalize_hsn_code(_cell_at(row, 30)) if ncol > 30 else ""
     return rate, mrp, qty, free_qty, amount, gst_pct, hsn_code
 
 
@@ -2153,6 +2667,33 @@ def _apply_edi_htf_footer(invoice: PurchaseInvoice, f_row: Sequence[Any], fmt: s
     """Read bill-level totals from the F (footer) row."""
     if not f_row:
         return
+    if fmt == "jcr":
+        line_gross = round(sum(float(it.amount or 0) for it in invoice.items), 2)
+        footer_gross = _to_float(_cell_at(f_row, 1))
+        total_disc = _to_float(_cell_at(f_row, 2))
+        total_cgst = _to_float(_cell_at(f_row, 24))
+        total_sgst = _to_float(_cell_at(f_row, 25))
+        round_off = _to_float(_cell_at(f_row, 22))
+        net = _to_float(_cell_at(f_row, 23))
+        invoice.line_gross = line_gross
+        invoice.gross_amount = footer_gross or line_gross
+        if total_disc:
+            invoice.cash_discount = total_disc
+        if round_off:
+            invoice.round_off = round_off
+        if total_cgst:
+            invoice.total_cgst = total_cgst
+        if total_sgst:
+            invoice.total_sgst = total_sgst
+        if total_cgst or total_sgst:
+            invoice.footer_gst_authoritative = True
+        if net:
+            invoice.invoice_total = net
+            invoice.taxable_amount = round(
+                net - total_cgst - total_sgst - round_off + total_disc, 2
+            )
+        return
+
     if fmt == "seema":
         line_gross = round(sum(float(it.amount or 0) for it in invoice.items), 2)
         footer_gross = _to_float(_cell_at(f_row, 1))
@@ -2241,6 +2782,90 @@ def _apply_edi_htf_footer(invoice: PurchaseInvoice, f_row: Sequence[Any], fmt: s
             invoice.invoice_total = round(pre_round + invoice.round_off, 2)
 
 
+def _edi_htf_header_details(h_row: Sequence[Any]) -> Dict[str, str]:
+    """
+    EDI H/T/F header: bill no + date from H row.
+    JCR-prefixed bills (Jay Ganesh Pharmavet) use a fixed supplier profile.
+    H[16] is the buyer/customer name, not the distributor.
+    """
+    invoice_number = _clean_cell(_cell_at(h_row, 2))
+    details = {
+        "supplier_name": "",
+        "supplier_address": "",
+        "supplier_phone": "",
+        "supplier_gstin": "",
+        "supplier_dl": "",
+        "invoice_number": invoice_number,
+        "invoice_date": (
+            _normalize_compact_date(_cell_at(h_row, 3))
+            or _normalize_compact_date(_cell_at(h_row, 9))
+            or ""
+        ),
+    }
+    bill_key = re.sub(r"\s+", "", invoice_number.upper())
+    if bill_key.startswith("JCR"):
+        details.update(JAI_GANESH_PHARMAVET_SUPPLIER)
+    return details
+
+
+def _enrich_item_hsn_from_db(conn: Any, item: ImportedPurchaseItem) -> None:
+    """Prefer a longer HSN from inventory when the bill carries a short chapter code."""
+    use_chapter = bool((item.raw or {}).get("hsn_chapter"))
+    if use_chapter:
+        item.hsn_code = hsn_chapter_code(item.hsn_code)
+        return
+    if conn is None or not (item.name or "").strip():
+        item.hsn_code = normalize_hsn_code(item.hsn_code)
+        return
+    from core.purchase_service import lookup_medicine_details
+
+    db_hsn = normalize_hsn_code(lookup_medicine_details(conn, item.name.strip()).get("hsn_code", ""))
+    bill_hsn = normalize_hsn_code(item.hsn_code)
+    if not bill_hsn:
+        item.hsn_code = db_hsn
+        return
+    if db_hsn and len(db_hsn) > len(bill_hsn):
+        bill_chapter = bill_hsn[:4]
+        if db_hsn.startswith(bill_chapter):
+            item.hsn_code = db_hsn
+            return
+    item.hsn_code = bill_hsn
+
+
+def _enrich_item_metadata_from_db(conn: Any, item: ImportedPurchaseItem) -> None:
+    """Fill schedule, content, and HSN from DB/catalog when the bill omits them."""
+    if not (item.name or "").strip():
+        return
+    from core.medicine_metadata_resolver import (
+        _apply_import_fallback_schedule,
+        resolve_medicine_metadata,
+    )
+    from core.purchase_service import lookup_medicine_details
+
+    meta = resolve_medicine_metadata(
+        item.name.strip(),
+        conn,
+        med_type=(item.medicine_type or "").strip(),
+        pack=(item.pack or "").strip(),
+        manufacturer=(item.manufacturer or "").strip(),
+        use_gemini=False,
+    )
+    if not (item.schedule or "").strip() and meta.get("schedule"):
+        item.schedule = meta["schedule"]
+    if not (item.content_drug or "").strip() and meta.get("content_drug"):
+        item.content_drug = meta["content_drug"]
+    if not (item.hsn_code or "").strip():
+        try:
+            details = lookup_medicine_details(conn, item.name.strip())
+            if details.get("hsn_code"):
+                item.hsn_code = str(details["hsn_code"])
+            if not (item.pack or "").strip() and details.get("unit"):
+                item.pack = str(details["unit"])
+        except Exception:
+            pass
+    _apply_import_fallback_schedule(item, conn)
+
+
 def _parse_h_t_f_invoice(path: str, rows: Sequence[Sequence[Any]], ext: str) -> Optional[PurchaseInvoice]:
     """Parse EDI export rows: H=header, T=item, F=footer (Seema/Micropro or MARG ERP)."""
     t_rows = [row for row in rows if _clean_cell(_cell_at(row, 0)).upper() == "T"]
@@ -2250,7 +2875,8 @@ def _parse_h_t_f_invoice(path: str, rows: Sequence[Sequence[Any]], ext: str) -> 
     h_row = next((row for row in rows if _clean_cell(_cell_at(row, 0)).upper() == "H"), [])
     f_row = next((row for row in rows if _clean_cell(_cell_at(row, 0)).upper() == "F"), [])
     header_text = _rows_to_text([h_row] if h_row else [])
-    edi_fmt = _detect_edi_htf_format(t_rows[0], header_text)
+    invoice_number = _clean_cell(_cell_at(h_row, 2))
+    edi_fmt = _detect_edi_htf_format(t_rows[0], header_text, invoice_number)
 
     issues: List[str] = []
     items: List[ImportedPurchaseItem] = []
@@ -2269,7 +2895,10 @@ def _parse_h_t_f_invoice(path: str, rows: Sequence[Sequence[Any]], ext: str) -> 
             manufacturer = _clean_cell(_cell_at(row, 7))
         else:
             manufacturer = _clean_cell(_cell_at(row, 7))
-        if edi_fmt == "seema":
+        if edi_fmt == "jcr":
+            line_cd_pct = 0.0
+            line_pd_pct = 0.0
+        elif edi_fmt == "seema":
             line_cd_pct = _to_float(_cell_at(row, 20))
             line_pd_pct = _to_float(_cell_at(row, 21))
         elif edi_fmt == "seema_legacy":
@@ -2300,8 +2929,16 @@ def _parse_h_t_f_invoice(path: str, rows: Sequence[Sequence[Any]], ext: str) -> 
             pack=pack,
             amount=amount,
             source_row=row_no,
-            raw={str(idx): _clean_cell(value) for idx, value in enumerate(row)},
+            raw={
+                str(idx): _clean_cell(value) for idx, value in enumerate(row)
+            },
         )
+        item.raw["gst_from_bill"] = True
+        item.raw["gst_pct"] = str(gst_pct)
+        if gst_pct == 0:
+            item.raw["gst_explicit_zero"] = True
+        if edi_fmt == "jcr":
+            item.raw["hsn_chapter"] = True
         item.validate()
         if item.issues:
             issues.append("Row {}: {}".format(row_no, "; ".join(item.issues)))
@@ -2311,14 +2948,10 @@ def _parse_h_t_f_invoice(path: str, rows: Sequence[Sequence[Any]], ext: str) -> 
         return None
 
     text = _rows_to_text(rows[:40])
-    details = extract_supplier_details(text)
-    invoice_number = _clean_cell(_cell_at(h_row, 2)) or details.get("invoice_number", "")
-    invoice_date = (
-        _normalize_compact_date(_cell_at(h_row, 3))
-        or _normalize_compact_date(_cell_at(h_row, 9))
-        or details.get("invoice_date", "")
-    )
-    if edi_fmt == "seema":
+    details = _edi_htf_header_details(h_row)
+    invoice_number = details.get("invoice_number", "")
+    invoice_date = details.get("invoice_date", "")
+    if edi_fmt in ("seema", "jcr"):
         invoice_total = (
             _to_float(_cell_at(f_row, 23))
             or _to_float(_cell_at(f_row, 1))
@@ -2341,13 +2974,6 @@ def _parse_h_t_f_invoice(path: str, rows: Sequence[Sequence[Any]], ext: str) -> 
         )
     details["invoice_number"] = invoice_number
     details["invoice_date"] = invoice_date
-    basename = os.path.basename(path).upper()
-    if not details.get("supplier_name") and any(
-        token in basename for token in ("SEEMA", "SJCR", "JCR00664")
-    ):
-        details["supplier_name"] = "SEEMA FRUITS PHARMA & VETERINARY DISTRIBUTORS"
-    if not details.get("supplier_name") and "SWAMI_SAMARTH" in basename.replace(" ", "_"):
-        details["supplier_name"] = "SHRI SWAMI SAMARTH MEDICAL AND AGENCY"
 
     parser_label = "EDI H/T/F ({})".format(edi_fmt)
     invoice = _invoice_from_details(
@@ -2527,7 +3153,7 @@ def _lookup_manufacturer(conn, name: str) -> str:
         cur.execute(
             """
             SELECT manufacturer FROM medicines
-            WHERE name=? AND COALESCE(manufacturer,'')!=''
+            WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) AND COALESCE(manufacturer,'')!=''
             ORDER BY id DESC LIMIT 1
             """,
             (name.strip(),),
@@ -2550,7 +3176,7 @@ def _item_from_record(rec: Dict[str, Any]) -> ImportedPurchaseItem:
     rec["qty_unit"] = _clean_cell(rec.get("qty_unit") or rec.get("unit"))
     rec["pkg_unit"] = _clean_cell(rec.get("pkg_unit") or pack)
     med_type = _type_from_record(rec)
-    if _clean_cell(rec.get("medicine_type")):
+    if _clean_cell(rec.get("medicine_type")) and not rec.get("gemini_import"):
         rec["medicine_type_source"] = "column"
     return ImportedPurchaseItem(
         name=name,
@@ -3093,10 +3719,13 @@ def _extract_total_amount(text: str, items: Sequence[ImportedPurchaseItem]) -> f
 
 
 def _add_quantity_metadata(item: Dict[str, Any], pack: Any) -> None:
+    from core.bill_import_normalize import pack_is_volume_or_weight
+
     med_type = str(item.get("type", ""))
-    if is_strip_count_type(med_type):
+    if is_strip_count_type(med_type) and not pack_is_volume_or_weight(pack):
         tps = _extract_tablets_per_strip(pack)
         item["tablets_per_stripe"] = tps
+        item["quantity_value"] = str(tps)
         item["total_tablets"] = float(item.get("qty", 0) or 0) * tps
         item["free_tablets"] = float(item.get("free_qty", 0) or 0) * tps
         return
@@ -3106,14 +3735,9 @@ def _add_quantity_metadata(item: Dict[str, Any], pack: Any) -> None:
 
 
 def _extract_tablets_per_strip(pack: Any) -> int:
-    text = _clean_cell(pack)
-    matches = re.findall(r"\d+", text)
-    if matches:
-        try:
-            return max(1, int(matches[0]))
-        except ValueError:
-            pass
-    return 1
+    from core.bill_import_normalize import tablets_per_strip_from_pack
+
+    return tablets_per_strip_from_pack(pack)
 
 
 def _merge_purchase_page_items(items: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -3140,27 +3764,30 @@ def _merge_purchase_page_items(items: Sequence[Dict[str, Any]]) -> List[Dict[str
             float(target.get("free_qty", 0) or 0) + float(item.get("free_qty", 0) or 0),
             4,
         )
-        _add_quantity_metadata(target, target.get("quantity_value", ""))
+        new_row = int(item.get("source_row") or 0)
+        old_row = int(target.get("source_row") or 0)
+        if new_row and (not old_row or new_row < old_row):
+            target["source_row"] = new_row
+        _add_quantity_metadata(target, target.get("pack", ""))
+    output.sort(key=lambda row: int(row.get("source_row") or 0))
     return output
 
 
 def _apply_invoice_discounts(purchase_page: Any, invoice: PurchaseInvoice) -> None:
-    """Apply product + cash discount from invoice footer to overall discount field."""
-    total_disc = round(
-        float(getattr(invoice, "product_discount", 0) or 0)
-        + float(getattr(invoice, "cash_discount", 0) or 0),
-        2,
-    )
+    """Apply bill discount from invoice footer to overall discount field."""
+    total_disc = invoice_bill_discount(invoice)
     if total_disc <= 0:
         return
+    gst_method = invoice_gst_calc_method(invoice)
+    if hasattr(purchase_page, "set_gst_calc_method"):
+        purchase_page.set_gst_calc_method(gst_method)
+    elif hasattr(purchase_page, "gst_calc_method_var"):
+        purchase_page.gst_calc_method_var.set(gst_method)
     if hasattr(purchase_page, "overall_discount"):
         _set_entry(purchase_page.overall_discount, "{:.2f}".format(total_disc))
-    cash_pct = float(getattr(invoice, "cash_discount_pct", 0) or 0)
-    if cash_pct and hasattr(purchase_page, "overall_discount_pct"):
-        _set_entry(purchase_page.overall_discount_pct, "{:.2f}".format(cash_pct))
-    elif hasattr(purchase_page, "sync_overall_discount_fields"):
+    if hasattr(purchase_page, "sync_overall_discount_fields"):
         purchase_page.sync_overall_discount_fields('rupees')
-    purchase_page.calculate_total()
+    purchase_page.recalculate_purchase_totals()
 
 
 def _apply_invoice_rounding(purchase_page: Any, invoice_total: Any) -> None:
@@ -3174,7 +3801,7 @@ def _apply_invoice_rounding(purchase_page: Any, invoice_total: Any) -> None:
     if abs(diff) > 5:
         return
     _set_entry(purchase_page.rounding_entry, "{:.2f}".format(diff))
-    purchase_page.calculate_total()
+    purchase_page.recalculate_purchase_totals()
 
 
 def _match_type(med_type: str, available_types: Iterable[str]) -> str:

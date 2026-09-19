@@ -25,7 +25,7 @@ _DIV      = '#e2e8f0'
 
 _LEFT_W  = 340
 _RIGHT_W = 500
-_HEIGHT  = 680
+_HEIGHT  = 720
 
 # Font names after loading TTF
 _FONT_REG  = 'Nirmala UI'
@@ -76,7 +76,7 @@ def show_activation_dialog(on_success_callback):
     _mode = ['activate']  # 'activate' | 'add_store'
 
     root = tk.Tk()
-    root.title("Satpuda Core — Activation")
+    root.title("Satpuda Core Private Limited — Activation")
     root.state('zoomed')
     root.resizable(True, True)
     root.configure(bg=_BG)
@@ -87,7 +87,14 @@ def show_activation_dialog(on_success_callback):
     except Exception:
         pass
 
-    logo_img = _try_img(_asset('satpuda_logo.png'), 80)
+    try:
+        from core.brand_assets import get_full_logo_png, PRODUCT_TAGLINE
+        _logo_path = get_full_logo_png(theme_name='navy-light')
+        _tagline = PRODUCT_TAGLINE
+    except Exception:
+        _logo_path = _asset('satpuda_logo.png')
+        _tagline = "Medical Management Software · Satpuda Core Private Limited"
+    logo_img = _try_img(_logo_path, 160)
     card_img = _try_img(_asset('card design.png'),  260)   # small card
 
     # ── Main container centred via place ──────────────────────────────────
@@ -107,37 +114,36 @@ def show_activation_dialog(on_success_callback):
 
     y = 26
 
-    # Logo
+    # Full brand logo (Satpuda Core Private Limited)
     if logo_img:
         lbl = tk.Label(left, image=logo_img, bg=_LEFT_BG)
         lbl.image = logo_img
         lbl.place(relx=0.5, y=y, anchor='n')
-        y += 90
+        y += 150
     else:
         c = tk.Canvas(left, width=80, height=80, bg=_ACCENT, highlightthickness=0)
         c.place(relx=0.5, y=y, anchor='n')
         c.create_text(40, 40, text="SC", font=_F(22, True), fill='white')
         y += 90
+        brand = tk.Frame(left, bg=_LEFT_BG)
+        brand.place(relx=0.5, y=y, anchor='n')
+        tk.Label(brand, text="Satpuda", font=_F(18, True),
+                 bg=_LEFT_BG, fg=_FG).pack(side=tk.LEFT)
+        tk.Label(brand, text="Core", font=_F(18, True),
+                 bg=_LEFT_BG, fg=_GREEN).pack(side=tk.LEFT)
+        y += 32
 
-    # Brand  (+4 gap after logo)
-    brand = tk.Frame(left, bg=_LEFT_BG)
-    brand.place(relx=0.5, y=y, anchor='n')
-    tk.Label(brand, text="Satpuda", font=_F(18, True),
-             bg=_LEFT_BG, fg=_FG).pack(side=tk.LEFT)
-    tk.Label(brand, text="Core", font=_F(18, True),
-             bg=_LEFT_BG, fg=_GREEN).pack(side=tk.LEFT)
-    y += 32
+    # Tagline text
+    tk.Label(left, text=_tagline,
+             font=_F(7), bg=_LEFT_BG, fg=_MUTED,
+             wraplength=300, justify='center').place(relx=0.5, y=y, anchor='n')
+    y += 28
 
-    # Tagline text  (+4 gap after brand)
-    tk.Label(left, text="Billing. Management. Simplified.",
-             font=_F(8), bg=_LEFT_BG, fg=_MUTED).place(relx=0.5, y=y, anchor='n')
-    y += 22
-
-    # Tagline pill  (+4 gap after text)
+    # Tagline pill
     pill = tk.Frame(left, bg=_CARD_BG,
                     highlightbackground=_BORDER, highlightthickness=1)
     pill.place(relx=0.5, y=y, anchor='n')
-    tk.Label(pill, text="  Powering healthcare, managing care  ",
+    tk.Label(pill, text="  Medical management for modern pharmacies  ",
              font=_F(8), bg=_CARD_BG, fg=_MUTED, pady=4).pack()
     y += 38
 
@@ -177,7 +183,7 @@ def show_activation_dialog(on_success_callback):
                       highlightbackground=_BORDER, highlightthickness=1)
         ph.place(relx=0.5, y=y, anchor='n')
         ph.pack_propagate(False)
-        tk.Label(ph, text="SatpudaCore  |  Billing. Management. Simplified.",
+        tk.Label(ph, text="Satpuda Core Private Limited",
                  font=_F(8, True), bg=_CARD_BG, fg=_ACCENT
                  ).place(relx=0.5, rely=0.5, anchor='center')
     y += 154
@@ -192,14 +198,46 @@ def show_activation_dialog(on_success_callback):
             dc.create_oval(x0, y0, x0+2, y0+2, fill=_BORDER, outline='')
 
     # ── Divider ───────────────────────────────────────────────────────────
-    tk.Frame(main, bg=_DIV, width=1, height=_HEIGHT).place(x=_LEFT_W, y=0)
+    divider = tk.Frame(main, bg=_DIV, width=1, height=_HEIGHT)
+    divider.place(x=_LEFT_W, y=0)
 
     # ══════════════════════════════════════════════════════════════════════
-    # RIGHT PANEL
+    # RIGHT PANEL (scrollable — keeps Administrator visible on small screens)
     # ══════════════════════════════════════════════════════════════════════
-    right = tk.Frame(main, bg=_RIGHT_BG, width=_RIGHT_W, height=_HEIGHT)
-    right.place(x=_LEFT_W+1, y=0)
+    _INNER_W = _RIGHT_W - 18  # leave room for scrollbar
+
+    right_outer = tk.Frame(main, bg=_RIGHT_BG, width=_RIGHT_W, height=_HEIGHT)
+    right_outer.place(x=_LEFT_W + 1, y=0)
+    right_outer.pack_propagate(False)
+
+    right_scroll = tk.Scrollbar(right_outer, orient='vertical')
+    right_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
+    right_canvas = tk.Canvas(
+        right_outer, bg=_RIGHT_BG, highlightthickness=0,
+        yscrollcommand=right_scroll.set,
+    )
+    right_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    right_scroll.config(command=right_canvas.yview)
+
+    # Explicit size required: place()-only children do not expand the frame.
+    right = tk.Frame(right_canvas, bg=_RIGHT_BG, width=_INNER_W, height=_HEIGHT)
     right.pack_propagate(False)
+    _right_win = right_canvas.create_window((0, 0), window=right, anchor='nw', width=_INNER_W)
+
+    def _right_scroll_region(_event=None):
+        right_canvas.configure(scrollregion=(0, 0, _INNER_W, right.winfo_height()))
+
+    def _right_canvas_width(event):
+        right_canvas.itemconfig(_right_win, width=event.width)
+
+    right.bind('<Configure>', _right_scroll_region)
+    right_canvas.bind('<Configure>', _right_canvas_width)
+
+    def _right_wheel(event):
+        right_canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
+
+    right_canvas.bind_all('<MouseWheel>', _right_wheel, add='+')
 
     ry = 32
 
@@ -231,7 +269,7 @@ def show_activation_dialog(on_success_callback):
 
     # ── Input fields ──────────────────────────────────────────────────────
     FW = 420   # field width
-    FX = (_RIGHT_W - FW) // 2
+    FX = (_INNER_W - FW) // 2
 
     def _field(label_txt, ph_txt, show=None):
         nonlocal ry
@@ -309,6 +347,28 @@ def show_activation_dialog(on_success_callback):
     p_ent = _field("Password",   "Enter your password",  show='\u25cf')
     k_ent = _field("Device Key", "Enter your device key")
     s_ent = _field("Store Name", "Enter initial store name")
+
+    # Sync mode — Offline (Drive) or Online (Satpuda Core Server)
+    from core.sync_prefs import get_sync_mode, MODE_OFFLINE, MODE_ONLINE, mode_label
+    _sync_mode = tk.StringVar(value=get_sync_mode())
+    sync_frame = tk.Frame(right, bg=_RIGHT_BG)
+    sync_frame.place(x=FX, y=ry, width=FW)
+    tk.Label(sync_frame, text="Sync Mode", font=_F(8, True),
+             bg=_RIGHT_BG, fg=_MUTED, anchor='w').pack(fill=tk.X)
+    sync_row = tk.Frame(sync_frame, bg=_RIGHT_BG)
+    sync_row.pack(fill=tk.X, pady=(4, 0))
+    for val, lbl in ((MODE_OFFLINE, 'Offline (Drive)'), (MODE_ONLINE, 'Online (Server)')):
+        tk.Radiobutton(
+            sync_row, text=lbl, variable=_sync_mode, value=val,
+            font=_F(9), bg=_RIGHT_BG, fg=_FG, selectcolor=_CARD_BG,
+            activebackground=_RIGHT_BG, activeforeground=_FG,
+        ).pack(side=tk.LEFT, padx=(0, 12))
+    tk.Label(
+        sync_frame,
+        text="Online: data syncs via Satpuda Core Server. Copy the SC- Android key from Settings after activation.",
+        font=_F(7), bg=_RIGHT_BG, fg=_MUTED, wraplength=FW, justify='left',
+    ).pack(anchor='w', pady=(4, 0))
+    ry += 72
 
     hint_var = tk.StringVar(
         value="First activation: enter your initial store name (becomes the backup folder name)."
@@ -447,6 +507,63 @@ def show_activation_dialog(on_success_callback):
         bind_escape_to_close(dlg, on_close=dlg.destroy)
         user_e.focus_set()
 
+    def _show_android_connection_key(parent, store_name: str, connection_key: str):
+        """Show SC- key for Android activation — same store name required."""
+        key_dlg = tk.Toplevel(parent)
+        key_dlg.title("Android Store Connection Key")
+        key_dlg.geometry("580x300")
+        key_dlg.resizable(False, False)
+        key_dlg.transient(parent)
+        key_dlg.grab_set()
+        key_dlg.configure(bg=_RIGHT_BG)
+
+        tk.Label(
+            key_dlg, text="Android Store Connection Key", font=_F(12, True),
+            bg=_RIGHT_BG, fg=_FG,
+        ).pack(pady=(14, 4))
+        tk.Label(
+            key_dlg,
+            text=f"Store: {store_name}\n"
+                 "On Android Satpuda Core activation enter the SAME store name and paste this key.\n"
+                 "Also available later: Settings → Database → Administrator → Android Store Connection Key.",
+            font=_F(8), bg=_RIGHT_BG, fg=_MUTED, justify='center',
+        ).pack(padx=14)
+
+        key_var = tk.StringVar(value=connection_key or '(generating…)')
+        key_entry = tk.Entry(
+            key_dlg, textvariable=key_var, font=_F(11, True),
+            bg=_INPUT_BG, fg=_FG, justify='center', relief='flat', bd=1,
+        )
+        key_entry.pack(fill=tk.X, padx=20, pady=12, ipady=6)
+
+        btn_row = tk.Frame(key_dlg, bg=_RIGHT_BG)
+        btn_row.pack(pady=(0, 14))
+
+        def _copy():
+            k = key_var.get().strip()
+            if not k or k.startswith('('):
+                messagebox.showwarning("Copy", "Key not ready yet.", parent=key_dlg)
+                return
+            try:
+                parent.clipboard_clear()
+                parent.clipboard_append(k)
+                parent.update_idletasks()
+                messagebox.showinfo("Copied", "Connection key copied.", parent=key_dlg)
+            except Exception:
+                messagebox.showerror("Error", "Failed to copy.", parent=key_dlg)
+
+        tk.Button(
+            btn_row, text="Copy Key", command=_copy,
+            font=_F(9, True), bg=_ACCENT, fg='white', relief='flat', bd=0, padx=14, pady=6,
+        ).pack(side=tk.LEFT, padx=6)
+        tk.Button(
+            btn_row, text="Continue", command=key_dlg.destroy,
+            font=_F(9), bg=_CARD_BG, fg=_FG, relief='flat', bd=0, padx=14, pady=6,
+        ).pack(side=tk.LEFT, padx=6)
+        from core.dialog_escape import bind_escape_to_close
+        bind_escape_to_close(key_dlg, on_close=key_dlg.destroy)
+        key_dlg.wait_window()
+
     def _finish_store_setup(store_name: str, *, satellite: bool):
         from core.backup_manager import restore_latest_backup_from_drive
         import shutil
@@ -470,6 +587,9 @@ def show_activation_dialog(on_success_callback):
                         shutil.rmtree(tmp_parent, ignore_errors=True)
             else:
                 setup_initial_store_on_activation(store_name)
+            if _sync_mode.get() == MODE_ONLINE:
+                from core.sync_coordinator import ensure_online_store_link
+                ensure_online_store_link()
         except Exception as ex:
             err_var.set(str(ex))
             return False
@@ -488,17 +608,97 @@ def show_activation_dialog(on_success_callback):
             _shake(main)
             return
 
-        satellite = _mode[0] == 'add_store'
-        needs_store = satellite or not has_registry()
-        if needs_store:
-            if not store_name:
-                err_var.set("Store name is required.")
-                return
-            if not _finish_store_setup(store_name, satellite=satellite):
-                return
+        from core.sync_prefs import set_sync_mode, MODE_ONLINE
+        chosen_mode = (_sync_mode.get() or "").strip().lower()
+        try:
+            # Online: no auto first-download — user pulls manually when ready.
+            set_sync_mode(chosen_mode)
+        except Exception as ex:
+            err_var.set(f"Could not save sync mode: {ex}")
+            return
 
-        root.destroy()
-        on_success_callback()
+        satellite = _mode[0] == 'add_store'
+        if satellite and not store_name:
+            err_var.set("Store name is required.")
+            return
+        if not satellite and not store_name and not has_registry():
+            err_var.set("Store name is required.")
+            return
+
+        chosen_online = _sync_mode.get() == MODE_ONLINE
+        from core.background_workers import run_with_progress
+
+        def worker(put):
+            put("Setting up store…")
+            name = store_name
+            if satellite:
+                if not _finish_store_setup(name, satellite=True):
+                    raise RuntimeError(err_var.get() or "Store setup failed.")
+            else:
+                if name:
+                    if not _finish_store_setup(name, satellite=False):
+                        raise RuntimeError(err_var.get() or "Store setup failed.")
+                else:
+                    try:
+                        from core.store_manager import get_active_display_name
+                        name = get_active_display_name() or name
+                    except Exception:
+                        pass
+
+            android_key = ''
+            if chosen_online:
+                put("Connecting store to Satpuda Core Server…")
+                try:
+                    from core.sync_coordinator import ensure_online_store_link
+                    ensure_online_store_link()
+                except Exception as ex:
+                    # Non-fatal — activation can continue; sync starts later
+                    put(f"Server link note: {ex}")
+                if not name:
+                    try:
+                        from core.store_manager import get_active_display_name
+                        name = get_active_display_name() or name
+                    except Exception:
+                        pass
+                if name:
+                    put("Preparing Android connection key…")
+                    try:
+                        from core.store_link import get_local_android_key
+                        from core.sync_coordinator import ensure_online_store_link
+                        android_key = ensure_online_store_link() or get_local_android_key()
+                    except Exception:
+                        android_key = ''
+            put("Finishing…")
+            try:
+                set_sync_mode(MODE_ONLINE if chosen_online else _sync_mode.get())
+            except Exception:
+                pass
+            return {
+                "store_name": name or "",
+                "android_key": android_key or "",
+                "show_key": bool(chosen_online and name and android_key),
+            }
+
+        def on_done(result):
+            result = result or {}
+            if result.get("show_key") and result.get("android_key"):
+                _show_android_connection_key(
+                    root, result.get("store_name") or "", result.get("android_key"),
+                )
+            root.destroy()
+            on_success_callback()
+
+        def on_error(exc):
+            err_var.set(str(exc))
+            _shake(main)
+
+        run_with_progress(
+            root,
+            "Activating — Online setup…" if chosen_online else "Activating…",
+            worker,
+            on_complete=on_done,
+            on_error=on_error,
+        )
 
     def _set_mode(mode):
         _mode[0] = mode
@@ -510,7 +710,10 @@ def show_activation_dialog(on_success_callback):
             btn.config(text="  Connect & Restore Store  ->")
         else:
             if has_registry():
-                hint_var.set("Re-activation: store setup is already configured on this device.")
+                hint_var.set(
+                    "Same store name as before → loads that store's data. "
+                    "New name → creates an empty store. Leave blank to keep current."
+                )
             else:
                 hint_var.set(
                     "First activation: enter your initial store name "
@@ -548,7 +751,7 @@ def show_activation_dialog(on_success_callback):
     )
     add_store_btn = tk.Button(
         right,
-        text="Add Store (restore from Drive)",
+        text="Add Store (Drive)",
         font=_F(9, True),
         bg='#dbeafe',
         fg=_ACCENT,
@@ -560,15 +763,62 @@ def show_activation_dialog(on_success_callback):
         pady=7,
         command=lambda: _set_mode('add_store'),
     )
-    add_store_btn.place(x=FX, y=ry, width=FW)
-    ry += 40
+    half_w = (FW - 8) // 2
+    add_store_btn.place(x=FX, y=ry, width=half_w)
+    admin_btn.place(x=FX + half_w + 8, y=ry, width=half_w)
+    ry += 44
 
-    admin_btn.place(x=FX, y=ry, width=FW)
-    ry += 40
+    # "I already have a shop" -- the SC- key, and nothing else.
+    #
+    # The form above asks for a username, a password and a device key, and its
+    # Online step reaches the server as the vendor ADMINISTRATOR with a password
+    # compiled into the build. A shop that already exists on the server does not
+    # need any of that: its SC- key names it, and /api/auth/pair can return no
+    # other store. This is the path the owner wants when he has created the shop
+    # himself in the admin panel.
+    def _pair_existing():
+        if _pair_key_dialog(root):
+            root.destroy()
+            on_success_callback()
+
+    pair_btn = tk.Button(
+        right,
+        text="I already have a shop - enter its SC- key",
+        font=_F(9, True),
+        bg='#dbeafe',
+        fg=_ACCENT,
+        activebackground='#bfdbfe',
+        activeforeground=_ACCENT,
+        relief='flat',
+        bd=0,
+        cursor='hand2',
+        pady=7,
+        command=_pair_existing,
+    )
+    pair_btn.place(x=FX, y=ry, width=FW)
+    ry += 44
 
     tk.Label(right, text="Your data is secure and encrypted",
              font=_F(8), bg=_RIGHT_BG, fg=_MUTED
              ).place(relx=0.5, y=ry, anchor='n')
+    ry += 28
+
+    # Fit dialog height to screen; right panel scrolls if content is taller.
+    content_h = max(_HEIGHT, ry + 16)
+    try:
+        screen_h = root.winfo_screenheight()
+        panel_h = min(content_h, max(560, screen_h - 48))
+    except Exception:
+        panel_h = content_h
+    main.config(height=panel_h)
+    left.config(height=panel_h)
+    right_outer.config(height=panel_h)
+    divider.config(height=panel_h)
+    right.config(height=content_h)
+    _right_scroll_region()
+    root.update_idletasks()
+    if panel_h < content_h:
+        main.place(relx=0.5, rely=0.02, anchor='n')
 
     # ── Bindings ──────────────────────────────────────────────────────────
     def _next(src, dst):
@@ -586,6 +836,10 @@ def show_activation_dialog(on_success_callback):
     s_ent.bind('<Return>', lambda e: _activate())
 
     def _on_close():
+        try:
+            right_canvas.unbind_all('<MouseWheel>')
+        except Exception:
+            pass
         if messagebox.askyesno("Exit",
                 "Activation is required.\nExit?", parent=root):
             root.destroy()
@@ -596,6 +850,177 @@ def show_activation_dialog(on_success_callback):
     root.protocol("WM_DELETE_WINDOW", _on_close)
     root.after(200, u_ent.focus)
     root.mainloop()
+
+
+def _pair_key_dialog(parent, *, title="Connect to your shop"):
+    """Ask for the shop's SC- key and connect this computer to it.
+
+    THE WAY IN THAT DID NOT EXIST. A store the owner creates by hand in the
+    admin panel could only be reached through the long three-factor form, whose
+    Online step signs in as the vendor ADMINISTRATOR with a password compiled
+    into the build and then matches stores by display NAME. The SC- key needs
+    neither: /api/auth/pair answers for exactly the one store that owns the key.
+
+    Two presses, deliberately. The first reads the key back and shows whose shop
+    it is; nothing on this computer changes until the second.
+
+    Returns True when this PC is now connected.
+    """
+    from core.desktop_license_service import pair_with_store_key
+
+    dlg = tk.Toplevel(parent)
+    dlg.title(title)
+    dlg.geometry("460x300")
+    dlg.resizable(False, False)
+    dlg.transient(parent)
+    dlg.grab_set()
+    dlg.configure(bg=_RIGHT_BG)
+
+    tk.Label(dlg, text="I already have a shop", font=_F(12, True),
+             bg=_RIGHT_BG, fg=_FG).pack(pady=(14, 4))
+    tk.Label(
+        dlg,
+        text=("Type the shop's SC- key. It is shown on the Satpuda admin panel "
+              "next to the shop, and on any device already connected to it."),
+        font=_F(8), bg=_RIGHT_BG, fg=_MUTED, wraplength=420, justify='center',
+    ).pack(padx=16)
+
+    key_e = tk.Entry(dlg, font=_F(11), bg=_INPUT_BG, fg=_FG, justify='center')
+    key_e.pack(padx=24, pady=(12, 6), fill=tk.X)
+    key_e.focus_set()
+
+    note = tk.StringVar(value="")
+    tk.Label(dlg, textvariable=note, font=_F(8), bg=_RIGHT_BG, fg=_FG,
+             wraplength=420, justify='center').pack(padx=16, pady=(2, 0))
+    err = tk.StringVar(value="")
+    tk.Label(dlg, textvariable=err, font=_F(8), bg=_RIGHT_BG, fg=_ERROR,
+             wraplength=420, justify='center').pack(padx=16, pady=(2, 0))
+
+    state = {"store": "", "done": False}
+    btn_row = tk.Frame(dlg, bg=_RIGHT_BG)
+    btn_row.pack(side=tk.BOTTOM, pady=12)
+
+    def _press():
+        err.set("")
+        key = key_e.get().strip()
+        if not key:
+            err.set("Enter the shop's SC- key.")
+            return
+        try:
+            res = pair_with_store_key({
+                "android_key": key,
+                "confirm": bool(state["store"]),
+            }) or {}
+        except Exception as exc:
+            err.set(str(exc))
+            return
+        if not res.get("ok"):
+            err.set(str(res.get("error") or "That key did not match a shop."))
+            state["store"] = ""
+            go.config(text="Check this key")
+            note.set("")
+            return
+        if res.get("confirm_required"):
+            state["store"] = str(res.get("store_name") or "")
+            note.set(
+                f'This key belongs to "{state["store"]}".\n'
+                "Connect this computer to that shop?"
+            )
+            go.config(text=f'Yes, connect to {state["store"]}')
+            return
+        state["done"] = True
+        dlg.destroy()
+
+    go = tk.Button(btn_row, text="Check this key", font=_F(10, True),
+                   bg=_ACCENT, fg='white', relief='flat', bd=0,
+                   cursor='hand2', padx=14, pady=6, command=_press)
+    go.pack(side=tk.LEFT, padx=6)
+    tk.Button(btn_row, text="Cancel", font=_F(10), bg=_CARD_BG, fg=_FG,
+              relief='flat', bd=0, cursor='hand2', padx=14, pady=6,
+              command=dlg.destroy).pack(side=tk.LEFT, padx=6)
+    key_e.bind('<Return>', lambda e: _press())
+    parent.wait_window(dlg)
+    return bool(state["done"])
+
+
+def show_license_recovery_dialog(message, *, title="Licence not found"):
+    """The blocked screen, with something on it to press.
+
+    It used to be ``messagebox.showerror`` followed by ``sys.exit(0)``: the shop
+    was told to connect the internet, pressed OK, and the app closed. Connecting
+    the internet changed nothing on screen, and a licence that arrived a minute
+    later could not be noticed. Three ways forward now, and none of them
+    invents a licence:
+
+      * LOOK AGAIN -- ask the server for this computer's licence, now.
+      * ENTER THE SHOP'S SC- KEY -- for a PC that was never paired, which is the
+        state an Offline sign-up leaves behind and the only state from which the
+        server cannot recognise the machine.
+      * CLOSE -- what the old box did, kept.
+
+    Returns True when the caller should re-check the licence.
+    """
+    from core import license_seal as seal
+
+    root = tk.Tk()
+    root.title(title)
+    root.configure(bg=_RIGHT_BG)
+    root.geometry("560x320")
+    root.resizable(False, False)
+    try:
+        from core.window_icon import apply_main_window_icon
+        apply_main_window_icon(root)
+    except Exception:
+        pass
+
+    tk.Label(root, text=title, font=_F(14, True), bg=_RIGHT_BG, fg=_FG).pack(
+        pady=(18, 8)
+    )
+    tk.Label(root, text=str(message or ""), font=_F(9), bg=_RIGHT_BG, fg=_FG,
+             wraplength=500, justify='left').pack(padx=24)
+    status = tk.StringVar(value="")
+    tk.Label(root, textvariable=status, font=_F(8), bg=_RIGHT_BG, fg=_MUTED,
+             wraplength=500, justify='center').pack(padx=24, pady=(10, 0))
+
+    state = {"retry": False}
+
+    def _look_again():
+        status.set("Asking the Satpuda server for this computer's licence…")
+        root.update_idletasks()
+        try:
+            seal.fetch_seal(timeout=15.0, force=True, wait=15.0)
+        except Exception as exc:
+            status.set(str(exc))
+            return
+        from core.license_manager import check_expiry
+        if not check_expiry():
+            state["retry"] = True
+            root.destroy()
+            return
+        status.set(
+            "Still no licence. Check that this computer is on the internet, "
+            "then press Look again."
+        )
+
+    def _pair():
+        if _pair_key_dialog(root):
+            state["retry"] = True
+            root.destroy()
+
+    row = tk.Frame(root, bg=_RIGHT_BG)
+    row.pack(side=tk.BOTTOM, pady=16)
+    tk.Button(row, text="Look again", font=_F(10, True), bg=_ACCENT, fg='white',
+              relief='flat', bd=0, cursor='hand2', padx=16, pady=7,
+              command=_look_again).pack(side=tk.LEFT, padx=6)
+    tk.Button(row, text="Enter my shop's SC- key", font=_F(10), bg=_CARD_BG,
+              fg=_FG, relief='flat', bd=0, cursor='hand2', padx=16, pady=7,
+              command=_pair).pack(side=tk.LEFT, padx=6)
+    tk.Button(row, text="Close", font=_F(10), bg=_CARD_BG, fg=_FG,
+              relief='flat', bd=0, cursor='hand2', padx=16, pady=7,
+              command=root.destroy).pack(side=tk.LEFT, padx=6)
+
+    root.mainloop()
+    return bool(state["retry"])
 
 
 def _shake(widget):

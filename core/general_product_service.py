@@ -31,6 +31,9 @@ def list_products(conn, search: str = ''):
 
 
 def save_product(conn, name: str, rate: float, mrp: float, product_id=None):
+    from core.online_guard import ensure_can_mutate
+
+    ensure_can_mutate()
     name = (name or '').strip()
     if not name:
         raise ValueError('Product name is required.')
@@ -51,36 +54,53 @@ def save_product(conn, name: str, rate: float, mrp: float, product_id=None):
         if cur.rowcount == 0:
             raise ValueError('Product not found.')
         conn.commit()
-        return int(product_id)
+        pid = int(product_id)
+    else:
+        cur.execute("SELECT id FROM general_products WHERE name=? COLLATE NOCASE", (name,))
+        row = cur.fetchone()
+        if row:
+            cur.execute(
+                """
+                UPDATE general_products
+                SET rate=?, mrp=?, updated_at=?
+                WHERE id=?
+                """,
+                (rate, mrp, now, row[0]),
+            )
+            conn.commit()
+            pid = int(row[0])
+        else:
+            cur.execute(
+                """
+                INSERT INTO general_products (name, rate, mrp, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (name, rate, mrp, now, now),
+            )
+            conn.commit()
+            pid = int(cur.lastrowid)
 
-    cur.execute("SELECT id FROM general_products WHERE name=? COLLATE NOCASE", (name,))
-    row = cur.fetchone()
-    if row:
-        cur.execute(
-            """
-            UPDATE general_products
-            SET rate=?, mrp=?, updated_at=?
-            WHERE id=?
-            """,
-            (rate, mrp, now, row[0]),
-        )
-        conn.commit()
-        return int(row[0])
-
-    cur.execute(
-        """
-        INSERT INTO general_products (name, rate, mrp, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        (name, rate, mrp, now, now),
-    )
-    conn.commit()
-    return int(cur.lastrowid)
+    try:
+        from core.sync_coordinator import after_general_product_saved
+        after_general_product_saved(conn, pid)
+    except Exception:
+        raise
+    return pid
 
 
 def delete_product(conn, product_id: int):
+    from core.online_guard import ensure_can_mutate
+
+    ensure_can_mutate()
     cur = conn.cursor()
     cur.execute("DELETE FROM general_products WHERE id=?", (int(product_id),))
     if cur.rowcount == 0:
         raise ValueError('Product not found.')
     conn.commit()
+    try:
+        from core import server_live as live
+        from core.sync_prefs import is_online_mode
+        if is_online_mode():
+            live.delete_remote('general_products', int(product_id))
+    except Exception:
+        raise

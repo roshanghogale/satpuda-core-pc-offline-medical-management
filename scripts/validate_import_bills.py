@@ -32,11 +32,23 @@ def _footer_expect(path: str) -> dict:
     if ext not in (".csv", ".xlsx", ".xls"):
         return {}
     rows = _read_tabular_file(path, ext)
+    h_row = next((row for row in rows if _clean_cell(_cell_at(row, 0)).upper() == "H"), [])
     f_row = next((row for row in rows if _clean_cell(_cell_at(row, 0)).upper() == "F"), [])
     t_row = next((row for row in rows if _clean_cell(_cell_at(row, 0)).upper() == "T"), [])
     if not f_row or not t_row:
         return {}
-    fmt = _detect_edi_htf_format(t_row, "")
+    invoice_number = _clean_cell(_cell_at(h_row, 2)) if h_row else ""
+    fmt = _detect_edi_htf_format(t_row, "", invoice_number)
+    if fmt == "jcr":
+        return {
+            "fmt": fmt,
+            "net": _to_float(_cell_at(f_row, 23)),
+            "disc": _to_float(_cell_at(f_row, 2)),
+            "cgst": _to_float(_cell_at(f_row, 24)),
+            "sgst": _to_float(_cell_at(f_row, 25)),
+            "round": _to_float(_cell_at(f_row, 22)),
+            "gross": _to_float(_cell_at(f_row, 1)),
+        }
     if fmt == "seema":
         return {
             "fmt": fmt,
@@ -106,7 +118,18 @@ def _check(path: str) -> list:
     if not inv.items:
         probs.append("no items")
     exp = _footer_expect(path)
-    if exp.get("fmt") == "seema":
+    if exp.get("fmt") == "jcr":
+        if exp.get("net") and abs(net - exp["net"]) > 0.02:
+            probs.append(f"net {net} != {exp['net']}")
+        if exp.get("disc") and abs(float(inv.cash_discount or 0) - exp["disc"]) > 0.02:
+            probs.append(f"bill disc mismatch")
+        if exp.get("cgst") and abs(cgst - exp["cgst"]) > 0.02:
+            probs.append(f"cgst {cgst} != F24 {exp['cgst']}")
+        if exp.get("sgst") and abs(sgst - exp["sgst"]) > 0.02:
+            probs.append(f"sgst {sgst} != F25 {exp['sgst']}")
+        if exp.get("gross") and abs(line - exp["gross"]) > 0.05:
+            probs.append(f"line gross {line} != F1 {exp['gross']}")
+    elif exp.get("fmt") == "seema":
         if exp.get("net") and abs(net - exp["net"]) > 0.02:
             probs.append(f"net {net} != {exp['net']}")
         if exp.get("gst") and abs(gst - exp["gst"]) > 0.02:

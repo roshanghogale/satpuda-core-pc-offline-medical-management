@@ -101,9 +101,9 @@ class GlobalInputController:
         if self._canvas is None:
             return
         cls = _widget_class(source_widget)
+        # Treeview scrolls its own rows — never also move the page canvas (causes blink/jump).
         if cls in _TREEVIEW_CLASSES:
-            if not _treeview_at_edge(source_widget, delta):
-                return
+            return
         if cls in _LISTBOX_CLASSES:
             return
         self._scroll_canvas(delta)
@@ -198,6 +198,11 @@ class GlobalInputController:
             self._root.after_idle(KeyboardRegistry.finish_modal_session)
             return 'break'
         w = self._focused_widget()
+        if w is not None:
+            owner = getattr(w, '_searchable_combo', None)
+            if owner is not None and hasattr(owner, 'dismiss'):
+                owner.dismiss(blur=True)
+                return 'break'
         if w is None or not _is_treeview(w):
             return  # not a Treeview — let main.py Escape handler run
         try:

@@ -6,6 +6,8 @@ Called once at startup from main.py — no UI code here.
 """
 import sqlite3
 import re
+import threading
+import time
 
 
 # ── Table definitions ─────────────────────────────────────────────────────────
@@ -54,6 +56,9 @@ _TABLES = [
         account_cleared INTEGER DEFAULT 0, doctor_name TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         discount_pct REAL DEFAULT 0,
+        customer_name TEXT,
+        customer_phone TEXT,
+        customer_address TEXT,
         FOREIGN KEY (customer_id) REFERENCES customers (id)
     )""",
     """CREATE TABLE IF NOT EXISTS sales_items (
@@ -73,7 +78,8 @@ _TABLES = [
         total_amount REAL DEFAULT 0, overall_discount REAL DEFAULT 0,
         rounding REAL DEFAULT 0, need_to_pay REAL DEFAULT 0,
         final_amount REAL DEFAULT 0,
-        amount_paid REAL DEFAULT 0, previous_due REAL DEFAULT 0,
+        amount_paid REAL DEFAULT 0, cash_paid_at_entry REAL DEFAULT 0,
+        online_paid_at_entry REAL DEFAULT 0, previous_due REAL DEFAULT 0,
         previous_credit REAL DEFAULT 0, due REAL DEFAULT 0,
         current_credit REAL DEFAULT 0, total_due REAL DEFAULT 0,
         bill_cleared INTEGER DEFAULT 0, account_cleared INTEGER DEFAULT 0,
@@ -185,6 +191,10 @@ _TABLES = [
         qty         REAL DEFAULT 0,
         rate        REAL DEFAULT 0,
         amount      REAL DEFAULT 0,
+        -- qty is in STRIPS for tablet medicines; stock_units is what the line
+        -- actually took off the shelf, so deleting the return can give back the
+        -- same amount instead of the raw strip count.
+        stock_units REAL,
         FOREIGN KEY (return_id)   REFERENCES purchase_returns (id),
         FOREIGN KEY (medicine_id) REFERENCES medicines (id)
     )""",
@@ -292,6 +302,19 @@ def initialise(conn: sqlite3.Connection):
 
     _run_one_time_migration(conn)
 
+    try:
+        from core.pharmacy_profile_io import ensure_pharmacy_profile_table
+
+        ensure_pharmacy_profile_table(conn)
+    except Exception:
+        pass
+
+    try:
+        from core.name_utils import normalize_medicine_names_in_db
+        normalize_medicine_names_in_db(conn)
+    except Exception:
+        pass
+
 
 # ── Migrations ────────────────────────────────────────────────────────────────
 
@@ -326,14 +349,36 @@ def _migrate_all(cur, conn):
     _migrate_pharmacy_profile(cur)
     _migrate_sales(cur)
     _migrate_sales_due_formula(conn)
+    _migrate_bill_credit_overpay_only(conn)
     _migrate_customer_payments(cur)
     _migrate_suppliers(cur)
     _migrate_purchase_items_entry_paid(cur)
+    _migrate_purchase_payment_split(cur)
+    _migrate_purchase_numbers_compact(cur, conn)
+    try:
+        from core.fy_serial import migrate_fy_serial_numbers
+
+        migrate_fy_serial_numbers(conn)
+    except Exception as e:
+        print(f"fy serial migration: {e}")
+    try:
+        from core.db_repair import repair_missing_purchases
+        from core.store_manager import get_active_db_path
+
+        repair_missing_purchases(conn, db_path=get_active_db_path())
+    except Exception as e:
+        print(f"purchase repair: {e}")
     _migrate_pending_orders(cur)
     # Sync metadata columns (created_at/updated_at/version/device_id/deleted/sync_status).
     # Schema only — conflict logic / bootstrap / listeners unchanged this step.
     from core.sync_metadata_schema import ensure_sync_metadata_schema
     ensure_sync_metadata_schema(conn)
+    try:
+        from core.sync_v3.schema import ensure_sync_v3_schema
+
+        ensure_sync_v3_schema(conn)
+    except Exception as e:
+        print(f"sync_v3 schema: {e}")
 
     if _get_startup_migration_version(cur) < _STARTUP_MIGRATION_VERSION:
         _create_purchase_triggers(cur)
@@ -341,6 +386,14 @@ def _migrate_all(cur, conn):
         _create_sales_triggers(cur)
         _migrate_location_format(cur)
         _set_startup_migration_version(cur, conn, _STARTUP_MIGRATION_VERSION)
+
+    # Runs on every open, not only behind the migration-version gate: both the
+    # Tauri engine and the classic UI write this column, and a store that misses
+    # it fails the purchase-return save outright.
+    try:
+        _alter_if_missing(cur, 'purchase_return_items', 'stock_units', 'REAL')
+    except Exception as e:
+        print(f"purchase_return_items.stock_units migration: {e}")
 
     conn.commit()
 
@@ -380,11 +433,16 @@ def _migrate_medicines(cur, conn):
             cur.execute("ALTER TABLE medicines ADD COLUMN synced_at TEXT")
         from core.medicine_sync_merge import ensure_medicine_sync_triggers
         ensure_medicine_sync_triggers(cur)
-        # Rebuild if unexpected columns exist
-        expected = {'id','name','type','stock_qty','unit','gst_percent','mrp','rate',
-                    'manufacturer','batch_no','expiry_date','hsn_code','schedule',
-                    'location','content_drug','is_hidden','synced_at','created_at'}
-        if len(cols) > len(expected) or any(c not in expected for c in cols if c != 'id'):
+        # Rebuild only for truly legacy/unexpected columns.
+        # Sync metadata columns are normal — do NOT recreate every startup.
+        expected = {
+            'id', 'name', 'type', 'stock_qty', 'unit', 'gst_percent', 'mrp', 'rate',
+            'manufacturer', 'batch_no', 'expiry_date', 'hsn_code', 'schedule',
+            'location', 'content_drug', 'is_hidden', 'synced_at', 'created_at',
+            'updated_at', 'version', 'device_id', 'deleted', 'sync_status',
+        }
+        unexpected = [c for c in cols if c not in expected]
+        if unexpected:
             _recreate_medicines(cur)
     except Exception as e:
         print(f"medicines migration: {e}")
@@ -469,6 +527,135 @@ def _migrate_purchase_items_entry_paid(cur):
         print(f"purchase entry_paid migration: {e}")
 
 
+def _migrate_purchase_payment_split(cur):
+    """Add cash/online entry columns; backfill legacy paid-at-entry into Cash.
+
+    Semantics:
+      cash_paid_at_entry   = cash paid when the purchase was entered
+      online_paid_at_entry = online paid when the purchase was entered
+
+    Old databases only had a single entry payment (amount_paid_at_entry /
+    amount_paid). On upgrade that amount is treated as Cash by default;
+    Online stays 0 until the user edits it.
+    """
+    try:
+        _alter_if_missing(cur, 'purchases', 'cash_paid_at_entry', 'REAL DEFAULT 0')
+        _alter_if_missing(cur, 'purchases', 'online_paid_at_entry', 'REAL DEFAULT 0')
+
+        # One-time: put the whole legacy entry payment into Cash.
+        # Re-run safely while both split columns are still at default 0
+        # (meaning the row was never edited with the new cash/online UI).
+        cur.execute("""
+            UPDATE purchases
+            SET cash_paid_at_entry = COALESCE(
+                    NULLIF(amount_paid_at_entry, 0),
+                    NULLIF(amount_paid, 0),
+                    0
+                ),
+                online_paid_at_entry = 0
+            WHERE COALESCE(cash_paid_at_entry, 0) = 0
+              AND COALESCE(online_paid_at_entry, 0) = 0
+              AND COALESCE(
+                    NULLIF(amount_paid_at_entry, 0),
+                    NULLIF(amount_paid, 0),
+                    0
+                  ) > 0
+        """)
+    except Exception as e:
+        print(f"purchase payment split migration: {e}")
+
+
+_purchase_pay_migrate_lock = threading.Lock()
+
+
+def ensure_purchase_payment_columns(conn):
+    """Idempotent: add cash/online purchase columns and backfill Cash from legacy entry paid.
+
+    Safe to call from UI threads — uses a lock and skips work when columns already exist.
+    """
+    with _purchase_pay_migrate_lock:
+        cur = conn.cursor()
+        try:
+            cur.execute('PRAGMA busy_timeout=30000')
+        except Exception:
+            pass
+        try:
+            cur.execute('PRAGMA table_info(purchases)')
+            cols = {r[1] for r in cur.fetchall()}
+        except Exception:
+            cols = set()
+        need_entry = 'amount_paid_at_entry' not in cols
+        need_split = (
+            'cash_paid_at_entry' not in cols or 'online_paid_at_entry' not in cols
+        )
+        if not need_entry and not need_split:
+            # Columns exist — still backfill cash from legacy when both split cols are 0.
+            try:
+                _migrate_purchase_payment_split(cur)
+                conn.commit()
+            except Exception as e:
+                print(f"purchase payment split migration: {e}")
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            return
+
+        last_err = None
+        for _attempt in range(5):
+            try:
+                if need_entry:
+                    _migrate_purchase_items_entry_paid(cur)
+                _migrate_purchase_payment_split(cur)
+                conn.commit()
+                return
+            except Exception as e:
+                last_err = e
+                msg = str(e).lower()
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                if 'locked' in msg or 'busy' in msg:
+                    time.sleep(0.35)
+                    continue
+                print(f"ensure_purchase_payment_columns: {e}")
+                return
+        if last_err:
+            print(f"ensure_purchase_payment_columns: {last_err}")
+
+
+def _migrate_purchase_numbers_compact(cur, conn):
+    """Renumber saved purchases to compact 1, 2, 3… by entry date order."""
+    try:
+        cur.execute(
+            "SELECT value FROM settings WHERE name='purchase_no_compact_migrated'"
+        )
+        row = cur.fetchone()
+        if row and str(row[0]) == '1':
+            return
+        cur.execute("""
+            SELECT id FROM purchases
+            WHERE COALESCE(is_autosave, 0) = 0
+            ORDER BY purchase_date ASC, id ASC
+        """)
+        ids = [int(r[0]) for r in cur.fetchall()]
+        for seq, pid in enumerate(ids, start=1):
+            cur.execute(
+                "UPDATE purchases SET purchase_no=? WHERE id=?",
+                (str(seq), pid),
+            )
+        cur.execute(
+            "INSERT OR REPLACE INTO settings (name, value) VALUES "
+            "('purchase_no_compact_migrated', '1')"
+        )
+        conn.commit()
+        if ids:
+            print(f"[MIGRATION] Purchase numbers compacted 1..{len(ids)}.")
+    except Exception as e:
+        print(f"purchase_no compact migration: {e}")
+
+
 def _migrate_purchases(cur):
     try:
         cur.execute("PRAGMA table_info(purchases)")
@@ -532,6 +719,9 @@ def _migrate_purchase_items(cur):
             # legacy aliases
             ('discount_percent','REAL DEFAULT 0'), ('gst_value','REAL DEFAULT 0'),
             ('amount','REAL DEFAULT 0'),
+            # Stock units the line added when it was saved (NULL on older rows), so an
+            # edit takes back exactly that and not a recomputation from today's unit.
+            ('stock_units','REAL'),
         ]
         for col, col_type in new_cols:
             if col not in cols:
@@ -552,8 +742,41 @@ def _migrate_pharmacy_profile(cur):
         _alter_if_missing(cur, 'pharmacy_profile', 'logo_path', 'TEXT')
         _alter_if_missing(cur, 'pharmacy_profile', 'fssai_number', 'TEXT')
         _alter_if_missing(cur, 'pharmacy_profile', 'show_fssai_on_bill', 'INTEGER DEFAULT 0')
+        _migrate_fssai_print_flag(cur)
     except Exception as e:
         print(f"pharmacy_profile migration: {e}")
+
+
+def _migrate_fssai_print_flag(cur):
+    """One-shot: keep printing FSSAI for shops that were already printing it.
+
+    "Print FSSAI on sale bills" was saved and never read -- the bill templates
+    printed the number whenever one existed. Making the checkbox real would
+    therefore have removed the FSSAI line from every shop that has a number and
+    never ticked the box, which is not a change to make silently to a licence
+    number on a bill. Turn it on once for exactly those shops; after that the
+    checkbox is theirs.
+    """
+    try:
+        cur.execute(
+            "SELECT value FROM settings WHERE name='fssai_print_flag_migrated'"
+        )
+        if cur.fetchone():
+            return
+        cur.execute(
+            "UPDATE pharmacy_profile SET show_fssai_on_bill=1 "
+            "WHERE COALESCE(TRIM(fssai_number), '') != '' "
+            "AND COALESCE(show_fssai_on_bill, 0) = 0"
+        )
+        n = cur.rowcount or 0
+        cur.execute(
+            "INSERT OR REPLACE INTO settings (name, value) "
+            "VALUES ('fssai_print_flag_migrated', '1')"
+        )
+        if n:
+            print(f"[MIGRATION] FSSAI printing kept on for {n} store profile(s).")
+    except Exception as e:
+        print(f"fssai print flag migration: {e}")
 
 
 def _migrate_sales(cur):
@@ -570,10 +793,41 @@ def _migrate_sales(cur):
             ('account_cleared',  'INTEGER DEFAULT 0'),
             ('discount_pct',     'REAL DEFAULT 0'),
             ('is_autosave',      'INTEGER DEFAULT 0'),
+            # Align with server + Android denormalized customer fields
+            ('customer_name',    'TEXT'),
+            ('customer_phone',   'TEXT'),
+            ('customer_address', 'TEXT'),
         ]
         for col, col_type in new_cols:
             if col not in cols:
                 cur.execute(f"ALTER TABLE sales ADD COLUMN {col} {col_type}")
+        # Backfill names/phones from customers (same as Android MIGRATION_10_11)
+        cur.execute("PRAGMA table_info(sales)")
+        cols_after = [c[1] for c in cur.fetchall()]
+        if 'customer_name' in cols_after:
+            cur.execute(
+                """
+                UPDATE sales SET
+                    customer_name = COALESCE(
+                        NULLIF(TRIM(customer_name), ''),
+                        (SELECT c.name FROM customers c WHERE c.id = sales.customer_id)
+                    ),
+                    customer_phone = COALESCE(
+                        NULLIF(TRIM(COALESCE(customer_phone, '')), ''),
+                        (SELECT c.phone FROM customers c WHERE c.id = sales.customer_id)
+                    ),
+                    customer_address = COALESCE(
+                        NULLIF(TRIM(COALESCE(customer_address, '')), ''),
+                        (SELECT c.address FROM customers c WHERE c.id = sales.customer_id)
+                    )
+                WHERE customer_id IS NOT NULL
+                  AND (
+                    customer_name IS NULL OR TRIM(customer_name) = ''
+                    OR customer_phone IS NULL OR TRIM(COALESCE(customer_phone,'')) = ''
+                    OR customer_address IS NULL OR TRIM(COALESCE(customer_address,'')) = ''
+                  )
+                """
+            )
         if 'phone_pay_paid' in cols:
             _rebuild_sales_table(cur)
         # sales_items columns
@@ -607,6 +861,34 @@ def _migrate_sales_due_formula(conn):
         print(f"sales due formula migration: {e}")
 
 
+def _migrate_bill_credit_overpay_only(conn):
+    """One-time: bill credit = overpay only (not leftover previous credit)."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT value FROM settings WHERE name='bill_credit_overpay_only_v1'")
+        row = cur.fetchone()
+        if row and row[0] == '1':
+            return
+
+        from core.billing_service import repair_sales_due_fields
+        from core.purchase_service import repair_purchase_credit_fields
+
+        n_sales = repair_sales_due_fields(conn)
+        n_purch = repair_purchase_credit_fields(conn)
+        print(
+            f"[MIGRATION] Cleared false bill credit on {n_sales} sale(s) "
+            f"and {n_purch} purchase(s)."
+        )
+        cur.execute(
+            "INSERT OR REPLACE INTO settings (name, value) "
+            "VALUES ('bill_credit_overpay_only_v1','1')"
+        )
+        conn.commit()
+    except Exception as e:
+        print(f"bill credit overpay migration: {e}")
+
+
 def _rebuild_sales_table(cur):
     try:
         cur.execute("""CREATE TABLE IF NOT EXISTS sales_new (
@@ -620,17 +902,30 @@ def _rebuild_sales_table(cur):
             paid_due REAL DEFAULT 0, bill_cleared INTEGER DEFAULT 0,
             account_cleared INTEGER DEFAULT 0, doctor_name TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            discount_pct REAL DEFAULT 0,
+            customer_name TEXT,
+            customer_phone TEXT,
+            customer_address TEXT,
             FOREIGN KEY (customer_id) REFERENCES customers (id)
         )""")
-        cur.execute("""INSERT INTO sales_new
+        cur.execute("PRAGMA table_info(sales)")
+        old_cols = {c[1] for c in cur.fetchall()}
+        has_name = 'customer_name' in old_cols
+        name_sel = "customer_name" if has_name else "NULL"
+        phone_sel = "customer_phone" if 'customer_phone' in old_cols else "NULL"
+        addr_sel = "customer_address" if 'customer_address' in old_cols else "NULL"
+        disc_sel = "discount_pct" if 'discount_pct' in old_cols else "0"
+        cur.execute(f"""INSERT INTO sales_new
             (id,bill_no,customer_id,bill_date,total_amount,discount,rounding,
              amount_paid,cash_paid,online_paid,previous_due,previous_credit,
              total_due,due_amount,credit_amount,paid_due,bill_cleared,
-             account_cleared,doctor_name,created_at)
+             account_cleared,doctor_name,created_at,discount_pct,
+             customer_name,customer_phone,customer_address)
             SELECT id,bill_no,customer_id,bill_date,total_amount,discount,rounding,
              amount_paid,cash_paid,online_paid,previous_due,previous_credit,
              total_due,due_amount,credit_amount,paid_due,bill_cleared,
-             account_cleared,doctor_name,created_at FROM sales""")
+             account_cleared,doctor_name,created_at,{disc_sel},
+             {name_sel},{phone_sel},{addr_sel} FROM sales""")
         cur.execute("DROP TABLE sales")
         cur.execute("ALTER TABLE sales_new RENAME TO sales")
     except Exception as e:

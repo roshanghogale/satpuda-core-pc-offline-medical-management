@@ -4,15 +4,37 @@ core/themed_messagebox.py
 Drop-in themed replacements for tkinter.messagebox dialogs.
 Content scrolls when long; buttons stay fixed and visible; size fits on screen.
 """
-import tkinter as tk
-from tkinter import messagebox as _mb
-
+# Tk is deliberately EXCLUDED from the headless data-engine build, so importing
+# it at module scope made this file unimportable there. Anything that merely
+# wanted to *report* something -- printing a bill, saving a PDF -- then died with
+# ImportError and the desktop API answered 500. Degrade instead: with no display
+# the show* helpers log and return a safe default, and the Tk app is unchanged.
 try:
-    import ttkbootstrap as ttk
-    _BOOT = True
-except ImportError:
-    from tkinter import ttk as ttk
+    import tkinter as tk
+    from tkinter import messagebox as _mb
+
+    HAS_TK = True
+except Exception:  # frozen sidecar / no display
+    tk = None
+    _mb = None
+    HAS_TK = False
+
+if HAS_TK:
+    try:
+        import ttkbootstrap as ttk
+        _BOOT = True
+    except ImportError:
+        from tkinter import ttk as ttk
+        _BOOT = False
+else:
+    ttk = None
     _BOOT = False
+
+
+def _headless(kind, title, message, default):
+    """No GUI available: record it and carry on."""
+    print(f"[dialog:{kind}] {title}: {message}", flush=True)
+    return default
 
 from core.font_config import FONT_FAMILY, FONT_SIZE_DEFAULT, FONT_SIZE_LABELS
 
@@ -139,6 +161,8 @@ def _show(parent, title, message, kind, buttons, *, focus_after=None):
     ttk.Separator(footer_shell, orient='horizontal').pack(fill=tk.X)
     bf = ttk.Frame(footer_shell, padding=(12, 8))
     bf.pack(fill=tk.X)
+    bf_inner = ttk.Frame(bf)
+    bf_inner.pack(anchor=tk.CENTER)
 
     default_val = buttons[0][1]
     primary_btn = [None]
@@ -158,13 +182,13 @@ def _show(parent, title, message, kind, buttons, *, focus_after=None):
     for i, (label, val, bstyle) in enumerate(buttons):
         try:
             b = ttk.Button(
-                bf, text=label, width=10,
+                bf_inner, text=label, width=10,
                 bootstyle=bstyle,
                 command=lambda v=val: _click(v),
             )
         except Exception:
-            b = ttk.Button(bf, text=label, width=10, command=lambda v=val: _click(v))
-        b.pack(side=tk.RIGHT, padx=4)
+            b = ttk.Button(bf_inner, text=label, width=10, command=lambda v=val: _click(v))
+        b.pack(side=tk.LEFT, padx=4)
 
         def _btn_return(event, v=val):
             _click(v)
@@ -179,6 +203,15 @@ def _show(parent, title, message, kind, buttons, *, focus_after=None):
     bind_escape_to_close(dlg, on_close=lambda: _click(buttons[-1][1]))
     bind_enter_to_confirm(dlg, on_confirm=_confirm)
 
+    try:
+        from core.voice.voice_dialog import register_messagebox_dialog
+        register_messagebox_dialog(
+            dlg,
+            buttons=[(label, (lambda v=val: _click(v))) for label, val, _ in buttons],
+        )
+    except Exception:
+        pass
+
     def _present():
         finalize_dialog_geometry(dlg, width=min(400, max_w), height=None, resizable=False)
         try:
@@ -190,6 +223,11 @@ def _show(parent, title, message, kind, buttons, *, focus_after=None):
                 dlg.grab_set()
             except Exception:
                 pass
+            try:
+                from core.voice.voice_dialog import track_modal_dialog
+                track_modal_dialog(dlg)
+            except Exception:
+                pass
         btn = primary_btn[0]
         if btn is not None:
             try:
@@ -197,29 +235,45 @@ def _show(parent, title, message, kind, buttons, *, focus_after=None):
                 btn.focus_force()
             except Exception:
                 pass
+        # Force paint so dialog is not blank after a long UI-thread save.
+        # Use update_idletasks only — dlg.update() re-enters the event loop and
+        # can destroy sibling Toplevels (bad window path) during live refresh.
+        try:
+            dlg.update_idletasks()
+        except Exception:
+            pass
 
-    dlg.after(1, _present)
+    # Present immediately (not after(1)) so content is visible before wait_window.
+    _present()
     dlg.wait_window()
     _refocus_after(parent, focus_after)
     return result[0]
 
 
 def showinfo(title, message, parent=None, *, focus_after=None):
+    if not HAS_TK:
+        return _headless("showinfo", title, message, None)
     return _show(parent, title, message, 'info', [('OK', True, 'primary')],
                  focus_after=focus_after)
 
 
 def showwarning(title, message, parent=None, *, focus_after=None):
+    if not HAS_TK:
+        return _headless("showwarning", title, message, None)
     return _show(parent, title, message, 'warning', [('OK', True, 'warning')],
                  focus_after=focus_after)
 
 
 def showerror(title, message, parent=None, *, focus_after=None):
+    if not HAS_TK:
+        return _headless("showerror", title, message, None)
     return _show(parent, title, message, 'error', [('OK', True, 'danger')],
                  focus_after=focus_after)
 
 
 def askyesno(title, message, parent=None, *, focus_after=None):
+    if not HAS_TK:
+        return _headless("askyesno", title, message, False)
     return _show(
         parent, title, message, 'question',
         [('Yes', True, 'primary'), ('No', False, 'secondary')],
@@ -228,11 +282,41 @@ def askyesno(title, message, parent=None, *, focus_after=None):
 
 
 def askokcancel(title, message, parent=None, *, focus_after=None):
+    if not HAS_TK:
+        return _headless("askokcancel", title, message, False)
     return _show(
         parent, title, message, 'question',
         [('OK', True, 'primary'), ('Cancel', False, 'secondary')],
         focus_after=focus_after,
     )
+
+
+def ask_choice(title, message, choices, parent=None, *, kind='question',
+               focus_after=None):
+    """More than two answers.
+
+    `choices` is [(label, value, bootstyle), ...]; the return is the chosen
+    value, or None when the dialog is closed without choosing. Yes/No cannot
+    carry a third answer, and some questions genuinely have one -- "resume this
+    unfinished sale, put it back off the books, or leave it alone" is three
+    different things to do with real money, and collapsing them into two
+    prompts in a row is how the wrong one gets clicked.
+    """
+    if not HAS_TK:
+        return _headless("ask_choice", title, message, None)
+    return _show(parent, title, message, kind, list(choices),
+                 focus_after=focus_after)
+
+
+def show_open_file(title, message, parent=None, *, focus_after=None) -> bool:
+    if not HAS_TK:
+        return _headless("show_open_file", title, message, False)
+    """Show saved-file dialog with Open / Close. Returns True if Open was chosen."""
+    return bool(_show(
+        parent, title, message, 'info',
+        [('Open', True, 'primary'), ('Close', False, 'secondary')],
+        focus_after=focus_after,
+    ))
 
 
 def install_messagebox_patch():

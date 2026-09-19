@@ -1,6 +1,17 @@
 # -*- mode: python ; coding: utf-8 -*-
 # SatpudaCore — complete single-file EXE build spec  (Windows 8 / 10 / 11, 64-bit)
 
+# A release build must not carry one shop's identity -- their Drive backup
+# folder, the developer's printer, a counter's learned distributor names.
+# That rule lived only in SatpudaEngine_Folder.spec, so every build made from
+# THIS spec shipped all of it to whoever installed it. One shared definition:
+import os as _os
+import sys as _sys
+
+_sys.path.insert(0, _os.path.abspath(SPECPATH))
+from build_release_filter import release_datas as _release_datas
+
+
 import sys
 sys.path.insert(0, SPECPATH)
 from pyinstaller_tk_bundle import tcl_tk_datas_and_binaries
@@ -13,19 +24,22 @@ try:
 except ImportError:
     _certifi_datas = []
 
+from pyinstaller_extra_bundle import bundle_extras
+_extra_datas, _extra_binaries, _extra_hidden = bundle_extras(include_heavy_ocr=False)
+
 block_cipher = None
 
 a = Analysis(
     ['main.py'],
     pathex=['.'],
-    binaries=_tcl_binaries,
-    datas=[
+    datas=_release_datas([
         # ── Config files (copied to AppData on first run) ──────────────────
         ('config/theme_config.txt',    'config'),
         ('config/layout_config.txt',   'config'),
         ('config/font_size.txt',       'config'),
         ('config/sample_import.json',  'config'),
         ('config/backup_creds.dat',    'config'),
+        ('config/drive_backup_folder.dat', 'config'),
         ('config/backup_config.dat',   'config'),
         ('config/backup_slots.dat',    'config'),
         ('config/expiry.dat',          'config'),
@@ -33,20 +47,20 @@ a = Analysis(
         ('config/app_mode.txt',         'config'),
         ('config/import_learned.json',  'config'),
         ('config/bill_print_settings.json', 'config'),
+        ('config/firebase_service_account.json', 'config'),
         # ── Assets (images, fonts, icons, Excel master) ────────────────────
         ('assets',                     'assets'),
         ('assets/NirmalaUI.ttf',        'assets'),
         ('assets/NirmalaUI_Bold.ttf',   'assets'),
         # ── Web app ────────────────────────────────────────────────────────
         ('web_app',                    'web_app'),
-        # ── Source packages (needed for dynamic imports) ───────────────────
-        ('core',                       'core'),
-        ('ui',                         'ui'),
-        ('widgets',                    'widgets'),
+        # Source is compiled into the EXE archive — do NOT bundle core/ui/widgets
+        # as datas (that extracts readable .py files into %TEMP%\_MEI* on every PC).
         # ── OAuth / service account credentials ────────────────────────────
         ('oauth_client.json',          '.'),
         ('service_account.json',       '.'),
-    ] + _tcl_datas + _certifi_datas,
+    ]) + _tcl_datas + _certifi_datas + _extra_datas,
+    binaries=_tcl_binaries + _extra_binaries,
     hiddenimports=[
         '_tkinter',
         # ── ttkbootstrap ───────────────────────────────────────────────────
@@ -99,12 +113,15 @@ a = Analysis(
         'googleapiclient', 'googleapiclient.discovery', 'googleapiclient.http',
         'google.auth', 'google.oauth2', 'google.oauth2.service_account',
         'google.auth.transport.requests',
+        'google_auth_httplib2',
+        'httplib2',
         # ── core modules ───────────────────────────────────────────────────
         'core',
         'core.alert_colors',
         'core.app_setup',
         'core.backup_manager',
         'core.app_version',
+        'core.ssl_utils',
         'core.github_updater',
         'core.billing_service',
         'core.calc_engine',
@@ -116,6 +133,10 @@ a = Analysis(
         'core.font_updater',
         'core.input_controller',
         'core.layout_config',
+        # Imported inside functions (get_home_banner_path, the logo
+        # resolver) and every call site swallows ImportError, so a missing
+        # module looks exactly like 'the shop has no picture'.
+        'core.store_images',
         'core.license_manager',
         'core.window_icon',
         'core.purchase_calculator',
@@ -123,6 +144,8 @@ a = Analysis(
         'core.purchase_invoice_engine',
         'core.purchase_service',
         'core.web_purchase_server',
+        'core.mobile_import_server',
+        'qrcode', 'qrcode.main', 'qrcode.image.pil', 'qrcode.constants',
         'core.web_purchase_save',
         'core.general_product_service',
         'core.column_config',
@@ -190,11 +213,11 @@ a = Analysis(
         'bill_templates', 'bill_templates.classic', 'bill_templates.legacy',
         'widgets.searchable_combo',
         'widgets.two_step_medicine_combo',
-    ],
+    ] + _extra_hidden,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=['rthook_tkinter_win.py', 'rthook_windows_icon.py'],
-    excludes=['matplotlib', 'numpy', 'pandas', 'scipy', 'wx', 'PyQt5', 'PyQt6',
+    excludes=['matplotlib', 'pandas', 'scipy', 'wx', 'PyQt5', 'PyQt6',
               'IPython', 'notebook', 'pytest'],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
@@ -203,6 +226,9 @@ a = Analysis(
 )
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+from pyinstaller_extra_bundle import filter_system_dlls
+a.binaries = filter_system_dlls(a.binaries)
 
 exe = EXE(
     pyz,
@@ -226,13 +252,13 @@ exe = EXE(
     entitlements_file=None,
     icon='assets/satpuda_logo.ico',
     version_info={
-        'version': (1, 0, 2, 0),
+        'version': (1, 0, 3, 0),
         'company_name': 'Satpuda Medical',
         'file_description': 'Satpuda Core — Billing. Management. Simplified.',
         'internal_name': 'SatpudaCore',
         'legal_copyright': 'Satpuda Medical',
         'original_filename': 'SatpudaCore.exe',
         'product_name': 'Satpuda Core',
-        'product_version': '1.0.2.0',
+        'product_version': '1.0.3.0',
     },
 )

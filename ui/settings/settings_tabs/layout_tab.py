@@ -12,7 +12,7 @@ from core.font_config import *
 from core.layout_config import (
     _DEFAULTS, _BANNER_DEFAULTS, _SCHEDULE_UNIT_DEFAULTS, _TYPE_QTY_DEFAULTS,
     _DEFAULT_SCHEDULES, _DEFAULT_MED_TYPES, save_layout, load_layout,
-    copy_custom_home_banner,
+    copy_custom_home_banner, sort_med_types, normalize_med_type_name,
 )
 from core.column_config import (
     TABLE_COLUMNS, PAGE_LABELS, QUICK_ACCESS_BUTTONS, DASHBOARD_SECTIONS,
@@ -25,21 +25,35 @@ from core.settings_section_nav import wire_settings_section_nav, bindings_for_se
 from core.app_setup import AVAILABLE_THEMES, load_theme, save_theme, restart_app as _restart_app
 
 
-# Sidebar section id → button label
-_NAV_SECTIONS = [
+# Sidebar sections split across two settings tabs
+_APPEARANCE_SECTIONS = [
     ('theme',        '\U0001f3a8  Theme'),
     ('font',         'Font Size'),
     ('banner',       'Home Banner'),
     ('quick_access', 'Quick Access'),
     ('dashboard',    'Dashboard Sections'),
+]
+
+_LAYOUT_SECTIONS = [
     ('columns',      'Column Visibility'),
     ('rows',         'Table Row Counts'),
+    ('med_types',    'Medicine Types'),
     ('units',        'Medicine Units'),
     ('schedules',    'Schedules'),
-    ('med_types',    'Medicine Types'),
-    ('thresholds',   'Thresholds'),
+    ('thresholds',   'Thresholds & Reorder'),
+    ('sales_margin', 'Sales Margin Display'),
+    ('record_indicators', 'Record Indicators'),
     ('app_mode',     'App Mode'),
 ]
+
+_SECTION_TAB = {
+    section_id: tab_name
+    for tab_name, sections in (
+        ('Appearance', _APPEARANCE_SECTIONS),
+        ('Layout & Lists', _LAYOUT_SECTIONS),
+    )
+    for section_id, _label in sections
+}
 
 
 class LayoutTab:
@@ -48,51 +62,13 @@ class LayoutTab:
     def __init__(self, notebook, parent_root, conn=None):
         self._root = parent_root
         self._conn = conn
+        self._notebook = notebook
         self._panels = {}
-        self._nav_buttons = {}
+        self._shells = {}
+        self._active_shell = None
         self._active_section = None
-
-        outer = ttk.Frame(notebook)
-        self.outer = outer
-        notebook.add(outer, text=self.TAB_NAME)
-
-        shell = ttk.Frame(outer)
-        shell.pack(fill=tk.BOTH, expand=True)
-
-        # ── Left navigation ───────────────────────────────────────────────
-        nav_outer = ttk.LabelFrame(shell, text="Sections")
-        nav_outer.pack(side=tk.LEFT, fill=tk.Y, padx=(8, 4), pady=8)
-
-        nav_scroll = ttk.Frame(nav_outer)
-        nav_scroll.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
-
-        for section_id, label in _NAV_SECTIONS:
-            if section_id == 'theme' and not TTKBOOTSTRAP_AVAILABLE:
-                continue
-            btn = ttk.Button(
-                nav_scroll, text=label, width=22,
-                command=lambda k=section_id: self._show_section(k),
-            )
-            btn.pack(fill=tk.X, pady=2)
-            self._nav_buttons[section_id] = btn
-
-        ttk.Separator(nav_outer, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=6, pady=8)
-        try:
-            ttk.Button(
-                nav_outer, text="Save Appearance\n& Restart",
-                command=self._save, bootstyle='success', width=22,
-            ).pack(padx=6, pady=(0, 8))
-        except Exception:
-            ttk.Button(
-                nav_outer, text="Save Appearance & Restart",
-                command=self._save, width=22,
-            ).pack(padx=6, pady=(0, 8))
-
-        # ── Right content: dedicated scroll pane (canvas + tk.Frame) ──────
-        right_col = ttk.Frame(shell)
-        right_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(4, 8), pady=8)
-        self._scroller = AppearanceScrollPane(right_col)
-        self._content_host = self._scroller.frame
+        self._nav_buttons = {}
+        self._section_buttons = []
 
         saved_font = 10
         try:
@@ -105,24 +81,138 @@ class LayoutTab:
         self._saved = load_layout()
         self._saved_font = saved_font
 
+        tab_defs = [
+            ('Appearance', _APPEARANCE_SECTIONS),
+            ('Layout & Lists', _LAYOUT_SECTIONS),
+        ]
+        for tab_name, sections in tab_defs:
+            self._shells[tab_name] = self._create_tab_shell(notebook, tab_name, sections)
+
+        for tab_name in self._shells:
+            shell = self._shells[tab_name]
+            self._activate_shell(tab_name)
+            section_buttons, focus_sidebar = wire_settings_section_nav(
+                self, shell['nav_buttons'], shell['section_order'], self._show_section,
+            )
+            shell['section_buttons'] = section_buttons
+            shell['focus_sidebar'] = focus_sidebar
+
+        # Sidebar shells only — panels are built on first visit to Appearance / Layout.
+        self._activate_shell('Appearance')
+
+    def _ensure_panels(self):
+        if getattr(self, '_panels_built', False):
+            return
         self._build_all_panels()
+        self._panels_built = True
 
-        first = 'font' if not TTKBOOTSTRAP_AVAILABLE else 'theme'
-        self._show_section(first)
-        section_ids = [s[0] for s in _NAV_SECTIONS if s[0] != 'theme' or TTKBOOTSTRAP_AVAILABLE]
-        wire_settings_section_nav(self, self._nav_buttons, section_ids, self._show_section)
+    def _create_tab_shell(self, notebook, tab_name, sections):
+        nav_buttons = {}
+        outer = ttk.Frame(notebook)
+        notebook.add(outer, text=tab_name)
 
-    def _focus_sidebar(self):
-        buttons = list(self._nav_buttons.values())
-        if buttons:
-            buttons[0].focus_set()
+        shell = ttk.Frame(outer)
+        shell.pack(fill=tk.BOTH, expand=True)
+
+        nav_outer = ttk.LabelFrame(shell, text="Sections")
+        nav_outer.pack(side=tk.LEFT, fill=tk.Y, padx=(8, 4), pady=8)
+
+        nav_scroll = ttk.Frame(nav_outer)
+        nav_scroll.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+
+        for section_id, label in sections:
+            if section_id == 'theme' and not TTKBOOTSTRAP_AVAILABLE:
+                continue
+            btn = ttk.Button(
+                nav_scroll, text=label, width=22,
+                command=lambda k=section_id: self._show_section(k),
+            )
+            btn.pack(fill=tk.X, pady=2)
+            nav_buttons[section_id] = btn
+
+        ttk.Separator(nav_outer, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=6, pady=8)
+        try:
+            save_btn = ttk.Button(
+                nav_outer, text="Save Appearance\n& Restart (F10)",
+                command=self._save, bootstyle='success', width=22,
+            )
+            save_btn.pack(padx=6, pady=(0, 8))
+        except Exception:
+            save_btn = ttk.Button(
+                nav_outer, text="Save Appearance & Restart (F10)",
+                command=self._save, width=22,
+            )
+            save_btn.pack(padx=6, pady=(0, 8))
+
+        right_col = ttk.Frame(shell)
+        right_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(4, 8), pady=8)
+        scroller = AppearanceScrollPane(right_col)
+
+        section_ids = [
+            s[0] for s in sections
+            if s[0] != 'theme' or TTKBOOTSTRAP_AVAILABLE
+        ]
+
+        return {
+            'name': tab_name,
+            'outer': outer,
+            'nav_buttons': nav_buttons,
+            'scroller': scroller,
+            'content_host': scroller.frame,
+            'section_order': section_ids,
+            'section_buttons': [],
+            'focus_sidebar': None,
+            'save_btn': save_btn,
+        }
+
+    def on_top_level_tab_selected(self, tab_text: str):
+        if tab_text not in self._shells:
+            return
+        self._activate_shell(tab_text)
+        self._ensure_panels()
+        order = self._shells[tab_text].get('section_order') or []
+        if not order:
+            return
+        current = self._active_section
+        if current is None or _SECTION_TAB.get(current) != tab_text:
+            self._show_section(order[0])
+
+    def open_section(self, section_id: str):
+        tab_name = _SECTION_TAB.get(section_id, 'Appearance')
+        for i in range(self._notebook.index('end')):
+            if self._notebook.tab(i, 'text') == tab_name:
+                self._notebook.select(i)
+                break
+        self._activate_shell(tab_name)
+        self._show_section(section_id)
+
+    def _activate_shell(self, tab_name: str):
+        shell = self._shells.get(tab_name)
+        if not shell:
+            return
+        self._active_shell = shell
+        self._nav_buttons = shell['nav_buttons']
+        self._scroller = shell['scroller']
+        self._content_host = shell['content_host']
+        self._section_buttons = shell['section_buttons']
+        self._section_order = shell['section_order']
+        self._focus_sidebar = shell['focus_sidebar']
+        self.outer = shell['outer']
 
     def get_keyboard_bindings(self):
-        return bindings_for_sectioned_tab(self)
+        bindings = bindings_for_sectioned_tab(self)
+        bindings.on_f10 = self._f10_save_appearance
+        return bindings
+
+    def _f10_save_appearance(self, event=None):
+        self._save()
+        return 'break'
 
     def _panel(self, section_id):
-        """Section root frame inside the scrollable area."""
-        wrapper = ttk.Frame(self._content_host)
+        """Section root frame inside the scrollable area for its tab."""
+        tab_name = _SECTION_TAB.get(section_id, 'Appearance')
+        shell = self._shells[tab_name]
+        wrapper = ttk.Frame(shell['content_host'])
         self._panels[section_id] = wrapper
         return wrapper
 
@@ -134,10 +224,15 @@ class LayoutTab:
         app.input_ctrl.set_active_canvas(self._scroller.canvas)
 
     def _show_section(self, section_id):
+        self._ensure_panels()
         if section_id not in self._panels:
             return
-        for frame in self._panels.values():
-            frame.pack_forget()
+        tab_name = _SECTION_TAB.get(section_id, 'Appearance')
+        self._activate_shell(tab_name)
+        shell = self._active_shell
+        for sid, frame in self._panels.items():
+            if _SECTION_TAB.get(sid) == tab_name:
+                frame.pack_forget()
         panel = self._panels[section_id]
         panel.pack(side=tk.TOP, fill=tk.X, anchor='n')
         self._active_section = section_id
@@ -149,7 +244,7 @@ class LayoutTab:
 
         panel.after_idle(_after_show)
         self.sync_input_canvas()
-        for key, btn in self._nav_buttons.items():
+        for key, btn in shell['nav_buttons'].items():
             try:
                 btn.configure(bootstyle='primary' if key == section_id else 'secondary')
             except Exception:
@@ -164,13 +259,20 @@ class LayoutTab:
         self._build_quick_access_panel()
         self._build_dashboard_panel()
         self._build_columns_panel()
+        self._build_sales_margin_panel()
         self._build_rows_panel()
         self._build_units_panel()
         self._build_schedules_panel()
         self._build_med_types_panel()
         if self._conn is not None:
             self._build_thresholds_panel()
+            self._build_record_indicators_panel()
             self._build_app_mode_panel()
+
+    def _build_record_indicators_panel(self):
+        from ui.settings.settings_tabs.record_indicators_panel import RecordIndicatorsPanel
+        frame = self._panel('record_indicators')
+        self._record_indicators_panel = RecordIndicatorsPanel(frame)
 
     def _build_thresholds_panel(self):
         from ui.settings.settings_tabs.misc_tabs import ThresholdsTab
@@ -484,6 +586,69 @@ class LayoutTab:
 
     # ── Row counts ────────────────────────────────────────────────────────
 
+    def _build_sales_margin_panel(self):
+        frame = self._panel('sales_margin')
+        saved = self._saved
+        lf = ttk.LabelFrame(frame, text="Sales page only (not printed on bill)")
+        lf.pack(fill=tk.X, padx=12, pady=12)
+
+        ttk.Label(
+            lf,
+            text="Margin is for the Sales screen while entering a bill only. "
+                 "It is never printed on the GST invoice. "
+                 "Margin = (MRP − purchase rate) × qty.",
+            wraplength=620, justify=tk.LEFT,
+        ).pack(padx=12, pady=(10, 8), anchor='w')
+
+        self._margin_col_var = tk.BooleanVar(
+            value=bool(saved.get('billing_show_margin_column', True)))
+        ttk.Checkbutton(
+            lf, text="Show margin column per medicine on Sales / Edit bill",
+            variable=self._margin_col_var,
+        ).pack(anchor=tk.W, padx=16, pady=4)
+
+        from core.billing_layout_prefs import (
+            MARGIN_DISPLAY_PERCENT,
+            MARGIN_DISPLAY_RUPEES,
+            load_billing_layout_prefs,
+            margin_display_mode_label,
+        )
+        billing_prefs = load_billing_layout_prefs()
+        ttk.Label(lf, text="Margin display:").pack(anchor=tk.W, padx=16, pady=(6, 2))
+        self._margin_display_combo = ttk.Combobox(
+            lf,
+            values=(
+                margin_display_mode_label(MARGIN_DISPLAY_RUPEES),
+                margin_display_mode_label(MARGIN_DISPLAY_PERCENT),
+            ),
+            state="readonly",
+            width=28,
+        )
+        self._margin_display_combo.set(
+            margin_display_mode_label(
+                str(
+                    billing_prefs.get("billing_margin_display_mode")
+                    or saved.get("billing_margin_display_mode")
+                    or MARGIN_DISPLAY_RUPEES
+                )
+            )
+        )
+        self._margin_display_combo.pack(anchor=tk.W, padx=16, pady=(0, 4))
+
+        self._total_margin_var = tk.BooleanVar(
+            value=bool(saved.get('billing_show_total_margin', True)))
+        ttk.Checkbutton(
+            lf, text="Show total margin in billing summary (after item + overall discount)",
+            variable=self._total_margin_var,
+        ).pack(anchor=tk.W, padx=16, pady=4)
+
+        self._margin_warn_var = tk.BooleanVar(
+            value=bool(saved.get('billing_margin_loss_warning', True)))
+        ttk.Checkbutton(
+            lf, text="Warn when discount is larger than margin (loss below purchase rate)",
+            variable=self._margin_warn_var,
+        ).pack(anchor=tk.W, padx=16, pady=(4, 12))
+
     def _build_rows_panel(self):
         frame = self._panel('rows')
         saved = self._saved
@@ -546,7 +711,8 @@ class LayoutTab:
         ttk.Label(ug, text="Default Qty (0=empty)", width=20, anchor='w',
                   font=(FONT_FAMILY, FONT_SIZE_LABELS, 'bold')).grid(row=0, column=2, padx=8, pady=2)
 
-        unit_med_types = saved.get('med_types', list(_SCHEDULE_UNIT_DEFAULTS.keys()))
+        unit_med_types = sort_med_types(
+            saved.get('med_types', list(_SCHEDULE_UNIT_DEFAULTS.keys())))
         for i, mt in enumerate(unit_med_types):
             r = i + 1
             ttk.Label(ug, text=f"{mt}:", width=18, anchor='w').grid(
@@ -620,7 +786,7 @@ class LayoutTab:
         self._typ_listbox.configure(yscrollcommand=typ_sb.set)
         self._typ_listbox.pack(side=tk.LEFT, fill=tk.Y)
         typ_sb.pack(side=tk.RIGHT, fill=tk.Y)
-        for t in saved.get('med_types', list(_DEFAULT_MED_TYPES)):
+        for t in sort_med_types(saved.get('med_types', list(_DEFAULT_MED_TYPES))):
             self._typ_listbox.insert(tk.END, t)
 
         tc = ttk.Frame(tf2)
@@ -671,11 +837,32 @@ class LayoutTab:
             self._sch_listbox.insert(tk.END, val)
             self._sch_new.delete(0, tk.END)
 
+    def _ensure_unit_vars_for_types(self, types):
+        for mt in types:
+            if mt not in self._unit_vars:
+                self._unit_vars[mt] = tk.StringVar(
+                    value=_SCHEDULE_UNIT_DEFAULTS.get(mt, ''))
+            if mt not in self._typeqty_vars:
+                raw = _TYPE_QTY_DEFAULTS.get(mt, 0)
+                self._typeqty_vars[mt] = tk.StringVar(
+                    value=str(raw) if raw != 0 else '0')
+
+    def _refresh_typ_listbox(self, types):
+        self._typ_listbox.delete(0, tk.END)
+        for t in sort_med_types(types):
+            self._typ_listbox.insert(tk.END, t)
+
     def _typ_add(self):
-        val = self._typ_new.get().strip()
-        if val and val not in self._typ_listbox.get(0, tk.END):
-            self._typ_listbox.insert(tk.END, val)
-            self._typ_new.delete(0, tk.END)
+        val = normalize_med_type_name(self._typ_new.get())
+        if not val:
+            return
+        current = list(self._typ_listbox.get(0, tk.END))
+        if val in current:
+            return
+        merged = sort_med_types(current + [val])
+        self._refresh_typ_listbox(merged)
+        self._ensure_unit_vars_for_types(merged)
+        self._typ_new.delete(0, tk.END)
 
     def _browse_home_banner(self):
         path = filedialog.askopenfilename(
@@ -691,8 +878,27 @@ class LayoutTab:
         if not path:
             return
         try:
+            previous = self._banner_path_var.get().strip()
             saved_path = copy_custom_home_banner(path)
+            # The path alone never leaves this PC. Carry the picture with the
+            # store so the shop's other machines show the same banner.
+            try:
+                from core.store_images import HOME_BANNER, remember_file
+
+                remember_file(HOME_BANNER, saved_path, previous=previous)
+            except Exception:
+                pass
             self._banner_path_var.set(saved_path)
+            # The new banner is written and cached before anything is removed.
+            # copy_custom_home_banner stamps every copy with the time, so
+            # without this the config folder keeps one full-size image per
+            # change and the shop only ever sees the newest.
+            try:
+                from core.layout_config import prune_custom_home_banners
+
+                prune_custom_home_banners(saved_path)
+            except Exception:
+                pass
             showinfo(
                 "Banner Selected",
                 "Custom banner saved.\nUse Save Appearance & Restart to apply on the home page.",
@@ -739,8 +945,9 @@ class LayoutTab:
                     data[f'typeqty_{mt}'] = raw if raw else 0
             raw_sch = list(self._sch_listbox.get(0, tk.END))
             data['schedules'] = ['' if s == '(blank)' else s for s in raw_sch]
-            new_types = list(self._typ_listbox.get(0, tk.END))
+            new_types = sort_med_types(list(self._typ_listbox.get(0, tk.END)))
             data['med_types'] = new_types
+            self._refresh_typ_listbox(new_types)
             data['home_banner_size'] = int(self._banner_size_var.get())
             data['home_banner_use_default'] = bool(self._banner_default_var.get())
             data['home_banner_path'] = '' if self._banner_default_var.get() else self._banner_path_var.get().strip()
@@ -775,12 +982,62 @@ class LayoutTab:
                         return
                     export_vis[page_key][report_key] = page_ex
             data['export_column_visibility'] = export_vis
+            if hasattr(self, '_margin_col_var'):
+                data['billing_show_margin_column'] = bool(self._margin_col_var.get())
+                data['billing_show_total_margin'] = bool(self._total_margin_var.get())
+                data['billing_margin_loss_warning'] = bool(self._margin_warn_var.get())
+                if hasattr(self, '_margin_display_combo'):
+                    from core.billing_layout_prefs import (
+                        MARGIN_DISPLAY_PERCENT,
+                        MARGIN_DISPLAY_RUPEES,
+                        margin_display_mode_label,
+                    )
+                    ml = (self._margin_display_combo.get() or "").strip()
+                    data['billing_margin_display_mode'] = (
+                        MARGIN_DISPLAY_PERCENT
+                        if ml == margin_display_mode_label(MARGIN_DISPLAY_PERCENT)
+                        else MARGIN_DISPLAY_RUPEES
+                    )
             for t in new_types:
                 if f'unit_{t}' not in data:
                     data[f'unit_{t}'] = _SCHEDULE_UNIT_DEFAULTS.get(t, '')
                 if f'typeqty_{t}' not in data:
                     data[f'typeqty_{t}'] = _TYPE_QTY_DEFAULTS.get(t, 0)
             save_layout(data)
+            try:
+                from core.sync_coordinator import after_layout_saved
+                after_layout_saved(getattr(self, "conn", None))
+            except Exception as exc:
+                from core.themed_messagebox import showerror
+                showerror("Online mode", str(exc), parent=getattr(self, "parent", None))
+                return
+            if hasattr(self, '_margin_col_var'):
+                try:
+                    from core.billing_layout_prefs import (
+                        MARGIN_DISPLAY_PERCENT,
+                        MARGIN_DISPLAY_RUPEES,
+                        margin_display_mode_label,
+                        save_billing_layout_prefs,
+                    )
+
+                    margin_mode = MARGIN_DISPLAY_RUPEES
+                    if hasattr(self, '_margin_display_combo'):
+                        ml = (self._margin_display_combo.get() or "").strip()
+                        if ml == margin_display_mode_label(MARGIN_DISPLAY_PERCENT):
+                            margin_mode = MARGIN_DISPLAY_PERCENT
+                    save_billing_layout_prefs(
+                        {
+                            "billing_show_margin_column": bool(self._margin_col_var.get()),
+                            "billing_show_total_margin": bool(self._total_margin_var.get()),
+                            "billing_margin_loss_warning": bool(self._margin_warn_var.get()),
+                            "billing_margin_display_mode": margin_mode,
+                        },
+                        getattr(self, "conn", None),
+                    )
+                except Exception:
+                    pass
+            if hasattr(self, '_record_indicators_panel'):
+                self._record_indicators_panel.save()
         except Exception as e:
             showerror("Error", f"Could not save layout: {e}")
             return

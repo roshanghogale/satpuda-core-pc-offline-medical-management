@@ -15,10 +15,30 @@ from typing import Any, Callable, Dict, List, Optional
 from core.focus_chain import focus_tree, safe_focus
 
 # Set True to log every keypress and whether registry actions ran (stdout + config/keyboard.log).
-DEBUG_KEYBOARD = True
+# Also reads config/keyboard_debug.txt — create that file with "0" to turn logging off.
+DEBUG_KEYBOARD = False
 
 _ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KEYBOARD_LOG_FILE = os.path.join(_ROOT_DIR, 'config', 'keyboard.log')
+KEYBOARD_DEBUG_FILE = os.path.join(_ROOT_DIR, 'config', 'keyboard_debug.txt')
+
+# Always log documented shortcut attempts (Ctrl+*, F-keys) even when DEBUG_KEYBOARD is False.
+SHORTCUT_LOG_ALWAYS = False
+
+_CTRL_SHIFT_CHORD_KEYS = frozenset({'c', 'n', 'w', 'm'})
+
+
+def _load_keyboard_debug() -> bool:
+    try:
+        if os.path.exists(KEYBOARD_DEBUG_FILE):
+            raw = open(KEYBOARD_DEBUG_FILE, encoding='utf-8').read().strip().lower()
+            return raw not in ('0', 'false', 'no', 'off')
+    except Exception:
+        pass
+    return True
+
+
+DEBUG_KEYBOARD = _load_keyboard_debug()
 
 INPUT_CLASSES = frozenset({
     'Entry', 'TEntry', 'TCombobox', 'Text', 'Spinbox', 'TSpinbox', 'Listbox',
@@ -94,6 +114,16 @@ class PageBindings:
     on_ctrl_f: Optional[Callable] = None
     on_ctrl_enter: Optional[Callable] = None
     on_ctrl_shift_c: Optional[Callable] = None
+    on_f7: Optional[Callable] = None
+    on_f8: Optional[Callable] = None
+    on_f9: Optional[Callable] = None
+    on_f10: Optional[Callable] = None
+    on_f11: Optional[Callable] = None
+    on_ctrl_shift_n: Optional[Callable] = None
+    on_ctrl_shift_w: Optional[Callable] = None
+    on_ctrl_shift_m: Optional[Callable] = None
+    on_ctrl_prior: Optional[Callable] = None
+    on_ctrl_next: Optional[Callable] = None
     f2_target: Any = None
     f3_target: Any = None
     on_shift_f2: Optional[Callable] = None
@@ -147,11 +177,75 @@ class KeyboardRegistry:
     # ── registration ─────────────────────────────────────────────────────
 
     @classmethod
+    def tutor_chat_blocks_shortcuts(cls) -> bool:
+        """True when Help AI panel is open and focus is inside it."""
+        if cls._tutor_chat_input_active():
+            return True
+        app = cls._app
+        if app is None:
+            return False
+        tutor = getattr(app, '_tutor_chat_window', None)
+        if tutor is None or not getattr(tutor, '_panel_visible', False):
+            return False
+        root = cls._root
+        if root is None:
+            return False
+        try:
+            w = root.focus_get()
+        except Exception:
+            return False
+        if w is None:
+            return False
+        for owner in (getattr(tutor, 'win', None), getattr(tutor, '_fab', None)):
+            if owner is None:
+                continue
+            cur = w
+            while cur is not None:
+                if cur == owner:
+                    return True
+                try:
+                    cur = cur.master
+                except Exception:
+                    break
+        return False
+
+    @classmethod
+    def _tutor_chat_input_active(cls) -> bool:
+        app = cls._app
+        if app is None:
+            return False
+        return bool(getattr(app, '_tutor_chat_input_active', False))
+
+    @classmethod
+    def _event_from_tutor_chat(cls, event) -> bool:
+        app = cls._app
+        if app is None:
+            return False
+        tutor = getattr(app, '_tutor_chat_window', None)
+        if tutor is None:
+            return False
+        w = getattr(event, 'widget', None)
+        for owner in (getattr(tutor, 'win', None), getattr(tutor, '_fab', None)):
+            if owner is None:
+                continue
+            cur = w
+            while cur is not None:
+                if cur == owner:
+                    return True
+                try:
+                    cur = cur.master
+                except Exception:
+                    break
+        return False
+
+    @classmethod
     def can_process_global_shortcut(cls, root=None) -> bool:
         """
         False when an editable control has focus so navigation keys type normally.
         Does not block action shortcuts (F5, Ctrl+E, etc.) — use only for nav keys.
         """
+        if cls.tutor_chat_blocks_shortcuts():
+            return False
         root = root or cls._root
         if root is None:
             return True
@@ -164,8 +258,20 @@ class KeyboardRegistry:
         return not _widget_blocks_navigation(w)
 
     @classmethod
-    def _emit_log(cls, message: str):
-        if not DEBUG_KEYBOARD:
+    def _should_always_log_action(cls, action: str) -> bool:
+        if not action or not SHORTCUT_LOG_ALWAYS:
+            return False
+        a = action.upper()
+        return (
+            a.startswith('CTRL+')
+            or a.startswith('F')
+            or a.startswith('BILLING:')
+            or a.startswith('PURCHASE:')
+        )
+
+    @classmethod
+    def _emit_log(cls, message: str, *, force: bool = False):
+        if not DEBUG_KEYBOARD and not force:
             return
         print(message, flush=True)
         try:
@@ -174,6 +280,20 @@ class KeyboardRegistry:
                 f.write(message + '\n')
         except Exception:
             pass
+
+    @classmethod
+    def _emit_log_always(cls, message: str):
+        """Write shortcut lines to keyboard.log when shortcut logging is enabled."""
+        if not DEBUG_KEYBOARD and not SHORTCUT_LOG_ALWAYS:
+            return
+        try:
+            os.makedirs(os.path.dirname(KEYBOARD_LOG_FILE), exist_ok=True)
+            with open(KEYBOARD_LOG_FILE, 'a', encoding='utf-8') as f:
+                f.write(message + '\n')
+        except Exception:
+            pass
+        if DEBUG_KEYBOARD:
+            print(message, flush=True)
 
     @classmethod
     def _log_context(cls) -> str:
@@ -217,12 +337,21 @@ class KeyboardRegistry:
 
     @classmethod
     def _log_keypress(cls, event, source: str = 'registry'):
-        if not DEBUG_KEYBOARD:
+        try:
+            state = int(getattr(event, 'state', 0))
+        except (TypeError, ValueError):
+            state = 0
+        has_mod = bool(state & 0x0005)  # Shift or Ctrl
+        if not DEBUG_KEYBOARD and not has_mod:
             return
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S.') + f'{int(time.time() * 1000) % 1000:03d}'
-        cls._emit_log(
+        line = (
             f'[{ts}] KEY {cls._format_key(event)} | {cls._log_context()} | source={source}'
         )
+        if has_mod and not DEBUG_KEYBOARD:
+            cls._emit_log_always(line)
+        else:
+            cls._emit_log(line)
 
     @classmethod
     def _log_action(
@@ -234,17 +363,22 @@ class KeyboardRegistry:
         reason: str = '',
         source: str = '',
     ):
-        if not DEBUG_KEYBOARD:
+        always = cls._should_always_log_action(action)
+        if not DEBUG_KEYBOARD and not always:
             return
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S.') + f'{int(time.time() * 1000) % 1000:03d}'
         status = 'PERFORMED' if performed else 'NOT PERFORMED'
         key_part = f' key={cls._format_key(event)} |' if event is not None else ''
         reason_part = f' reason={reason}' if reason else ''
         src_part = f' source={source}' if source else ''
-        cls._emit_log(
+        line = (
             f'[{ts}] ACTION {action} | {status} |{key_part} {cls._log_context()}'
             f'{reason_part}{src_part}'
         )
+        if always and not DEBUG_KEYBOARD:
+            cls._emit_log_always(line)
+        else:
+            cls._emit_log(line)
 
     @classmethod
     def _navigation_block_reason(cls, event=None) -> str:
@@ -272,9 +406,25 @@ class KeyboardRegistry:
         cls._log_action(shortcut, performed, event, reason=reason)
 
     @classmethod
-    def _on_log_all_keypress(cls, event):
+    def _on_global_keypress(cls, event):
+        """
+        bind_all fallback: log keys and run page digit/letter shortcuts when focus
+        is on the root or another widget outside the wired page tree (common on Home).
+        """
+        if cls._tutor_chat_input_active():
+            return None
+        if cls._event_from_tutor_chat(event):
+            return None
         cls._log_keypress(event, source='bind_all')
-        return None
+        chord = cls._handle_keypress_chords(event)
+        if chord is not None:
+            return chord
+        return cls._on_keypress_letter_nav(event)
+
+    @classmethod
+    def _on_log_all_keypress(cls, event):
+        """Legacy alias — use _on_global_keypress."""
+        return cls._on_global_keypress(event)
 
     @classmethod
     def _safe_bind_all(cls, root: tk.Misc, seq: str, callback) -> bool:
@@ -322,10 +472,11 @@ class KeyboardRegistry:
             cls._emit_log(f'[{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}] nav_mode={cls._nav_mode}')
 
     @classmethod
-    def finish_modal_session(cls):
+    def finish_modal_session(cls, *, defer_refresh: bool = False, blur: bool = True):
         """
         Call after startup alerts / modal dialogs close so page shortcuts work.
         Esc on alert windows does not run main blur_to_nav — this restores nav.
+        Use defer_refresh=True after heavy modals so navigation is not blocked.
         """
         root = cls._root
         if root is not None:
@@ -340,8 +491,15 @@ class KeyboardRegistry:
             except Exception:
                 pass
         cls.set_nav_mode(True)
-        cls.blur_to_nav()
-        cls.refresh_active_page()
+        if blur:
+            cls.blur_to_nav()
+        if defer_refresh and root is not None:
+            try:
+                root.after_idle(cls.refresh_active_page)
+            except Exception:
+                cls.refresh_active_page()
+        elif blur:
+            cls.refresh_active_page()
 
     @classmethod
     def refresh_active_page(cls):
@@ -367,12 +525,30 @@ class KeyboardRegistry:
                 pass
 
     @classmethod
+    def activate_page(cls, page_root, bindings: Optional[PageBindings] = None):
+        """Switch active page without re-walking the widget tree."""
+        if page_root is None:
+            return
+        if bindings is None:
+            bindings = getattr(page_root, '_keyboard_bindings', None)
+        cls._active_page_root = page_root
+        cls._active_page_bindings = bindings
+        if bindings is not None:
+            cls.set_active(bindings)
+        if id(page_root) not in cls._wired_pages:
+            cls.wire_page(page_root, bindings)
+
+    @classmethod
     def register_page(cls, page_root, bindings: Optional[PageBindings] = None):
         """Bind every shortcut on this page's widget tree (call from each page)."""
         if bindings is None:
             bindings = getattr(page_root, '_keyboard_bindings', None)
         cls._active_page_root = page_root
         cls._active_page_bindings = bindings
+        if id(page_root) in cls._wired_pages:
+            if bindings is not None:
+                cls.set_active(bindings)
+            return
         cls.wire_page(page_root, bindings)
 
     @classmethod
@@ -435,6 +611,16 @@ class KeyboardRegistry:
             ('<Shift-F2>', cls._on_shift_f2),
             ('<F4>', cls._on_f4),
             ('<KeyPress-F4>', cls._on_f4),
+            ('<F7>', cls._on_f7),
+            ('<KeyPress-F7>', cls._on_f7),
+            ('<F8>', cls._on_f8),
+            ('<KeyPress-F8>', cls._on_f8),
+            ('<F9>', cls._on_f9),
+            ('<KeyPress-F9>', cls._on_f9),
+            ('<F10>', cls._on_f10),
+            ('<KeyPress-F10>', cls._on_f10),
+            ('<F11>', cls._on_f11),
+            ('<KeyPress-F11>', cls._on_f11),
             ('<Control-g>', cls._on_ctrl_g),
             ('<Control-G>', cls._on_ctrl_g),
             ('<Control-p>', cls._on_ctrl_p),
@@ -449,6 +635,24 @@ class KeyboardRegistry:
             ('<Control-Shift-c>', cls._on_ctrl_shift_c),
             ('<Control-Shift-KeyPress-C>', cls._on_ctrl_shift_c),
             ('<Control-Shift-KeyPress-c>', cls._on_ctrl_shift_c),
+            ('<Control-Shift-N>', cls._on_ctrl_shift_n),
+            ('<Control-Shift-n>', cls._on_ctrl_shift_n),
+            ('<Control-Shift-KeyPress-N>', cls._on_ctrl_shift_n),
+            ('<Control-Shift-KeyPress-n>', cls._on_ctrl_shift_n),
+            ('<Control-Shift-W>', cls._on_ctrl_shift_w),
+            ('<Control-Shift-w>', cls._on_ctrl_shift_w),
+            ('<Control-Shift-KeyPress-W>', cls._on_ctrl_shift_w),
+            ('<Control-Shift-KeyPress-w>', cls._on_ctrl_shift_w),
+            ('<Control-Shift-M>', cls._on_ctrl_shift_m),
+            ('<Control-Shift-m>', cls._on_ctrl_shift_m),
+            ('<Control-Shift-KeyPress-M>', cls._on_ctrl_shift_m),
+            ('<Control-Shift-KeyPress-m>', cls._on_ctrl_shift_m),
+            ('<Control-Prior>', cls._on_ctrl_prior),
+            ('<Control-Next>', cls._on_ctrl_next),
+            ('<Control-bracketleft>', cls._on_ctrl_prior),
+            ('<Control-bracketright>', cls._on_ctrl_next),
+            ('<Control-Alt-Left>', cls._on_ctrl_prior),
+            ('<Control-Alt-Right>', cls._on_ctrl_next),
             ('<Alt_L>', cls._on_alt_press),
             ('<Alt_R>', cls._on_alt_press),
             ('<KeyRelease-Alt_L>', cls._on_alt_release),
@@ -471,8 +675,15 @@ class KeyboardRegistry:
     @classmethod
     def _on_widget_nav_keypress(cls, event):
         """Per-widget KeyPress: digits + letters (runs before Entry default insert)."""
+        if cls._tutor_chat_input_active():
+            return None
+        if cls._event_from_tutor_chat(event):
+            return None
         if event.keysym in cls._ALT_MODIFIER_KEYS:
             return None
+        chord = cls._handle_keypress_chords(event)
+        if chord is not None:
+            return chord
         if cls._alt_key_down:
             return None
         if cls.event_has_modifiers(event):
@@ -480,6 +691,8 @@ class KeyboardRegistry:
                 f'nav:{event.keysym}', False, event,
                 reason='modifiers_held', source='widget_nav',
             )
+            return None
+        if not cls.should_handle_navigation(event):
             return None
         digit_key = cls._keysym_to_page_digit(event)
         if digit_key and digit_key in cls._page_digit_handlers:
@@ -579,9 +792,14 @@ class KeyboardRegistry:
             except Exception:
                 pass
 
-        page_root.after_idle(_rewire)
-        page_root.after(400, _rewire)
-        page_root.after(1000, _rewire)
+        try:
+            top = page_root.winfo_toplevel()
+            if getattr(top, '_startup_prewarm', False):
+                _rewire()
+            else:
+                page_root.after_idle(_rewire)
+        except Exception:
+            page_root.after_idle(_rewire)
 
     @classmethod
     def unwire_page(cls, page_root):
@@ -689,6 +907,16 @@ class KeyboardRegistry:
             ('<Shift-F2>', cls._on_shift_f2),
             ('<F4>', cls._on_f4),
             ('<KeyPress-F4>', cls._on_f4),
+            ('<F7>', cls._on_f7),
+            ('<KeyPress-F7>', cls._on_f7),
+            ('<F8>', cls._on_f8),
+            ('<KeyPress-F8>', cls._on_f8),
+            ('<F9>', cls._on_f9),
+            ('<KeyPress-F9>', cls._on_f9),
+            ('<F10>', cls._on_f10),
+            ('<KeyPress-F10>', cls._on_f10),
+            ('<F11>', cls._on_f11),
+            ('<KeyPress-F11>', cls._on_f11),
             ('<Control-g>', cls._on_ctrl_g),
             ('<Control-G>', cls._on_ctrl_g),
             ('<Control-p>', cls._on_ctrl_p),
@@ -703,6 +931,24 @@ class KeyboardRegistry:
             ('<Control-Shift-c>', cls._on_ctrl_shift_c),
             ('<Control-Shift-KeyPress-C>', cls._on_ctrl_shift_c),
             ('<Control-Shift-KeyPress-c>', cls._on_ctrl_shift_c),
+            ('<Control-Shift-N>', cls._on_ctrl_shift_n),
+            ('<Control-Shift-n>', cls._on_ctrl_shift_n),
+            ('<Control-Shift-KeyPress-N>', cls._on_ctrl_shift_n),
+            ('<Control-Shift-KeyPress-n>', cls._on_ctrl_shift_n),
+            ('<Control-Shift-W>', cls._on_ctrl_shift_w),
+            ('<Control-Shift-w>', cls._on_ctrl_shift_w),
+            ('<Control-Shift-KeyPress-W>', cls._on_ctrl_shift_w),
+            ('<Control-Shift-KeyPress-w>', cls._on_ctrl_shift_w),
+            ('<Control-Shift-M>', cls._on_ctrl_shift_m),
+            ('<Control-Shift-m>', cls._on_ctrl_shift_m),
+            ('<Control-Shift-KeyPress-M>', cls._on_ctrl_shift_m),
+            ('<Control-Shift-KeyPress-m>', cls._on_ctrl_shift_m),
+            ('<Control-Prior>', cls._on_ctrl_prior),
+            ('<Control-Next>', cls._on_ctrl_next),
+            ('<Control-bracketleft>', cls._on_ctrl_prior),
+            ('<Control-bracketright>', cls._on_ctrl_next),
+            ('<Control-Alt-Left>', cls._on_ctrl_prior),
+            ('<Control-Alt-Right>', cls._on_ctrl_next),
             ('<Alt_L>', cls._on_alt_press),
             ('<Alt_R>', cls._on_alt_press),
             ('<KeyRelease-Alt_L>', cls._on_alt_release),
@@ -716,7 +962,7 @@ class KeyboardRegistry:
             seqs.append((f'<Key-{d}>', cls._on_digit_nav))
         for d in range(0, 8):
             seqs.append((f'<KeyPress-KP_{d}>', cls._on_digit_nav))
-        for d in range(1, 10):
+        for d in range(0, 10):
             seqs.append((f'<Control-Key-{d}>', cls._on_settings_ctrl_digit_event))
             seqs.append((f'<Control-KP_{d}>', cls._on_settings_ctrl_digit_event))
         return seqs
@@ -743,15 +989,12 @@ class KeyboardRegistry:
 
     @classmethod
     def _on_page_keypress(cls, event):
-        """Page-level KeyPress: digits, letters, Ctrl+Shift+C fallback."""
+        """Page-level KeyPress: Ctrl+Shift chords + letter nav."""
+        chord = cls._handle_keypress_chords(event)
+        if chord is not None:
+            return chord
         if event.keysym in cls._ALT_MODIFIER_KEYS:
             return None
-        if event.keysym.lower() == 'c' and cls._ctrl_shift_held(event):
-            if cls._root is not None:
-                from core.dialog_escape import grabbed_toplevel
-                if grabbed_toplevel(cls._root) is not None:
-                    return None
-            return cls._on_ctrl_shift_c(event)
         if cls._alt_held(event):
             cls._alt_chord_used = True
             return None
@@ -804,6 +1047,14 @@ class KeyboardRegistry:
                 if key == 'p':
                     return lambda: show('purchase')
 
+        if active_nav == 'Payment':
+            page = getattr(app, '_payment_page', None)
+            if page is not None and hasattr(page, '_show'):
+                if key == 's':
+                    return lambda: page._show('supplier')
+                if key == 'c':
+                    return lambda: page._show('customer')
+
         if active_nav == '🏠 Home':
             hb = getattr(app, '_home_keyboard_bindings', None)
             if hb and key in hb.sub_keys:
@@ -834,8 +1085,13 @@ class KeyboardRegistry:
         cls._grave_bind_cache = None
         cls._bind_globals(root)
         cls._bind_navigation(root)
-        cls._safe_bind_all(root, '<KeyPress>', cls._on_log_all_keypress)
+        cls._safe_bind_all(root, '<KeyPress>', cls._on_global_keypress)
         cls._installed = True
+        if DEBUG_KEYBOARD or SHORTCUT_LOG_ALWAYS:
+            cls._emit_log_always(
+                '--- keyboard shortcut logging active → config/keyboard.log '
+                '(set config/keyboard_debug.txt to 0 to reduce noise) ---'
+            )
         if DEBUG_KEYBOARD:
             cls._emit_log(
                 f'[{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}] '
@@ -875,7 +1131,7 @@ class KeyboardRegistry:
             return
         cls._nav_bound = True
         # Digits/letters: per-page wire_page + wire_shell only (NOT bind_all — prevents duplicates)
-        for d in range(1, 10):
+        for d in range(0, 10):
             cls._safe_bind_all(root, f'<Control-Key-{d}>', cls._on_settings_ctrl_digit_event)
             cls._safe_bind_all(root, f'<Control-KP_{d}>', cls._on_settings_ctrl_digit_event)
 
@@ -932,18 +1188,13 @@ class KeyboardRegistry:
         if cls.event_has_modifiers(event):
             return None
 
+        if not cls.should_handle_navigation(event):
+            return None
+
         digit_key = cls._keysym_to_page_digit(event)
         if digit_key and digit_key in cls._page_digit_handlers:
             return cls._dispatch_page_digit(
                 event, cls._page_digit_handlers[digit_key], digit_key)
-
-        if not cls.should_handle_navigation(event):
-            reason = cls._navigation_block_reason(event) or 'nav_blocked'
-            cls._log_action(
-                f'letter:{event.keysym.lower()}', False, event, reason=reason,
-                source='letter_nav',
-            )
-            return None
 
         key = event.keysym.lower()
         if len(key) != 1 or not key.isalpha():
@@ -977,11 +1228,57 @@ class KeyboardRegistry:
 
     @classmethod
     def _ctrl_shift_held(cls, event) -> bool:
+        """True when Ctrl+Shift+letter — tolerant of Windows Tk state quirks."""
         try:
-            state = event.state
-            return bool(state & 0x0004) and bool(state & 0x0001)
+            state = int(getattr(event, 'state', 0) or 0)
         except Exception:
+            state = 0
+        if not (state & 0x0004):
             return False
+        if state & 0x0001:
+            return True
+        keysym = getattr(event, 'keysym', '') or ''
+        return len(keysym) == 1 and keysym.isupper()
+
+    @classmethod
+    def _try_ctrl_shift_chord(cls, event, key: str = ''):
+        """Fallback when <Control-Shift-Key> does not fire inside Entry (Windows)."""
+        letter = (key or getattr(event, 'keysym', '') or '').lower()
+        if letter not in _CTRL_SHIFT_CHORD_KEYS:
+            return None
+        if not cls._ctrl_shift_held(event):
+            return None
+        if cls._root is not None:
+            try:
+                from core.dialog_escape import grabbed_toplevel
+                if grabbed_toplevel(cls._root) is not None:
+                    cls._log_action(
+                        f'Ctrl+Shift+{letter.upper()}', False, event,
+                        reason='modal_grab', source='ctrl_shift_chord',
+                    )
+                    return 'break'
+            except Exception:
+                pass
+        dispatch = {
+            'c': cls._on_ctrl_shift_c,
+            'n': cls._on_ctrl_shift_n,
+            'w': cls._on_ctrl_shift_w,
+            'm': cls._on_ctrl_shift_m,
+        }
+        handler = dispatch.get(letter)
+        if not handler:
+            return None
+        cls._log_action(
+            f'Ctrl+Shift+{letter.upper()}', True, event, source='ctrl_shift_chord',
+        )
+        return handler(event)
+
+    @classmethod
+    def _handle_keypress_chords(cls, event):
+        key = (getattr(event, 'keysym', '') or '').lower()
+        if key in _CTRL_SHIFT_CHORD_KEYS:
+            return cls._try_ctrl_shift_chord(event, key)
+        return None
 
     @classmethod
     def set_sidebar_index(cls, index: int):
@@ -1137,6 +1434,10 @@ class KeyboardRegistry:
             ('<F2>', cls._on_f2),
             ('<F3>', cls._on_f3),
             ('<Shift-F2>', cls._on_shift_f2),
+            ('<F10>', cls._on_f10),
+            ('<KeyPress-F10>', cls._on_f10),
+            ('<F11>', cls._on_f11),
+            ('<KeyPress-F11>', cls._on_f11),
             ('<Control-g>', cls._on_ctrl_g),
             ('<Control-G>', cls._on_ctrl_g),
             ('<Control-p>', cls._on_ctrl_p),
@@ -1151,6 +1452,24 @@ class KeyboardRegistry:
             ('<Control-Shift-c>', cls._on_ctrl_shift_c),
             ('<Control-Shift-KeyPress-C>', cls._on_ctrl_shift_c),
             ('<Control-Shift-KeyPress-c>', cls._on_ctrl_shift_c),
+            ('<Control-Shift-N>', cls._on_ctrl_shift_n),
+            ('<Control-Shift-n>', cls._on_ctrl_shift_n),
+            ('<Control-Shift-KeyPress-N>', cls._on_ctrl_shift_n),
+            ('<Control-Shift-KeyPress-n>', cls._on_ctrl_shift_n),
+            ('<Control-Shift-W>', cls._on_ctrl_shift_w),
+            ('<Control-Shift-w>', cls._on_ctrl_shift_w),
+            ('<Control-Shift-KeyPress-W>', cls._on_ctrl_shift_w),
+            ('<Control-Shift-KeyPress-w>', cls._on_ctrl_shift_w),
+            ('<Control-Shift-M>', cls._on_ctrl_shift_m),
+            ('<Control-Shift-m>', cls._on_ctrl_shift_m),
+            ('<Control-Shift-KeyPress-M>', cls._on_ctrl_shift_m),
+            ('<Control-Shift-KeyPress-m>', cls._on_ctrl_shift_m),
+            ('<Control-Prior>', cls._on_ctrl_prior),
+            ('<Control-Next>', cls._on_ctrl_next),
+            ('<Control-bracketleft>', cls._on_ctrl_prior),
+            ('<Control-bracketright>', cls._on_ctrl_next),
+            ('<Control-Alt-Left>', cls._on_ctrl_prior),
+            ('<Control-Alt-Right>', cls._on_ctrl_next),
             ('<Alt_L>', cls._on_alt_press),
             ('<Alt_R>', cls._on_alt_press),
             ('<KeyRelease-Alt_L>', cls._on_alt_release),
@@ -1207,6 +1526,92 @@ class KeyboardRegistry:
         if fn:
             return cls._run(fn, event, action='F6')
         cls._log_action('F6', False, event, reason='no_handler')
+        return None
+
+    @classmethod
+    def _on_f7(cls, event):
+        fn = cls._get_handler('on_f7')
+        if fn:
+            return cls._run(fn, event, action='F7')
+        cls._log_action('F7', False, event, reason='no_handler')
+        return None
+
+    @classmethod
+    def _on_f8(cls, event):
+        fn = cls._get_handler('on_f8')
+        if fn:
+            return cls._run(fn, event, action='F8')
+        cls._log_action('F8', False, event, reason='no_handler')
+        return None
+
+    @classmethod
+    def _on_f9(cls, event):
+        fn = cls._get_handler('on_f9')
+        if fn:
+            return cls._run(fn, event, action='F9')
+        cls._log_action('F9', False, event, reason='no_handler')
+        return None
+
+    @classmethod
+    def _on_f10(cls, event):
+        fn = cls._get_handler('on_f10')
+        if fn:
+            return cls._run(fn, event, action='F10')
+        cls._log_action('F10', False, event, reason='no_handler')
+        return None
+
+    @classmethod
+    def _on_f11(cls, event):
+        if cls._root is not None:
+            try:
+                from core.dialog_escape import grabbed_toplevel
+                if grabbed_toplevel(cls._root) is not None:
+                    cls._log_action('F11', False, event, reason='modal_grab')
+                    return 'break'
+            except Exception:
+                pass
+        fn = cls._get_handler('on_f11')
+        if fn:
+            return cls._run(fn, event, action='F11')
+        cls._log_action('F11', False, event, reason='no_handler')
+        return None
+
+    @classmethod
+    def _on_ctrl_shift_n(cls, event):
+        fn = cls._get_handler('on_ctrl_shift_n')
+        if fn:
+            return cls._run(fn, event, action='Ctrl+Shift+N')
+        cls._log_action('Ctrl+Shift+N', False, event, reason='no_handler')
+        return None
+
+    @classmethod
+    def _on_ctrl_shift_w(cls, event):
+        fn = cls._get_handler('on_ctrl_shift_w')
+        if fn:
+            return cls._run(fn, event, action='Ctrl+Shift+W')
+        cls._log_action('Ctrl+Shift+W', False, event, reason='no_handler')
+        return None
+
+    @classmethod
+    def _on_ctrl_shift_m(cls, event):
+        fn = cls._get_handler('on_ctrl_shift_m')
+        if fn:
+            return cls._run(fn, event, action='Ctrl+Shift+M')
+        cls._log_action('Ctrl+Shift+M', False, event, reason='no_handler')
+        return None
+
+    @classmethod
+    def _on_ctrl_prior(cls, event):
+        fn = cls._get_handler('on_ctrl_prior')
+        if fn:
+            return cls._run(fn, event, action='Ctrl+PageUp')
+        return None
+
+    @classmethod
+    def _on_ctrl_next(cls, event):
+        fn = cls._get_handler('on_ctrl_next')
+        if fn:
+            return cls._run(fn, event, action='Ctrl+PageDown')
         return None
 
     @classmethod
@@ -1285,15 +1690,12 @@ class KeyboardRegistry:
 
     @classmethod
     def _on_keypress_alt_chord(cls, event):
-        """Alt+Key tracking; Ctrl+Shift+C fallback (Windows Entry focus)."""
+        """Global KeyPress: Ctrl+Shift chords + Alt+Key tracking."""
+        chord = cls._handle_keypress_chords(event)
+        if chord is not None:
+            return chord
         if event.keysym in cls._ALT_MODIFIER_KEYS:
             return None
-        if event.keysym.lower() == 'c' and cls._ctrl_shift_held(event):
-            if cls._root is not None:
-                from core.dialog_escape import grabbed_toplevel
-                if grabbed_toplevel(cls._root) is not None:
-                    return None
-            return cls._on_ctrl_shift_c(event)
         if cls._alt_held(event):
             cls._alt_chord_used = True
         return None
@@ -1433,7 +1835,8 @@ class KeyboardRegistry:
             {'shortcut': '4', 'handler': '_dispatch_page_digit -> Sales History', 'page': 'global', 'status': 'OK'},
             {'shortcut': '5', 'handler': '_dispatch_page_digit -> Purchase History', 'page': 'global', 'status': 'OK'},
             {'shortcut': '6', 'handler': '_dispatch_page_digit -> Returns', 'page': 'global', 'status': 'OK'},
-            {'shortcut': '7', 'handler': '_dispatch_page_digit -> Settings', 'page': 'global', 'status': 'OK'},
+            {'shortcut': '7', 'handler': '_dispatch_page_digit -> Payment', 'page': 'global', 'status': 'OK'},
+            {'shortcut': '8', 'handler': '_dispatch_page_digit -> Settings', 'page': 'global', 'status': 'OK'},
             {'shortcut': 'Ctrl+1..9', 'handler': '_on_settings_ctrl_digit_event', 'page': 'Settings', 'status': 'OK'},
             {'shortcut': 'Ctrl+F', 'handler': '_on_ctrl_f', 'page': 'active PageBindings', 'status': 'OK'},
             {'shortcut': 'Ctrl+E', 'handler': '_on_ctrl_e', 'page': 'active PageBindings', 'status': 'OK'},

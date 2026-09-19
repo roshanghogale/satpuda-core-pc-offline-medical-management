@@ -1,6 +1,32 @@
 """
-set_expiry.py  -  Manage the expiry.dat restriction
-----------------------------------------------------
+set_expiry.py  -  expiry.dat, which is NO LONGER the licence
+------------------------------------------------------------
+READ THIS BEFORE USING IT. This tool writes ``expiry.dat``, and ``expiry.dat``
+stopped deciding anything. The licence a shop is actually held to is the SIGNED
+blob in ``license.seal``, issued by the Satpuda server and verified against a
+public key compiled into the build -- see core/license_seal.py. Writing a date
+here changes what some Settings screens display and changes NOTHING about when
+the till stops.
+
+That is deliberate, and it is the point of the change: a date that a file on the
+shop's own PC could set was a date the shop could set for itself. So there is no
+local way to extend a licence any more, and this tool is not a back door into
+one.
+
+TO ACTUALLY MOVE AN EXPIRY, one of two things:
+
+  * the admin panel on the server -- change the store's expiry date there, then
+    have the shop open the software with the internet connected. The app
+    re-fetches a licence that says no before it turns the shop away, so one
+    connection is enough; or
+  * the software's own Administrator settings, which ask for the Satpuda
+    administrator username and password, write the server record and the signed
+    blob in the same call, and refuse the edit outright if the server cannot be
+    reached.
+
+What this tool is still good for is READING what a machine has
+(``python set_expiry.py read``) while diagnosing something.
+
 Run from the project root:
 
   Set expiry date:
@@ -24,20 +50,25 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from core.license_manager import write_expiry, _read_expiry, _expiry_path
+from core.license_manager import write_expiry, _read_expiry, all_expiry_paths
 from datetime import date, timedelta
 
 
 def _show_current():
     data = _read_expiry()
-    path = _expiry_path()
+    paths = all_expiry_paths()
     if not data:
-        print("  expiry.dat : NOT FOUND  (" + path + ")")
+        print("  expiry.dat : NOT FOUND")
+        for p in paths:
+            print("    - " + p)
         print("  Status     : No restriction - app runs forever")
         return
     enabled = data.get('enabled', False)
     exp     = data.get('expiry_date', 'unknown')
-    print("  expiry.dat : " + path)
+    print("  expiry.dat locations:")
+    for p in paths:
+        mark = " (exists)" if os.path.exists(p) else " (missing)"
+        print("    - " + p + mark)
     print("  Enabled    : " + str(enabled))
     print("  Expiry Date: " + str(exp))
     if enabled:
@@ -46,11 +77,11 @@ def _show_current():
             today    = date.today()
             diff     = (exp_date - today).days
             if diff > 0:
-                print("  Status     : ACTIVE - " + str(diff) + " day(s) remaining  (expires " + exp + ")")
+                print("  Status     : ACTIVE - " + str(diff) + " day(s) until expiry check on " + exp)
             elif diff == 0:
-                print("  Status     : EXPIRES TODAY - app will be blocked on next startup")
+                print("  Status     : EXPIRES TODAY - activation required on next startup")
             else:
-                print("  Status     : EXPIRED " + str(abs(diff)) + " day(s) ago - app is blocked")
+                print("  Status     : Past expiry date - no activation (only triggers on expiry day itself)")
         except Exception:
             print("  Status     : Invalid date format")
     else:

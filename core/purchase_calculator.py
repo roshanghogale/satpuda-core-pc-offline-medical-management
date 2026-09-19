@@ -1,56 +1,39 @@
 """
 core/purchase_calculator.py
 ───────────────────────────
-Single source of truth for ALL purchase calculations.
-Used by: purchase.py, purchase_history.py (edit),
-         import_purchases.py, import_from_mobile.py,
-         web purchase entry (via import_purchases).
+Single entry point for ALL purchase calculations (save, edit, import, web).
 
-No UI code here. No DB code here. Pure calculation only.
+Delegates to core.pharmacy_purchase_calc.compute_purchase_invoice:
+  Step 1 — Line evaluation (qty × rate − item discount)
+  Step 2 — GST slab grouping + proportional bill discount
+  Step 3 — Tax extraction matrix (Mode A inclusive | Mode B exclusive)
+  Step 4 — Matrix verification + payment totals
+
+gst_calc_method mapping:
+  discount_after_gst  → Mode A (rates include GST — Swami Samarth style)
+  discount_before_gst → Mode B (rates exclude GST — Jai Ganesh style)
 """
+
+from core.calc_engine import auto_round
 
 
 class PurchaseCalculator:
     """
     Input
     -----
-    items          : list of dicts, each with:
-                       qty            (strips for tablet/bolus, units for others)
-                       rate           (per strip or per unit — purchase rate)
-                       discount_pct   (item-level discount %)
-                       gst_pct        (GST %)
-                       free_qty       (free strips/units, default 0)
-    overall_discount : rupee amount deducted from taxable value before GST
-                       (default 0)
+    items            : list of dicts (qty, rate, discount_pct, gst_pct, …)
+    overall_discount : rupee bill-level discount (default 0)
+    gst_calc_method  : 'discount_before_gst' | 'discount_after_gst'
     rounding         : manual rounding adjustment (default 0)
-    previous_due     : outstanding due from previous purchases (default 0)
-    previous_credit  : credit balance from previous overpayments (default 0)
-    amount_paid      : amount paid now (default 0)
+    previous_due / previous_credit / cash_paid / online_paid : payment fields
 
-    Output  (all keys present in the returned dict)
+    Output
     ------
-    Per-item (mutates each item dict, adds computed keys):
-        base           = qty × rate
-        discount_amt   = base × discount_pct / 100
-        taxable        = base minus item discount minus proportional overall_discount
-        gst_amt        = taxable x gst_pct / 100
-        item_amount    = taxable + gst_amt
-
-    Summary:
-        subtotal       = Σ taxable
-        total_gst      = Σ gst_amt
-        cgst           = total_gst / 2
-        sgst           = total_gst / 2
-        total_amount   = subtotal + total_gst + rounding
-
-    Payment:
-        need_to_pay    = total_amount + previous_due − previous_credit
-        final_amount   = total_amount
-        due            = max(0, need_to_pay - amount_paid)
-        current_credit = max(0, amount_paid - need_to_pay)
-        total_due      = due
-        bill_cleared   = 1 if due == 0 else 0
-        account_cleared= 1 if total_due == 0 else 0
+    gross_subtotal   : Σ (qty × rate − item discount) before bill discount
+    subtotal         : taxable after bill discount (matches bill SUB TOTAL)
+    total_gst/cgst/sgst : from GST slab table
+    total_amount     : subtotal + GST + rounding
+    items            : per-line taxable / gst_amt after slab allocation
     """
 
     def __init__(
@@ -60,145 +43,157 @@ class PurchaseCalculator:
         rounding: float = 0.0,
         previous_due: float = 0.0,
         previous_credit: float = 0.0,
-        amount_paid: float = 0.0,
+        cash_paid: float = 0.0,
+        online_paid: float = 0.0,
+        amount_paid: float | None = None,
+        expenditure: float = 0.0,
+        gst_calc_method: str = "discount_before_gst",
     ):
         self.items            = items
         self.overall_discount = round(float(overall_discount or 0), 2)
         self.rounding         = round(float(rounding or 0), 2)
         self.previous_due     = round(float(previous_due or 0), 2)
         self.previous_credit  = round(float(previous_credit or 0), 2)
-        self.amount_paid      = round(float(amount_paid or 0), 2)
+        self.cash_paid        = round(float(cash_paid or 0), 2)
+        self.online_paid      = round(float(online_paid or 0), 2)
+        if amount_paid is not None:
+            self.amount_paid = round(float(amount_paid or 0), 2)
+        else:
+            self.amount_paid = round(self.cash_paid + self.online_paid, 2)
+        self.expenditure      = round(float(expenditure or 0), 2)
+        method = (gst_calc_method or "discount_before_gst").strip()
+        self.gst_calc_method = (
+            method if method in ("discount_before_gst", "discount_after_gst")
+            else "discount_before_gst"
+        )
 
-    # ── public API ────────────────────────────────────────────────────────
+    @staticmethod
+    def normalize_items(items: list) -> None:
+        """Clear stale line totals so slab GST is always computed from qty/rate/GST."""
+        for item in items:
+            if item.get('_preserve_line_totals'):
+                gst = float(item.get('gst_pct', item.get('gst_value', 0)) or 0)
+                item['gst_pct'] = gst
+                item['discount_pct'] = float(
+                    item.get('discount_pct', item.get('item_discount', 0)) or 0
+                )
+                continue
+            for key in (
+                'import_lock_values', 'import_taxable', 'import_gst_amt',
+                'import_item_amount', 'taxable', 'gst_amt', 'cgst_amt', 'sgst_amt',
+                'overall_discount_amt', 'cash_disc_share', '_goods_amount',
+                '_taxable_before_overall', '_gst_before_overall', '_gst_pct_for_calc',
+                'base', 'discount_amt',
+            ):
+                item.pop(key, None)
+            gst = float(item.get('gst_pct', item.get('gst_value', 0)) or 0)
+            item['gst_pct'] = gst
+            item['discount_pct'] = float(
+                item.get('discount_pct', item.get('item_discount', 0)) or 0
+            )
+            base = float(item.get('qty', 0) or 0) * float(item.get('rate', 0) or 0)
+            stored = float(item.get('item_amount', item.get('amount', 0)) or 0)
+            if stored and base and abs(stored - base) > max(0.05, base * 0.02):
+                item.pop('amount', None)
+                item.pop('item_amount', None)
 
     def calculate(self) -> dict:
-        """Run all calculations and return a single result dict."""
-        self._calc_items()
-        summary = self._calc_summary()
+        from core.pharmacy_purchase_calc import compute_purchase_invoice, gst_method_to_tax_mode
+
+        self.normalize_items(self.items)
+
+        bill_inclusive = gst_method_to_tax_mode(self.gst_calc_method) == "inclusive"
+        prep = []
+        for item in self.items:
+            row = dict(item)
+            if "is_tax_inclusive" not in row:
+                row["is_tax_inclusive"] = bill_inclusive
+            prep.append(row)
+
+        rounding = self.rounding
+        calc = compute_purchase_invoice(
+            items=prep,
+            global_cash_discount=self.overall_discount,
+            product_discount=0.0,
+            round_off=rounding if rounding else None,
+            net_payable=None,
+            gst_calc_method=self.gst_calc_method,
+        )
+
+        if not rounding:
+            rounding = auto_round(float(calc.get('pre_round_total', 0) or 0))
+            if rounding:
+                calc = compute_purchase_invoice(
+                    items=prep,
+                    global_cash_discount=self.overall_discount,
+                    product_discount=0.0,
+                    round_off=rounding,
+                    net_payable=None,
+                    gst_calc_method=self.gst_calc_method,
+                )
+
+        worked = calc.get('items') or prep
+        for orig, new in zip(self.items, worked):
+            for key in (
+                'taxable', 'gst_amt', 'cgst_amt', 'sgst_amt', 'item_amount', 'amount',
+                'overall_discount_amt', 'discount_amt', 'base', '_goods_amount',
+                '_taxable_before_overall', 'cash_disc_share',
+            ):
+                if key in new:
+                    orig[key] = new[key]
+
+        summary = {
+            'gross_subtotal':   calc['gross_total'],
+            'subtotal':         calc['taxable_total'],
+            'total_gst':        calc['total_gst'],
+            'cgst':             calc['cgst'],
+            'sgst':             calc['sgst'],
+            'discount_amount':  calc['discount_amount'],
+            'pre_round_total':  calc['pre_round_total'],
+            'total_amount':     calc['total_amount'],
+            'rounding':         calc['rounding'],
+            'slab_breakdown':   calc.get('slab_breakdown') or [],
+            'tax_mode':         calc.get('tax_mode'),
+            'validation':       calc.get('validation') or {},
+        }
         payment = self._calc_payment(summary['total_amount'])
-        # Include all inputs so save_purchase can access them directly
         inputs = {
             'overall_discount': self.overall_discount,
-            'rounding':         self.rounding,
+            'rounding':         calc['rounding'],
+            'expenditure':      self.expenditure,
             'previous_due':     self.previous_due,
             'previous_credit':  self.previous_credit,
+            'cash_paid':        self.cash_paid,
+            'online_paid':      self.online_paid,
             'amount_paid':      self.amount_paid,
+            'gst_calc_method':  self.gst_calc_method,
         }
         return {**summary, **payment, **inputs, 'items': self.items}
 
-    # ── item-level ────────────────────────────────────────────────────────
+    def _calc_payment(self, bill_total: float) -> dict:
+        """Payment outcome for a purchase bill.
 
-    def _calc_items(self):
-        for item in self.items:
-            if item.get('import_lock_values'):
-                taxable = round(float(item.get('import_taxable', item.get('qty', 0) * item.get('rate', 0)) or 0), 4)
-                gst_amt = round(float(item.get('import_gst_amt', taxable * float(item.get('gst_pct', 0) or 0) / 100) or 0), 4)
-                item_amount = round(float(item.get('import_item_amount', taxable + gst_amt) or 0), 2)
-
-                item['base'] = round(taxable, 2)
-                item['discount_amt'] = 0.0
-                item['_taxable_before_overall'] = taxable
-                item['_gst_pct_for_calc'] = float(item.get('gst_pct', item.get('gst_value', 0)) or 0)
-                item['overall_discount_amt'] = 0.0
-                item['taxable'] = round(taxable, 2)
-                item['gst_amt'] = round(gst_amt, 2)
-                item['item_amount'] = item_amount
-                item['amount'] = item_amount
-                continue
-
-            qty          = float(item.get('qty', 0) or 0)
-            rate         = float(item.get('rate', 0) or 0)
-            disc_pct     = float(item.get('discount_pct',
-                                  item.get('item_discount', 0)) or 0)
-            gst_pct      = float(item.get('gst_pct',
-                                  item.get('gst_value', 0)) or 0)
-
-            base         = round(qty * rate, 4)
-            discount_amt = round(base * disc_pct / 100, 4)
-            taxable      = round(base - discount_amt, 4)
-
-            item['base']         = round(base, 2)
-            item['discount_amt'] = round(discount_amt, 2)
-            item['_taxable_before_overall'] = taxable
-            item['_gst_pct_for_calc'] = gst_pct
-            item['overall_discount_amt'] = 0.0
-            item['taxable']      = round(taxable, 2)
-            item['gst_amt']      = round(taxable * gst_pct / 100, 2)
-            item['item_amount']  = round(taxable + item['gst_amt'], 2)
-            # keep legacy key 'amount' in sync so existing save code works
-            item['amount']       = item['item_amount']
-
-    # ── summary ───────────────────────────────────────────────────────────
-
-    def _calc_summary(self) -> dict:
-        gross_subtotal = round(
-            sum(i.get('_taxable_before_overall', i.get('taxable', 0)) for i in self.items),
-            4,
+        need_to_pay / due use previous credit (reduces what to collect now).
+        current_credit is overpayment beyond (bill + previous due) only —
+        leftover previous_credit must NOT appear as this bill's credit when
+        Amount Paid equals Total.
+        """
+        eps = 0.01
+        final_amount = round(bill_total + self.expenditure, 2)
+        need_to_pay = round(
+            final_amount + self.previous_due - self.previous_credit, 2,
         )
-        has_locked_imports = any(bool(i.get('import_lock_values')) for i in self.items)
-        discount_amount = 0.0 if has_locked_imports else round(
-            min(max(self.overall_discount, 0.0), gross_subtotal),
-            4,
+        due = round(max(0.0, need_to_pay - self.amount_paid), 2)
+        if due < eps:
+            due = 0.0
+        # Overpay past bill + previous due only (ignore previous_credit here).
+        overpay = round(
+            self.amount_paid - (final_amount + self.previous_due), 2,
         )
-        remaining_discount = discount_amount
-        taxable_items = [
-            i for i in self.items
-            if float(i.get('_taxable_before_overall', i.get('taxable', 0)) or 0) > 0
-        ]
-        last_taxable = taxable_items[-1] if taxable_items else None
-
-        for item in self.items:
-            taxable_before = float(
-                item.get('_taxable_before_overall', item.get('taxable', 0)) or 0
-            )
-            if gross_subtotal > 0 and taxable_before > 0:
-                if item is last_taxable:
-                    overall_disc = remaining_discount
-                else:
-                    overall_disc = round(discount_amount * taxable_before / gross_subtotal, 4)
-                    remaining_discount = round(remaining_discount - overall_disc, 4)
-            else:
-                overall_disc = 0.0
-
-            taxable = round(max(0.0, taxable_before - overall_disc), 4)
-            gst_pct = float(item.get('_gst_pct_for_calc', item.get('gst_pct', 0)) or 0)
-            gst_amt = round(taxable * gst_pct / 100, 4)
-            item_amount = round(taxable + gst_amt, 2)
-
-            item['overall_discount_amt'] = round(overall_disc, 2)
-            item['taxable'] = round(taxable, 2)
-            item['gst_amt'] = round(gst_amt, 2)
-            item['item_amount'] = item_amount
-            item['amount'] = item_amount
-
-        subtotal   = round(gross_subtotal - discount_amount, 2)
-        total_gst  = round(sum(i.get('gst_amt', 0) for i in self.items), 2)
-        cgst       = round(total_gst / 2, 2)
-        sgst       = round(total_gst / 2, 2)
-        pre_round_total = round(subtotal + total_gst, 2)
-        total_amount = round(pre_round_total + self.rounding, 2)
-        return {
-            'gross_subtotal':   round(gross_subtotal, 2),
-            'subtotal':         subtotal,
-            'total_gst':        total_gst,
-            'cgst':             cgst,
-            'sgst':             sgst,
-            'discount_amount':  round(discount_amount, 2),
-            'pre_round_total':  pre_round_total,
-            'total_amount':     total_amount,
-        }
-
-    # ── payment ───────────────────────────────────────────────────────────
-
-    def _calc_payment(self, total_amount: float) -> dict:
-        need_to_pay    = round(total_amount + self.previous_due
-                               - self.previous_credit, 2)
-        final_amount   = total_amount
-        due            = round(max(0.0, need_to_pay - self.amount_paid), 2)
-        current_credit = round(max(0.0, self.amount_paid - need_to_pay), 2)
-        total_due      = due
-        bill_cleared   = 1 if due == 0 else 0
-        account_cleared = 1 if total_due == 0 else 0
+        current_credit = overpay if overpay > eps else 0.0
+        total_due = due
+        bill_cleared = 1 if due < eps else 0
+        account_cleared = 1 if total_due < eps else 0
         return {
             'need_to_pay':     need_to_pay,
             'final_amount':    final_amount,
@@ -207,7 +202,87 @@ class PurchaseCalculator:
             'total_due':       total_due,
             'bill_cleared':    bill_cleared,
             'account_cleared': account_cleared,
-            # legacy aliases kept so existing DB save code works unchanged
             'due_amount':      due,
             'credit_amount':   current_credit,
         }
+
+
+def _calc_header_match_score(
+    items: list,
+    target_cgst: float,
+    target_total: float,
+    overall_discount: float = 0.0,
+    gst_calc_method: str = "discount_before_gst",
+) -> tuple:
+    calc = PurchaseCalculator(
+        items=items,
+        overall_discount=overall_discount,
+        rounding=0,
+        gst_calc_method=gst_calc_method,
+    ).calculate()
+    cgst_err = abs(float(calc.get('cgst') or 0) - float(target_cgst or 0))
+    total_err = abs(float(calc.get('total_amount') or 0) - float(target_total or 0))
+    return cgst_err + total_err * 0.05, calc
+
+
+def reconcile_items_gst_with_header(
+    items: list,
+    target_cgst: float,
+    target_total: float,
+    overall_discount: float = 0.0,
+    gst_calc_method: str = "discount_before_gst",
+) -> list:
+    """
+    Fix stale per-line gst_pct when DB lines disagree with saved purchase header.
+
+    Old bills often have correct cgst/total on purchases but wrong gst_pct on lines
+    (e.g. exempt item saved as 5%). Tries 0% GST on lines that match stored header.
+    """
+    if not items:
+        return items
+    target_cgst = float(target_cgst or 0)
+    target_total = float(target_total or 0)
+    if target_cgst <= 0 and target_total <= 0:
+        return [dict(i) for i in items]
+
+    working = [dict(i) for i in items]
+    err, _ = _calc_header_match_score(
+        working, target_cgst, target_total, overall_discount, gst_calc_method,
+    )
+    if err < 0.06:
+        return working
+
+    # Lines with no GST in stored amount → 0% GST
+    for item in working:
+        qty = float(item.get('qty') or 0)
+        rate = float(item.get('rate') or 0)
+        disc = float(item.get('discount_pct', item.get('item_discount', 0)) or 0)
+        base = round(qty * rate * (1 - disc / 100), 2)
+        stored_gst = float(item.get('gst_amt') or 0)
+        stored_amt = float(item.get('item_amount') or item.get('amount') or 0)
+        if stored_gst <= 0.001 and base > 0 and stored_amt > 0:
+            if abs(stored_amt - base) <= max(0.05, base * 0.01):
+                item['gst_pct'] = 0.0
+    err, _ = _calc_header_match_score(
+        working, target_cgst, target_total, overall_discount, gst_calc_method,
+    )
+    if err < 0.06:
+        return working
+
+    best = working
+    best_err = err
+    for i, item in enumerate(working):
+        if float(item.get('gst_pct') or 0) <= 0:
+            continue
+        trial = [dict(x) for x in working]
+        trial[i] = dict(trial[i], gst_pct=0.0)
+        trial_err, _ = _calc_header_match_score(
+            trial, target_cgst, target_total, overall_discount, gst_calc_method,
+        )
+        if trial_err < best_err:
+            best_err = trial_err
+            best = trial
+    if best_err < err:
+        return best
+
+    return working

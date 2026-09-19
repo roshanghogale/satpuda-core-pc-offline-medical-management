@@ -1,9 +1,10 @@
 """
 GitHub Releases updater for Satpuda Core.
 
-Checks https://github.com/roshanghogale/satpuda-core-pc-offline-medical-management
-for a newer release, downloads the matching EXE asset, and replaces the running
-binary. Activation (AppData) and veterinary.db next to the EXE are preserved.
+Checks https://github.com/roshanghogale/exes-for-satpuda-core/releases
+for a newer release. Installed apps use the zip portable build (same as
+SatpudaCoreInstaller). Legacy single-EXE portable builds can still swap the
+running binary in place.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 from core.app_version import APP_NAME, APP_VERSION
 
 GITHUB_OWNER = "roshanghogale"
-GITHUB_REPO = "satpuda-core-pc-offline-medical-management"
+GITHUB_REPO = "exes-for-satpuda-core"
 GITHUB_API_LATEST = (
     f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
 )
@@ -37,6 +38,12 @@ GITHUB_RELEASES_PAGE = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/release
 
 EXE_MODERN = "SatpudaCore.exe"       # Windows 8 / 10 / 11 (64-bit)
 EXE_WIN7 = "SatpudaCore_Win7.exe"    # Windows 7 / 8 / 8.1 (32-bit Python 3.8 build)
+
+INSTALLER_FALLBACK_NAME = "SatpudaCoreInstaller.exe"
+INSTALLER_FALLBACK_URL = (
+    "https://github.com/roshanghogale/exes-for-satpuda-core/releases/download/v1.0.0/"
+    + INSTALLER_FALLBACK_NAME
+)
 
 _USER_AGENT = f"{APP_NAME.replace(' ', '')}/{APP_VERSION}"
 
@@ -51,12 +58,27 @@ class UpdateInfo:
     published_at: str = ""
     download_url: str = ""
     download_name: str = ""
+    installer_download_url: str = ""
+    installer_download_name: str = ""
     html_url: str = ""
     error: str = ""
+    update_mode: str = "zip"  # zip | exe | installer_only
 
     @property
     def has_download(self) -> bool:
-        return bool(self.download_url and self.download_name)
+        return self.can_install_via_installer
+
+    @property
+    def can_install_via_installer(self) -> bool:
+        if self.installer_download_url and self.installer_download_name:
+            return True
+        if self.update_mode == "installer_local" and self.download_url:
+            return True
+        try:
+            from core.install_updater import resolve_installer_exe
+            return bool(resolve_installer_exe())
+        except Exception:
+            return False
 
 
 def _app_data_dir() -> str:
@@ -77,7 +99,7 @@ def _load_prefs() -> Dict[str, str]:
     path = _prefs_path()
     try:
         if os.path.exists(path):
-            with open(path, encoding="utf-8") as fh:
+            with open(path, encoding="utf-8-sig") as fh:
                 data = json.load(fh)
                 if isinstance(data, dict):
                     return data
@@ -139,39 +161,51 @@ def is_newer_version(latest: str, current: str = APP_VERSION) -> bool:
 def expected_exe_name() -> str:
     if getattr(sys, "frozen", False):
         return os.path.basename(sys.executable)
-    return EXE_MODERN
+    try:
+        from core.install_updater import EXE_WIN10
+        return EXE_WIN10
+    except Exception:
+        return EXE_MODERN
 
 
 def is_win7_build() -> bool:
+    if getattr(sys, "frozen", False):
+        name = os.path.basename(sys.executable).lower()
+        if name in (EXE_WIN7.lower(), "satpudacore_win8.exe"):
+            return True
+        try:
+            from core.build_features import is_lite_build
+            return is_lite_build()
+        except Exception:
+            pass
     return expected_exe_name().lower() == EXE_WIN7.lower()
 
 
 def platform_label() -> str:
-    return "Windows 7 / 8 / 8.1" if is_win7_build() else "Windows 10 / 11"
+    try:
+        from core.install_updater import platform_label as _install_platform_label
+        return _install_platform_label()
+    except Exception:
+        return "Windows 7 / 8 / 8.1" if is_win7_build() else "Windows 10 / 11"
 
 
 def _ca_bundle_path() -> Optional[str]:
-    """Resolve CA bundle — critical for HTTPS in PyInstaller one-file EXEs."""
-    if getattr(sys, "frozen", False):
-        bundled = os.path.join(getattr(sys, "_MEIPASS", ""), "certifi", "cacert.pem")
-        if os.path.isfile(bundled):
-            return bundled
     try:
-        import certifi
-        path = certifi.where()
-        if path and os.path.isfile(path):
-            return path
+        from core.ssl_utils import ca_bundle_path
+        path = ca_bundle_path()
+        return path or None
     except Exception:
         pass
     return None
 
 
 def _ssl_context():
-    import ssl
-    cafile = _ca_bundle_path()
-    if cafile:
-        return ssl.create_default_context(cafile=cafile)
-    return ssl.create_default_context()
+    try:
+        from core.ssl_utils import ssl_context as _ctx
+        return _ctx()
+    except Exception:
+        import ssl
+        return ssl.create_default_context()
 
 
 def _api_request(url: str, timeout: int = 25) -> dict:
@@ -209,18 +243,40 @@ def _fetch_latest_release() -> dict:
     return releases[0]
 
 
-def _pick_asset(assets: List[dict]) -> Tuple[str, str]:
+def _pick_asset(assets: List[dict]) -> Tuple[str, str, str]:
     """
-    Pick the EXE asset that matches the running build only.
-    Win7 PCs download SatpudaCore_Win7.exe; Win10/11 PCs download SatpudaCore.exe.
+    Pick the best update asset: zip portable build first, legacy single EXE second.
+    Returns (name, url, mode) where mode is zip | exe | empty.
     """
+    try:
+        from core.install_updater import pick_zip_asset
+        name, url = pick_zip_asset(assets)
+        if url:
+            return name, url, "zip"
+    except Exception:
+        pass
     target = expected_exe_name().lower()
     for asset in assets or []:
         name = str(asset.get("name") or "").strip()
         url = str(asset.get("browser_download_url") or "").strip()
         if name.lower() == target and url:
-            return name, url
-    return "", ""
+            return name, url, "exe"
+    legacy = EXE_MODERN.lower()
+    if target != legacy:
+        for asset in assets or []:
+            name = str(asset.get("name") or "").strip()
+            url = str(asset.get("browser_download_url") or "").strip()
+            if name.lower() == legacy and url:
+                return name, url, "exe"
+    return "", "", ""
+
+
+def _pick_installer_asset(assets: List[dict]) -> Tuple[str, str]:
+    try:
+        from core.install_updater import pick_installer_asset
+        return pick_installer_asset(assets)
+    except Exception:
+        return "", ""
 
 
 def check_for_update(current: str = APP_VERSION) -> UpdateInfo:
@@ -275,17 +331,30 @@ def check_for_update(current: str = APP_VERSION) -> UpdateInfo:
     if get_skipped_version() and parse_version(get_skipped_version()) >= parse_version(latest):
         return info
 
-    name, url = _pick_asset(payload.get("assets") or [])
-    info.download_name = name
-    info.download_url = url
+    assets = payload.get("assets") or []
+    inst_name, inst_url = _pick_installer_asset(assets)
+    info.installer_download_name = inst_name
+    info.installer_download_url = inst_url
     info.available = True
-    if not url:
-        needed = expected_exe_name()
-        other = EXE_WIN7 if needed == EXE_MODERN else EXE_MODERN
+
+    try:
+        from core.install_updater import resolve_installer_exe
+        local_installer = resolve_installer_exe()
+    except Exception:
+        local_installer = ""
+
+    if local_installer:
+        info.download_name = os.path.basename(local_installer)
+        info.download_url = local_installer
+        info.update_mode = "installer_local"
+    elif inst_url:
+        info.download_name = inst_name
+        info.download_url = inst_url
+        info.update_mode = "installer"
+    else:
         info.error = (
-            f"Version {latest} is available but {needed} was not found on the release "
-            f"({platform_label()} build). Upload both {EXE_MODERN} and {EXE_WIN7} "
-            f"when publishing. This PC needs {needed}, not {other}."
+            f"Version {latest} is available but SatpudaCoreInstaller.exe was not found "
+            f"on this PC or on the GitHub release."
         )
     return info
 
@@ -321,7 +390,7 @@ def download_update(
 
 
 def apply_downloaded_update(new_exe_path: str, parent=None) -> None:
-    """Replace running EXE and restart. AppData activation is untouched."""
+    """Replace running EXE and restart. Legacy single-file portable builds only."""
     if not getattr(sys, "frozen", False):
         webbrowser.open(GITHUB_RELEASES_PAGE)
         return
@@ -366,6 +435,72 @@ def apply_downloaded_update(new_exe_path: str, parent=None) -> None:
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     sys.exit(0)
+
+
+def apply_update(
+    info: UpdateInfo,
+    downloaded_path: str = "",
+    *,
+    parent=None,
+    progress_cb: Optional[Callable[[str, object], None]] = None,
+) -> None:
+    """Open Satpuda Core Installer, downloading it first only when not already present."""
+    from core.install_updater import open_or_download_installer, resolve_install_dir
+
+    def _dl_progress(read: int, total: int) -> None:
+        if progress_cb:
+            pct = min(100, int(read * 100 / total)) if total > 0 else 0
+            progress_cb(
+                "download_installer",
+                {"message": f"Downloading installer… {pct}%" if total else "Downloading installer…"},
+            )
+
+    open_or_download_installer(
+        info.installer_download_url,
+        info.installer_download_name,
+        install_dir=resolve_install_dir(),
+        parent=parent,
+        progress_cb=_dl_progress,
+    )
+
+
+def fetch_installer_download() -> Tuple[str, str, str]:
+    """
+    Fetch SatpudaCoreInstaller.exe from the latest GitHub release.
+
+    Returns (url, name, error). Does not require a newer app version.
+    """
+    try:
+        payload = _fetch_latest_release()
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return "", "", "No GitHub releases published yet."
+        if exc.code == 403:
+            return (
+                "",
+                "",
+                "GitHub rate limit reached. Try again in a few minutes.",
+            )
+        return "", "", f"GitHub API error ({exc.code})."
+    except urllib.error.URLError:
+        return "", "", "Could not reach GitHub. Check your internet connection."
+    except Exception as exc:
+        return "", "", str(exc)
+
+    assets = payload.get("assets") or []
+    name, url = _pick_installer_asset(assets)
+    if url:
+        return url, name, ""
+
+    tag = str(payload.get("tag_name") or "").strip().lstrip("vV")
+    if tag:
+        direct = (
+            f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases/download/"
+            f"v{tag}/{INSTALLER_FALLBACK_NAME}"
+        )
+        return direct, INSTALLER_FALLBACK_NAME, ""
+
+    return INSTALLER_FALLBACK_URL, INSTALLER_FALLBACK_NAME, ""
 
 
 def open_releases_page() -> None:

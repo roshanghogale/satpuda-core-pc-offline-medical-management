@@ -1,26 +1,32 @@
-"""
-PyInstaller runtime hook — runs before main.py and before tkinter import.
-"""
+﻿"""PyInstaller runtime hook - runs before main.py."""
 import os
 import sys
 
 if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
     base = os.path.abspath(sys._MEIPASS)
     exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+    _ver = sys.getwindowsversion()
+    _legacy_win = _ver.major < 6 or (_ver.major == 6 and _ver.minor <= 1)
 
     for key in ('TCL_LIBRARY', 'TK_LIBRARY'):
         old = os.environ.get(key, '')
         if old and '_MEI' in old and not os.path.isdir(old):
             os.environ.pop(key, None)
 
-    if hasattr(os, 'add_dll_directory'):
+    if hasattr(os, 'add_dll_directory') and not _legacy_win:
         for folder in (base, exe_dir):
             try:
                 os.add_dll_directory(folder)
             except (OSError, AttributeError):
                 pass
 
-    path_parts = [base, exe_dir]
+    path_parts = []
+    if _legacy_win:
+        root = os.environ.get('SystemRoot', r'C:\Windows')
+        for folder in (os.path.join(root, 'SysWOW64'), os.path.join(root, 'System32')):
+            if os.path.isdir(folder):
+                path_parts.append(folder)
+    path_parts.extend([base, exe_dir])
     for part in os.environ.get('PATH', '').split(os.pathsep):
         if not part or '_MEI' in part.upper():
             continue
@@ -39,7 +45,8 @@ if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
         import ctypes
         for name in (
             'tcl86t.dll', 'tk86t.dll', 'tcl86.dll', 'tk86.dll',
-            'sqlite3.dll', 'python313.dll',
+            'sqlite3.dll', 'python38.dll', 'python3.dll',
+            'VCRUNTIME140.dll', 'MSVCP140.dll', 'ucrtbase.dll',
         ):
             dll_path = os.path.join(base, name)
             if os.path.isfile(dll_path):
