@@ -356,6 +356,9 @@ export type InventoryMedicine = {
   content_drug: string
   hsn_code: string
   location?: string
+  /** Where the shop got this stock: a purchase, opening stock or typed here.
+   *  Reference only -- it names no supplier record and moves no due. */
+  supplier_name?: string
   is_strip: boolean
   tablets_per_stripe: number
 }
@@ -1133,6 +1136,10 @@ export type PurchaseLinePayload = {
   schedule?: string
   content_drug?: string
   unit?: string
+  // A bill import names the pack `pack` / `quantity_value`, never `unit`.
+  // Leaving them off the type is how "500ML" quietly became a pack of 1.
+  pack?: string
+  quantity_value?: string
   tablets_per_stripe?: number
   item_amount?: number
   line_amount?: number

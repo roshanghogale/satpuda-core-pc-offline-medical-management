@@ -101,17 +101,33 @@ DEFAULT_BILL_PRINT_SETTINGS = {
     "dot_matrix_hpos_60ths": 0,
     # Dot matrix bill: show | vertical borders (False = horizontal rules only).
     "dot_matrix_vertical_borders": True,
-    # Dot matrix A6: reverse-feed before print (cm) — moves bill up on the slip.
-    "dot_matrix_top_offset_cm": 0.8,
+    # Dot matrix A6: top margin (cm) — how far BELOW the perforation the first
+    # line starts. Fed forward after the paper is pulled back to the slip top.
+    "dot_matrix_top_offset_cm": 1.0,
+    # Dot matrix A6: blank space kept at the bottom of every slip (cm).
+    "dot_matrix_bottom_margin_cm": 1.0,
+    # Dot matrix A6: printable width (cm). The slip is 14.5 cm wide and the
+    # tractor holes take about 0.8 cm at each side.
+    "dot_matrix_print_width_cm": 12.9,
     # Dot matrix A6: forward tear feed after print (cm) — ejects slip without blank FF page.
     "dot_matrix_tear_feed_cm": 2.5,
     # Dot matrix A6: perforation-to-perforation height of one slip (cm). When set,
     # every bill advances the paper by exactly this much, whatever its length, so
     # the next bill starts at the same place on the next slip. 0 = off (tear feed).
-    "dot_matrix_slip_height_cm": 0,
+    "dot_matrix_slip_height_cm": 10.5,
+    # Dot matrix A6: who positions the paper between bills. "printer" sends the
+    # page length and a form feed and lets the printer's own tear-off park the
+    # slip and pull it back - nothing to measure, and it cannot drift.
+    # "software" feeds and reverses by dot_matrix_tear_gap_cm instead.
+    "dot_matrix_tear_mode": "software",
+    # Dot matrix A6: print head to tear edge (cm). Between bills the paper rests
+    # with the perforation at the tear edge so the shop can tear the slip off;
+    # each bill pulls back this far to start at the top of the next slip and
+    # gives it back afterwards. Used only when a slip height is set.
+    "dot_matrix_tear_gap_cm": 4.0,
     # Dot matrix A6: move the whole bill right (cm) from the printer's first
     # column. Nothing can print left of that column, so 0 is the leftmost.
-    "dot_matrix_left_offset_cm": 0,
+    "dot_matrix_left_offset_cm": 0.8,
 }
 
 

@@ -46,6 +46,9 @@ class DmLayout:
     escp_tear_feed_216: int = 0       # ESC J forward feed after print (total n/216 inch)
     escp_slip_216: int = 0            # exact slip pitch n/216 inch; >0 = advance exactly one slip per bill
     escp_left_cols: int = 0           # ESC l n left margin in columns of the current pitch (whole bill moves right)
+    escp_tear_gap_216: int = 0        # print head -> tear edge, n/216 inch; pulled back before printing, given back after
+    escp_tear_mode: str = "software"  # "software": the app ejects to the tear edge and pulls the same back
+    escp_top_forward_216: int = 0     # ESC J n — top margin fed FORWARD from the perforation before the first line
 
 
 # A5 / full-width continuous paper
@@ -486,6 +489,142 @@ def _dot_matrix_top_reverse_units(settings: dict) -> int:
     return max(0, min(255, int(round(cm / 2.54 * 216))))
 
 
+def _cm_setting(settings: dict, key: str, default: float, lo: float, hi: float) -> float:
+    try:
+        cm = float(settings.get(key, default) if settings.get(key) is not None else default)
+    except (TypeError, ValueError):
+        cm = default
+    return max(lo, min(hi, cm))
+
+
+def _units(cm: float) -> int:
+    """cm -> 1/216 inch, the unit every 9-pin paper motion command uses."""
+    return int(round(cm / 2.54 * 216))
+
+
+def _a6_paper(settings: dict) -> dict:
+    """The shop's slip, in numbers: height, margins and printable width.
+
+    Measured on the paper itself, not guessed from "A6": the slips are 9 cm
+    tall and 14.5 cm wide, and the tractor holes take 0.8 cm at each side.
+    """
+    slip_cm = _cm_setting(settings, "dot_matrix_slip_height_cm", 0.0, 0.0, 30.0)
+    return {
+        "slip": _units(slip_cm) if slip_cm > 0 else 0,
+        "top": _units(_cm_setting(settings, "dot_matrix_top_offset_cm", 1.0, 0.0, 5.0)),
+        "bottom": _units(_cm_setting(settings, "dot_matrix_bottom_margin_cm", 1.0, 0.0, 5.0)),
+        "width_cols": max(40, min(80, int(
+            _cm_setting(settings, "dot_matrix_print_width_cm", 12.9, 5.0, 20.0) / 2.54 * 12
+        ))),
+    }
+
+
+def _a6_width_scaled(base: DmLayout, cols: int) -> DmLayout:
+    """Same bill, fitted to the printable width of the paper.
+
+    The pieces have to add up exactly or the borders do not meet: a header row
+    is width - 2 (two pipes), the footer width - 3, and the table columns
+    width - (columns + 1). Width is taken from (or given to) the medicine name
+    column first, since it is the one with room to spare.
+    """
+    cols = max(40, min(80, int(cols)))
+    if cols == base.line_width:
+        return base
+    widths = list(base.col_widths)
+    want_cells = cols - (len(widths) + 1)
+    widths[1] = max(10, widths[1] + (want_cells - sum(widths)))
+    if sum(widths) != want_cells:                      # name column hit its floor
+        widths[-1] = max(6, widths[-1] + (want_cells - sum(widths)))
+    hdr_left = max(12, round(base.hdr_left_w / (base.line_width - 2) * (cols - 2)))
+    foot_left = max(12, round(base.foot_left_w / (base.line_width - 3) * (cols - 3)))
+    return replace(
+        base,
+        line_width=cols,
+        col_widths=tuple(widths),
+        hdr_left_w=hdr_left,
+        hdr_right_w=max(8, cols - 2 - hdr_left),
+        foot_left_w=foot_left,
+        foot_right_w=max(8, cols - 3 - foot_left),
+    )
+
+
+def _a6_lines_that_fit(paper: dict, spacing: int) -> int:
+    """How many lines fit between the top and bottom margins of one slip."""
+    if not paper["slip"]:
+        return 0
+    content = max(spacing, paper["slip"] - paper["top"] - paper["bottom"])
+    return max(1, content // spacing)
+
+
+def _dot_matrix_tear_mode(settings: dict) -> str:
+    """Who puts the paper where the next bill starts.
+
+    "software" (default): the app runs the whole cycle. After a bill it feeds
+    the slip out by the tear-off distance so the perforation clears the tear
+    edge, and before the next bill it pulls back exactly the same distance it
+    fed out - never more - so the paper lands on the top of the next slip. It
+    can neither over-pull nor under-eject, because both ends use the one
+    number, and nothing depends on the printer's own tear-off working.
+
+    "printer": send the page length and a form feed and let a printer whose
+    auto tear-off does work do it instead.
+    """
+    raw = str(settings.get("dot_matrix_tear_mode") or "software").strip().lower()
+    return raw if raw in ("printer", "software") else "software"
+
+
+def _a6_page_plan(slip_216: int, wanted_spacing: int) -> tuple[int, int]:
+    """(line spacing, page length in lines) whose product is the slip, exactly.
+
+    The printer counts a page in LINES, so a page length that does not divide
+    the slip leaves a fraction of a line over on every bill and the position
+    creeps down the roll. Nudging the line spacing by a step or two makes it
+    come out even.
+    """
+    if slip_216 <= 0:
+        return wanted_spacing, 0
+    best = None
+    for spacing in range(20, 33):
+        lines = slip_216 / spacing
+        err = abs(lines - round(lines))
+        rank = (round(err, 6), abs(spacing - wanted_spacing))
+        if best is None or rank < best[0]:
+            best = (rank, spacing, max(1, min(127, int(round(lines)))))
+    return best[1], best[2]
+
+
+def _dot_matrix_tear_gap_units(settings: dict) -> int:
+    """Print head to tear edge, in 1/216 inch.
+
+    Between bills the paper rests with the perforation at the tear edge, which
+    is where the shop tears the slip off - so the top of the NEXT slip is that
+    far ABOVE the print head, and printing from where the paper stands would
+    start halfway down the slip. Each bill pulls the paper back by this much
+    first, prints from the top of the slip, and gives it back at the end, so
+    the perforation is at the tear edge again and the net movement is still
+    exactly one slip.
+    """
+    try:
+        cm = float(settings.get("dot_matrix_tear_gap_cm", 4.0) or 0)
+    except (TypeError, ValueError):
+        cm = 4.0
+    # Up to 8 cm: on this printer the tear edge sits well above the print head,
+    # and a slip that does not clear it cannot be torn off cleanly.
+    cm = max(0.0, min(8.0, cm))
+    return max(0, int(round(cm / 2.54 * 216)))
+
+
+def _a6_reverse_feed_bytes(units_216: int) -> bytes:
+    """ESC j n, repeated: one command moves at most 255/216 inch."""
+    out = bytearray()
+    remaining = max(0, int(units_216 or 0))
+    while remaining > 0:
+        n = min(255, remaining)
+        out += bytes([0x1B, 0x6A, n])
+        remaining -= n
+    return bytes(out)
+
+
 def _dot_matrix_tear_feed_units(settings: dict) -> int:
     """ESC J forward feed total — eject slip to tear bar (no full FF blank page)."""
     try:
@@ -546,10 +685,39 @@ def _a6_base_layout(settings: dict) -> DmLayout:
     except (TypeError, ValueError):
         spacing = int(base.escp_line_spacing or 30)
     spacing = max(20, min(32, spacing))
-    line_mm = spacing / 180.0 * 25.4
-    slip = max(20, min(36, int(round(100.0 / line_mm))))
-    page_lines = max(slip + 3, min(127, int(round(120.0 / line_mm))))
-    top_rev = _dot_matrix_top_reverse_units(settings)
+    paper = _a6_paper(settings)
+    base = _a6_width_scaled(base, paper["width_cols"])
+    slip_units = _dot_matrix_slip_units(settings)
+    mode = _dot_matrix_tear_mode(settings)
+    if mode == "printer" and slip_units:
+        # Let the printer own the paper: the line spacing is picked so a PAGE is
+        # exactly one slip, and the form feed at the end takes it to the next
+        # top-of-form, where the printer's own tear-off parks it and pulls it
+        # back. The BILL still stops at the bottom margin, below.
+        spacing, _page_lines = _a6_page_plan(slip_units, spacing)
+    if paper["slip"]:
+        # Fixed page: the margins are kept and the bill always fills the rest,
+        # so every slip carries the same frame whatever the bill holds.
+        slip = _a6_lines_that_fit(paper, spacing)
+        page_lines = max(1, min(127, paper["slip"] // spacing))
+        if mode == "printer":
+            # Never print the page's last line: a page filled to the end leaves
+            # the printer AT the page end, and the form feed is then answered
+            # with a whole blank slip.
+            slip = min(slip, max(1, page_lines - 1))
+    else:
+        line_mm = spacing / 180.0 * 25.4
+        slip = max(20, min(36, int(round(100.0 / line_mm))))
+        page_lines = max(slip + 3, min(127, int(round(120.0 / line_mm))))
+    # The software pull-back only makes sense in the exact-slip cycle, where the
+    # end feed gives the same distance back, and only when the printer is not
+    # doing it itself.
+    gap = _dot_matrix_tear_gap_units(settings) if (slip_units and mode == "software") else 0
+    # The top margin is a distance DOWN from the perforation, so it is fed
+    # forward after the pull-back. Reversing for it (as before) fought the
+    # paper's own position and left the setting unusable.
+    top_fwd = paper["top"] if slip_units else 0
+    top_rev = gap if slip_units else _dot_matrix_top_reverse_units(settings)
     tear = _dot_matrix_tear_feed_units(settings)
     return replace(
         base,
@@ -558,6 +726,9 @@ def _a6_base_layout(settings: dict) -> DmLayout:
         escp_page_lines=page_lines,
         escp_backspaces=0,
         escp_hpos_60ths=0,
+        escp_tear_gap_216=gap,
+        escp_tear_mode=mode,
+        escp_top_forward_216=top_fwd,
         escp_top_reverse=top_rev,
         escp_tear_feed_216=tear,
         escp_slip_216=_dot_matrix_slip_units(settings),
@@ -589,8 +760,19 @@ def _layout_a6_for_ctx(ctx, settings: dict) -> DmLayout:
     need = header_est + table_est + footer_est
     if need <= base.slip_lines:
         return base
+    paper = _a6_paper(settings)
     start_spacing = int(base.escp_line_spacing or 30)
-    for spacing in range(start_spacing, 19, -2):
+    for spacing in range(start_spacing, 17, -1):
+        if paper["slip"]:
+            fits = _a6_lines_that_fit(paper, spacing)
+            if fits >= need:
+                return replace(
+                    base,
+                    escp_line_spacing=spacing,
+                    slip_lines=fits,
+                    escp_page_lines=max(1, min(127, paper["slip"] // spacing)),
+                )
+            continue
         line_mm = spacing / 180.0 * 25.4
         slip = max(need, min(36, int(round(100.0 / line_mm))))
         if slip >= need:
@@ -601,6 +783,15 @@ def _layout_a6_for_ctx(ctx, settings: dict) -> DmLayout:
                 slip_lines=slip,
                 escp_page_lines=page_lines,
             )
+    if paper["slip"]:
+        # The bill is longer than the slip even at the tightest spacing: it
+        # carries on to the next one rather than printing over the perforation.
+        return replace(
+            base,
+            escp_line_spacing=18,
+            slip_lines=_a6_lines_that_fit(paper, 18),
+            escp_page_lines=max(1, min(127, paper["slip"] // 18)),
+        )
     return replace(base, escp_line_spacing=22, slip_lines=max(need, 32), escp_page_lines=36)
 
 
@@ -804,7 +995,11 @@ def _totals_lines(ctx, settings: dict) -> list[str]:
             lines.append(_amt_row("Bill Due", bill_due))
         if total_due > 0:
             lines.append(_amt_row("Total Due", total_due))
-    return lines or [_amt_row(total_l, float(ctx.grand_total or 0))]
+    # "Total row" off means no total: this used to hand one back anyway, so the
+    # setting did nothing on a bill that had no discount, GST or rounding.
+    if not lines and _setting(settings, "show_total", True):
+        lines.append(_amt_row(total_l, float(ctx.grand_total or 0)))
+    return lines
 
 
 def _footer_left_lines(ctx, settings: dict) -> list[str]:
@@ -849,15 +1044,19 @@ def _build_footer(ctx, settings: dict) -> list[str]:
     continued = bool(getattr(ctx, "is_continued", False))
     out: list[str] = []
 
-    if not continued and _setting(settings, "show_gst_strip", True):
-        strip = _footer_strip_line(ctx, settings)
+    if not continued:
+        # The GST strip and the money are two different things: hiding the strip
+        # used to take Total, LESS and Due down with it, because both lived
+        # under the same switch and the bill came out with no amount on it.
+        show_strip = _setting(settings, "show_gst_strip", True)
+        strip = _footer_strip_line(ctx, settings) if show_strip else ""
         totals = _totals_lines(ctx, settings)
-        out.append(_foot_hbar(settings))
-        max_h = max(1, len(totals))
-        for i in range(max_h):
-            left = strip if i == 0 else ""
-            right = totals[i] if i < len(totals) else ""
-            out.append(_foot_row(left, right, settings))
+        if strip or totals:
+            out.append(_foot_hbar(settings))
+            for i in range(max(1, len(totals))):
+                left = strip if i == 0 else ""
+                right = totals[i] if i < len(totals) else ""
+                out.append(_foot_row(left, right, settings))
     elif continued:
         totals = _totals_lines(ctx, settings)
         out.append(_foot_hbar(settings))
@@ -951,11 +1150,18 @@ def render_escp_document(
             # The printer's own page length follows the real slip as closely as
             # whole lines allow; the exact advance is done by the end feed below.
             page_len = max(1, min(127, int(round(dm.escp_slip_216 / float(spacing)))))
+            if getattr(dm, "escp_tear_mode", "") == "printer":
+                # Here the page length IS the slip (the spacing was chosen to
+                # divide it), and the form feed at the end lands on the next
+                # top-of-form, so nothing accumulates.
+                _sp, page_len = _a6_page_plan(int(dm.escp_slip_216), spacing)
         out += bytes([0x1B, 0x43, page_len])  # page = one A6 slip; auto-feed after last line
         out += _a6_init_suffix(dm)
-        rev = int(dm.escp_top_reverse or 0)
-        if rev > 0:
-            out += bytes([0x1B, 0x6A, min(255, rev)])  # reverse feed — start ~1.5 cm higher
+        # Pull the paper back to the top of this slip: the tear gap (the paper
+        # is parked with the perforation at the tear edge) plus the top offset.
+        out += _a6_reverse_feed_bytes(int(dm.escp_top_reverse or 0))
+        # Top margin: down from the perforation, fed forward.
+        out += _a6_tear_feed_bytes(int(getattr(dm, "escp_top_forward_216", 0) or 0))
         # No CR/LF here — avoids a blank line before the first border row
     elif paper_u == "A4":
         if draft_a4:
@@ -997,10 +1203,23 @@ def render_escp_document(
     if a6 and dm.use_condensed:
         out += b"\x12"
     if a6:
-        out += _a6_tear_feed_bytes(_a6_end_feed_units(dm, printed_rows))
+        if _a6_uses_printer_tear_off(dm):
+            page_len = max(1, int(dm.escp_slip_216 // max(1, spacing)))
+            if printed_rows < page_len:
+                out += b"\x0c"      # form feed: on to the printer's next top-of-form
+        else:
+            out += _a6_tear_feed_bytes(_a6_end_feed_units(dm, printed_rows))
     elif paper_u == "A4" and do_ff:
         out += b"\x0c"
     return bytes(out)
+
+
+def _a6_uses_printer_tear_off(dm: DmLayout) -> bool:
+    """True when the printer itself parks the slip and pulls it back."""
+    return (
+        str(getattr(dm, "escp_tear_mode", "printer")) == "printer"
+        and int(getattr(dm, "escp_slip_216", 0) or 0) > 0
+    )
 
 
 def _a6_end_feed_units(dm: DmLayout, printed_rows: int) -> int:
@@ -1018,8 +1237,13 @@ def _a6_end_feed_units(dm: DmLayout, printed_rows: int) -> int:
     slip = int(getattr(dm, "escp_slip_216", 0) or 0)
     if slip > 0:
         spacing = max(20, min(32, int(dm.escp_line_spacing or 28)))
-        used = int(printed_rows) * spacing - int(dm.escp_top_reverse or 0)
-        return max(0, slip - used)
+        used = (int(printed_rows) * spacing
+                + int(getattr(dm, "escp_top_forward_216", 0) or 0)
+                - int(dm.escp_top_reverse or 0))
+        # ... and the slip is fed out to the tear edge again, so the next bill
+        # can pull back the same distance. A bill longer than its slip still
+        # gets the eject, or the shop could not tear it off.
+        return max(int(getattr(dm, "escp_tear_gap_216", 0) or 0), slip - used)
     tear = int(getattr(dm, "escp_tear_feed_216", 0) or 0)
     if tear <= 0:
         tear = _dot_matrix_tear_feed_units({})
@@ -1098,7 +1322,11 @@ def dot_matrix_print_summary(settings: dict | None, printer: str) -> str:
         f"slip_height_cm={merged.get('dot_matrix_slip_height_cm', 0)} "
         f"left_offset_cm={_dot_matrix_left_offset_cm(merged)} "
         f"tear_feed_cm={merged.get('dot_matrix_tear_feed_cm', 2.5)} "
-        f"line_spacing={merged.get('dot_matrix_line_spacing', 30)}"
+        f"tear_gap_cm={merged.get('dot_matrix_tear_gap_cm', 2.5)} "
+        f"tear_mode={_dot_matrix_tear_mode(merged)} (eject and pull back the same) "
+        f"line_spacing={merged.get('dot_matrix_line_spacing', 30)} "
+        f"bottom_margin_cm={merged.get('dot_matrix_bottom_margin_cm', 1.0)} "
+        f"print_width_cm={merged.get('dot_matrix_print_width_cm', 12.9)}"
     )
 
 

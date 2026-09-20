@@ -42,6 +42,10 @@ _TABLES = [
         gst_percent REAL, mrp REAL, rate REAL,
         manufacturer TEXT, batch_no TEXT, expiry_date DATE,
         hsn_code TEXT, schedule TEXT, location TEXT, content_drug TEXT,
+        -- Where the shop got this stock, written on opening stock because
+        -- there is no purchase to carry it. A note on the shelf and nothing
+        -- more: it creates no supplier, no bill and no due.
+        supplier_name TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )""",
     """CREATE TABLE IF NOT EXISTS sales (
@@ -424,7 +428,7 @@ def _migrate_medicines(cur, conn):
     try:
         cur.execute("PRAGMA table_info(medicines)")
         cols = [c[1] for c in cur.fetchall()]
-        for col in ('content_drug', 'unit', 'location'):
+        for col in ('content_drug', 'unit', 'location', 'supplier_name'):
             if col not in cols:
                 cur.execute(f"ALTER TABLE medicines ADD COLUMN {col} TEXT")
         if 'is_hidden' not in cols:
@@ -438,7 +442,7 @@ def _migrate_medicines(cur, conn):
         expected = {
             'id', 'name', 'type', 'stock_qty', 'unit', 'gst_percent', 'mrp', 'rate',
             'manufacturer', 'batch_no', 'expiry_date', 'hsn_code', 'schedule',
-            'location', 'content_drug', 'is_hidden', 'synced_at', 'created_at',
+            'location', 'content_drug', 'supplier_name', 'is_hidden', 'synced_at', 'created_at',
             'updated_at', 'version', 'device_id', 'deleted', 'sync_status',
         }
         unexpected = [c for c in cols if c not in expected]
@@ -458,9 +462,13 @@ def _recreate_medicines(cur):
         cur.execute("PRAGMA table_info(medicines)")
         existing_cols = {r[1] for r in cur.fetchall()}
 
+        # A column an older store has not got yet reads as NULL, so a rebuild
+        # there does not fail and a newer store does not lose what it holds.
+        supplier_col = "supplier_name" if "supplier_name" in existing_cols else "NULL"
         cur.execute("SELECT id, name, type, stock_qty, unit, gst_percent, mrp, rate,"
                     " manufacturer, batch_no, expiry_date, hsn_code, schedule, location,"
-                    " content_drug, created_at, COALESCE(is_hidden, 0), synced_at FROM medicines")
+                    " content_drug, created_at, COALESCE(is_hidden, 0), synced_at,"
+                    f" {supplier_col} FROM medicines")
         backup = cur.fetchall()
 
         cur.execute("DROP TABLE IF EXISTS medicines")
@@ -471,6 +479,7 @@ def _recreate_medicines(cur):
             gst_percent REAL, mrp REAL, rate REAL,
             manufacturer TEXT, batch_no TEXT, expiry_date DATE,
             hsn_code TEXT, schedule TEXT, location TEXT, content_drug TEXT,
+            supplier_name TEXT,
             is_hidden INTEGER DEFAULT 0,
             synced_at TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -480,8 +489,9 @@ def _recreate_medicines(cur):
                 INSERT INTO medicines
                     (id, name, type, stock_qty, unit, gst_percent, mrp, rate,
                      manufacturer, batch_no, expiry_date, hsn_code, schedule,
-                     location, content_drug, created_at, is_hidden, synced_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     location, content_drug, created_at, is_hidden, synced_at,
+                     supplier_name)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, row)
         from core.medicine_sync_merge import ensure_medicine_sync_triggers
         ensure_medicine_sync_triggers(cur)

@@ -769,3 +769,114 @@
 2026-09-19 19:58:41  INFO  USB restore - SatpudaCore_2026-09-10_09-00.db.gz for store Test Shop
 2026-09-19 19:58:42  INFO  USB restore - SatpudaCore_2026-09-16_18-30.db.gz for store Test Shop
 2026-09-19 20:01:44  INFO  Bundled backup_config.dat written: Swami Samarth Medical
+2026-09-20 07:28:45  INFO  Bundled backup_config.dat written: Swami Samarth Medical
+2026-09-20 07:49:06  INFO  Bundled backup_config.dat written: Swami Samarth Medical
+2026-09-20 15:07:36  INFO  Bundled backup_config.dat written: Swami Samarth Medical
+2026-09-20 15:15:20  INFO  backup_config.dat: keeping this PC's own Drive folder; the bundled one differs and is not applied.
+2026-09-20 15:16:08  INFO  Bundled backup_config.dat written: Swami Samarth Medical
+2026-09-20 15:41:02  INFO  Bundled backup_config.dat written: Swami Samarth Medical
+2026-09-20 16:12:32  INFO  backup_config.dat: keeping this PC's own Drive folder; the bundled one differs and is not applied.
+2026-09-20 16:13:45  INFO  Bundled backup_config.dat written: Swami Samarth Medical
+2026-09-20 16:30:44  INFO  Bundled backup_config.dat written: Swami Samarth Medical
+2026-09-20 16:53:50  INFO  Bundled backup_config.dat written: Swami Samarth Medical
+2026-09-20 18:33:47  INFO  Bundled backup_config.dat written: Swami Samarth Medical
+2026-09-20 21:10:07  INFO  Bundled backup_config.dat written: Swami Samarth Medical
+2026-09-20 21:33:47  INFO  Slot manual/close_last = SatpudaCore_2026-09-20_21-33.db.gz
+2026-09-20 21:33:47  INFO  Pendrive backup OK - SatpudaCore_2026-09-20_21-33.db.gz -> C:\Users\win10\AppData\Local\Temp\tmpcix1xzmg\usb
+2026-09-20 21:33:47  INFO  Drive upload skipped - no Drive folder configured for this PC. Local USB copy: ok
+2026-09-20 21:33:47  INFO  Slot manual/close_last = SatpudaCore_2026-09-20_21-33.db.gz
+2026-09-20 21:33:47  INFO  Pendrive backup OK - SatpudaCore_2026-09-20_21-33.db.gz -> C:\Users\win10\AppData\Local\Temp\tmpy821jcf5\usb
+2026-09-20 21:33:47  INFO  Drive upload skipped - no Drive folder configured for this PC. Local USB copy: ok
+2026-09-20 21:33:47  INFO  Backup skipped - no Drive folder configured and no USB drive connected.
+2026-09-20 21:33:47  INFO  Slot manual/close_last = SatpudaCore_2026-09-20_21-33.db.gz
+2026-09-20 21:33:47  INFO  Pendrive backup OK - SatpudaCore_2026-09-20_21-33.db.gz -> C:\Users\win10\AppData\Local\Temp\tmp95lmz7c0\usb
+2026-09-20 21:33:47  INFO  Drive upload skipped - no Drive folder configured for this PC. Local USB copy: ok
+2026-09-20 21:33:51  INFO  backup_config.dat: keeping this PC's own Drive folder; the bundled one differs and is not applied.
+2026-09-20 21:34:23  INFO  USB restore - SatpudaCore_2026-09-10_09-00.db.gz for store Test Shop
+2026-09-20 21:34:23  INFO  USB restore - SatpudaCore_2026-09-16_18-30.db.gz for store Test Shop
+2026-09-20 21:38:55  INFO  Bundled backup_config.dat written: Swami Samarth Medical
+2026-09-20 21:55:46  INFO  Bundled backup_config.dat written: Swami Samarth Medical
+2026-09-20 22:18:15  INFO  Slot manual/close_last = SatpudaCore_2026-09-20_22-18.db.gz
+2026-09-20 22:18:15  INFO  Pendrive backup OK - SatpudaCore_2026-09-20_22-18.db.gz -> C:\Users\win10\AppData\Local\Temp\tmpo8ktoonc\usb
+2026-09-20 22:18:15  INFO  Drive upload skipped - no Drive folder configured for this PC. Local USB copy: ok
+2026-09-20 22:18:15  INFO  Slot manual/close_last = SatpudaCore_2026-09-20_22-18.db.gz
+2026-09-20 22:18:15  INFO  Pendrive backup OK - SatpudaCore_2026-09-20_22-18.db.gz -> C:\Users\win10\AppData\Local\Temp\tmpau8hk4fb\usb
+2026-09-20 22:18:15  INFO  Drive upload skipped - no Drive folder configured for this PC. Local USB copy: ok
+2026-09-20 22:18:15  INFO  Backup skipped - no Drive folder configured and no USB drive connected.
+2026-09-20 22:18:15  INFO  Slot manual/close_last = SatpudaCore_2026-09-20_22-18.db.gz
+2026-09-20 22:18:15  INFO  Pendrive backup OK - SatpudaCore_2026-09-20_22-18.db.gz -> C:\Users\win10\AppData\Local\Temp\tmpkey7wa08\usb
+2026-09-20 22:18:15  INFO  Drive upload skipped - no Drive folder configured for this PC. Local USB copy: ok
+2026-09-20 22:18:18  INFO  backup_config.dat: keeping this PC's own Drive folder; the bundled one differs and is not applied.
+2026-09-20 22:18:47  INFO  USB restore - SatpudaCore_2026-09-10_09-00.db.gz for store Test Shop
+2026-09-20 22:18:47  INFO  USB restore - SatpudaCore_2026-09-16_18-30.db.gz for store Test Shop
+2026-09-20 22:25:34  INFO  Bundled backup_config.dat written: Swami Samarth Medical
+2026-09-20 22:30:20  INFO  Slot manual/close_last = SatpudaCore_2026-09-20_22-30.db.gz
+2026-09-20 22:30:20  INFO  Pendrive backup OK - SatpudaCore_2026-09-20_22-30.db.gz -> C:\Users\win10\AppData\Local\Temp\tmpcboez7tx\usb
+2026-09-20 22:30:20  INFO  Drive upload skipped - no Drive folder configured for this PC. Local USB copy: ok
+2026-09-20 22:30:20  INFO  Slot manual/close_last = SatpudaCore_2026-09-20_22-30.db.gz
+2026-09-20 22:30:20  INFO  Pendrive backup OK - SatpudaCore_2026-09-20_22-30.db.gz -> C:\Users\win10\AppData\Local\Temp\tmpp_vvhskf\usb
+2026-09-20 22:30:20  INFO  Drive upload skipped - no Drive folder configured for this PC. Local USB copy: ok
+2026-09-20 22:30:20  INFO  Backup skipped - no Drive folder configured and no USB drive connected.
+2026-09-20 22:30:20  INFO  Slot manual/close_last = SatpudaCore_2026-09-20_22-30.db.gz
+2026-09-20 22:30:20  INFO  Pendrive backup OK - SatpudaCore_2026-09-20_22-30.db.gz -> C:\Users\win10\AppData\Local\Temp\tmp32ypcdl9\usb
+2026-09-20 22:30:20  INFO  Drive upload skipped - no Drive folder configured for this PC. Local USB copy: ok
+2026-09-20 22:30:23  INFO  backup_config.dat: keeping this PC's own Drive folder; the bundled one differs and is not applied.
+2026-09-20 22:30:52  INFO  USB restore - SatpudaCore_2026-09-10_09-00.db.gz for store Test Shop
+2026-09-20 22:30:52  INFO  USB restore - SatpudaCore_2026-09-16_18-30.db.gz for store Test Shop
+2026-09-20 22:32:48  INFO  Bundled backup_config.dat written: Swami Samarth Medical
+2026-09-20 22:48:42  INFO  Bundled backup_config.dat written: Swami Samarth Medical
+2026-09-20 22:48:42  INFO  Slot manual/close_last = SatpudaCore_2026-09-20_22-48.db.gz
+2026-09-20 22:48:42  INFO  Pendrive backup OK - SatpudaCore_2026-09-20_22-48.db.gz -> C:\Users\win10\AppData\Local\Temp\tmp15pqb58c\usb
+2026-09-20 22:48:42  INFO  Drive upload skipped - no Drive folder configured for this PC. Local USB copy: ok
+2026-09-20 22:48:42  INFO  Slot manual/close_last = SatpudaCore_2026-09-20_22-48.db.gz
+2026-09-20 22:48:42  INFO  Pendrive backup OK - SatpudaCore_2026-09-20_22-48.db.gz -> C:\Users\win10\AppData\Local\Temp\tmp2_5smbc7\usb
+2026-09-20 22:48:42  INFO  Drive upload skipped - no Drive folder configured for this PC. Local USB copy: ok
+2026-09-20 22:48:42  INFO  Backup skipped - no Drive folder configured and no USB drive connected.
+2026-09-20 22:48:42  INFO  Slot manual/close_last = SatpudaCore_2026-09-20_22-48.db.gz
+2026-09-20 22:48:42  INFO  Pendrive backup OK - SatpudaCore_2026-09-20_22-48.db.gz -> C:\Users\win10\AppData\Local\Temp\tmpffqo_m4i\usb
+2026-09-20 22:48:42  INFO  Drive upload skipped - no Drive folder configured for this PC. Local USB copy: ok
+2026-09-20 22:48:46  INFO  backup_config.dat: keeping this PC's own Drive folder; the bundled one differs and is not applied.
+2026-09-20 22:49:15  INFO  USB restore - SatpudaCore_2026-09-10_09-00.db.gz for store Test Shop
+2026-09-20 22:49:15  INFO  USB restore - SatpudaCore_2026-09-16_18-30.db.gz for store Test Shop
+2026-09-20 22:59:11  INFO  Slot manual/close_last = SatpudaCore_2026-09-20_22-59.db.gz
+2026-09-20 22:59:11  INFO  Pendrive backup OK - SatpudaCore_2026-09-20_22-59.db.gz -> C:\Users\win10\AppData\Local\Temp\tmp6gefkqle\usb
+2026-09-20 22:59:11  INFO  Drive upload skipped - no Drive folder configured for this PC. Local USB copy: ok
+2026-09-20 22:59:11  INFO  Slot manual/close_last = SatpudaCore_2026-09-20_22-59.db.gz
+2026-09-20 22:59:11  INFO  Pendrive backup OK - SatpudaCore_2026-09-20_22-59.db.gz -> C:\Users\win10\AppData\Local\Temp\tmp_lzewqpa\usb
+2026-09-20 22:59:11  INFO  Drive upload skipped - no Drive folder configured for this PC. Local USB copy: ok
+2026-09-20 22:59:11  INFO  Backup skipped - no Drive folder configured and no USB drive connected.
+2026-09-20 22:59:11  INFO  Slot manual/close_last = SatpudaCore_2026-09-20_22-59.db.gz
+2026-09-20 22:59:11  INFO  Pendrive backup OK - SatpudaCore_2026-09-20_22-59.db.gz -> C:\Users\win10\AppData\Local\Temp\tmpibrg8eae\usb
+2026-09-20 22:59:11  INFO  Drive upload skipped - no Drive folder configured for this PC. Local USB copy: ok
+2026-09-20 22:59:14  INFO  backup_config.dat: keeping this PC's own Drive folder; the bundled one differs and is not applied.
+2026-09-20 22:59:41  INFO  USB restore - SatpudaCore_2026-09-10_09-00.db.gz for store Test Shop
+2026-09-20 22:59:42  INFO  USB restore - SatpudaCore_2026-09-16_18-30.db.gz for store Test Shop
+2026-09-20 23:00:58  INFO  Bundled backup_config.dat written: Swami Samarth Medical
+2026-09-20 23:05:14  INFO  Bundled backup_config.dat written: Swami Samarth Medical
+2026-09-20 23:06:22  INFO  Slot manual/close_last = SatpudaCore_2026-09-20_23-06.db.gz
+2026-09-20 23:06:22  INFO  Pendrive backup OK - SatpudaCore_2026-09-20_23-06.db.gz -> C:\Users\win10\AppData\Local\Temp\tmp7h0yeeyh\usb
+2026-09-20 23:06:22  INFO  Drive upload skipped - no Drive folder configured for this PC. Local USB copy: ok
+2026-09-20 23:06:22  INFO  Slot manual/close_last = SatpudaCore_2026-09-20_23-06.db.gz
+2026-09-20 23:06:22  INFO  Pendrive backup OK - SatpudaCore_2026-09-20_23-06.db.gz -> C:\Users\win10\AppData\Local\Temp\tmpmy6okp7b\usb
+2026-09-20 23:06:22  INFO  Drive upload skipped - no Drive folder configured for this PC. Local USB copy: ok
+2026-09-20 23:06:22  INFO  Backup skipped - no Drive folder configured and no USB drive connected.
+2026-09-20 23:06:22  INFO  Slot manual/close_last = SatpudaCore_2026-09-20_23-06.db.gz
+2026-09-20 23:06:22  INFO  Pendrive backup OK - SatpudaCore_2026-09-20_23-06.db.gz -> C:\Users\win10\AppData\Local\Temp\tmptsg8yej8\usb
+2026-09-20 23:06:22  INFO  Drive upload skipped - no Drive folder configured for this PC. Local USB copy: ok
+2026-09-20 23:06:25  INFO  backup_config.dat: keeping this PC's own Drive folder; the bundled one differs and is not applied.
+2026-09-20 23:07:07  INFO  USB restore - SatpudaCore_2026-09-10_09-00.db.gz for store Test Shop
+2026-09-20 23:07:07  INFO  USB restore - SatpudaCore_2026-09-16_18-30.db.gz for store Test Shop
+2026-09-20 23:12:17  INFO  Bundled backup_config.dat written: Swami Samarth Medical
+2026-09-20 23:12:20  INFO  Slot manual/close_last = SatpudaCore_2026-09-20_23-12.db.gz
+2026-09-20 23:12:20  INFO  Pendrive backup OK - SatpudaCore_2026-09-20_23-12.db.gz -> C:\Users\win10\AppData\Local\Temp\tmp3gkm02ji\usb
+2026-09-20 23:12:20  INFO  Drive upload skipped - no Drive folder configured for this PC. Local USB copy: ok
+2026-09-20 23:12:20  INFO  Slot manual/close_last = SatpudaCore_2026-09-20_23-12.db.gz
+2026-09-20 23:12:20  INFO  Pendrive backup OK - SatpudaCore_2026-09-20_23-12.db.gz -> C:\Users\win10\AppData\Local\Temp\tmpf3wj6zao\usb
+2026-09-20 23:12:20  INFO  Drive upload skipped - no Drive folder configured for this PC. Local USB copy: ok
+2026-09-20 23:12:20  INFO  Backup skipped - no Drive folder configured and no USB drive connected.
+2026-09-20 23:12:20  INFO  Slot manual/close_last = SatpudaCore_2026-09-20_23-12.db.gz
+2026-09-20 23:12:20  INFO  Pendrive backup OK - SatpudaCore_2026-09-20_23-12.db.gz -> C:\Users\win10\AppData\Local\Temp\tmpc79nxht6\usb
+2026-09-20 23:12:20  INFO  Drive upload skipped - no Drive folder configured for this PC. Local USB copy: ok
+2026-09-20 23:12:23  INFO  backup_config.dat: keeping this PC's own Drive folder; the bundled one differs and is not applied.
+2026-09-20 23:12:54  INFO  USB restore - SatpudaCore_2026-09-10_09-00.db.gz for store Test Shop
+2026-09-20 23:12:54  INFO  USB restore - SatpudaCore_2026-09-16_18-30.db.gz for store Test Shop

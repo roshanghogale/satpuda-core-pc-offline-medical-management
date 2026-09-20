@@ -552,6 +552,48 @@
   flex: 1 1 220px;
 }
 
+/* Opening Stock's typed form.
+ *
+ * It was first built out of <Field>, which is .settings-field: a two-column
+ * grid of a 140-220px label beside a 160-360px input. Four of those inside a
+ * 180px grid cell had nowhere to go, so the Type input sat on top of the
+ * "Batch no." label. The Inventory medicine editor stacks label over input
+ * instead (.field), and that is what a dense row of boxes wants.
+ */
+.opening-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px 12px;
+  margin-bottom: 10px;
+  align-items: end;
+}
+
+.opening-grid > .field {
+  min-width: 0;
+}
+
+/* The name is the one field that needs the room. */
+.opening-span2 {
+  grid-column: span 2;
+}
+
+.opening-paste {
+  margin: 4px 0 12px;
+}
+
+.opening-paste > summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+@media (max-width: 720px) {
+  .opening-span2 {
+    grid-column: span 1;
+  }
+}
+
 .settings-table-wrap {
   overflow: auto;
   max-height: 420px;

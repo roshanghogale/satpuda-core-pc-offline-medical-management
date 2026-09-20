@@ -36,6 +36,10 @@ ALIASES: dict[str, tuple[str, ...]] = {
     "manufacturer": ("manufacturer", "company", "mfg", "maker"),
     "schedule": ("schedule", "sch"),
     "content_drug": ("content_drug", "content", "salt", "composition"),
+    # Where the shop got the stock. A note on the medicine and nothing more:
+    # opening stock creates no supplier, no bill and no due, so this never
+    # reaches the supplier ledger.
+    "supplier_name": ("supplier_name", "supplier", "distributor", "party", "from"),
 }
 NUMERIC = ("stock_qty", "extra_medicine", "mrp", "rate", "gst_percent")
 COLUMNS = tuple(ALIASES)
@@ -49,8 +53,8 @@ def template() -> dict[str, Any]:
         "required": ["name"],
         "sample_csv": (
             "name,batch_no,expiry_date,type,unit,stock_qty,extra_medicine,mrp,rate,gst_percent\n"
-            "AMOXYCILLIN 500MG,B1204,08/2027,Tablet,1x10,12,4,85.50,68.40,12\n"
-            "CALCIUM LIQUID 500ML,C77,03/2028,Liquid,500ML,6,0,240,190,12\n"
+            "AMOXYCILLIN 500MG,B1204,08/27,Tablet,1x10,12,4,85.50,68.40,12\n"
+            "CALCIUM LIQUID 500ML,C77,03/28,Liquid,500ML,6,0,240,190,12\n"
         ),
         "notes": [
             "stock_qty is counted the way the shop counts it: for Tablet, Bolus and "

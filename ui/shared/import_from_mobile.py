@@ -504,21 +504,7 @@ class ImportFromMobilePage:
     # ── Expiry date parser ─────────────────────────────────────────────────
 
     def _parse_expiry_to_db(self, raw: str) -> str:
-        """Convert any expiry format to YYYY-MM-01 for DB storage.
-        Handles: MM/YY, MM/YYYY, YYYY-MM-DD, YYYY-MM-01
-        """
-        raw = str(raw).strip()
-        if not raw:
-            return ''
-        # Already YYYY-MM-DD or YYYY-MM-01
-        if len(raw) == 10 and raw[4] == '-':
-            parts = raw.split('-')
-            return f"{parts[0]}-{parts[1].zfill(2)}-01"
-        # MM/YY or MM/YYYY
-        if '/' in raw:
-            parts = raw.split('/')
-            mm = parts[0].zfill(2)
-            yy = parts[1]
-            year = '20' + yy if len(yy) == 2 else yy
-            return f"{year}-{mm}-01"
-        return raw
+        """Convert any expiry a phone can send to YYYY-MM-01. See core/expiry_text.py."""
+        from core.expiry_text import expiry_to_db
+
+        return expiry_to_db(raw)

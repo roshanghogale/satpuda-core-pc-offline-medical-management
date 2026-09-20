@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, memo } from 'react'
 import { createPortal } from 'react-dom'
-import { buildJSON, emptyBill, emptyItem, calcAmount, calcPurchaseSummary, round2 } from '../billUtils.js'
+import { buildJSON, emptyBill, emptyItem, calcAmount, calcPurchaseSummary, round2, typeExpiry, normalizeExpiry, expiryProblem } from '../billUtils.js'
 import {
   getApiBase, getSuppliers, upsertSupplier, saveSupplierToServer, getFieldOrderForSupplier, ALL_MEDICINE_FIELDS,
   getMedicineTypes, getSchedules, loadRuntimeCatalog,
@@ -676,6 +676,25 @@ export default function PurchasePage({
                             onChange={v => updateItem(rowIdx, fk, v)}
                             onEnter={() => onItemEnter(rowIdx, fk)}
                             inputRef={r => { inputRefs.current[refKey] = r }}
+                          />
+                        ) : fk === 'expiry_date' ? (
+                          <input
+                            ref={r => inputRefs.current[refKey] = r}
+                            type="text"
+                            inputMode="numeric"
+                            maxLength={7}
+                            value={item[fk] || ''}
+                            onChange={e => updateItem(rowIdx, fk, typeExpiry(e.target.value))}
+                            onBlur={e => updateItem(rowIdx, fk, normalizeExpiry(e.target.value))}
+                            onKeyDown={e => {
+                              if (e.key !== 'Enter') return
+                              updateItem(rowIdx, fk, normalizeExpiry(e.target.value))
+                              onItemEnter(rowIdx, fk)
+                            }}
+                            onFocus={e => e.target.select()}
+                            className={styles.cellInput}
+                            placeholder="MM/YY"
+                            title={expiryProblem(item[fk]) || 'Expiry as MM/YY'}
                           />
                         ) : meta?.type === 'select' ? (
                           <select

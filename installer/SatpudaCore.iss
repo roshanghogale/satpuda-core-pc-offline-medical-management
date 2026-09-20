@@ -33,7 +33,7 @@
 ; ============================================================================
 
 #define MyAppName        "Satpuda Core"
-#define MyAppVersion     "1.0.3"
+#define MyAppVersion     "1.0.6"
 #define MyAppPublisher   "Satpuda"
 #define MyAppExeName     "SatpudaCore_Desktop.exe"
 #define MyEngineExeName  "SatpudaEngine.exe"
@@ -487,6 +487,14 @@ begin
     if X > Y then begin Result :=  1; Exit; end;
     if X < Y then begin Result := -1; Exit; end;
   end;
+end;
+
+{ A tag as a shop reads it: v1.0.6 -> 1.0.6. }
+function TagNumber(const Tag: String): String;
+begin
+  Result := Trim(Tag);
+  if (Result <> '') and ((Result[1] = 'v') or (Result[1] = 'V')) then
+    Result := Copy(Result, 2, Length(Result));
 end;
 
 { The release this run installs: the newest one on GitHub once ResolveTargetTag
@@ -2322,6 +2330,19 @@ begin
   Log('latest tag on GitHub: "' + GLatestTag + '"');
 end;
 
+{ Put the version that is really going to be installed at the top of the
+  window, replacing the one this installer happened to be compiled with. Safe to
+  call more than once, and safe before the wizard exists. }
+procedure ShowResolvedVersionInTitle;
+var
+  Num: String;
+begin
+  Num := TagNumber(TargetTag);
+  if Num = '' then Exit;
+  if WizardForm <> nil then
+    WizardForm.Caption := '{#MyAppName} ' + Num + ' Setup';
+end;
+
 { Decide once which release this run installs: GitHub's newest when it is newer
   than the version this installer was built as, else the built-in version (also
   the answer when the shop is offline or GitHub cannot be reached). }
@@ -2453,6 +2474,7 @@ begin
   { Which release to offer comes from GitHub (one call, four-second ceiling),
     so ask before the page is filled in. Offline it falls back to this build. }
   ResolveTargetTag;
+  ShowResolvedVersionInTitle;
   GMaintUpdate.Caption := 'Update to ' + TargetTag;
 
   Addr := '';
@@ -2547,6 +2569,7 @@ begin
   { Normally already decided on the maintenance page; a run that skipped it
     (silent install) decides here. }
   ResolveTargetTag;
+  ShowResolvedVersionInTitle;
 
   Params :=
     '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' +

@@ -113,7 +113,7 @@ def save_purchase_v3(conn, supplier_id: int, purchase_date_str: str,
     purchase_id = int(cur.lastrowid)
     if not needs_fy:
         patch_purchase_fy_fields(cur, purchase_id, purchase_no, purchase_date)
-    _insert_items(cur, purchase_id, items, conn=conn)
+    _insert_items(cur, purchase_id, items, conn=conn, supplier_id=supplier_id)
     recalculate_supplier_due(conn, supplier_id, commit=False)
     try:
         from core.sync_coordinator import stamp_purchase_meta
@@ -230,7 +230,7 @@ def finalize_autosave_v3(conn, purchase_id: int, supplier_id: int,
         ),
     )
     cur.execute("DELETE FROM purchase_items WHERE purchase_id=?", (purchase_id,))
-    _insert_items(cur, purchase_id, items, conn=conn)
+    _insert_items(cur, purchase_id, items, conn=conn, supplier_id=supplier_id)
     recalculate_supplier_due(conn, supplier_id, commit=False)
     try:
         from core.sync_coordinator import stamp_purchase_meta

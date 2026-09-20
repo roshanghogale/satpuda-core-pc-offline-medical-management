@@ -6,6 +6,7 @@ import {
   useState,
 } from 'react'
 import { ensureLocalEngine } from '../backend'
+import { formatExpiryMmYy } from '../expiryText'
 import {
   autosavePurchaseBill,
   applyPurchaseImport,
@@ -135,17 +136,6 @@ function fmtPrice(val: number): string {
 }
 
 /** Type 1129 → 11/29 (slash after month, max MM/YY). */
-function formatExpiryMmYy(text: string, deleting = false): string {
-  const t = (text || '').trim()
-  const iso = t.match(/^(\d{4})-(\d{2})/)
-  if (iso) return `${iso[2]}/${iso[1].slice(2)}`
-  const raw = t.replace(/\D/g, '').slice(0, 4)
-  if (!raw) return ''
-  if (raw.length === 1) return raw
-  if (raw.length === 2) return deleting ? raw : `${raw}/`
-  return `${raw.slice(0, 2)}/${raw.slice(2)}`
-}
-
 function isStripType(t: string, meta?: PurchaseRuntimePrefs['type_meta']) {
   if (meta && meta[t]) return Boolean(meta[t].strip)
   const x = (t || '').trim().toLowerCase()
@@ -226,9 +216,12 @@ function newTab(n: number, purchaseDate = ''): PurchaseTab {
 function lineFromPayload(it: PurchaseLinePayload): LineItem {
   const qty = Number(it.qty) || 0
   const tps = Math.max(1, Number(it.tablets_per_stripe) || 1)
+  // An edited purchase sends `unit`; a bill import sends `quantity_value`
+  // (the cleaned pack) and `pack` (what the bill printed). Reading only
+  // `unit` put every imported syrup and liquid on the shelf as a pack of 1.
   const pack =
-    it.unit ||
-    (isStripType(it.type || '') ? String(tps) : String(it.unit || '1'))
+    String(it.unit || it.quantity_value || it.pack || '').trim() ||
+    (isStripType(it.type || '') ? String(tps) : '1')
   const mrp = Number(it.mrp) || 0
   const rate = Number(it.rate) || 0
   const amount = Number(it.item_amount ?? it.amount) || 0
@@ -845,12 +838,13 @@ export function PurchasePage({
     [suppliers, patchTab],
   )
 
-  const onPickMedicine = async (name: string) => {
+  /** Returns the medicine's type, for callers that must know how to read a pack. */
+  const onPickMedicine = async (name: string): Promise<string> => {
     const trimmed = name.trim()
-    if (trimmed.length < 1) return
+    if (trimmed.length < 1) return ''
     try {
       const res = await lookupPurchaseMedicine(trimmed)
-      if (!res.ok || !res.details) return
+      if (!res.ok || !res.details) return ''
       const d = res.details
       const nextType = d.type || medType
       onMedTypeChange(nextType)
@@ -874,9 +868,11 @@ export function PurchasePage({
         }
       }
       if (d.discount_pct) setDiscPct(String(d.discount_pct))
+      return nextType
     } catch {
       /* ignore */
     }
+    return ''
   }
 
   const refreshMedicineSuggestions = useCallback(async (q: string) => {
@@ -1142,7 +1138,10 @@ export function PurchasePage({
     setManufacturer(String(it.manufacturer ?? ''))
     setBatch(String(it.batch ?? ''))
     setStrips(String(it.qty ?? ''))
-    setTabsPerStrip(String(it.tablets_per_stripe ?? it.pack ?? '1'))
+    // The line's own pack first. tablets_per_stripe is 1 on every non-strip
+    // line by design, so reading it here flattened "1LTR" to "1" the moment
+    // anyone opened the line -- and Save wrote that 1 back onto the medicine.
+    setTabsPerStrip(String(it.pack || it.tablets_per_stripe || '1'))
     setFreeStrips(String(it.free ?? '0'))
     setHsn(String(it.hsn ?? ''))
     setGstPct(String(it.gstPct ?? '0'))
@@ -1582,8 +1581,9 @@ export function PurchasePage({
           onPickSupplier(pf.supplier_name)
         }
         patchTab({ reorderOrderId: pf.order_id })
+        let pickedType = ''
         if (pf.medicine_name) {
-          await onPickMedicine(pf.medicine_name)
+          pickedType = await onPickMedicine(pf.medicine_name)
           setMedicine(pf.medicine_name)
         }
         if (pf.rate > 0) setRate(String(pf.rate))
@@ -1595,7 +1595,15 @@ export function PurchasePage({
           setStrips(q)
         }
         if (pf.pack_size) {
-          setTabsPerStrip(pf.pack_size.replace(/[^\d.]/g, '') || '1')
+          // A strip count is a number; a pack size is text the bill printed.
+          // Stripping the letters from both turned 500ML into 500. When the
+          // medicine is unknown the picker has already filled this box from
+          // the catalogue, so the text is left as it stands.
+          setTabsPerStrip(
+            typeMetaFor(pickedType, prefs).strip
+              ? pf.pack_size.replace(/[^\d.]/g, '') || '1'
+              : pf.pack_size,
+          )
         }
         setNote(
           pf.order_no
@@ -1857,7 +1865,7 @@ export function PurchasePage({
     openGstSlab,
     recalculatePurchase,
     addItem: () => {},
-    pickMedicine: async (_n: string) => {},
+    pickMedicine: async (_n: string) => '',
     applySupplier: async (_n: string, _o?: { force?: boolean }) => {},
   })
   actionsRef.current = {

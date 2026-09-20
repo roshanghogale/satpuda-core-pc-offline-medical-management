@@ -7,19 +7,14 @@ from typing import Any
 
 
 def _parse_expiry_to_db(raw: str) -> str:
-    raw = str(raw or "").strip()
-    if not raw:
-        return ""
-    if len(raw) == 10 and raw[4] == "-":
-        parts = raw.split("-")
-        return f"{parts[0]}-{parts[1].zfill(2)}-01"
-    if "/" in raw:
-        parts = raw.split("/")
-        mm = parts[0].zfill(2)
-        yy = parts[1]
-        year = "20" + yy if len(yy) == 2 else yy
-        return f"{year}-{mm}-01"
-    return raw
+    """The loader's expiry, however the phone spelled it. See core/expiry_text.py.
+
+    The old copy returned the raw text unchanged when it held no "/", so "0428"
+    travelled on as "0428" and Postgres stored nothing for it.
+    """
+    from core.expiry_text import expiry_to_db
+
+    return expiry_to_db(raw)
 
 
 def detect_export_type(data: dict[str, Any]) -> str:
@@ -117,6 +112,20 @@ def _find_existing_medicine(cur, name: str, batch: str, db_expiry: str):
     return cur.fetchone()
 
 
+def _supplier_note(med: dict[str, Any]) -> str:
+    """The supplier a loader row names, as a note on the medicine.
+
+    Only a plain name counts. The purchase-shaped ``supplier`` dict some
+    exports send belongs to a bill, and opening stock has no bill.
+    """
+    raw = med.get("supplier_name")
+    if raw is None:
+        raw = med.get("supplier")
+    if isinstance(raw, dict):
+        raw = raw.get("name")
+    return str(raw or "").strip()
+
+
 def _row_values(med: dict[str, Any]) -> dict[str, Any]:
     """One loader row -> the fields a medicine document holds, for either mode."""
     from core.name_utils import normalize_medicine_name
@@ -145,6 +154,9 @@ def _row_values(med: dict[str, Any]) -> dict[str, Any]:
         "manufacturer": med.get("manufacturer", ""),
         "schedule": med.get("schedule", ""),
         "content_drug": med.get("content_drug", ""),
+        # Reference only. Nothing reads this into the supplier ledger --
+        # opening stock owes nobody anything.
+        "supplier_name": _supplier_note(med),
     }
 
 
@@ -212,6 +224,7 @@ def _apply_medicines_online(data: dict[str, Any]) -> dict[str, Any]:
                 "manufacturer": row["manufacturer"],
                 "schedule": row["schedule"],
                 "content_drug": row["content_drug"],
+                "supplier_name": row["supplier_name"],
                 # A row the shop is filling stock into belongs on the shelf again.
                 "is_hidden": 0,
                 "deleted": 0,
@@ -331,6 +344,10 @@ def _apply_medicines(conn, data: dict[str, Any]) -> dict[str, Any]:
                     db_expiry,
                     batch,
                 ]
+                supplier_note = _supplier_note(med)
+                if supplier_note:
+                    sets.append("supplier_name=?")
+                    vals.append(supplier_note)
                 if has_hidden:
                     sets.append("is_hidden=0")
                 if has_deleted:
@@ -357,6 +374,7 @@ def _apply_medicines(conn, data: dict[str, Any]) -> dict[str, Any]:
                     "manufacturer",
                     "schedule",
                     "content_drug",
+                    "supplier_name",
                 ]
                 vals = [
                     name,
@@ -372,6 +390,7 @@ def _apply_medicines(conn, data: dict[str, Any]) -> dict[str, Any]:
                     med.get("manufacturer", ""),
                     med.get("schedule", ""),
                     med.get("content_drug", ""),
+                    _supplier_note(med),
                 ]
                 if "location" in cols:
                     fields.append("location")
@@ -436,6 +455,7 @@ def _apply_medicines(conn, data: dict[str, Any]) -> dict[str, Any]:
 
 
 def _apply_purchases(conn, data: dict[str, Any]) -> dict[str, Any]:
+    from core.expiry_text import expiry_display
     from core.layout_config import is_strip_count_type
     from core.purchase_calculator import PurchaseCalculator
     from core.purchase_service import (
@@ -482,12 +502,10 @@ def _apply_purchases(conn, data: dict[str, Any]) -> dict[str, Any]:
                 is_tb = is_strip_count_type(med_type)
                 qty = float(it.get("qty", 0) or 0)
                 free_qty = float(it.get("free_qty", 0) or 0)
-                exp_raw = it.get("expiry_date", "")
-                if "/" in str(exp_raw):
-                    parts = str(exp_raw).split("/")
-                    expiry = f"{parts[0].zfill(2)}/{parts[1][-2:]}"
-                else:
-                    expiry = str(exp_raw)
+                # MM/YY is what the purchase path downstream expects. A phone
+                # row that spelled it "0428" used to travel on unchanged and be
+                # dropped when it was finally converted for the database.
+                expiry = expiry_display(it.get("expiry_date", ""))
                 item = {
                     # Android exports "name" / "gst_pct"; older web export used medicine_name / gst_percent.
                     "name": str(
@@ -545,7 +563,13 @@ def _apply_purchases(conn, data: dict[str, Any]) -> dict[str, Any]:
             result = PurchaseCalculator(
                 items=items,
                 overall_discount=float(purchase.get("overall_discount", 0) or 0),
-                rounding=0.0,
+                # The bill's own rounding and delivery charge were thrown away
+                # here, so an imported bill could not add up to what the shop
+                # was actually asked to pay.
+                rounding=float(purchase.get("rounding", 0) or 0),
+                expenditure=float(
+                    purchase.get("expenditure", purchase.get("delivery", 0)) or 0
+                ),
                 previous_due=prev_due,
                 previous_credit=prev_credit,
                 cash_paid=cash,

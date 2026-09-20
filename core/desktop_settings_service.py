@@ -312,6 +312,10 @@ def get_options() -> dict[str, Any]:
             {"value": "standard", "label": "Standard (HTML/PDF)"},
             {"value": "dot_matrix", "label": "Dot Matrix (9-pin ESC/P)"},
         ],
+        "dot_matrix_tear_modes": [
+            {"value": "software", "label": "Satpuda (ejects the slip, pulls back the same)"},
+            {"value": "printer", "label": "Printer's own auto tear-off"},
+        ],
         "dot_matrix_print_methods": [
             {"value": "auto", "label": "Auto (RAW for an ESC/P driver, else Windows driver)"},
             {"value": "raw", "label": "RAW ESC/P - exact position (recommended)"},

@@ -21,24 +21,15 @@ from core.due_fifo import PURCHASE_ENTRY_PAID_SQL
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def expiry_to_db(expiry_mmyy: str) -> str:
-    """Convert MM/YY or MM/YYYY → YYYY-MM-01 for DB storage. Empty/invalid → ''."""
-    raw = (expiry_mmyy or '').strip()
-    if not raw:
-        return ''
-    if len(raw) == 10 and raw[4] == '-':
-        parts = raw.split('-')
-        if len(parts) >= 2:
-            return f"{parts[0]}-{parts[1].zfill(2)}-01"
-    if '/' not in raw:
-        return ''
-    parts = raw.split('/')
-    if len(parts) < 2:
-        return ''
-    month = parts[0].zfill(2)
-    year = parts[1]
-    if len(year) == 2:
-        year = '20' + year
-    return f"{year}-{month}-01"
+    """Any expiry text → YYYY-MM-01 for DB storage. Unreadable → ''.
+
+    This used to demand a "/" and return '' without one, which is how stock
+    loaded from a phone as "0428" landed with no expiry at all. See
+    core/expiry_text.py.
+    """
+    from core.expiry_text import expiry_to_db as _read
+
+    return _read(expiry_mmyy)
 
 
 def _expiry_db(value) -> str:
@@ -1528,7 +1519,13 @@ def _get_unit_value(item) -> str:
     unit_suffix = item.get('auto_unit', '')
     if any(sep in qty_raw.lower() for sep in ('*', 'x', '×')):
         return qty_raw
-    if any(qty_raw.lower().endswith(s) for s in ('ml', 'gm', 'g', 'l', 'kg', 'doses', 'vial')):
+    # Anything that already names its own size is left alone. This list used to
+    # stop at 'ml'/'gm', so a bill that said "1 LTR" or "500GMS" came out as
+    # "1LTRml" and "500GMSgm" on the shelf.
+    if any(qty_raw.lower().endswith(s) for s in (
+        'ml', 'ltr', 'lt', 'ltrs', 'l', 'gms', 'gm', 'gr', 'g', 'kg', 'mg', 'mcg',
+        'doses', 'dose', 'vial', 'tab', 'tabs', 'cap', 'caps', 'pcs', 'btl',
+    )):
         return qty_raw
     return f"{qty_raw}{unit_suffix}" if unit_suffix else qty_raw
 
@@ -1836,6 +1833,7 @@ def save_purchase_online_now(
             pack_by_med[mid], line_pack, it.get("type")
         ) != pack_by_med[mid]):
             pack_by_med[mid] = line_pack
+    supplier_note = _supplier_name_for(None, supplier_id)
     for mid, it in by_med.items():
         stock_delta = float(stock_by_med.get(mid, 0.0) or 0)
         unit_val = pack_by_med.get(mid) or it.get("_unit_val") or it.get("unit") or ""
@@ -1850,6 +1848,11 @@ def save_purchase_online_now(
             mp["name"] = name
         if it.get("hsn_code"):
             mp["hsn_code"] = it.get("hsn_code")
+        # Where this medicine came from, for reference. Only on a line that
+        # actually stocked something, so an edit that takes stock back does not
+        # rewrite the note.
+        if supplier_note and stock_delta > 0:
+            mp["supplier_name"] = supplier_note
         # Each line was stocked by its own pack above; the batch row keeps its own.
         kept_pack = _batch_row_pack(mp.get("unit"), unit_val, it.get("type") or mp.get("type"))
         if kept_pack:
@@ -2781,6 +2784,7 @@ def update_purchase_online_now(
                 keep[txt_key] = val_s
         if keep:
             attrs_by_med[mid_a] = keep
+    supplier_note = _supplier_name_for(None, supplier_id)
     for mid in touched:
         mp = medicine_by_id(mid) or get_doc("medicines", mid) or {
             "id": mid, "local_id": mid, "name": "", "stock_qty": 0,
@@ -2789,6 +2793,11 @@ def update_purchase_online_now(
         mp["id"] = mid
         mp["local_id"] = mid
         delta = float(new_by_med.get(mid, 0.0)) - float(old_by_med.get(mid, 0.0))
+        # An edited bill still says where the stock came from. Only when the
+        # line is putting stock on the shelf: taking it back must not rewrite
+        # the note.
+        if supplier_note and delta > 0:
+            mp["supplier_name"] = supplier_note
         if skip_stock_ops:
             delta = 0.0
         for _k, _v in (attrs_by_med.get(mid) or {}).items():
@@ -3007,7 +3016,7 @@ def save_purchase(conn, supplier_id: int, purchase_date_str: str,
 
     patch_purchase_fy_fields(cur, purchase_id, purchase_no, purchase_date)
 
-    _insert_items(cur, purchase_id, items, conn=conn)
+    _insert_items(cur, purchase_id, items, conn=conn, supplier_id=supplier_id)
 
     if is_online_mode():
         recalculate_supplier_due(conn, supplier_id, commit=False)
@@ -3167,7 +3176,7 @@ def update_purchase(conn, purchase_id: int, supplier_id: int,
         pass
 
     cur.execute("DELETE FROM purchase_items WHERE purchase_id=?", (purchase_id,))
-    _insert_items(cur, purchase_id, items, conn=conn)
+    _insert_items(cur, purchase_id, items, conn=conn, supplier_id=supplier_id)
 
     recalculate_supplier_due(conn, supplier_id, commit=False)
     if old_supplier_id and old_supplier_id != supplier_id:
@@ -3203,6 +3212,40 @@ def _line_has_own_pack(item: dict) -> bool:
     except (TypeError, ValueError):
         pass
     return any(str(item.get(k) or "").strip() for k in ("unit", "quantity_value", "pack"))
+
+
+def _supplier_name_for(conn, supplier_id) -> str:
+    """The supplier's name, for the note a medicine keeps about where it came from.
+
+    Opening stock writes medicines.supplier_name because it has no bill behind
+    it. A purchase has one, and used to leave the field empty -- so a shop that
+    bought a medicine through the product still could not see who sold it
+    without opening the purchase history. Reference only: the due is the
+    purchase's business, not this column's.
+    """
+    try:
+        sid = int(supplier_id or 0)
+    except (TypeError, ValueError):
+        return ""
+    if sid <= 0:
+        return ""
+    try:
+        from core.sync_prefs import is_online_mode
+
+        if is_online_mode():
+            from core.online_catalog import find_supplier_by_id
+            from core.server_crud import get_doc
+
+            doc = find_supplier_by_id(sid) or get_doc("suppliers", sid) or {}
+            return str(doc.get("name") or "").strip()
+        if conn is None:
+            return ""
+        row = conn.execute(
+            "SELECT name FROM suppliers WHERE id=?", (sid,)
+        ).fetchone()
+        return str(row[0]).strip() if row and row[0] else ""
+    except Exception:
+        return ""
 
 
 def _batch_row_pack(row_unit, line_pack, med_type) -> str:
@@ -3533,7 +3576,7 @@ def _remove_orphan_medicine_if_unused(conn, medicine_id: int) -> None:
     cur.execute("DELETE FROM medicines WHERE id=?", (medicine_id,))
 
 
-def _insert_items(cur, purchase_id: int, items: list, conn=None):
+def _insert_items(cur, purchase_id: int, items: list, conn=None, supplier_id=None):
     item_rows  = []
     stock_rows = []
 
@@ -3590,6 +3633,7 @@ def _insert_items(cur, purchase_id: int, items: list, conn=None):
             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, item_rows)
 
+    supplier_note = _supplier_name_for(conn, supplier_id)
     for unit_val, stock_delta, med_id, line_type in stock_rows:
         if stock_delta <= 0:
             continue
@@ -3601,10 +3645,17 @@ def _insert_items(cur, purchase_id: int, items: list, conn=None):
         kept_pack = _batch_row_pack(
             held[0] if held else None, unit_val, line_type or (held[1] if held else "")
         )
-        cur.execute(
-            "UPDATE medicines SET unit=?, stock_qty=stock_qty+?, is_hidden=0 WHERE id=?",
-            (kept_pack or unit_val, stock_delta, med_id),
-        )
+        if supplier_note:
+            cur.execute(
+                "UPDATE medicines SET unit=?, stock_qty=stock_qty+?, is_hidden=0, "
+                "supplier_name=? WHERE id=?",
+                (kept_pack or unit_val, stock_delta, supplier_note, med_id),
+            )
+        else:
+            cur.execute(
+                "UPDATE medicines SET unit=?, stock_qty=stock_qty+?, is_hidden=0 WHERE id=?",
+                (kept_pack or unit_val, stock_delta, med_id),
+            )
         cur.execute("SELECT name FROM medicines WHERE id=?", (med_id,))
         name_row = cur.fetchone()
         if name_row and name_row[0]:
@@ -3873,7 +3924,7 @@ def finalize_autosave_purchase(conn, purchase_id: int, supplier_id: int,
     patch_purchase_fy_fields(cur, purchase_id, purchase_no, purchase_date)
 
     cur.execute("DELETE FROM purchase_items WHERE purchase_id=?", (purchase_id,))
-    _insert_items(cur, purchase_id, items, conn=conn)
+    _insert_items(cur, purchase_id, items, conn=conn, supplier_id=supplier_id)
 
     if is_online_mode():
         recalculate_supplier_due(conn, supplier_id, commit=False)

@@ -1,6 +1,7 @@
 /** Import + Data & System settings — mirrors Tk Import / Database tabs. */
 
 import { useEffect, useRef, useState } from 'react'
+import { expiryProblem, formatExpiryMmYy } from '../../expiryText'
 import {
   importAction,
   systemAction,
@@ -35,6 +36,60 @@ type StoreRow = {
   store_key?: string
   display_name?: string
   [k: string]: unknown
+}
+
+/** One medicine on the shelf, as the Opening Stock form collects it. */
+type OpeningRow = {
+  name: string
+  batch_no: string
+  expiry_date: string
+  type: string
+  qty: string          // strips for tablets/capsules/bolus, units for the rest
+  pack: string         // tabs per strip, or the pack size (500ml, 100gm)
+  extra_medicine: string
+  mrp: string
+  rate: string
+  gst_percent: string
+  manufacturer: string
+  hsn_code: string
+  schedule: string
+  content_drug: string
+  supplier_name: string
+}
+
+function emptyOpeningRow(): OpeningRow {
+  return {
+    name: '', batch_no: '', expiry_date: '', type: 'Tablet',
+    qty: '', pack: '', extra_medicine: '', mrp: '', rate: '', gst_percent: '',
+    manufacturer: '', hsn_code: '', schedule: '', content_drug: '',
+    supplier_name: '',
+  }
+}
+
+const STRIP_TYPES = ['tablet', 'tablet pack', 'capsule', 'bolus', 'bolus pack']
+
+/** Typed freely, because a shop may have its own; these are just the common ones. */
+const OPENING_TYPE_SUGGESTIONS = [
+  'Tablet', 'Tablet Pack', 'Capsule', 'Bolus', 'Bolus Pack', 'Syrup', 'Suspension',
+  'Liquid', 'Injection', 'Injection - Vial', 'Drops', 'Eye Drops', 'Ear Drops',
+  'Nasal Drops', 'Ointment', 'Cream', 'Gel', 'Lotion', 'Powder', 'Sachet',
+  'Granules', 'Spray', 'Shampoo', 'Soap', 'Feed Supplement', 'Vaccine', 'Others',
+]
+
+/** A strip type counts strips and tablets; everything else counts bottles and
+ *  tubes with a pack size - the same split the Purchase screen shows. */
+function openingLabels(type: string) {
+  const strip = STRIP_TYPES.includes((type || '').trim().toLowerCase())
+  return {
+    strip,
+    qty: strip ? 'Strips (Qty)' : 'Units (Qty)',
+    pack: strip ? 'Tabs/Strip' : 'Pack Size (e.g. 500ml)',
+    extra: strip ? 'Loose tablets' : 'Extra units',
+    // Money on a strip type is per strip, the same way the medicine editor
+    // says it, so nobody types a per-tablet MRP into a per-strip box.
+    mrp: strip ? 'MRP (per strip)' : 'MRP',
+    rate: strip ? 'Rate (per strip)' : 'Rate (purchase)',
+  }
 }
 
 export function ImportPanel({
@@ -73,9 +128,33 @@ export function ImportPanel({
   // Opening stock: the shelf a shop already had on the day it started, which no
   // purchase bill in the system ever brought in.
   const [openingText, setOpeningText] = useState('')
+  // Rows typed into the form above the paste box. They are sent as `rows`,
+  // which the engine already accepts, so nothing here builds CSV by hand.
+  const [openingList, setOpeningList] = useState<OpeningRow[]>([])
+  const [openingDraft, setOpeningDraft] = useState<OpeningRow>(emptyOpeningRow())
   const [openingRows, setOpeningRows] = useState<Record<string, unknown>[]>([])
   const [openingProblems, setOpeningProblems] = useState<string[]>([])
   const openingFileRef = useRef<HTMLInputElement>(null)
+  const openingNameRef = useRef<HTMLInputElement>(null)
+  // The labels follow the type: a strip type counts strips and tablets, a
+  // bottle counts units and carries a printed pack size.
+  const openingMeta = openingLabels(openingDraft.type)
+
+  /** Park the typed medicine on the list and get ready for the next one. */
+  function addOpeningRow() {
+    if (!openingDraft.name.trim()) return
+    setOpeningList((rows) => [...rows, openingDraft])
+    // Type, GST and manufacturer repeat down a shelf; the rest does not.
+    setOpeningDraft((d) => ({
+      ...emptyOpeningRow(),
+      type: d.type,
+      gst_percent: d.gst_percent,
+      manufacturer: d.manufacturer,
+      schedule: d.schedule,
+      supplier_name: d.supplier_name,
+    }))
+    openingNameRef.current?.focus()
+  }
 
   const scheduleList = schedules?.length ? schedules : []
 
@@ -345,9 +424,32 @@ export function ImportPanel({
     setErr('')
     setMsg('')
     try {
-      const body = openingText.trim().startsWith('{') || openingText.trim().startsWith('[')
-        ? { json: openingText }
-        : { csv: openingText }
+      const typed = openingList.filter((r) => r.name.trim())
+      const body = typed.length
+        ? {
+            rows: typed.map((r) => ({
+              name: r.name.trim(),
+              batch_no: r.batch_no.trim(),
+              expiry_date: r.expiry_date.trim(),
+              type: r.type,
+              // The engine's "unit" is the pack: tabs per strip on a strip
+              // type, the printed size on anything else.
+              unit: r.pack.trim(),
+              stock_qty: r.qty.trim(),
+              extra_medicine: r.extra_medicine.trim(),
+              mrp: r.mrp.trim(),
+              rate: r.rate.trim(),
+              gst_percent: r.gst_percent.trim(),
+              manufacturer: r.manufacturer.trim(),
+              hsn_code: r.hsn_code.trim(),
+              schedule: r.schedule.trim(),
+              content_drug: r.content_drug.trim(),
+              supplier_name: r.supplier_name.trim(),
+            })),
+          }
+        : openingText.trim().startsWith('{') || openingText.trim().startsWith('[')
+          ? { json: openingText }
+          : { csv: openingText }
       const res = await importAction({ action, ...body })
       if (!res.ok) {
         setErr(String(res.error || 'Could not read those rows.'))
@@ -359,6 +461,7 @@ export function ImportPanel({
         setMsg(String(res.message || ''))
       } else {
         setOpeningRows([])
+        setOpeningList([])
         setMsg(String(res.message || 'Opening stock added.'))
         if (res.sync_warning) setErr(`Saved here, but the server said: ${String(res.sync_warning)}`)
       }
@@ -686,45 +789,341 @@ export function ImportPanel({
             For the medicine a shop already had when it started on Satpuda: type
             or paste the rows here and they go straight into Inventory. No
             supplier is created, no purchase bill is invented and no payment is
-            recorded. The rows are the same ones the data-loading app sends, so
-            a file from that app can be loaded as it is.
+            recorded. This is the same form as the Satpuda Loader app on the
+            phone, and it writes through the same import, so a shelf can be
+            typed on either one - phone rows arrive by QR / Import from mobile.
           </Note>
           <Note>
-            First line names the columns:{' '}
-            <code>name,batch_no,expiry_date,type,unit,stock_qty,extra_medicine,mrp,rate,gst_percent</code>
-            . Only <code>name</code> is required. For Tablet, Bolus and Capsule,{' '}
-            <code>stock_qty</code> is STRIPS and <code>extra_medicine</code> the
-            loose pieces; for everything else it is simply the number of units. A
-            medicine already on the shelf with the same name and batch is
-            updated, not added twice.
+            Fill the medicine in, press Add to list, and repeat. Nothing is
+            written until you press Add to Inventory. A medicine already on the
+            shelf with the same name and batch is updated, not added twice.
           </Note>
-          <input
-            ref={openingFileRef}
-            type="file"
-            accept=".csv,.txt,.json,text/csv,application/json"
-            style={{ display: 'none' }}
-            onChange={(e) => onLoadOpeningFile(e.target.files?.[0] ?? null)}
-          />
-          <textarea
-            className="settings-input"
-            rows={10}
-            value={openingText}
-            onChange={(e) => setOpeningText(e.target.value)}
-            placeholder={'name,batch_no,expiry_date,type,unit,stock_qty,extra_medicine,mrp,rate,gst_percent\nAMOXYCILLIN 500MG,B1204,08/2027,Tablet,1x10,12,4,85.50,68.40,12'}
-          />
+          <datalist id="opening-med-types">
+            {OPENING_TYPE_SUGGESTIONS.map((t) => (
+              <option key={t} value={t} />
+            ))}
+          </datalist>
+          {/* Enter anywhere in the form adds the row, so a long shelf can be
+              typed without reaching for the mouse on every medicine. */}
+          <div
+            className="opening-grid"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && openingDraft.name.trim()) {
+                e.preventDefault()
+                addOpeningRow()
+              }
+            }}
+          >
+            <label className="field opening-span2">
+              <span className="field-label">Medicine name</span>
+              <input
+                className="settings-input"
+                ref={openingNameRef}
+                value={openingDraft.name}
+                onChange={(e) =>
+                  setOpeningDraft((d) => ({ ...d, name: e.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">Type</span>
+              <input
+                className="settings-input"
+                list="opening-med-types"
+                value={openingDraft.type}
+                onChange={(e) =>
+                  setOpeningDraft((d) => ({ ...d, type: e.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">Batch No</span>
+              <input
+                className="settings-input"
+                value={openingDraft.batch_no}
+                onChange={(e) =>
+                  setOpeningDraft((d) => ({ ...d, batch_no: e.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">Expiry (MM/YY)</span>
+              <input
+                className="settings-input"
+                inputMode="numeric"
+                maxLength={5}
+                placeholder="08/27"
+                value={openingDraft.expiry_date}
+                onChange={(e) => {
+                  // The slash is the field's job, the same as on the Purchase
+                  // page. This box used to ask for MM/YYYY while every other
+                  // one in the product asked for MM/YY.
+                  const el = e.target
+                  const deleting = el.value.length < openingDraft.expiry_date.length
+                  setOpeningDraft((d) => ({
+                    ...d,
+                    expiry_date: formatExpiryMmYy(el.value, deleting),
+                  }))
+                }}
+                onBlur={(e) =>
+                  setOpeningDraft((d) => ({
+                    ...d,
+                    expiry_date: formatExpiryMmYy(e.target.value),
+                  }))
+                }
+                title={expiryProblem(openingDraft.expiry_date) || 'Expiry as MM/YY'}
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">{openingMeta.qty}</span>
+              <input
+                className="settings-input"
+                type="number"
+                min={0}
+                value={openingDraft.qty}
+                onChange={(e) =>
+                  setOpeningDraft((d) => ({ ...d, qty: e.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">{openingMeta.pack}</span>
+              <input
+                className="settings-input"
+                placeholder={openingMeta.strip ? '10' : '500ml'}
+                value={openingDraft.pack}
+                onChange={(e) =>
+                  setOpeningDraft((d) => ({ ...d, pack: e.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">{openingMeta.extra}</span>
+              <input
+                className="settings-input"
+                type="number"
+                min={0}
+                value={openingDraft.extra_medicine}
+                onChange={(e) =>
+                  setOpeningDraft((d) => ({ ...d, extra_medicine: e.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">{openingMeta.mrp}</span>
+              <input
+                className="settings-input"
+                type="number"
+                step="0.01"
+                min={0}
+                value={openingDraft.mrp}
+                onChange={(e) =>
+                  setOpeningDraft((d) => ({ ...d, mrp: e.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">{openingMeta.rate}</span>
+              <input
+                className="settings-input"
+                type="number"
+                step="0.01"
+                min={0}
+                value={openingDraft.rate}
+                onChange={(e) =>
+                  setOpeningDraft((d) => ({ ...d, rate: e.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">GST %</span>
+              <input
+                className="settings-input"
+                type="number"
+                step="0.01"
+                min={0}
+                value={openingDraft.gst_percent}
+                onChange={(e) =>
+                  setOpeningDraft((d) => ({ ...d, gst_percent: e.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">
+                Manufacturer <span className="opt">(optional)</span>
+              </span>
+              <input
+                className="settings-input"
+                value={openingDraft.manufacturer}
+                onChange={(e) =>
+                  setOpeningDraft((d) => ({ ...d, manufacturer: e.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">
+                HSN <span className="opt">(optional)</span>
+              </span>
+              <input
+                className="settings-input"
+                value={openingDraft.hsn_code}
+                onChange={(e) =>
+                  setOpeningDraft((d) => ({ ...d, hsn_code: e.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">
+                Schedule <span className="opt">(optional)</span>
+              </span>
+              <input
+                className="settings-input"
+                value={openingDraft.schedule}
+                onChange={(e) =>
+                  setOpeningDraft((d) => ({ ...d, schedule: e.target.value }))
+                }
+              />
+            </label>
+            <label className="field opening-span2">
+              <span className="field-label">
+                Content / Drug <span className="opt">(optional)</span>
+              </span>
+              <input
+                className="settings-input"
+                value={openingDraft.content_drug}
+                onChange={(e) =>
+                  setOpeningDraft((d) => ({ ...d, content_drug: e.target.value }))
+                }
+              />
+            </label>
+            <label className="field opening-span2">
+              <span className="field-label">
+                Supplier <span className="opt">(reference only - no bill, no due)</span>
+              </span>
+              <input
+                className="settings-input"
+                value={openingDraft.supplier_name}
+                onChange={(e) =>
+                  setOpeningDraft((d) => ({ ...d, supplier_name: e.target.value }))
+                }
+              />
+            </label>
+          </div>
           <div className="settings-inline-actions">
             <button
               type="button"
               className="settings-action-btn"
-              disabled={busy}
-              onClick={() => openingFileRef.current?.click()}
+              disabled={!openingDraft.name.trim()}
+              onClick={addOpeningRow}
             >
-              Load from file
+              Add to list
             </button>
+            <span className="muted">
+              {openingList.length
+                ? openingList.length + ' medicine(s) waiting'
+                : 'Nothing in the list yet'}
+            </span>
+            {openingList.length ? (
+              <button
+                type="button"
+                className="settings-action-btn"
+                onClick={() => setOpeningList([])}
+              >
+                Clear list
+              </button>
+            ) : null}
+          </div>
+          {openingList.length ? (
+            <div className="settings-table-wrap">
+              <table className="settings-table">
+                <thead>
+                  <tr>
+                    <th>Medicine</th>
+                    <th>Type</th>
+                    <th>Batch</th>
+                    <th>Expiry</th>
+                    <th>Qty</th>
+                    <th>Pack</th>
+                    <th>Extra</th>
+                    <th>MRP</th>
+                    <th>Rate</th>
+                    <th>GST%</th>
+                    <th>Supplier</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {openingList.map((r, i) => (
+                    <tr key={r.name + '-' + i}>
+                      <td>{r.name}</td>
+                      <td>{r.type}</td>
+                      <td>{r.batch_no}</td>
+                      <td>{r.expiry_date}</td>
+                      <td>{r.qty}</td>
+                      <td>{r.pack}</td>
+                      <td>{r.extra_medicine}</td>
+                      <td>{r.mrp}</td>
+                      <td>{r.rate}</td>
+                      <td>{r.gst_percent}</td>
+                      <td>{r.supplier_name}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="settings-link-btn"
+                          onClick={() =>
+                            setOpeningList((rows) => rows.filter((_x, j) => j !== i))
+                          }
+                        >
+                          Remove
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+          <details className="opening-paste">
+            <summary>Or paste rows from a file instead</summary>
+          <Note>
+            The same rows the data-loading app sends.
+            First line names the columns:{' '}
+            <code>name,batch_no,expiry_date,type,unit,stock_qty,extra_medicine,mrp,rate,gst_percent</code>
+            . Only <code>name</code> is required, <code>unit</code> is the pack
+            (tabs per strip, or 500ml), and for Tablet, Bolus and Capsule{' '}
+            <code>stock_qty</code> is STRIPS with <code>extra_medicine</code> the
+            loose pieces. The list above is used when it has rows in it.
+          </Note>
+            <input
+              ref={openingFileRef}
+              type="file"
+              accept=".csv,.txt,.json,text/csv,application/json"
+              style={{ display: 'none' }}
+              onChange={(e) => onLoadOpeningFile(e.target.files?.[0] ?? null)}
+            />
+            <textarea
+              className="settings-input"
+              rows={8}
+              value={openingText}
+              onChange={(e) => setOpeningText(e.target.value)}
+              placeholder={'name,batch_no,expiry_date,type,unit,stock_qty,extra_medicine,mrp,rate,gst_percent\nAMOXYCILLIN 500MG,B1204,08/27,Tablet,1x10,12,4,85.50,68.40,12'}
+            />
+            <div className="settings-inline-actions">
+              <button
+                type="button"
+                className="settings-action-btn"
+                disabled={busy}
+                onClick={() => openingFileRef.current?.click()}
+              >
+                Load from file
+              </button>
+            </div>
+          </details>
+          <div className="settings-inline-actions">
             <button
               type="button"
               className="settings-action-btn"
-              disabled={busy || !openingText.trim()}
+              disabled={busy || (!openingText.trim() && !openingList.length)}
               onClick={() => void runOpening('opening_stock_preview')}
             >
               Check rows
@@ -732,7 +1131,7 @@ export function ImportPanel({
             <button
               type="button"
               className="settings-action-btn"
-              disabled={busy || !openingText.trim()}
+              disabled={busy || (!openingText.trim() && !openingList.length)}
               onClick={() => void runOpening('opening_stock_apply')}
             >
               Add to Inventory
@@ -740,7 +1139,7 @@ export function ImportPanel({
             <button
               type="button"
               className="settings-action-btn"
-              disabled={busy || !openingText.trim()}
+              disabled={busy || (!openingText.trim() && !openingRows.length)}
               onClick={() => {
                 setOpeningText('')
                 setOpeningRows([])

@@ -1442,6 +1442,17 @@ def write_import_log(invoice: PurchaseInvoice, status: str, message: str = "") -
             "invoice_total": invoice.invoice_total,
             "preview_total": invoice.preview_amount,
             "issues": invoice.issues[:20],
+            # Per line, so a pack the parser never read can be told apart from
+            # one that was read and then dropped further down. These are parsed
+            # items: they carry the bill's own words, nothing the shelf stores.
+            "lines": [
+                {
+                    "name": str(getattr(it, "name", "") or "")[:40],
+                    "type": str(getattr(it, "medicine_type", "") or ""),
+                    "pack": str(getattr(it, "pack", "") or ""),
+                }
+                for it in invoice.items[:25]
+            ],
         }
         with open(os.path.join(log_dir, "purchase_import.log"), "a", encoding="utf-8") as handle:
             handle.write(json.dumps(payload, ensure_ascii=True) + "\n")

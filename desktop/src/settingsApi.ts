@@ -30,6 +30,7 @@ export type SettingsBundle = {
     export_formats: string[]
     printer_types: Opt[]
     dot_matrix_print_methods?: Opt[]
+    dot_matrix_tear_modes?: Opt[]
     payment_modes?: string[]
     display_styles?: Opt[]
     column_pages?: { key: string; label: string }[]

@@ -37,16 +37,10 @@ def _expiry_to_display(db_expiry: Any) -> str:
 
 
 def _expiry_to_db(display: str) -> str:
-    s = (display or "").strip()
-    if not s:
-        return ""
-    if "/" in s:
-        parts = s.split("/")
-        mm = parts[0].zfill(2)
-        yy = parts[1] if len(parts) > 1 else ""
-        year = yy if len(yy) == 4 else ("20" + yy.zfill(2))
-        return f"{year}-{mm}-01"
-    return s
+    """The expiry box, however it was filled in. See core/expiry_text.py."""
+    from core.expiry_text import expiry_to_db
+
+    return expiry_to_db(display)
 
 
 def _load_medicine_data(conn, medicine_id: int) -> dict[str, Any] | None:
@@ -124,7 +118,7 @@ def _load_medicine_data(conn, medicine_id: int) -> dict[str, Any] | None:
         "manufacturer",
         "schedule",
     ]
-    for c in ("content_drug", "hsn_code", "location"):
+    for c in ("content_drug", "hsn_code", "location", "supplier_name"):
         if c in cols:
             need.append(c)
     select = ", ".join(need)
@@ -514,6 +508,7 @@ def update_medicine(conn, body: dict[str, Any]) -> dict[str, Any]:
     manufacturer = str(body.get("manufacturer") or "").strip()
     schedule = str(body.get("schedule") or "").strip()
     content = str(body.get("content_drug") or body.get("content") or "").strip()
+    supplier = str(body.get("supplier_name") or body.get("supplier") or "").strip()
     hsn = str(body.get("hsn_code") or body.get("hsn") or "").strip()
 
     location = str(body.get("location") or body.get("shelf") or "").strip()
@@ -569,6 +564,7 @@ def update_medicine(conn, body: dict[str, Any]) -> dict[str, Any]:
                 "manufacturer": manufacturer,
                 "schedule": schedule,
                 "content_drug": content,
+                "supplier_name": supplier,
                 "hsn_code": hsn,
             })
             upsert_medicine_online(doc)
@@ -609,6 +605,11 @@ def update_medicine(conn, body: dict[str, Any]) -> dict[str, Any]:
         manufacturer,
         schedule,
     ]
+    if "supplier_name" in cols:
+        # Reference only: the Inventory editor never creates a supplier record
+        # and never moves a due.
+        sets.append("supplier_name=?")
+        params.append(supplier)
     if "content_drug" in cols:
         sets.append("content_drug=?")
         params.append(content)

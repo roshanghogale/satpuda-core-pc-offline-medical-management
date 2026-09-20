@@ -960,7 +960,7 @@ export function PharmacyPanel(props: Props) {
               }
             />
           </Field>
-          <Field label="Dot matrix top offset (cm)">
+          <Field label="Dot matrix top margin (cm)">
             <input
               className="settings-input"
               type="number"
@@ -988,6 +988,77 @@ export function PharmacyPanel(props: Props) {
                 setBill((b) => ({
                   ...b,
                   dot_matrix_slip_height_cm: Number(e.target.value),
+                }))
+              }
+            />
+          </Field>
+          <Field label="Dot matrix bottom margin (cm)">
+            <input
+              className="settings-input"
+              type="number"
+              step={0.1}
+              min={0}
+              max={5}
+              value={Number(bill.dot_matrix_bottom_margin_cm ?? 1.0)}
+              onChange={(e) =>
+                setBill((b) => ({
+                  ...b,
+                  dot_matrix_bottom_margin_cm: Number(e.target.value),
+                }))
+              }
+            />
+          </Field>
+          <Field label="Dot matrix print width (cm)">
+            <input
+              className="settings-input"
+              type="number"
+              step={0.1}
+              min={5}
+              max={20}
+              value={Number(bill.dot_matrix_print_width_cm ?? 12.9)}
+              onChange={(e) =>
+                setBill((b) => ({
+                  ...b,
+                  dot_matrix_print_width_cm: Number(e.target.value),
+                }))
+              }
+            />
+          </Field>
+          <Field label="Dot matrix tear-off handled by">
+            <select
+              className="settings-input"
+              disabled={Number(bill.dot_matrix_slip_height_cm ?? 0) <= 0}
+              value={String(bill.dot_matrix_tear_mode || 'software')}
+              onChange={(e) =>
+                setBill((b) => ({ ...b, dot_matrix_tear_mode: e.target.value }))
+              }
+            >
+              {(opts.dot_matrix_tear_modes || [
+                { value: 'software', label: 'Satpuda (recommended)' },
+                { value: 'printer', label: "Printer's own auto tear-off" },
+              ]).map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Dot matrix tear-off eject (cm)">
+            <input
+              className="settings-input"
+              type="number"
+              step={0.1}
+              min={0}
+              max={8}
+              disabled={
+                Number(bill.dot_matrix_slip_height_cm ?? 0) <= 0 ||
+                String(bill.dot_matrix_tear_mode || 'software') !== 'software'
+              }
+              value={Number(bill.dot_matrix_tear_gap_cm ?? 4.0)}
+              onChange={(e) =>
+                setBill((b) => ({
+                  ...b,
+                  dot_matrix_tear_gap_cm: Number(e.target.value),
                 }))
               }
             />
@@ -1071,7 +1142,22 @@ export function PharmacyPanel(props: Props) {
             reverse-feed before print to start bill higher on A6 slip (default
             0.8). Slip height cm: measure one slip from perforation to
             perforation; every bill then moves the paper by exactly one slip
-            (0 = off). Left offset cm: moves the whole bill right of the
+            (0 = off) - measure one slip from perforation to perforation.
+            Top and bottom margin cm: blank space kept at the top and bottom of
+            every slip; the medicine table always fills whatever is left, so the
+            bill is the same shape on every slip. Print width cm: the paper
+            width minus the tractor holes (14.5 cm slip - 0.8 cm each side =
+            12.9). Tear-off handled by Satpuda: after each bill the slip is
+            fed out by Tear-off eject cm so the perforation clears the tear
+            edge, and the next bill pulls back exactly that same distance - no
+            more - so it starts on the top of the next slip. Raise Tear-off
+            eject until the slip is fully out past the tear bar (4 cm to start,
+            up to 8); it cannot drift, because both ends use the one number.
+            Turn the printer's own Auto tear off OFF, or the two fight each
+            other - it is in the printer's Default Setting mode, the app cannot
+            change it. Top margin cm: how far BELOW
+            the perforation the first line prints. Left offset cm: moves the
+            whole bill right of the
             printer&apos;s first column (nothing prints left of it - if the bill
             is too far right at 0, move the paper left in the printer). Tear
             feed cm: how far the paper moves up after a bill when no slip height

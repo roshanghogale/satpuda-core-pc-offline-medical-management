@@ -456,7 +456,13 @@ def online_latest_supplier_maps() -> tuple[
 
 
 def latest_supplier_by_medicine_id(conn, medicine_ids) -> dict[int, str]:
-    """Latest purchase supplier name per medicine (Inventory Supplier Name column)."""
+    """The supplier name Inventory shows against a medicine.
+
+    The medicine's own ``supplier_name`` first -- what the Opening Stock page,
+    the loader app, the Inventory editor or the last purchase wrote on it -- and
+    the purchase history behind it only where that note is empty. Derivation
+    alone could never speak for opening stock, which has no purchase at all.
+    """
     ids = []
     seen: set[int] = set()
     for raw in medicine_ids or []:
@@ -519,6 +525,57 @@ def latest_supplier_by_medicine_id(conn, medicine_ids) -> dict[int, str]:
             for mid, name in by_id.items():
                 if name:
                     out[mid] = name
+    except Exception:
+        pass
+    # The note on the medicine is what a shop typed or what its last bill said,
+    # so it is the answer wherever it exists.
+    for mid, name in _stored_supplier_by_medicine_id(conn, ids).items():
+        if name:
+            out[mid] = name
+    return out
+
+
+def _stored_supplier_by_medicine_id(conn, ids) -> dict[int, str]:
+    """medicines.supplier_name per id, from the shop's own catalogue."""
+    out: dict[int, str] = {}
+    if not ids:
+        return out
+    try:
+        from core.sync_prefs import is_online_mode
+
+        if is_online_mode():
+            from core.online_catalog import medicines as _catalogue
+
+            # One pass over the catalogue, not a lookup per row: Inventory can
+            # ask about ten thousand medicines at once.
+            wanted = {int(m) for m in ids}
+            for doc in _catalogue() or []:
+                try:
+                    mid = int(doc.get("id") or doc.get("local_id") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if mid in wanted:
+                    name = str(doc.get("supplier_name") or "").strip()
+                    if name:
+                        out[mid] = name
+            return out
+    except Exception:
+        return out
+    try:
+        if "supplier_name" not in _table_cols(conn, "medicines"):
+            return out
+        chunk = 400
+        for i in range(0, len(ids), chunk):
+            part = ids[i : i + chunk]
+            ph = ",".join("?" * len(part))
+            rows = conn.execute(
+                f"SELECT id, COALESCE(supplier_name,'') FROM medicines WHERE id IN ({ph})",
+                part,
+            ).fetchall()
+            for mid, name in rows:
+                text = str(name or "").strip()
+                if text:
+                    out[int(mid)] = text
     except Exception:
         pass
     return out

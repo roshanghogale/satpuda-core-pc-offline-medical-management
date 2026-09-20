@@ -80,6 +80,10 @@ export function MedicineEditDialog({
     schedule: '',
     content_drug: '',
     hsn_code: '',
+    // Where the shop got this stock. Written by a purchase, by the Opening
+    // Stock page, by the loader app on the phone, or typed here. Reference
+    // only: nothing about it reaches the supplier ledger.
+    supplier_name: '',
     is_strip: false,
   })
 
@@ -174,6 +178,7 @@ export function MedicineEditDialog({
       mrp_tab: strip ? fmtPrice(m.mrp_tab) : '',
       rate_tab: strip ? fmtPrice(m.rate_tab) : '',
       manufacturer: m.manufacturer || '',
+      supplier_name: m.supplier_name || '',
       schedule: m.schedule || '',
       content_drug: m.content_drug || '',
       hsn_code: m.hsn_code || '',
@@ -245,6 +250,7 @@ export function MedicineEditDialog({
         mrp: Number(form.mrp) || 0,
         rate: Number(form.rate) || 0,
         manufacturer: form.manufacturer,
+        supplier_name: form.supplier_name,
         schedule: form.schedule,
         content_drug: form.content_drug,
         hsn_code: form.hsn_code,
@@ -486,6 +492,16 @@ export function MedicineEditDialog({
                     value={form.manufacturer}
                     disabled={readOnly}
                     onChange={(e) => patch({ manufacturer: e.target.value })}
+                  />
+                </label>
+                <label className="field">
+                  <span className="field-label">Supplier</span>
+                  <input
+                    className="settings-input"
+                    value={form.supplier_name}
+                    disabled={readOnly}
+                    placeholder="Where this stock came from"
+                    onChange={(e) => patch({ supplier_name: e.target.value })}
                   />
                 </label>
                 <label className="field">

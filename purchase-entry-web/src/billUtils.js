@@ -5,6 +5,47 @@ function itemHasData(it) {
   return qty > 0
 }
 
+// ── Expiry ───────────────────────────────────────────────────────────────────
+// Nobody types the slash. The box said MM/YY, the shop typed 0428, and the PC
+// threw the whole date away because it tested for a "/" -- the medicine came in
+// with an empty expiry and no warning. The slash is this field's job, not the
+// shop's, and core/expiry_text.py now reads whatever still gets through.
+
+const EXPIRY_SEP = /[^\d/]/g
+
+/** What the box should show after each keystroke: the slash puts itself in. */
+export function typeExpiry(text) {
+  const s = String(text == null ? '' : text).replace(EXPIRY_SEP, '')
+  const parts = s.split('/')
+  if (parts.length > 1) {
+    // They typed the separator themselves, so a lone month is padded: 4/ -> 04/
+    const mm = parts[0].slice(0, 2)
+    const yy = parts.slice(1).join('').slice(0, 4)
+    return (mm.length === 1 ? '0' + mm : mm) + '/' + yy
+  }
+  if (s.length <= 2) return s
+  return s.slice(0, 2) + '/' + s.slice(2, 6)
+}
+
+/** MM/YY once they leave the box, so every row leaves the phone the same shape. */
+export function normalizeExpiry(text) {
+  const t = typeExpiry(text)
+  const m = t.match(/^(\d{1,2})\/(\d{2}|\d{4})$/)
+  if (!m) return t
+  const mm = m[1].padStart(2, '0')
+  if (Number(mm) < 1 || Number(mm) > 12) return t
+  return mm + '/' + (m[2].length === 4 ? m[2].slice(2) : m[2])
+}
+
+/** "" when it reads as a month and a year; otherwise what is wrong with it. */
+export function expiryProblem(text) {
+  const t = String(text == null ? '' : text).trim()
+  if (!t) return ''
+  return /^(0[1-9]|1[0-2])\/\d{2}$/.test(normalizeExpiry(t))
+    ? ''
+    : 'Expiry must be MM/YY, e.g. 04/28'
+}
+
 export function buildJSON(bills) {
   return {
     bills: bills.map(bill => {
@@ -33,7 +74,7 @@ export function buildJSON(bills) {
           medicine_name:      it.medicine_name      || '',
           type:               it.type               || '',
           batch_no:           it.batch_no           || '',
-          expiry_date:        it.expiry_date         || '',
+          expiry_date:        normalizeExpiry(it.expiry_date || ''),
           qty:                parseFloat(it.qty)            || 0,
           tablets_per_stripe: ['tablet','bolus'].includes((it.type||'').toLowerCase()) ? (parseInt(it.quantity_value) || 1) : 1,
           free_qty:           parseFloat(it.free_qty)        || 0,
