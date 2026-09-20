@@ -142,7 +142,7 @@ def single_copy_pdf_layout(layout: str | None = None) -> str:
 
 
 def load_sales_bill_save_dir() -> str:
-    """Custom folder for saved sales bills; empty = use Downloads."""
+    """Custom folder for saved sales bills; empty = use Documents."""
     _migrate_legacy_files()
     try:
         from core.bill_config import load_bill_print_settings
@@ -208,20 +208,26 @@ def resolve_sales_bill_save_dir() -> str:
             return path
     except Exception:
         pass
+    # Documents, where a shop looks for its own papers. Bills used to land in
+    # Downloads, among everything the browser ever fetched. A shop that chose
+    # its own folder keeps it -- this is only the default.
     candidates = []
-    if sys.platform == "win32":
-        userprofile = os.environ.get("USERPROFILE", "")
-        if userprofile:
-            candidates.append(os.path.join(userprofile, "Downloads"))
     home = os.path.expanduser("~")
+    if sys.platform == "win32":
+        userprofile = os.environ.get("USERPROFILE", "") or home
+        onedrive = os.environ.get("OneDrive", "")
+        candidates.append(os.path.join(userprofile, "Documents"))
+        if onedrive:
+            candidates.append(os.path.join(onedrive, "Documents"))
     candidates.extend([
+        os.path.join(home, "Documents"),
         os.path.join(home, "Downloads"),
         os.path.join(home, "download"),
     ])
     for path in candidates:
         if path and os.path.isdir(path):
             return path
-    fallback = os.path.join(home, "Downloads")
+    fallback = os.path.join(home, "Documents")
     os.makedirs(fallback, exist_ok=True)
     return fallback
 

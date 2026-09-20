@@ -1068,6 +1068,11 @@ def gdi_placement_for(settings: dict | None, paper: str) -> dict | None:
     slip_cm = 0.0
     if _dot_matrix_slip_units(merged):
         slip_cm = max(5.0, min(30.0, float(merged.get("dot_matrix_slip_height_cm") or 0)))
+    else:
+        # No slip height set: still ask the driver for an A6-high page. Its own
+        # default is a full sheet (A4 / 11 inch / fanfold), so every A6 bill fed
+        # a whole page and the next bill started a page later.
+        slip_cm = 10.5
     return {
         "left_cm": _dot_matrix_left_offset_cm(merged),
         "top_cm": 0.0,

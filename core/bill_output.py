@@ -1,8 +1,9 @@
-"""Save bill HTML/PDF to Downloads; silent or dialog printing on Windows."""
+"""Save bill HTML/PDF to the bill folder; silent or dialog printing on Windows."""
 from __future__ import annotations
 
 import os
 import subprocess
+import time
 import sys
 import webbrowser
 
@@ -618,39 +619,95 @@ def _try_pdf_via_browser(
     paper_height_mm: float | None = None,
 ) -> bool:
     uri = 'file:///' + os.path.abspath(html_path).replace('\\', '/')
-    for exe in _chromium_browser_paths():
+    # The browser that worked last time goes first, and with a short timeout:
+    # every bill pays for this conversion, so a browser that is slow to start,
+    # blocked by antivirus or mid-update must not hold the counter up for a
+    # minute per attempt before the next one is tried.
+    for exe, headless_flag, timeout_s in _pdf_browser_attempts():
         try:
             if os.path.isfile(pdf_path):
                 os.remove(pdf_path)
         except Exception:
             pass
-        for headless_flag in ('--headless=new', '--headless'):
-            try:
-                cmd = [
-                    exe,
-                    headless_flag,
-                    '--disable-gpu',
-                    '--no-pdf-header-footer',
-                    '--disable-extensions',
-                    '--run-all-compositor-stages-before-draw',
-                    '--virtual-time-budget=5000',
-                ]
-                if paper_width_mm and paper_height_mm:
-                    cmd.append(f'--paper-width={paper_width_mm / 25.4:.4f}')
-                    cmd.append(f'--paper-height={paper_height_mm / 25.4:.4f}')
-                cmd.append(f'--print-to-pdf={pdf_path}')
-                cmd.append(uri)
-                subprocess.run(
-                    cmd,
-                    timeout=60,
-                    capture_output=True,
-                    check=False,
-                )
-                if os.path.isfile(pdf_path) and os.path.getsize(pdf_path) > 500:
-                    return True
-            except Exception:
-                continue
+        started = time.time()
+        try:
+            cmd = [
+                exe,
+                headless_flag,
+                '--disable-gpu',
+                '--no-pdf-header-footer',
+                '--disable-extensions',
+                '--run-all-compositor-stages-before-draw',
+                '--virtual-time-budget=5000',
+            ]
+            if paper_width_mm and paper_height_mm:
+                cmd.append(f'--paper-width={paper_width_mm / 25.4:.4f}')
+                cmd.append(f'--paper-height={paper_height_mm / 25.4:.4f}')
+            cmd.append(f'--print-to-pdf={pdf_path}')
+            cmd.append(uri)
+            subprocess.run(
+                cmd,
+                timeout=timeout_s,
+                capture_output=True,
+                check=False,
+            )
+            if os.path.isfile(pdf_path) and os.path.getsize(pdf_path) > 500:
+                _remember_pdf_browser(exe, headless_flag, time.time() - started)
+                return True
+            _log_pdf_browser(f'no PDF from "{os.path.basename(exe)}" {headless_flag} '
+                             f'in {time.time() - started:.1f}s')
+        except subprocess.TimeoutExpired:
+            _log_pdf_browser(f'"{os.path.basename(exe)}" {headless_flag} timed out after {timeout_s}s')
+        except Exception as exc:
+            _log_pdf_browser(f'"{os.path.basename(exe)}" {headless_flag} failed: {exc}')
     return False
+
+
+def _log_pdf_browser(message: str) -> None:
+    try:
+        from core.print_log import print_log
+        print_log(f'[pdf] {message}')
+    except Exception:
+        pass
+
+
+def _pdf_browser_attempts() -> list[tuple[str, str, int]]:
+    """(browser, headless flag, timeout) to try, best first.
+
+    The pair that last produced a PDF is tried first with a short timeout, so
+    the usual bill costs one browser start. Everything else follows as before.
+    """
+    flags = ('--headless=new', '--headless')
+    attempts: list[tuple[str, str, int]] = []
+    try:
+        from core.printer_manager import PrinterManager
+        cfg = PrinterManager.load_settings()
+        last_exe = str(cfg.get('pdf_browser_path') or '').strip()
+        last_flag = str(cfg.get('pdf_browser_flag') or '').strip()
+        if last_exe and os.path.isfile(last_exe) and last_flag in flags:
+            attempts.append((last_exe, last_flag, 30))
+    except Exception:
+        pass
+    for exe in _chromium_browser_paths():
+        for flag in flags:
+            if not any(exe == a[0] and flag == a[1] for a in attempts):
+                attempts.append((exe, flag, 60))
+    return attempts
+
+
+def _remember_pdf_browser(exe: str, headless_flag: str, seconds: float) -> None:
+    """Keep the browser that just worked, so the next bill starts with it."""
+    try:
+        from core.printer_manager import PrinterManager
+        cfg = PrinterManager.load_settings()
+        if cfg.get('pdf_browser_path') == exe and cfg.get('pdf_browser_flag') == headless_flag:
+            return
+        cfg['pdf_browser_path'] = exe
+        cfg['pdf_browser_flag'] = headless_flag
+        PrinterManager.save_settings(cfg)
+        _log_pdf_browser(f'using "{os.path.basename(exe)}" {headless_flag} ({seconds:.1f}s) from now on')
+    except Exception:
+        pass
 
 
 def _try_pdf_via_edge(html_path: str, pdf_path: str) -> bool:
@@ -919,7 +976,7 @@ def print_bill_with_slot(
 
 def save_bill_to_downloads(conn, sale_id) -> tuple[str, str | None]:
     """
-    Write Bill_<no>.html and Bill_<no>.pdf (when possible) to Downloads.
+    Write Bill_<no>.html and Bill_<no>.pdf (when possible) to the bill folder.
     Returns (html_path, pdf_path or None).
     """
     return save_bill_pdf_only(conn, sale_id)
@@ -965,7 +1022,7 @@ def save_bill_pdf_a6(
 
 
 def prepare_and_print_bill(conn, sale_id, hwnd_owner: int = 0) -> tuple[str, str | None]:
-    """Save bill files to Downloads, then open the Windows print dialog."""
+    """Save bill files to the bill folder, then open the Windows print dialog."""
     if _is_dot_matrix_printer_mode():
         from core.printer_manager import PrinterManager
         slot = 1

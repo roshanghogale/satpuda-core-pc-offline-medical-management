@@ -38,6 +38,19 @@ _SNAP_KEYS = ("customers", "suppliers", "doctors", "medicines_inventory")
 _last_error: dict[str, str] = {}
 
 
+def clear_errors() -> None:
+    """Forget why the last reads failed - the server is answering again.
+
+    The shell's warning bar shows the last catalog failure until a read of that
+    list succeeds. Lists are cached, so after a blip nothing re-read them for
+    minutes and a shop kept looking at "Cannot reach server" long after the
+    connection was back - which is how a bill that was already saved gets
+    entered a second time. The connectivity monitor calls this on reconnect.
+    """
+    with _lock:
+        _last_error.clear()
+
+
 def last_error(key: str = "") -> str:
     """Why the last catalog read for `key` came back empty, or "" if it did not fail.
 

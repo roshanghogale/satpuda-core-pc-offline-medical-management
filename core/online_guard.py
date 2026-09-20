@@ -267,6 +267,16 @@ def start_connectivity_monitor(interval_sec: float = 8.0) -> None:
                             kick_flush()
                         except Exception as exc:
                             log.debug("kick_flush on reconnect: %s", exc)
+                        # Drop the warning bar and re-read the lists: while the
+                        # connection was down they were served from this PC's
+                        # last copy, and the message outlived the problem.
+                        try:
+                            from core import online_catalog
+
+                            online_catalog.clear_errors()
+                            online_catalog.invalidate()
+                        except Exception as exc:
+                            log.debug("catalog refresh on reconnect: %s", exc)
                         cb = _on_reconnected
                         if cb:
                             try:
