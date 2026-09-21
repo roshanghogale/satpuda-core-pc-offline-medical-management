@@ -803,15 +803,29 @@ export function ImportPanel({
               <option key={t} value={t} />
             ))}
           </datalist>
-          {/* Enter anywhere in the form adds the row, so a long shelf can be
-              typed without reaching for the mouse on every medicine. */}
+          {/* Enter walks to the next box, the same as the Purchase page; Enter
+              on the last box (or Ctrl+Enter anywhere) adds the medicine. Enter
+              used to add it from whichever box it was pressed in, so a
+              medicine went onto the list half typed. */}
           <div
             className="opening-grid"
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && openingDraft.name.trim()) {
-                e.preventDefault()
-                addOpeningRow()
+              if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
+              const target = e.target as HTMLElement
+              if (target.tagName !== 'INPUT' && target.tagName !== 'SELECT') return
+              e.preventDefault()
+              const boxes = Array.from(
+                e.currentTarget.querySelectorAll<HTMLElement>('input, select'),
+              ).filter((el) => !(el as HTMLInputElement).disabled)
+              const at = boxes.indexOf(target)
+              const next = at >= 0 ? boxes[at + 1] : undefined
+              if (e.ctrlKey || !next) {
+                if (openingDraft.name.trim()) addOpeningRow()
+                else openingNameRef.current?.focus()
+                return
               }
+              next.focus()
+              if (next instanceof HTMLInputElement) next.select()
             }}
           >
             <label className="field opening-span2">

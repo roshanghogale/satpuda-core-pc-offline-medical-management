@@ -911,6 +911,56 @@ def _save_discount_loss_messages(raw_items: list, overall_discount: float) -> li
     return _discount_loss_messages(lines, overall_discount)
 
 
+def _remember_doctor_online(name: str, phone: str) -> None:
+    """Keep the doctor a sale names, with the number typed for them, on the server.
+
+    Offline the bill save already does this (billing_service upserts the doctors
+    table). Online the engine's database is an empty shell, and the sale carried
+    the doctor's name on the bill row only: a new doctor never joined the list,
+    and the number typed beside them was thrown away altogether. Best effort and
+    off the counter's path -- a slow link must not hold up the bill.
+    """
+    doc_name = str(name or "").strip().upper()
+    doc_phone = str(phone or "").strip()
+    if not doc_name:
+        return
+    try:
+        from core.sync_prefs import is_online_mode
+
+        if not is_online_mode():
+            return
+    except Exception:
+        return
+
+    def _work():
+        try:
+            from core.online_catalog import doctors, patch_docs
+            from core.server_crud import bump_meta, upsert_contact_online
+
+            existing = next(
+                (
+                    d
+                    for d in doctors() or []
+                    if str(d.get("name") or "").strip().upper() == doc_name
+                ),
+                None,
+            )
+            if existing:
+                if not doc_phone or str(existing.get("phone") or "").strip() == doc_phone:
+                    return
+                doc = bump_meta(dict(existing))
+                doc["phone"] = doc_phone
+            else:
+                doc = {"name": doc_name, "phone": doc_phone, "registration_number": ""}
+            did = upsert_contact_online("doctors", doc)
+            doc["id"] = doc["local_id"] = did
+            patch_docs("doctors", [doc])
+        except Exception as exc:
+            print(f"[sale] doctor {doc_name!r} not saved to the list: {exc}", flush=True)
+
+    threading.Thread(target=_work, name="sale-doctor", daemon=True).start()
+
+
 def save_sale(conn, body: dict[str, Any]) -> dict[str, Any]:
     """
     Persist a sale using classic billing_service (counter merge + stock).
@@ -1304,6 +1354,7 @@ def save_sale(conn, body: dict[str, Any]) -> dict[str, Any]:
             except Exception:
                 pdf_dir = ""
 
+        _remember_doctor_online(doctor_name, doctor_phone)
         return {
             "ok": True,
             "bill_no": bill_no,

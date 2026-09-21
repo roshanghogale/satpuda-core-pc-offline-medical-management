@@ -156,11 +156,12 @@ fn kill_port_listeners_windows(port: u16) {
             }
         }
         for pid in pids {
-            let _ = Command::new("taskkill")
-                .args(["/PID", &pid.to_string(), "/F"])
+            let mut kill = Command::new("taskkill");
+            kill.args(["/PID", &pid.to_string(), "/T", "/F"])
                 .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
+                .stderr(Stdio::null());
+            apply_no_window(&mut kill);
+            let _ = kill.status();
         }
     }
     #[cfg(not(windows))]
@@ -450,13 +451,32 @@ fn stop_engine(app: &AppHandle) {
     if let Some(state) = app.try_state::<ApiState>() {
         if let Ok(mut guard) = state.child.lock() {
             if let Some(mut child) = guard.take() {
+                // The whole tree, not just the process we started: killing the
+                // engine alone left whatever it had started still running, and
+                // the app never finished closing.
+                #[cfg(windows)]
+                {
+                    let mut kill = Command::new("taskkill");
+                    kill.args(["/PID", &child.id().to_string(), "/T", "/F"])
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null());
+                    apply_no_window(&mut kill);
+                    let _ = kill.status();
+                }
                 let _ = child.kill();
                 let _ = child.wait();
                 log::info!("Stopped local data engine");
             }
         }
     }
+    // An engine this window did not start (left over from an earlier run that
+    // hung) still holds the port. Closing Satpuda must leave nothing behind,
+    // or the next start -- and the voice test -- find "the app is running".
+    kill_port_listeners_windows(API_PORT);
 }
+
+/// The quit work runs once, even though Tauri reports both ExitRequested and Exit.
+static QUITTING: AtomicBool = AtomicBool::new(false);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -507,6 +527,17 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app_handle, event| {
             if matches!(event, RunEvent::Exit | RunEvent::ExitRequested { .. }) {
+                if QUITTING.swap(true, Ordering::SeqCst) {
+                    return;
+                }
+                // Gone from the screen the moment the shop presses X; the
+                // backup and the engine shutdown below happen behind it.
+                // Before, the window sat there frozen for up to two minutes
+                // (60 s per exit event, and there are two) and looked as if it
+                // would not close at all.
+                for (_, win) in app_handle.webview_windows() {
+                    let _ = win.hide();
+                }
                 // Ask the engine for the closing backup of the day BEFORE
                 // killing it. It cannot do this on its own: the kill below is a
                 // SIGKILL/TerminateProcess, so no Python shutdown code runs on a
@@ -526,7 +557,7 @@ pub fn run() {
                 if !RESTARTING.load(Ordering::SeqCst) {
                     let _ = http_get_local_timeout(
                         "/api/backup/close",
-                        Duration::from_secs(60),
+                        Duration::from_secs(25),
                     );
                 }
                 stop_engine(&app_handle);

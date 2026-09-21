@@ -1523,7 +1523,7 @@ def _get_unit_value(item) -> str:
     # stop at 'ml'/'gm', so a bill that said "1 LTR" or "500GMS" came out as
     # "1LTRml" and "500GMSgm" on the shelf.
     if any(qty_raw.lower().endswith(s) for s in (
-        'ml', 'ltr', 'lt', 'ltrs', 'l', 'gms', 'gm', 'gr', 'g', 'kg', 'mg', 'mcg',
+        'ml', 'ltr', 'lt', 'ltrs', 'lit', 'litre', 'liter', 'l', 'gms', 'gm', 'gr', 'g', 'kg', 'mg', 'mcg',
         'doses', 'dose', 'vial', 'tab', 'tabs', 'cap', 'caps', 'pcs', 'btl',
     )):
         return qty_raw

@@ -160,6 +160,8 @@ export type SalesFormDefaults = {
   customers: string[]
   customer_details?: CustomerDetail[]
   doctors: string[]
+  /** Upper-cased doctor name -> phone number. */
+  doctor_phones?: Record<string, string>
   villages: string[]
   default_village?: string
   medicines?: MedicineSuggestion[]

@@ -451,6 +451,26 @@ def save_purchase_bill(conn, body: dict[str, Any]) -> dict[str, Any]:
         gst_calc_method=method,
     ).calculate()
 
+    # An imported bill is shown pinned to the supplier's printed footer (net
+    # payable, GST, round-off) by calc_purchase, and the classic page saves
+    # those same pinned figures. This save worked the bill out from the rows
+    # alone, so what was stored was not what the screen showed: SEEMA FRUITS
+    # INV1897 said NET PAYABLE 6473.00 on screen and went into the books, and
+    # the supplier's due, as 6421.71.
+    if body.get("import_bill_mode") and isinstance(body.get("import_invoice_summary"), dict):
+        shown = calc_purchase(
+            conn,
+            dict(
+                body,
+                previous_due=prev_due,
+                previous_credit=prev_credit,
+                skip_party_due=True,
+            ),
+        )
+        if shown.get("ok") and isinstance(shown.get("calc"), dict):
+            calc = shown["calc"]
+            items = list(shown.get("items") or items)
+
     # The purchase is saved as typed; what looks mistyped is only pointed out. The same
     # supplier's bill number is looked up before the save, which would otherwise find itself.
     try:

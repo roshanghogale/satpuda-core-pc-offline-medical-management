@@ -3113,6 +3113,9 @@ def _next_sales_bill_hint(conn, bill_date: Any = None) -> str:
 def sales_form_defaults(conn) -> dict[str, Any]:
     customers: list[dict[str, Any]] = []
     doctors: list[str] = []
+    # Doctor name -> number, so picking a doctor fills the phone box. The list
+    # carried names only, and the number had to be typed on every bill.
+    doctor_phones: dict[str, str] = {}
     villages, default_village = _sales_village_lists(conn)
     medicines: list[dict[str, Any]] = []
 
@@ -3124,6 +3127,7 @@ def sales_form_defaults(conn) -> dict[str, Any]:
                 customer_names,
                 customers as oc_customers,
                 doctor_names,
+                doctors as oc_doctors,
             )
 
             for c in oc_customers():
@@ -3154,6 +3158,11 @@ def sales_form_defaults(conn) -> dict[str, Any]:
                     }
                 )
             doctors = doctor_names()[:_NAME_LIST_LIMIT]
+            for d in oc_doctors():
+                n = str(d.get("name") or "").strip()
+                ph = str(d.get("phone") or "").strip()
+                if n and ph:
+                    doctor_phones[n.upper()] = ph
             medicines = search_medicines(conn, "", 80)
             payment_modes = ["Cash", "Due", "Online", "UPI", "Cheque"]
             try:
@@ -3171,6 +3180,7 @@ def sales_form_defaults(conn) -> dict[str, Any]:
                 "customers": cust_names,
                 "customer_details": customers,
                 "doctors": doctors,
+                "doctor_phones": doctor_phones,
                 "villages": villages,
                 "default_village": default_village,
                 "medicines": medicines,
@@ -3211,14 +3221,19 @@ def sales_form_defaults(conn) -> dict[str, Any]:
 
     if _table_exists(conn, "doctors") and "name" in _table_cols(conn, "doctors"):
         try:
-            doctors = [
-                str(r[0])
-                for r in conn.execute(
-                    "SELECT name FROM doctors ORDER BY name COLLATE NOCASE "
-                    f"LIMIT {_NAME_LIST_LIMIT}"
-                )
-                if r and r[0]
-            ]
+            phone_col = (
+                "COALESCE(phone,'')" if "phone" in _table_cols(conn, "doctors") else "''"
+            )
+            doctors = []
+            for r in conn.execute(
+                f"SELECT name, {phone_col} FROM doctors "
+                f"ORDER BY name COLLATE NOCASE LIMIT {_NAME_LIST_LIMIT}"
+            ):
+                if not r or not r[0]:
+                    continue
+                doctors.append(str(r[0]))
+                if str(r[1] or "").strip():
+                    doctor_phones[str(r[0]).strip().upper()] = str(r[1]).strip()
         except Exception:
             doctors = []
 
@@ -3244,6 +3259,7 @@ def sales_form_defaults(conn) -> dict[str, Any]:
         "customers": [c["name"] for c in customers],
         "customer_details": customers,
         "doctors": doctors,
+        "doctor_phones": doctor_phones,
         "villages": villages,
         "default_village": default_village,
         "medicines": medicines,

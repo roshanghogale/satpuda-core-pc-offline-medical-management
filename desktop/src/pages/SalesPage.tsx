@@ -1804,7 +1804,20 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
         bumpSalesBillNo(res.bill_no) || defaults?.next_bill_hint,
       )
       if (defaults) {
-        setDefaults({ ...defaults, next_bill_hint: nextHint })
+        // A doctor first named on this bill joins the list, with the number
+        // typed for them, without waiting for the next reload.
+        const docName = tabRef.current.doctor.trim()
+        const docPhone = tabRef.current.doctorPhone.trim()
+        const doctors =
+          docName &&
+          !(defaults.doctors || []).some((d) => d.toUpperCase() === docName.toUpperCase())
+            ? [...(defaults.doctors || []), docName.toUpperCase()]
+            : defaults.doctors
+        const doctor_phones =
+          docName && docPhone
+            ? { ...(defaults.doctor_phones || {}), [docName.toUpperCase()]: docPhone }
+            : defaults.doctor_phones
+        setDefaults({ ...defaults, next_bill_hint: nextHint, doctors, doctor_phones })
       }
       // The autosave session was closed by the save itself. Let go of our
       // handle BEFORE clearing, so clearForm cannot aim a discard at the bill
@@ -2932,8 +2945,21 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
                 id: d,
                 label: d,
               }))}
-              onChange={(v) => patchTab({ doctor: v })}
-              onPick={(it) => patchTab({ doctor: it.label })}
+              onChange={(v) => {
+                // A name typed out in full is as good as picked: its number comes too.
+                const known = defaults?.doctor_phones?.[v.trim().toUpperCase()]
+                patchTab(known ? { doctor: v, doctorPhone: known } : { doctor: v })
+              }}
+              onPick={(it) => {
+                // Picking a doctor brings their number; it used to fill the
+                // name only, so the phone was typed again on every bill.
+                const known = defaults?.doctor_phones?.[it.label.trim().toUpperCase()]
+                patchTab(
+                  known !== undefined
+                    ? { doctor: it.label, doctorPhone: known }
+                    : { doctor: it.label },
+                )
+              }}
               onEnter={() => focusNavOrder(6)}
             />
           </Field>
