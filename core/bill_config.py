@@ -101,6 +101,15 @@ DEFAULT_BILL_PRINT_SETTINGS = {
     "dot_matrix_hpos_60ths": 0,
     # Dot matrix bill: show | vertical borders (False = horizontal rules only).
     "dot_matrix_vertical_borders": True,
+    # "compact" is the slip the shop picked on 25-09-2026: no SHREE GANESHAY NAMAH,
+    # no GST INVOICE line, no GST, no recovery wish, signature between the nice line
+    # and the total, and every line saved given to the medicine table. "classic" is
+    # what was printed before it.
+    "dot_matrix_style": "compact",
+    # The three the shop picked from the printed samples on 25-09-2026.
+    "dot_matrix_bold_total": True,      # Total struck twice by the printer
+    "dot_matrix_item_count": True,      # "8 aushadhe, 59 nag" above HAVE A NICE DAY
+    "dot_matrix_due_lines": True,       # Prev/Bill/Total Due, but only when money is owed
     # Dot matrix A6: top margin (cm) — how far BELOW the perforation the first
     # line starts. Fed forward after the paper is pulled back to the slip top.
     "dot_matrix_top_offset_cm": 1.0,

@@ -15,7 +15,8 @@ from tests._bill_fixtures import discounted_bill_context, isolated_bill_settings
 
 
 def _settings(template: str, **extra) -> dict:
-    return {**DEFAULT_BILL_PRINT_SETTINGS, "template": template, **extra}
+    # The tax figures belong to the old slip; the shop's new one prints no GST.
+    return {**DEFAULT_BILL_PRINT_SETTINGS, "template": template, "dot_matrix_style": "classic", **extra}
 
 
 class ATaxInvoiceShowsItsTax(unittest.TestCase):
@@ -24,10 +25,12 @@ class ATaxInvoiceShowsItsTax(unittest.TestCase):
         from core.dot_matrix_print import _show_gst_details as dot_matrix_rule
 
         for rule in (pdf_rule, dot_matrix_rule):
-            self.assertTrue(rule({"template": "legacy"}))
-            self.assertFalse(rule({"template": "legacy", "show_gst": False}))
-            self.assertTrue(rule({"template": "classic"}))
-            self.assertFalse(rule({"template": "classic", "show_gst": False}))
+            old = {"dot_matrix_style": "classic"}      # the new slip never prints GST
+            self.assertTrue(rule({**old, "template": "legacy"}))
+            self.assertFalse(rule({**old, "template": "legacy", "show_gst": False}))
+            self.assertTrue(rule({**old, "template": "classic"}))
+            self.assertFalse(rule({**old, "template": "classic", "show_gst": False}))
+        self.assertFalse(dot_matrix_rule({"template": "legacy"}))
 
     def test_the_pdf_bill_is_the_gst_invoice_under_another_title(self):
         from core.bill_config import render_bill_html

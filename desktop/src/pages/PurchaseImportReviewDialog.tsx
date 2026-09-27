@@ -1,12 +1,19 @@
-import type { PurchaseImportPreview } from '../pagesApi'
+import type { ExistingSupplierBill, PurchaseImportPreview } from '../pagesApi'
 import { DataTable } from './pageChrome'
 
 type Props = {
   open: boolean
   preview: PurchaseImportPreview | null
   busy?: boolean
+  /** The purchase this invoice number is already saved on, if any. Sent with the
+   *  parse (startPurchaseImport's existing_bill). */
+  existingBill?: ExistingSupplierBill | null
   onClose: () => void
   onApply: () => void
+  /** Add only the medicines that purchase does not have yet to that purchase. */
+  onMerge?: (purchaseId: number) => void
+  /** Save this as a second purchase for the same bill number. */
+  onSaveAsNew?: () => void
 }
 
 /** Say where the lines came from, never which AI model read them: the model
@@ -25,8 +32,11 @@ export function PurchaseImportReviewDialog({
   open,
   preview,
   busy,
+  existingBill,
   onClose,
   onApply,
+  onMerge,
+  onSaveAsNew,
 }: Props) {
   if (!open || !preview) return null
   const rows = (preview.lines || []).map((ln) => [
@@ -64,6 +74,19 @@ export function PurchaseImportReviewDialog({
             Check MRP, rate, quantity and schedule on every line before you save
             the purchase.
           </p>
+          {/* One supplier bill is one purchase: store 127 held the same bill as
+              purchases 35 and 36, one second apart. Say it in the shop's own
+              words, and offer to add the missing medicines to the bill that is
+              already there. */}
+          {existingBill ? (
+            <p className="note" role="alert">
+              Ha bill {existingBill.bill_number || preview.bill_number || ''}{' '}
+              already saved aahe (purchase {existingBill.purchase_no}
+              {existingBill.purchase_date ? `, ${existingBill.purchase_date}` : ''}
+              , {existingBill.item_count ?? 0} aushadhe). Tyat{' '}
+              {existingBill.new_line_count ?? 0} navin aushadhe jodu ka?
+            </p>
+          ) : null}
           <DataTable
             columns={['Medicine', 'Batch', 'Qty', 'Rate', 'Status']}
             rows={rows}
@@ -72,16 +95,37 @@ export function PurchaseImportReviewDialog({
         </div>
         <div className="modal-foot">
           <button type="button" className="btn btn-neutral" onClick={onClose}>
-            Cancel
+            {existingBill ? 'Radd' : 'Cancel'}
           </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={busy || !(preview.valid_count ?? 0)}
-            onClick={onApply}
-          >
-            {busy ? 'Applying…' : 'Apply to Purchase'}
-          </button>
+          {existingBill ? (
+            <>
+              <button
+                type="button"
+                className="btn btn-neutral"
+                disabled={busy || !(preview.valid_count ?? 0)}
+                onClick={onSaveAsNew}
+              >
+                Naveen bill banav
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={busy || !(preview.valid_count ?? 0)}
+                onClick={() => onMerge?.(existingBill.purchase_id)}
+              >
+                {busy ? 'Applying…' : 'Merge'}
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={busy || !(preview.valid_count ?? 0)}
+              onClick={onApply}
+            >
+              {busy ? 'Applying…' : 'Apply to Purchase'}
+            </button>
+          )}
         </div>
       </div>
     </div>

@@ -460,7 +460,20 @@ export default function PurchasePage({
       }
       const saved = data.saved ?? 0
       const errs = data.errors || []
-      if (errs.length) {
+      // A bill the shop already has is skipped, not saved: one supplier bill is one
+      // purchase (store 127 held the same bill as purchases 35 and 36, one second
+      // apart). Say which, and keep the bills on screen -- clearing them here would
+      // look exactly like a successful save of every one.
+      const dupes = data.skipped_duplicate || []
+      if (dupes.length) {
+        const which = dupes
+          .map(d => `${d.bill_number} (already purchase ${d.purchase_no || d.purchase_id})`)
+          .join('; ')
+        setSaveMsg(
+          `Saved ${saved}/${bills.length}. Already saved, not saved again: ${which}`
+          + (errs.length ? `. Errors: ${errs.join('; ')}` : ''),
+        )
+      } else if (errs.length) {
         setSaveMsg(`Saved ${saved}/${bills.length}. Errors: ${errs.join('; ')}`)
       } else {
         const savedNames = bills.flatMap(bl =>

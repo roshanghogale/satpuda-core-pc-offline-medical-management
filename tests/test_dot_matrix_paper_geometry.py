@@ -128,7 +128,7 @@ class TheSlipWidth(unittest.TestCase):
         ctx = _Ctx(3)
         merged = dmp._settings_for_ctx(shop_settings(), ctx)
         dm = dmp._dm(merged)
-        lines = dmp.format_bill_text(ctx, merged).splitlines()
+        lines = dmp.printed_text(dmp.format_bill_text(ctx, merged)).splitlines()
         self.assertEqual(dm.line_width, int(12.9 / 2.54 * 12))
         self.assertLessEqual(max(len(line) for line in lines), dm.line_width)
         printed_cm = (dm.line_width + dm.escp_left_cols) / 12 * 2.54

@@ -7,6 +7,11 @@ with MRP 0, expired on the purchase date (04/23 on a 2026-08-31 bill), without e
 WITHOUT BATCH; Syrup lines on Tablet medicines; payments dated a year ahead. The PC now says
 so at save. Nothing here refuses a save.
 
+The one check that grew teeth is the duplicate supplier bill: a NEW purchase for a bill
+number the supplier already has is refused before it is written, and the shop answers. The
+warning text is what an edit or a deliberate "save anyway" still gets, and that is what is
+pinned here -- tests/test_a_supplier_bill_is_not_saved_twice.py holds the refusal itself.
+
 Offline cases use an in-memory store; Online cases patch the store query client. Nothing
 reaches a server.
 """
@@ -167,7 +172,7 @@ class TheTauriSavesStillSave(_Shop):
         self.assertTrue(res.get("ok"), res)
         self.assertFalse(res.get("warnings"))
 
-    def purchase(self, **line):
+    def purchase(self, *, allow_duplicate=False, **line):
         item = {"name": "PARA TAB", "type": "Tablet", "batch": "PB1", "expiry": "12/28",
                 "qty": 2, "rate": 60.0, "mrp": 100.0, "unit": "10"}
         item.update(line)
@@ -176,6 +181,7 @@ class TheTauriSavesStillSave(_Shop):
             return desktop_purchase_service.save_purchase_bill(self.conn, {
                 "supplier_name": "SHREE PHARMA", "bill_number": "INV-9",
                 "purchase_date": "2026-08-31", "items": [item], "cash_paid": 0,
+                "allow_duplicate": allow_duplicate,
             })
 
     def test_a_purchase_with_mistyped_lines_is_saved_and_warned(self):
@@ -184,7 +190,11 @@ class TheTauriSavesStillSave(_Shop):
         text = "\n".join(res.get("warnings") or [])
         self.assertIn("Rate is above MRP", text)
         self.assertIn("Already expired on the purchase date", text)
-        again = self.purchase()
+        # The same bill again is refused outright now; only a deliberate "save anyway"
+        # writes it, and that still gets the warning naming the purchase it repeats.
+        refused = self.purchase()
+        self.assertEqual(refused.get("code"), "duplicate_bill", refused)
+        again = self.purchase(allow_duplicate=True)
         self.assertTrue(again.get("ok"), again)
         self.assertIn("already saved as purchase", "\n".join(again.get("warnings") or []))
         live = self.conn.execute(
@@ -218,6 +228,8 @@ class ClassicShowsTheSameChecks(unittest.TestCase):
         purchase = self.source("ui", "purchase", "purchase.py")
         self.assertIn("purchase_line_warnings(", purchase)
         self.assertIn("duplicate_supplier_bill_warnings(", purchase)
+        # And the classic page refuses a duplicate before it writes, like the Tauri save.
+        self.assertIn("find_saved_supplier_bill(", purchase)
         self.assertIn("payment_warnings(",
                       self.source("ui", "settings", "settings_tabs", "payment_tab.py"))
         self.assertIn("payment_warnings(",

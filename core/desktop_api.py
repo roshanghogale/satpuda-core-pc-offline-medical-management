@@ -656,6 +656,7 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                             "/api/purchase/calc",
                             "/api/purchase/save",
                             "/api/purchase/lookup-medicine",
+                            "/api/purchase/merge-lines",
                             "/api/purchase/autosave",
                             "/api/purchase/load",
                             "/api/purchase/last",
@@ -1678,6 +1679,7 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 "/api/purchase/calc",
                 "/api/purchase/save",
                 "/api/purchase/lookup-medicine",
+                "/api/purchase/merge-lines",
                 "/api/purchase/autosave",
                 "/api/purchase/autosave/discard",
                 "/api/sync/blocked/retry",
@@ -1710,6 +1712,10 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                     result = purchase_svc.calc_purchase(conn, body)
                 elif path == "/api/purchase/lookup-medicine":
                     result = purchase_svc.lookup_medicine(conn, body)
+                elif path == "/api/purchase/merge-lines":
+                    # "Junya bill madhe ughad": the rows in the refused tab are added to the
+                    # purchase that already holds this bill number, not thrown away.
+                    result = purchase_svc.merge_lines_into_purchase(conn, body)
                 elif path == "/api/purchase/autosave":
                     result = purchase_svc.autosave_purchase(conn, body)
                 elif path == "/api/purchase/autosave/discard":

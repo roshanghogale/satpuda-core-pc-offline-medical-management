@@ -126,7 +126,7 @@ def update_file_import_bill(body: dict[str, Any]) -> dict[str, Any]:
 
 
 def submit_file_import(conn, body: dict[str, Any]) -> dict[str, Any]:
-    from core.web_purchase_save import save_internal_bill
+    from core.web_purchase_save import DuplicateBillError, save_internal_bill
 
     token = str(body.get("token") or "").strip()
     sess = _SESSIONS.pop(token, None)
@@ -136,16 +136,28 @@ def submit_file_import(conn, body: dict[str, Any]) -> dict[str, Any]:
     saved = 0
     errors: list[str] = []
     purchase_nos: list[str] = []
+    skipped_duplicate: list[dict[str, Any]] = []
     for i, bill in enumerate(bills):
         label = bill.get("bill_number") or f"Bill {i + 1}"
         try:
             sup = bill.get("supplier") or {}
             if not str(sup.get("name") or "").strip():
                 raise ValueError("supplier name required")
-            pno = save_internal_bill(conn, bill)
+            pno = save_internal_bill(
+                conn, bill, allow_duplicate=bool(body.get("allow_duplicate"))
+            )
             conn.commit()
             saved += 1
             purchase_nos.append(str(pno))
+        except DuplicateBillError as dup:
+            # Not saved, and said so plainly: one supplier bill is one purchase.
+            conn.rollback()
+            skipped_duplicate.append({"bill_number": label, **dup.existing})
+            errors.append(
+                f"{label}: already saved as purchase "
+                f"{dup.existing.get('purchase_no') or dup.existing.get('purchase_id')} "
+                "— not saved again."
+            )
         except Exception as exc:
             conn.rollback()
             errors.append(f"{label}: {exc}")
@@ -155,6 +167,7 @@ def submit_file_import(conn, body: dict[str, Any]) -> dict[str, Any]:
         "total": len(bills),
         "errors": errors,
         "purchase_nos": purchase_nos,
+        "skipped_duplicate": skipped_duplicate,
     }
 
 

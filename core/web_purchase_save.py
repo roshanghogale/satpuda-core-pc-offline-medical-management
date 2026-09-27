@@ -2,6 +2,24 @@
 from datetime import datetime
 
 
+class DuplicateBillError(Exception):
+    """This supplier's bill number is already a purchase, so the bill was not saved.
+
+    One supplier bill is one purchase: store 127 had the same bill as purchases 35 and 36, one
+    second apart, and the phone path can repost the same batch of bills as easily as the desktop
+    can press Save twice. Carries the purchase that already holds it so the caller can say which.
+    """
+
+    def __init__(self, existing):
+        self.existing = existing or {}
+        super().__init__(
+            "bill {} is already saved as purchase {}".format(
+                self.existing.get('bill_number') or '',
+                self.existing.get('purchase_no') or self.existing.get('purchase_id') or '',
+            )
+        )
+
+
 def _normalize_supplier(b):
     sup = b.get('supplier') or {}
     if isinstance(sup, dict) and (sup.get('name') or '').strip():
@@ -110,7 +128,7 @@ def json_bill_to_internal(b):
     }
 
 
-def save_internal_bill(conn, bill):
+def save_internal_bill(conn, bill, *, allow_duplicate=False):
     from core.purchase_calculator import PurchaseCalculator
     from core.purchase_service import (
         get_or_create_supplier, get_or_create_medicine,
@@ -121,6 +139,19 @@ def save_internal_bill(conn, bill):
     items = list(bill['items'])
     if not items:
         raise ValueError('no valid line items (need medicine name and qty > 0)')
+
+    # Asked before a medicine or a supplier is created, so a refused bill leaves nothing behind.
+    # A lookup that cannot run answers nothing and the bill saves as before.
+    if not allow_duplicate and not bill.get('allow_duplicate'):
+        from core.save_warnings import find_saved_supplier_bill
+
+        already = find_saved_supplier_bill(
+            conn,
+            supplier_name=(sup.get('name') or '').strip(),
+            bill_number=(bill.get('bill_number') or '').strip(),
+        )
+        if already:
+            raise DuplicateBillError(already)
 
     for item in items:
         if not item.get('medicine_id'):
@@ -183,16 +214,24 @@ def save_internal_bill(conn, bill):
 def save_purchases_from_web_json(conn, data):
     """
     Save bills from web JSON { bills: [...] }.
-    Returns { saved, errors, purchase_nos }.
+    Returns { saved, errors, purchase_nos, skipped_duplicate }.
+
+    A bill this supplier already has is SKIPPED, not saved and not counted an error: the phone
+    reposting a batch it already sent is the normal way this happens, and the shop does not want
+    the same goods on the shelf twice (store 127, purchases 35 and 36, one second apart). Send
+    allow_duplicate on the payload, or on the one bill, when a second purchase is really meant.
     """
     bills = data.get('bills') if isinstance(data, dict) else data
     if not isinstance(bills, list) or not bills:
         raise ValueError('Expected {"bills": [...]} with at least one bill.')
 
+    allow_all = bool(data.get('allow_duplicate')) if isinstance(data, dict) else False
+
     saved = 0
     errors = []
     purchase_nos = []
     saved_medicine_names = []
+    skipped_duplicate = []
 
     for i, raw in enumerate(bills):
         label = raw.get('bill_number') or f'Bill {i + 1}'
@@ -202,7 +241,10 @@ def save_purchases_from_web_json(conn, data):
                 raise ValueError('no valid items')
             if not (bill['supplier'].get('name') or '').strip():
                 raise ValueError('supplier name required')
-            pno = save_internal_bill(conn, bill)
+            pno = save_internal_bill(
+                conn, bill,
+                allow_duplicate=allow_all or bool(raw.get('allow_duplicate')),
+            )
             conn.commit()
             saved += 1
             purchase_nos.append(str(pno))
@@ -210,6 +252,18 @@ def save_purchases_from_web_json(conn, data):
                 n = (item.get('name') or '').strip()
                 if n:
                     saved_medicine_names.append(n)
+        except DuplicateBillError as dup:
+            conn.rollback()
+            skipped_duplicate.append({
+                'bill_number': label,
+                'supplier_name': (raw.get('supplier_name') or '').strip()
+                or ((raw.get('supplier') or {}).get('name') or '').strip(),
+                'purchase_id': dup.existing.get('purchase_id'),
+                'purchase_no': dup.existing.get('purchase_no'),
+                'purchase_date': dup.existing.get('purchase_date'),
+                'item_count': dup.existing.get('item_count'),
+                'message': f"{label}: {dup}",
+            })
         except Exception as e:
             conn.rollback()
             errors.append(f"{label}: {e}")
@@ -219,4 +273,5 @@ def save_purchases_from_web_json(conn, data):
         'errors': errors,
         'purchase_nos': purchase_nos,
         'saved_medicine_names': sorted(set(saved_medicine_names)),
+        'skipped_duplicate': skipped_duplicate,
     }

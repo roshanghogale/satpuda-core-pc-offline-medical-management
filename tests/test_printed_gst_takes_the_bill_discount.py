@@ -104,7 +104,7 @@ class TheBillPrintsThoseFigures(unittest.TestCase):
         from core.dot_matrix_print import _footer_strip_line, _settings_with_layout, _totals_lines
 
         ctx = discounted_bill_context()
-        settings = _settings_with_layout({"template": "classic", "paper_size": "A5"})
+        settings = _settings_with_layout({"template": "classic", "paper_size": "A5", "dot_matrix_style": "classic"})
         self.assertEqual(
             _footer_strip_line(ctx, settings),
             "GST 223.22*6+6%=13.38SGST+13.40CGST, HAVE A NICE DAY",

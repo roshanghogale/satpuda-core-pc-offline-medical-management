@@ -436,7 +436,7 @@ def _save_all_pdf(parent, sections):
             body += f"""
 <h3>{esc(title)}</h3>
 <p class="meta">{len(rows)} records</p>
-<table><thead><tr>{hdr_html}</tr></thead><tbody>{rows_html}</tbody></table>
+<table><thead><tr>{hdr_html}</tr></thead><tbody>{rows_html}</tbody>{_totals_html(headers, rows)}</table>
 <div style="margin-bottom:12mm"></div>
 """
 
@@ -582,6 +582,24 @@ def _save_pdf(parent, title, headers, rows, default_name):
         messagebox.showerror("Export Error", str(e), parent=parent)
 
 
+def _totals_html(headers, rows):
+    """A bold TOTAL line under the table, for the columns worth adding.
+
+    A printed report used to end with its last row and the shop added the money column
+    by hand. The same rule as the dot matrix report (core/dot_matrix_print.py).
+    """
+    try:
+        from core.dot_matrix_print import _report_totals_row
+    except Exception:
+        return ''
+    totals = _report_totals_row(list(headers or []), list(rows or []))
+    if not totals:
+        return ''
+    cells = ''.join(
+        '<td>' + str(v).replace('&', '&amp;').replace('<', '&lt;') + '</td>' for v in totals)
+    return f'<tfoot><tr>{cells}</tr></tfoot>'
+
+
 def _build_html(title, headers, rows):
     from datetime import datetime
     date_str = datetime.now().strftime('%d/%m/%Y %H:%M')
@@ -626,6 +644,7 @@ def _build_html(title, headers, rows):
 <table>
   <thead><tr>{header_html}</tr></thead>
   <tbody>{rows_html}</tbody>
+  {_totals_html(headers, rows)}
 </table>
 <button class="print-btn" onclick="window.print()">&#128424; Print / Save as PDF</button>
 </body>
@@ -733,7 +752,7 @@ def _save_pdf_to_path(path, title, headers, rows):
 table{{width:100%;border-collapse:collapse}}th{{background:#2c3e50;color:#fff;padding:4px}}
 td{{border:1px solid #ccc;padding:3px}}tr.even{{background:#f7f7f7}}</style></head><body>
 <h2>{esc(title)}</h2><p>{date_str} — {len(rows)} records</p>
-<table><thead><tr>{hdr_html}</tr></thead><tbody>{rows_html}</tbody></table>
+<table><thead><tr>{hdr_html}</tr></thead><tbody>{rows_html}</tbody>{_totals_html(headers, rows)}</table>
 </body></html>"""
     if not path.lower().endswith(".pdf"):
         path = path.rsplit(".", 1)[0] + ".pdf"
@@ -755,7 +774,8 @@ def _save_all_pdf_to_path(path, sections):
         rows_html = "".join(
             "<tr>" + "".join(f"<td>{esc(v)}</td>" for v in row) + "</tr>" for row in rows
         )
-        body += f"<h3>{esc(title)}</h3><table><thead><tr>{hdr}</tr></thead><tbody>{rows_html}</tbody></table>"
+        body += (f"<h3>{esc(title)}</h3><table><thead><tr>{hdr}</tr></thead>"
+                 f"<tbody>{rows_html}</tbody>{_totals_html(headers, rows)}</table>")
     html = (
         f"<!DOCTYPE html><html><head><meta charset=UTF-8><title>Export All</title></head><body>"
         f"<h2>Full Export</h2><p>{date_str}</p>{body}</body></html>"

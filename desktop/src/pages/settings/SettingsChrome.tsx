@@ -19,16 +19,19 @@ export function Check({
   label,
   checked,
   onChange,
+  disabled,
 }: {
   label: string
   checked: boolean
   onChange: (v: boolean) => void
+  disabled?: boolean
 }) {
   return (
-    <label className="settings-field-check">
+    <label className="settings-field-check" style={disabled ? { opacity: 0.55 } : undefined}>
       <input
         type="checkbox"
         checked={checked}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
       />
       <span>{label}</span>

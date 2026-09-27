@@ -191,18 +191,22 @@ def medicine_type_lookup(conn) -> Callable[[dict], str]:
     return lookup
 
 
-def duplicate_supplier_bill_warnings(
+def _supplier_bill_rows(
     conn,
     *,
     supplier_id: Any = 0,
     supplier_name: str = "",
     bill_number: str = "",
     exclude_purchase_id: Any = 0,
-) -> list[str]:
-    """The same supplier's bill number already saved on another purchase.
+) -> list[dict]:
+    """Live purchases (not deleted, not an autosave) already holding this supplier's bill number.
 
-    Asked before a new purchase is saved (after it, the purchase would find itself). A store
-    that cannot be asked gives no warning.
+    One lookup for both readers: the save warning that names them, and the save itself, which
+    refuses a second purchase for a bill already on the books.
+
+    Empty means "nothing to act on", and that covers a lookup that could not run at all -- a
+    store that cannot be asked answers nothing, and neither a warning nor a refusal may be
+    decided on an unknown.
     """
     bill = str(bill_number or "").strip()
     if not bill:
@@ -214,7 +218,7 @@ def duplicate_supplier_bill_warnings(
     except (TypeError, ValueError):
         sid, exclude = 0, 0
     sname = str(supplier_name or "").strip().upper()
-    held: list[str] = []
+    found: list[dict] = []
 
     def same_supplier(row_sid: Any, row_name: Any) -> bool:
         try:
@@ -230,11 +234,11 @@ def duplicate_supplier_bill_warnings(
         if is_online_mode():
             from core import store_query_client as sq
 
-            found = sq.list_purchases(
+            got = sq.list_purchases(
                 q=bill, from_date="2000-01-01", to_date="2099-12-31", limit=200,
                 include_total=False,
             ) or {}
-            for row in found.get("rows") or []:
+            for row in got.get("rows") or []:
                 if not isinstance(row, dict) or row.get("deleted") or row.get("is_autosave"):
                     continue
                 if str(row.get("bill_number") or "").strip().upper() != key:
@@ -242,26 +246,98 @@ def duplicate_supplier_bill_warnings(
                 rid = int(row.get("id") or row.get("local_id") or 0)
                 if exclude and rid == exclude:
                     continue
-                if same_supplier(row.get("supplier_id"), row.get("supplier_name")):
-                    held.append(str(row.get("purchase_no") or rid))
+                if not same_supplier(row.get("supplier_id"), row.get("supplier_name")):
+                    continue
+                items = row.get("items")
+                found.append({
+                    "purchase_id": rid,
+                    "purchase_no": str(row.get("purchase_no") or rid),
+                    "purchase_date": str(row.get("purchase_date") or "").split(" ")[0],
+                    "total": _f(row.get("total_amount", row.get("total"))),
+                    "item_count": (
+                        len(items) if isinstance(items, list)
+                        else int(_f(row.get("item_count")))
+                    ),
+                    "bill_number": bill,
+                })
         elif conn is not None:
             rows = conn.execute(
-                "SELECT p.id, COALESCE(p.purchase_no,''), p.supplier_id, COALESCE(s.name,'') "
+                "SELECT p.id, COALESCE(p.purchase_no,''), p.supplier_id, COALESCE(s.name,''), "
+                "COALESCE(p.purchase_date,''), COALESCE(p.total_amount,0), "
+                "(SELECT COUNT(*) FROM purchase_items pi WHERE pi.purchase_id = p.id) "
                 "FROM purchases p LEFT JOIN suppliers s ON s.id = p.supplier_id "
                 "WHERE UPPER(TRIM(COALESCE(p.bill_number,''))) = ? "
                 "AND COALESCE(p.deleted,0)=0 AND COALESCE(p.is_autosave,0)=0",
                 (key,),
             ).fetchall()
-            for rid, number, row_sid, row_name in rows:
+            for rid, number, row_sid, row_name, pdate, total, count in rows:
                 if exclude and int(rid) == exclude:
                     continue
-                if same_supplier(row_sid, row_name):
-                    held.append(str(number or rid))
+                if not same_supplier(row_sid, row_name):
+                    continue
+                found.append({
+                    "purchase_id": int(rid),
+                    "purchase_no": str(number or rid),
+                    "purchase_date": str(pdate or "").split(" ")[0],
+                    "total": _f(total),
+                    "item_count": int(count or 0),
+                    "bill_number": bill,
+                })
     except Exception:
         return []
-    if not held:
+    return found
+
+
+def find_saved_supplier_bill(
+    conn,
+    *,
+    supplier_id: Any = 0,
+    supplier_name: str = "",
+    bill_number: str = "",
+    exclude_purchase_id: Any = 0,
+) -> Optional[dict]:
+    """The purchase this supplier's bill number is already saved on, or None.
+
+    None also means "could not be asked": the save goes ahead rather than refuse a bill on a
+    lookup that never ran.
+    """
+    rows = _supplier_bill_rows(
+        conn,
+        supplier_id=supplier_id,
+        supplier_name=supplier_name,
+        bill_number=bill_number,
+        exclude_purchase_id=exclude_purchase_id,
+    )
+    return rows[0] if rows else None
+
+
+def duplicate_supplier_bill_warnings(
+    conn,
+    *,
+    supplier_id: Any = 0,
+    supplier_name: str = "",
+    bill_number: str = "",
+    exclude_purchase_id: Any = 0,
+) -> list[str]:
+    """The same supplier's bill number already saved on another purchase.
+
+    Asked before a new purchase is saved (after it, the purchase would find itself). A store
+    that cannot be asked gives no warning.
+
+    A NEW purchase is refused outright now (see find_saved_supplier_bill's callers); this text
+    is what an edit, an autosave finish or a deliberate "save anyway" still says.
+    """
+    rows = _supplier_bill_rows(
+        conn,
+        supplier_id=supplier_id,
+        supplier_name=supplier_name,
+        bill_number=bill_number,
+        exclude_purchase_id=exclude_purchase_id,
+    )
+    if not rows:
         return []
     return [
-        f"Supplier bill {bill} from this supplier is already saved as purchase "
-        f"{_listed(held)}. Check that the same bill is not being entered twice."
+        f"Supplier bill {str(bill_number or '').strip()} from this supplier is already saved as "
+        f"purchase {_listed([r['purchase_no'] for r in rows])}. Check that the same bill is not "
+        "being entered twice."
     ]

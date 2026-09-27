@@ -1107,10 +1107,44 @@ export function PharmacyPanel(props: Props) {
             </button>
           </Field>
           {alignMsg ? <Note>{alignMsg}</Note> : null}
+          <Field label="Dot matrix bill style">
+            <select
+              className="settings-input"
+              value={String(bill.dot_matrix_style || 'compact')}
+              onChange={(e) =>
+                setBill((b) => ({ ...b, dot_matrix_style: e.target.value }))
+              }
+            >
+              <option value="compact">New slip (no blessing, no GST, more medicines)</option>
+              <option value="classic">Old slip (blessing, GST INVOICE, GST, wish line)</option>
+            </select>
+          </Field>
+          <Field label="Dot matrix slip extras">
+            <Check
+              label="Total printed bold (printer strikes the line twice)"
+              checked={Boolean(bill.dot_matrix_bold_total ?? true)}
+              onChange={(v) => setBill((b) => ({ ...b, dot_matrix_bold_total: v }))}
+            />
+            <Check
+              label='Item count line ("8 aushadhe, 59 nag")'
+              checked={Boolean(bill.dot_matrix_item_count ?? true)}
+              onChange={(v) => setBill((b) => ({ ...b, dot_matrix_item_count: v }))}
+            />
+            <Check
+              label="Show the customer's due on the slip when money is owed"
+              checked={Boolean(bill.dot_matrix_due_lines ?? true)}
+              onChange={(v) => setBill((b) => ({ ...b, dot_matrix_due_lines: v }))}
+            />
+          </Field>
           <Field label="Dot matrix table borders">
             <Check
               label="Show vertical | borders (off = horizontal lines only)"
-              checked={Boolean(bill.dot_matrix_vertical_borders ?? true)}
+              checked={
+                String(bill.dot_matrix_style || 'compact') === 'compact'
+                  ? false
+                  : Boolean(bill.dot_matrix_vertical_borders ?? true)
+              }
+              disabled={String(bill.dot_matrix_style || 'compact') === 'compact'}
               onChange={(v) =>
                 setBill((b) => ({ ...b, dot_matrix_vertical_borders: v }))
               }

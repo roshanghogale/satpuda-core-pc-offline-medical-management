@@ -1294,6 +1294,73 @@ class PurchasePage(PurchaseSessionMixin, PurchaseNavMixin, PurchaseFormMixin):
         self.save_purchase()
         return 'break'
 
+    def _duplicate_bill_allowed(self) -> bool:
+        """Refuse a NEW purchase for a bill this supplier already has, then ask what to do.
+
+        Store 127 held the same bill as purchases 35 and 36, one second apart. The save only
+        warned, and by then the row was written and the goods were on the shelf twice. Nothing
+        is written until this answers True: the shop either opens the saved bill (this page has
+        no loader of its own, so the Purchase History edit window does it), deliberately saves a
+        second purchase, or stays put. An edit is not asked, and a lookup that cannot run is not
+        an answer -- the save goes ahead as before.
+        """
+        if self._editing_purchase_id:
+            return True
+        try:
+            from core.save_warnings import find_saved_supplier_bill
+
+            already = find_saved_supplier_bill(
+                self.conn,
+                supplier_name=self.supplier_name.get().strip(),
+                bill_number=self.bill_number.get().strip(),
+                exclude_purchase_id=self._autosave_purchase_id or 0,
+            )
+        except Exception:
+            return True
+        if not already:
+            return True
+
+        from core.themed_messagebox import ask_choice
+
+        bill = self.bill_number.get().strip()
+        answer = ask_choice(
+            "Bill Already Saved",
+            f"Bill {bill} from this supplier is already saved as purchase "
+            f"{already.get('purchase_no')}"
+            + (f" on {already.get('purchase_date')}" if already.get("purchase_date") else "")
+            + f" with {int(already.get('item_count') or 0)} item(s).\n\n"
+            "This purchase was NOT saved. Nothing on this page has been cleared.\n\n"
+            "Open the saved bill to add these medicines to it, save this as a second "
+            "purchase anyway, or go back to the page.",
+            [
+                ("Open saved bill", "open", "primary"),
+                ("Save anyway", "save", "warning"),
+                ("Back", None, "secondary"),
+            ],
+            parent=self.parent,
+        )
+        if answer == "save":
+            return True
+        if answer == "open":
+            try:
+                from ui.purchase.purchase_history_edit import open_edit_window
+
+                open_edit_window(
+                    self.parent,
+                    self.conn,
+                    int(already.get("purchase_id") or 0),
+                    str(already.get("purchase_no") or bill),
+                    lambda: None,
+                )
+            except Exception as exc:
+                showinfo(
+                    "Open Saved Bill",
+                    f"Could not open purchase {already.get('purchase_no')} from here ({exc}).\n\n"
+                    "Open Purchase History, find that bill and press Edit.",
+                    parent=self.parent,
+                )
+        return False
+
     def save_purchase(self):
         if getattr(self, "_save_busy", False):
             return
@@ -1302,6 +1369,9 @@ class PurchasePage(PurchaseSessionMixin, PurchaseNavMixin, PurchaseFormMixin):
             return
         if not self.purchase_items:
             showwarning("No Items", "Please add items to the purchase.")
+            return
+
+        if not self._duplicate_bill_allowed():
             return
 
         self.recalculate_purchase_totals()

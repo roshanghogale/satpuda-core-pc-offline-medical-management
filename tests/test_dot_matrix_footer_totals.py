@@ -16,8 +16,11 @@ from tests.test_dot_matrix_paper_geometry import _Ctx, shop_settings  # noqa: E4
 
 
 def bill_lines(ctx, **settings):
+    # This file is about the OLD slip's switches; the new one has no GST strip at all
+    # (see test_the_new_dot_matrix_slip.py).
+    settings.setdefault("dot_matrix_style", "classic")
     merged = dmp._settings_for_ctx(shop_settings(dot_matrix_slip_height_cm=10.16, **settings), ctx)
-    return dmp.format_bill_text(ctx, merged).splitlines()
+    return dmp.printed_text(dmp.format_bill_text(ctx, merged)).splitlines()
 
 
 def money_row(lines, word):
@@ -43,7 +46,8 @@ class TheTotalsBlock(unittest.TestCase):
         self.assertFalse(money_row(lines, "HAVE A NICE DAY"))
 
     def test_hiding_the_total_hides_the_total(self):
-        lines = bill_lines(self.ctx, show_total=False)
+        # ...and with it the dues, which are only worth printing beside a total.
+        lines = bill_lines(self.ctx, show_total=False, dot_matrix_due_lines=False)
         self.assertFalse(money_row(lines, "Total"))
         self.assertTrue(money_row(lines, "HAVE A NICE DAY"))
 
@@ -56,11 +60,12 @@ class TheTotalsBlock(unittest.TestCase):
         for word in ("Prev Due", "Bill Due", "Total Due"):
             self.assertTrue(money_row(lines, word), word)
 
-    def test_the_money_sits_above_the_recovery_wish(self):
+    def test_the_money_stands_with_the_signature(self):
+        # The wish line is gone from both slips; the signature shares the total's row.
         lines = bill_lines(self.ctx)
-        total_at = max(i for i, l in enumerate(lines) if "Total" in l)
-        wish_at = max(i for i, l in enumerate(lines) if "SPEEDY RECOVERY" in l)
-        self.assertLess(total_at, wish_at)
+        sign_at = max(i for i, l in enumerate(lines) if "SIGN OF Q.P." in l)
+        self.assertIn("Total", lines[sign_at])
+        self.assertFalse(any("SPEEDY RECOVERY" in l for l in lines))
 
 
 if __name__ == "__main__":

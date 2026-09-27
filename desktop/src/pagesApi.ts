@@ -1167,10 +1167,27 @@ export type PurchaseCalcResult = {
   import_bill_mode?: boolean
 }
 
+/** The purchase this supplier's bill number is already saved on. */
+export type ExistingSupplierBill = {
+  purchase_id: number
+  purchase_no: string
+  purchase_date?: string
+  total?: number
+  item_count?: number
+  bill_number?: string
+  /** Import only: how many parsed lines that purchase does not have yet. */
+  new_line_count?: number
+  already_line_count?: number
+}
+
 export type PurchaseSaveResult = {
   ok: boolean
   error?: string
   code?: string
+  /** code "duplicate_bill": nothing was saved, the screen has to ask. */
+  need_confirm?: boolean
+  message?: string
+  existing?: ExistingSupplierBill
   purchase_no?: string
   purchase_id?: number
   supplier_id?: number
@@ -1210,6 +1227,9 @@ export type PurchaseRuntimePrefs = {
 export type LoadedPurchase = {
   ok: boolean
   error?: string
+  /** Set when this form came back from a merge: lines appended / already there. */
+  items_added?: number
+  items_already_there?: number
   purchase_id?: number
   purchase_no?: string
   is_autosave?: boolean
@@ -1251,6 +1271,28 @@ export function calcPurchaseBill(body: Record<string, unknown>) {
 
 export function savePurchaseBill(body: Record<string, unknown>) {
   return postJson<PurchaseSaveResult>('/api/purchase/save', body)
+}
+
+/** Add the lines held on screen to the purchase that already has this bill number.
+ *
+ *  The rule for "this line is already there" lives in the engine
+ *  (core/purchase_line_merge.py), so a refused save and a re-imported bill photo
+ *  decide it the same way. */
+export function mergePurchaseLines(body: {
+  purchase_id: number
+  items: unknown[]
+}) {
+  return postJson<{
+    ok: boolean
+    error?: string
+    code?: string
+    merged?: boolean
+    merge_into_purchase_id?: number
+    items_added?: number
+    items_already_there?: number
+    loaded?: LoadedPurchase
+    message?: string
+  }>('/api/purchase/merge-lines', body)
 }
 
 export function lookupPurchaseMedicine(name: string) {
@@ -1343,10 +1385,12 @@ export type PurchaseImportStartResult = {
   may_need_more_pages?: boolean
   first_invalid?: { source_row?: number | string; issues?: string[] }
   preview_items?: { name: string; batch: string; qty: number; rate: number }[]
+  existing_bill?: ExistingSupplierBill | null
   confirmations?: {
     skip_invalid?: boolean
     item_count_mismatch?: boolean
     may_need_more_pages?: boolean
+    bill_already_saved?: boolean
   }
 }
 
@@ -1359,6 +1403,16 @@ export type PurchaseImportApplyResult = {
   import_token?: string
   replace_existing?: boolean
   items_imported?: number
+  /** code "bill_already_saved": this invoice number is already a purchase. */
+  existing?: ExistingSupplierBill
+  new_line_count?: number
+  already_line_count?: number
+  /** The merge answer: the SAVED purchase, opened to edit, with the missing lines added. */
+  merged?: boolean
+  merge_into_purchase_id?: number
+  items_added?: number
+  items_already_there?: number
+  loaded?: LoadedPurchase
   form?: {
     supplier_name: string
     supplier_address: string

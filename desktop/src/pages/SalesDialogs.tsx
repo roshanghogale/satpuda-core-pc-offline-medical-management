@@ -9,6 +9,14 @@ export type AlertState = {
   kind?: AlertKind
   confirmLabel?: string
   cancelLabel?: string
+  /** A third answer, shown between Cancel and the confirm button.
+   *
+   *  Some questions genuinely have three answers and collapsing them into two
+   *  prompts in a row is how the wrong one gets clicked. A refused duplicate
+   *  purchase is one: open the bill that is already saved, save this one as a
+   *  second purchase anyway, or go back to the page. */
+  altLabel?: string
+  onAlt?: () => void
   onConfirm?: () => void
   onCancel?: () => void
   /** Restore focus after the dialog closes (OK / Enter / Esc / backdrop). */
@@ -103,6 +111,21 @@ export function AlertDialog({
               >
                 {alert.cancelLabel || 'Cancel'}
               </button>
+              {alert.altLabel ? (
+                <button
+                  type="button"
+                  className="btn-neutral"
+                  onClick={() => {
+                    const fn = alert.onAlt
+                    const after = alert.focusAfterClose
+                    onClose()
+                    fn?.()
+                    if (after) window.setTimeout(after, 30)
+                  }}
+                >
+                  {alert.altLabel}
+                </button>
+              ) : null}
               <button
                 type="button"
                 className={kind === 'error' ? 'btn-danger' : 'btn-primary'}

@@ -406,6 +406,48 @@ def save_purchase_bill(conn, body: dict[str, Any]) -> dict[str, Any]:
     purchase_date = _parse_date(body.get("purchase_date"))
     method = str(body.get("gst_calc_method") or "discount_before_gst").strip()
 
+    # One supplier bill, one purchase. Store 127 held the same bill as purchases 35 and 36, one
+    # second apart: the save only warned, and by the time it did the row was written and the
+    # goods were on the shelf twice. A NEW purchase for a bill number this supplier already has
+    # is refused here, before anything is written or calculated, and the screen offers to open
+    # the saved bill instead. An edit is not asked (it would find itself), and a lookup that
+    # cannot run answers nothing -- a save is never held up over an unknown.
+    already = None
+    if not body.get("allow_duplicate") and _safe_int(body.get("editing_purchase_id")) <= 0:
+        try:
+            from core.save_warnings import find_saved_supplier_bill
+
+            already = find_saved_supplier_bill(
+                conn,
+                supplier_name=supplier_name,
+                bill_number=bill_number,
+                exclude_purchase_id=_safe_int(body.get("autosave_purchase_id")),
+            )
+        except Exception:
+            already = None
+    if already:
+        return {
+            "ok": False,
+            "need_confirm": True,
+            "code": "duplicate_bill",
+            "message": (
+                f"Bill {bill_number} from {supplier_name} is already saved as purchase "
+                f"{already.get('purchase_no')}"
+                + (f" on {already.get('purchase_date')}" if already.get("purchase_date") else "")
+                + f" with {int(already.get('item_count') or 0)} item(s), "
+                f"₹{_safe_float(already.get('total')):.2f}.\n\n"
+                "Nothing was saved. Open that bill to add to it, or save this one as a second "
+                "purchase."
+            ),
+            "existing": {
+                "purchase_id": int(already.get("purchase_id") or 0),
+                "purchase_no": str(already.get("purchase_no") or ""),
+                "purchase_date": str(already.get("purchase_date") or ""),
+                "total": _safe_float(already.get("total")),
+                "item_count": int(already.get("item_count") or 0),
+            },
+        }
+
     overall = _safe_float(body.get("overall_discount", body.get("discount_rs")))
     rounding = _safe_float(body.get("rounding"))
     cash = _safe_float(body.get("cash_paid"))
@@ -790,6 +832,57 @@ def load_purchase(conn, purchase_id: int) -> dict[str, Any]:
             "previous_due": _safe_float(prev_due),
             "previous_credit": _safe_float(prev_credit),
         },
+    }
+
+
+def _purchase_form_with_new_lines(
+    conn, purchase_id: int, new_items: list
+) -> dict[str, Any]:
+    """The saved purchase, opened to edit, with only the lines it does not already have added.
+
+    The merge rule lives in core.purchase_line_merge so the import, the Purchase page's
+    "open the saved bill" answer and the tests all decide "already there" the same way.
+    """
+    from core.purchase_line_merge import merge_new_lines
+
+    loaded = load_purchase(conn, int(purchase_id))
+    if not loaded.get("ok") or not isinstance(loaded.get("form"), dict):
+        return loaded
+    saved_lines = list(loaded["form"].get("items") or [])
+    merged, added, already = merge_new_lines(saved_lines, _normalize_items(new_items or []))
+    loaded["form"]["items"] = merged
+    loaded["items_added"] = added
+    loaded["items_already_there"] = already
+    return loaded
+
+
+def merge_lines_into_purchase(conn, body: dict[str, Any]) -> dict[str, Any]:
+    """Open a saved purchase to edit and add the lines the caller is holding that it lacks.
+
+    This is the "Junya bill madhe ughad" answer to a refused duplicate save: the rows typed or
+    imported into the pending tab are not thrown away, they are added to the bill that already
+    exists, and the next Save updates that one purchase.
+    """
+    purchase_id = _safe_int(body.get("purchase_id"))
+    if purchase_id == 0:
+        return {"ok": False, "error": "Invalid purchase id.", "code": "not_found"}
+    loaded = _purchase_form_with_new_lines(conn, purchase_id, body.get("items") or [])
+    if not loaded.get("ok"):
+        return loaded
+    added = int(loaded.get("items_added") or 0)
+    already = int(loaded.get("items_already_there") or 0)
+    return {
+        "ok": True,
+        "merged": True,
+        "merge_into_purchase_id": purchase_id,
+        "items_added": added,
+        "items_already_there": already,
+        "loaded": loaded,
+        "message": (
+            f"Purchase {loaded.get('purchase_no') or purchase_id} is open for edit. "
+            f"{added} new line(s) added; {already} were already on it. "
+            "Check the lines and press Save to update this bill."
+        ),
     }
 
 
@@ -1717,6 +1810,60 @@ def purchase_import_progress(progress_id: str) -> dict[str, Any]:
     return {"ok": True, "status": str(row.get("status") or "")}
 
 
+def _parsed_line_dicts(items: Any) -> list[dict[str, Any]]:
+    """The parsed bill's rows as plain dicts, which is all the merge rule reads."""
+    out: list[dict[str, Any]] = []
+    for it in items or []:
+        name = str(getattr(it, "name", "") or "").strip()
+        if not name:
+            continue
+        out.append(
+            {
+                "name": name,
+                "batch": str(getattr(it, "batch", "") or ""),
+                "expiry": str(getattr(it, "expiry", "") or ""),
+                "qty": _safe_float(getattr(it, "qty", 0)),
+            }
+        )
+    return out
+
+
+def _import_existing_bill(conn, invoice, parsed_items: Any) -> Optional[dict[str, Any]]:
+    """The purchase this invoice number is already saved on, and what re-importing would add.
+
+    The shop photographs a bill again when the first read missed a page or a row, so the
+    interesting figure is not "is it a duplicate" but "how many of these medicines are not on
+    that purchase yet". None means nothing to merge into -- including a lookup that could not
+    run, which must never stop an import.
+    """
+    try:
+        from core.purchase_line_merge import split_new_lines
+        from core.save_warnings import find_saved_supplier_bill
+
+        found = find_saved_supplier_bill(
+            conn,
+            supplier_name=(getattr(invoice, "supplier_name", "") or "").strip(),
+            bill_number=(getattr(invoice, "invoice_number", "") or "").strip(),
+        )
+        if not found:
+            return None
+        saved = load_purchase(conn, int(found.get("purchase_id") or 0))
+        saved_lines = list((saved.get("form") or {}).get("items") or []) if saved.get("ok") else []
+        missing, already = split_new_lines(saved_lines, _parsed_line_dicts(parsed_items))
+        return {
+            "purchase_id": int(found.get("purchase_id") or 0),
+            "purchase_no": str(found.get("purchase_no") or ""),
+            "purchase_date": str(found.get("purchase_date") or ""),
+            "total": _safe_float(found.get("total")),
+            "item_count": int(found.get("item_count") or 0),
+            "bill_number": str(found.get("bill_number") or ""),
+            "new_line_count": len(missing),
+            "already_line_count": len(already),
+        }
+    except Exception:
+        return None
+
+
 def start_purchase_import(conn, body: dict[str, Any]) -> dict[str, Any]:
     """
     Parse + enrich purchase bill (same Python stack as classic Shift+F2).
@@ -1844,6 +1991,11 @@ def start_purchase_import(conn, body: dict[str, Any]) -> dict[str, Any]:
             }
         )
 
+    # The same invoice number may already be a purchase -- this is usually the second photo of
+    # a bill, not a second bill. Say so with the parse, so the review screen can offer to add
+    # the missing medicines to the purchase that exists instead of starting another one.
+    existing_bill = _import_existing_bill(conn, invoice, valid or items)
+
     return {
         "ok": True,
         "import_token": token,
@@ -1859,12 +2011,14 @@ def start_purchase_import(conn, body: dict[str, Any]) -> dict[str, Any]:
         "may_need_more_pages": may_more,
         "first_invalid": first_invalid,
         "preview_items": preview_items,
+        "existing_bill": existing_bill,
         "confirmations": {
             "skip_invalid": bool(invalid and valid),
             "item_count_mismatch": bool(
                 expected_count > 0 and len(valid) < expected_count
             ),
             "may_need_more_pages": may_more,
+            "bill_already_saved": bool(existing_bill),
         },
         "images_supported": import_capabilities().get("images_supported"),
     }
@@ -2020,9 +2174,45 @@ def apply_purchase_import(conn, body: dict[str, Any]) -> dict[str, Any]:
                 "valid_count": len(items),
             }
 
+    # The invoice number may already be a purchase. Ask before anything is loaded: the shop's
+    # own words for this are "the same bill must not be saved twice, and if it is already there
+    # it should open with the new medicines added" (store 127 had it as purchases 35 and 36).
+    merge_into = _safe_int(body.get("merge_into_purchase_id"))
+    if merge_into <= 0 and not body.get("allow_duplicate"):
+        existing_bill = _import_existing_bill(conn, invoice, invoice.items)
+        if existing_bill:
+            if str(body.get("confirm") or "").strip().lower() == "merge":
+                merge_into = int(existing_bill.get("purchase_id") or 0)
+            else:
+                new_count = int(existing_bill.get("new_line_count") or 0)
+                return {
+                    "ok": False,
+                    "need_confirm": True,
+                    "code": "bill_already_saved",
+                    "import_token": token,
+                    "message": (
+                        f"Ha bill {existing_bill.get('bill_number') or ''} already saved aahe "
+                        f"(purchase {existing_bill.get('purchase_no')}"
+                        + (
+                            f", {existing_bill.get('purchase_date')}"
+                            if existing_bill.get("purchase_date")
+                            else ""
+                        )
+                        + f", {int(existing_bill.get('item_count') or 0)} aushadhe).\n\n"
+                        f"Tyat {new_count} navin aushadhe jodu ka?"
+                    ),
+                    "existing": existing_bill,
+                    "new_line_count": new_count,
+                    "already_line_count": int(existing_bill.get("already_line_count") or 0),
+                }
+
     # Existing items replace/append is decided by the client (has_items).
     replace_existing = True
-    if body.get("has_existing_items"):
+    if merge_into > 0:
+        # Merging writes onto the saved bill's own lines, so what the pending tab happened to
+        # hold does not come into it.
+        replace_existing = True
+    elif body.get("has_existing_items"):
         if "replace_existing" not in body:
             return {
                 "ok": False,
@@ -2113,6 +2303,39 @@ def apply_purchase_import(conn, body: dict[str, Any]) -> dict[str, Any]:
         pass
 
     converted = list(prepared.get("converted") or [])
+
+    # Merging: the answer is the SAVED bill's form with the missing lines appended and
+    # editing_purchase_id set, so the next Save updates that purchase. The bill's own header,
+    # totals and payment stay as the shop saved them -- an import may add medicines to a bill
+    # that exists, never rewrite what is already on it.
+    if merge_into > 0:
+        merged = _purchase_form_with_new_lines(conn, merge_into, converted)
+        if not merged.get("ok"):
+            return merged
+        try:
+            write_import_log(invoice, "imported", f"Merged into purchase {merge_into}")
+        except Exception:
+            pass
+        _IMPORT_SESSIONS.pop(token, None)
+        _cleanup_session_tmp(sess)
+        added = int(merged.get("items_added") or 0)
+        already = int(merged.get("items_already_there") or 0)
+        return {
+            "ok": True,
+            "merged": True,
+            "merge_into_purchase_id": merge_into,
+            "items_imported": len(converted),
+            "items_added": added,
+            "items_already_there": already,
+            "loaded": merged,
+            "message": (
+                f"Purchase {merged.get('purchase_no') or merge_into} ughadla aahe. "
+                f"{added} navin aushadhe jodli; {already} agodar hoti.\n\n"
+                "Check every new line (batch, expiry, MRP, rate) and press Save to update "
+                "this bill."
+            ),
+        }
+
     form = {
         "supplier_name": prepared.get("supplier_name") or "",
         "supplier_address": prepared.get("supplier_address") or "",

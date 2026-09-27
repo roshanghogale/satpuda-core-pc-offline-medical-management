@@ -23,6 +23,7 @@ import {
   loadPurchaseById,
   lookupPurchaseMedicine,
   lookupSupplierByName,
+  mergePurchaseLines,
   registerPurchaseMedicine,
   savePurchaseBill,
   searchPurchaseMedicines,
@@ -1296,6 +1297,10 @@ export function PurchasePage({
       continue_count_mismatch?: boolean
       replace_existing?: boolean
       has_existing_items?: boolean
+      /** Add the parsed lines to this saved purchase instead of starting a new one. */
+      merge_into_purchase_id?: number
+      /** A second purchase for a bill number that is already on the books. */
+      allow_duplicate?: boolean
     },
   ) => {
     const res = await applyPurchaseImport({
@@ -1304,6 +1309,34 @@ export function PurchasePage({
       ...flags,
     })
     if (res.need_confirm) {
+      // The same invoice number is already a purchase. Usually this is the
+      // second photo of one bill, not a second bill (store 127 held the same
+      // bill as purchases 35 and 36), so the first answer adds the medicines
+      // that purchase does not have yet to the purchase itself.
+      if (res.code === 'bill_already_saved' && res.existing) {
+        const existingId = res.existing.purchase_id
+        showAlert({
+          title: 'Bill Already Saved',
+          message: res.message || 'This bill is already saved.',
+          kind: 'confirm',
+          confirmLabel: 'Merge',
+          altLabel: 'Naveen bill banav',
+          cancelLabel: 'Radd',
+          onConfirm: () => {
+            reenterImportApply(token, {
+              ...flags,
+              merge_into_purchase_id: existingId,
+            })
+          },
+          onAlt: () => {
+            reenterImportApply(token, { ...flags, allow_duplicate: true })
+          },
+          onCancel: () => {
+            void cancelPurchaseImport(token)
+          },
+        })
+        return
+      }
       if (res.code === 'replace_or_append') {
         showAlert({
           title: 'Existing Purchase Items',
@@ -1351,6 +1384,22 @@ export function PurchasePage({
         onCancel: () => {
           void cancelPurchaseImport(token)
         },
+      })
+      return
+    }
+    // Merged: the answer is the SAVED purchase opened to edit, with only the
+    // missing lines appended and editing_purchase_id set, so the next Save
+    // updates that one bill instead of writing a second one.
+    if (res.ok && res.merged && res.loaded) {
+      const added = res.items_added ?? 0
+      applyLoaded(res.loaded, {
+        dirty: true,
+        note: `${res.loaded.purchase_no || ''} open for edit · ${added} new line(s) added`,
+      })
+      showAlert({
+        title: 'Bill Open For Edit',
+        message: res.message || 'The saved bill is open for edit.',
+        kind: 'info',
       })
       return
     }
@@ -1490,7 +1539,12 @@ export function PurchasePage({
     fileInputRef.current?.click()
   }
 
-  const applyLoaded = (loaded: LoadedPurchase) => {
+  const applyLoaded = (
+    loaded: LoadedPurchase,
+    /** A merge hands back a bill with lines it has not saved yet, so the tab is
+     *  dirty and the note says what was added rather than "loaded for edit". */
+    opts?: { dirty?: boolean; note?: string },
+  ) => {
     if (!loaded.ok || !loaded.form) {
       showAlert({
         title: 'Load Purchase',
@@ -1530,9 +1584,11 @@ export function PurchasePage({
       importBillMode: false,
       importInvoiceSummary: null,
       title: loaded.purchase_no || tab.title,
-      dirty: false,
+      dirty: Boolean(opts?.dirty),
     })
-    setNote(`Loaded ${loaded.purchase_no || loaded.purchase_id} for edit`)
+    setNote(
+      opts?.note || `Loaded ${loaded.purchase_no || loaded.purchase_id} for edit`,
+    )
   }
 
   /** See SalesPage: derived from the prop so no blank frame gets through. */
@@ -1628,7 +1684,53 @@ export function PurchasePage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reorderPrefill])
 
-  const savePurchase = async (): Promise<boolean> => {
+  /** "Junya bill madhe ughad": open the bill that is already saved and carry the
+   *  rows on screen over to it.
+   *
+   *  The engine decides which of these rows that bill already has -- the same
+   *  rule a re-imported bill photo goes through (core/purchase_line_merge.py) --
+   *  so the two answers can never drift apart. Nothing on the tab is cleared if
+   *  this fails. */
+  const openSavedBillWithNewLines = async (purchaseId: number) => {
+    setSaving(true)
+    try {
+      const res = await mergePurchaseLines({
+        purchase_id: purchaseId,
+        items: tabPayload(tabRef.current).items,
+      })
+      if (!res.ok || !res.loaded) {
+        showAlert({
+          title: 'Open Saved Bill',
+          message: res.error || 'Could not open that purchase.',
+          kind: 'error',
+        })
+        return
+      }
+      const added = res.items_added ?? 0
+      applyLoaded(res.loaded, {
+        dirty: true,
+        note: `${res.loaded.purchase_no || purchaseId} open for edit · ${added} new line(s) added`,
+      })
+      showAlert({
+        title: 'Bill Open For Edit',
+        message: res.message || 'The saved bill is open for edit.',
+        kind: 'info',
+      })
+    } catch (e) {
+      showAlert({
+        title: 'Open Saved Bill',
+        message: e instanceof Error ? e.message : String(e),
+        kind: 'error',
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const savePurchase = async (opts?: {
+    /** The shop answered "Tari save kar" to the refusal below. */
+    allowDuplicate?: boolean
+  }): Promise<boolean> => {
     // F5 reaches this from the window listener even while the form is still
     // the blank tab waiting for the bill being edited.
     if (editPendingRef.current) return false
@@ -1644,7 +1746,33 @@ export function PurchasePage({
     }
     setSaving(true)
     try {
-      const res = await savePurchaseBill(tabPayload(tabRef.current))
+      const res = await savePurchaseBill({
+        ...tabPayload(tabRef.current),
+        ...(opts?.allowDuplicate ? { allow_duplicate: true } : {}),
+      })
+      // One supplier bill, one purchase. The engine refused this one BEFORE
+      // writing anything (store 127 held the same bill as purchases 35 and 36,
+      // one second apart, because the old check only warned afterwards), so the
+      // rows are all still here and nothing may be cleared on any of the three
+      // answers.
+      if (res.need_confirm && res.code === 'duplicate_bill' && res.existing) {
+        const existingId = res.existing.purchase_id
+        showAlert({
+          title: 'Bill Already Saved',
+          message: res.message || 'This bill is already saved.',
+          kind: 'confirm',
+          confirmLabel: 'Junya bill madhe ughad',
+          altLabel: 'Tari save kar',
+          cancelLabel: 'Radd',
+          onConfirm: () => {
+            void openSavedBillWithNewLines(existingId)
+          },
+          onAlt: () => {
+            void savePurchase({ allowDuplicate: true })
+          },
+        })
+        return false
+      }
       if (!res.ok) {
         const title =
           res.code === 'supplier_required'

@@ -66,11 +66,14 @@ _LAYOUT_A5 = DmLayout(
 _LAYOUT_A4 = DmLayout(
     line_width=80,
     hdr_left_w=26,
-    hdr_center_w=28,
-    hdr_right_w=26,
-    col_widths=(4, 28, 10, 6, 6, 10, 16),
-    foot_left_w=52,
-    foot_right_w=28,
+    hdr_center_w=27,
+    hdr_right_w=25,
+    # 7 columns + 8 rules = 80; header 26+27+25 = 78 (+2 rules); footer 50+27 = 77 (+3).
+    # The old numbers summed to 80 in every zone and left no room for the rules, so a
+    # bordered A4 bill printed 88-character rows and wrapped.
+    col_widths=(4, 26, 9, 6, 5, 10, 12),
+    foot_left_w=50,
+    foot_right_w=27,
     escp_left_margin=0,
     escp_line_spacing=30,
     use_condensed=False,
@@ -184,6 +187,8 @@ def _is_tax_invoice(settings: dict) -> bool:
 
 def _show_gst_details(settings: dict) -> bool:
     # Same rule as the PDF bill (bill_templates/classic.py): a Tax Invoice shows its tax.
+    if _is_compact(settings):
+        return False        # the new slip never carries GST -- that room goes to the medicines
     return _setting(settings, "show_gst", True)
 
 
@@ -195,11 +200,21 @@ def _center(text: str, width: int) -> str:
     return _ascii_safe(text)[:width].center(width)
 
 
-def _meta_row(label: str, value: str, label_w: int = 9, width: int | None = None, *, settings: dict) -> str:
+def _meta_rows(label: str, value: str, label_w: int = 9, width: int | None = None, *,
+               settings: dict) -> list[str]:
+    """"Dr.NAME  : DR ..." -- and the rest of a long name on the next line, indented
+    under the value, because a cut-off name is worse than a second line."""
     lbl = _ascii_safe(label)
     val = _ascii_safe(value)
     w = width if width is not None else _dm(settings).hdr_right_w
-    return f"{lbl:<{label_w}}: {val}"[:w]
+    head = f"{lbl:<{label_w}}: "
+    room = max(1, w - len(head))
+    parts = _wrap_text(val, room)
+    return [f"{head}{parts[0]}"[:w]] + [f"{'':<{len(head)}}{p}"[:w] for p in parts[1:] if p]
+
+
+def _meta_row(label: str, value: str, label_w: int = 9, width: int | None = None, *, settings: dict) -> str:
+    return _meta_rows(label, value, label_w, width, settings=settings)[0]
 
 
 def _cell(text: str, width: int, align: str = "l") -> str:
@@ -211,7 +226,22 @@ def _cell(text: str, width: int, align: str = "l") -> str:
     return s.ljust(width)
 
 
+COMPACT_STYLE = "compact"       # the shop's own slip: no blessing, no title, no GST, no wish
+CLASSIC_STYLE = "classic"       # what was printed until 25-09-2026
+
+
+def _style(settings: dict) -> str:
+    want = str(settings.get("dot_matrix_style") or COMPACT_STYLE).strip().lower()
+    return CLASSIC_STYLE if want == CLASSIC_STYLE else COMPACT_STYLE
+
+
+def _is_compact(settings: dict) -> bool:
+    return _style(settings) == COMPACT_STYLE
+
+
 def _vertical_borders(settings: dict) -> bool:
+    if _is_compact(settings):
+        return False        # the shop chose the slip without the | rules
     return bool(settings.get("dot_matrix_vertical_borders", True))
 
 
@@ -289,10 +319,9 @@ def _foot_row(left: str, right: str, settings: dict) -> str:
 def _table_sep_dynamic(widths: tuple[int, ...], settings: dict) -> str:
     if _vertical_borders(settings):
         return "+" + "+".join("-" * w for w in widths) + "+"
-    n = len(widths)
-    gutter = len(_col_gutter(settings))
-    total = sum(widths) + gutter * max(0, n - 1)
-    return "-" * total
+    # Without the | rules the table still has to reach both edges, or the slip
+    # looks ragged: the rules under the medicines were two characters short.
+    return "-" * _dm(settings).line_width
 
 
 def _table_row_dynamic(
@@ -304,7 +333,7 @@ def _table_row_dynamic(
     parts = [_cell(c, w, a) for c, w, a in zip(cells, widths, aligns)]
     if _vertical_borders(settings):
         return "|" + "|".join(parts) + "|"
-    return _col_gutter(settings).join(parts)
+    return _col_gutter(settings).join(parts).ljust(_dm(settings).line_width)[:_dm(settings).line_width]
 
 
 def _invoice_title(ctx, settings: dict) -> str:
@@ -312,6 +341,9 @@ def _invoice_title(ctx, settings: dict) -> str:
     if doc_title:
         return _ascii_safe(doc_title)
     return "TAX INVOICE" if _is_tax_invoice(settings) else "GST INVOICE"
+
+
+_ALWAYS_ON_COLUMNS = ("batch",)      # a batch number is required on a medicine bill
 
 
 def _medicine_columns(settings: dict) -> list[tuple[str, str, str, int]]:
@@ -338,7 +370,9 @@ def _medicine_columns(settings: dict) -> list[tuple[str, str, str, int]]:
     }
     cols: list[tuple[str, str, str, int]] = []
     for key, hdr, align, width in keys:
-        if _setting(settings, show_map[key], True):
+        # A batch number has to be on a medicine bill -- a return, a recall and an
+        # inspection are all traced by it -- so that tick cannot take it off.
+        if key in _ALWAYS_ON_COLUMNS or _setting(settings, show_map[key], True):
             cols.append((key, hdr, align, width))
     if not cols:
         cols = [("name", "Name of Medicine", "l", _dm(settings).line_width - 10)]
@@ -347,9 +381,26 @@ def _medicine_columns(settings: dict) -> list[tuple[str, str, str, int]]:
 
 def _active_col_layout(settings: dict) -> tuple[tuple[int, ...], tuple[str, ...], list[tuple[str, str, str, int]]]:
     cols = _medicine_columns(settings)
-    widths = tuple(c[3] for c in cols)
+    widths = list(c[3] for c in cols)
     aligns = tuple(c[2] for c in cols)
-    return widths, aligns, cols
+    names = [c[0] for c in cols]
+    if "expiry" in names and "amount" in names:
+        # "10/27" was printed "10/2" -- the year is the whole point of an expiry
+        # date, and the amount column never needs all ten of its columns.
+        e, a = names.index("expiry"), names.index("amount")
+        if widths[e] < 5 and widths[a] > 8:
+            widths[a] -= 5 - widths[e]
+            widths[e] = 5
+            cols = [(k, h, al, widths[i]) for i, (k, h, al, _w) in enumerate(cols)]
+    if not _vertical_borders(settings) and cols:
+        # The | rules cost a column each; without them that room is free, and the
+        # medicine name is the column that always wants it.
+        spare = _dm(settings).line_width - (sum(widths) + max(0, len(widths) - 1))
+        if spare > 0:
+            at = 1 if len(widths) > 1 else 0
+            widths[at] += spare
+            cols = [(k, h, al, widths[i]) for i, (k, h, al, _w) in enumerate(cols)]
+    return tuple(widths), aligns, cols
 
 
 def _build_header_left(ctx, settings: dict) -> list[str]:
@@ -361,9 +412,9 @@ def _build_header_left(ctx, settings: dict) -> list[str]:
         for chunk in _ascii_safe(ctx.address).splitlines():
             chunk = chunk.strip()
             if chunk:
-                lines.append(chunk.title()[:dm.hdr_left_w])
+                lines.extend(_wrap_text(chunk.title(), dm.hdr_left_w))
     if _setting(settings, "show_store_phone", True) and ctx.phone:
-        lines.append(f"Phone : {ctx.phone}"[:dm.hdr_left_w])
+        lines.extend(_wrap_text(f"Phone : {ctx.phone}", dm.hdr_left_w))
     # "Store email" is honoured on the PDF bill (bill_templates/classic.py) and
     # was silently dropped here, so the same tick printed on one kind of bill
     # and not the other.
@@ -384,16 +435,17 @@ def _store_license_left_lines(ctx, settings: dict) -> list[str]:
     dm = _dm(settings)
     lines: list[str] = []
     if _setting(settings, "show_store_gstin", True) and (getattr(ctx, "gstin", None) or "").strip():
-        lines.append(f"GSTIN : {ctx.gstin}"[:dm.hdr_left_w])
+        lines.extend(_wrap_text(f"GSTIN : {ctx.gstin}", dm.hdr_left_w))
     if _setting(settings, "show_store_dl", True) and (getattr(ctx, "dl_no", None) or "").strip():
-        lines.append(f"DL No. : {ctx.dl_no}"[:dm.hdr_left_w])
+        # Two DL numbers on one shop is normal; the second one goes on its own line.
+        lines.extend(_wrap_text(f"DL No. : {ctx.dl_no}", dm.hdr_left_w))
     fssai = (getattr(ctx, "fssai", None) or "").strip()
     if (
         _setting(settings, "show_store_fssai", True)
         and getattr(ctx, "show_fssai_on_bill", False)
         and fssai
     ):
-        lines.append(f"FSSAI : {fssai}"[:dm.hdr_left_w])
+        lines.extend(_wrap_text(f"FSSAI : {fssai}", dm.hdr_left_w))
     return lines
 
 
@@ -415,10 +467,11 @@ def _build_header_right(ctx, settings: dict) -> list[str]:
     dm = _dm(settings)
     rows: list[str] = []
     # PDF invoice-panel: blessing + GST INVOICE at top, then bill meta below
-    if _setting(settings, "show_blessing", True) and ctx.blessing_line:
-        rows.append(_center(ctx.blessing_line, dm.hdr_right_w))
-    rows.append(_center(_invoice_title(ctx, settings).upper(), dm.hdr_right_w))
-    rows.append("")
+    if not _is_compact(settings):
+        if _setting(settings, "show_blessing", True) and ctx.blessing_line:
+            rows.append(_center(ctx.blessing_line, dm.hdr_right_w))
+        rows.append(_center(_invoice_title(ctx, settings).upper(), dm.hdr_right_w))
+        rows.append("")
 
     bill_no_l = _label(settings, "meta_bill_no_label", "BILL NO.")
     date_l = _label(settings, "meta_date_label", "Date")
@@ -426,28 +479,28 @@ def _build_header_right(ctx, settings: dict) -> list[str]:
     addr_l = _label(settings, "meta_party_address_label", "Pt.ADD.")
 
     if _setting(settings, "show_bill_no", True) and ctx.bill_no:
-        rows.append(_meta_row(bill_no_l, ctx.bill_no, settings=settings))
+        rows.extend(_meta_rows(bill_no_l, ctx.bill_no, settings=settings))
     if _setting(settings, "show_bill_date", True):
         bill_date = getattr(ctx, "bill_date_landscape", None) or ctx.bill_date
         if bill_date:
-            rows.append(_meta_row(date_l, bill_date, settings=settings))
+            rows.extend(_meta_rows(date_l, bill_date, settings=settings))
 
     if not settings.get("hide_party_meta"):
         ref_line = (getattr(ctx, "reference_line", None) or "").strip()
         if ref_line:
-            rows.append(_meta_row("Ref.", ref_line, settings=settings))
+            rows.extend(_meta_rows("Ref.", ref_line, settings=settings))
         if _setting(settings, "show_patient_name", True) and ctx.cust_name:
-            rows.append(_meta_row(party_l, ctx.cust_name, settings=settings))
+            rows.extend(_meta_rows(party_l, ctx.cust_name, settings=settings))
         if _setting(settings, "show_patient_address", True) and ctx.cust_addr:
-            rows.append(_meta_row(addr_l, ctx.cust_addr, settings=settings))
+            rows.extend(_meta_rows(addr_l, ctx.cust_addr, settings=settings))
         for label, value in getattr(ctx, "extra_meta_rows", None) or []:
             if str(value or "").strip():
-                rows.append(_meta_row(str(label), str(value), settings=settings))
+                rows.extend(_meta_rows(str(label), str(value), settings=settings))
 
     if _setting(settings, "show_doctor", True) and _setting(settings, "show_doctor_name", True) and ctx.doctor_name:
-        rows.append(_meta_row("Dr.NAME", ctx.doctor_name, settings=settings))
+        rows.extend(_meta_rows("Dr.NAME", ctx.doctor_name, settings=settings))
     if _setting(settings, "show_doctor", True) and _setting(settings, "show_doctor_reg", True) and ctx.doctor_reg:
-        rows.append(_meta_row("Dr.Reg.", ctx.doctor_reg, settings=settings))
+        rows.extend(_meta_rows("Dr.Reg.", ctx.doctor_reg, settings=settings))
     return rows
 
 
@@ -939,7 +992,20 @@ def format_bill_text(ctx, settings: dict | None = None) -> str:
     return "\n".join(lines)
 
 
-def _footer_strip_line(ctx, settings: dict) -> str:
+def _footer_strip_lines(ctx, settings: dict) -> list[str]:
+    """The GST working, then HAVE A NICE DAY under it -- never sliced off its end."""
+    w = _dm(settings).foot_left_w
+    custom = (getattr(ctx, "footer_strip_line", None) or settings.get("footer_strip_line") or "").strip()
+    if custom:
+        return _wrap_text(_ascii_safe(custom), w)
+    nice = _label(settings, "gst_day_line", "HAVE A NICE DAY")
+    if not _show_gst_details(settings) or not ctx.gst_enabled or float(ctx.gst_amount or 0) <= 0:
+        return _wrap_text(nice, w)
+    gst = _footer_strip_line(ctx, settings, gst_only=True)
+    return [line for line in _wrap_text(gst, w) if line] + [line for line in _wrap_text(nice, w) if line]
+
+
+def _footer_strip_line(ctx, settings: dict, gst_only: bool = False) -> str:
     custom = (getattr(ctx, "footer_strip_line", None) or settings.get("footer_strip_line") or "").strip()
     if custom:
         return _ascii_safe(custom)
@@ -956,6 +1022,8 @@ def _footer_strip_line(ctx, settings: dict) -> str:
         )
     else:
         gst_part = f"GST {taxable:.2f} = {sgst:.2f}SGST + {cgst:.2f}CGST"
+    if gst_only:
+        return gst_part
     return f"{gst_part}, {nice}"[:_dm(settings).foot_left_w]
 
 
@@ -985,7 +1053,9 @@ def _totals_lines(ctx, settings: dict) -> list[str]:
         lines.append(_amt_row("Rounding", float(ctx.rounding)))
     if _setting(settings, "show_total", True):
         lines.append(_amt_row(total_l, float(ctx.grand_total or 0)))
-    if _setting(settings, "show_customer_due", False):
+    # A credit customer wants to see the running due on the slip itself; a cash
+    # customer's slip must not grow a due line that says 0.
+    if _setting(settings, "show_customer_due", False) or _setting(settings, "dot_matrix_due_lines", True):
         prev = float(getattr(ctx, "previous_due", 0) or 0)
         bill_due = bill_due_display(ctx)
         total_due = total_due_display(ctx)
@@ -1012,10 +1082,12 @@ def _footer_left_lines(ctx, settings: dict) -> list[str]:
         )
         text = _ascii_safe(wish).strip()
         if text:
-            wrapped = textwrap.wrap(text, width=dm.foot_left_w) or [text[:dm.foot_left_w]]
+            # A6 used to keep only the first line: the rest of the shop's own
+            # sentence simply vanished. Two lines is what the slip can spare.
+            wrapped = _wrap_text(text, dm.foot_left_w)
             if _resolve_paper(settings) == "A6":
-                wrapped = wrapped[:1]
-            lines.extend(wrapped)
+                wrapped = wrapped[:2]
+            lines.extend([line for line in wrapped if line])
     # Phone stays in header left on A6 — do not repeat in footer
     if (
         _setting(settings, "show_store_phone", True)
@@ -1040,7 +1112,84 @@ def _signature_lines(ctx, settings: dict) -> list[str]:
     return [for_line[:dm.foot_right_w], _center(sign_l, dm.foot_right_w)]
 
 
+def _item_count_line(ctx, settings: dict) -> str:
+    """"8 aushadhe, 59 nag" -- what the counter checks the bag against."""
+    items = list(getattr(ctx, "items", None) or [])
+    if not items or getattr(ctx, "is_continued", False):
+        return ""
+    total = 0.0
+    for item in items:
+        try:
+            total += float(getattr(item, "qty", 0) or 0)
+        except (TypeError, ValueError):
+            pass
+    nag = str(int(total)) if float(total).is_integer() else f"{total:g}"
+    return f"{len(items)} aushadhe, {nag} nag"
+
+
+def _compact_footer(ctx, settings: dict) -> list[str]:
+    """HAVE A NICE DAY .... SIGN OF Q.P. .... Total 567.84 -- one block.
+
+    The signature takes the middle of ONE row only: on a GST bill the left zone
+    carries the whole tax working, and squeezing it into half the width broke it
+    across three lines.
+    """
+    dm = _dm(settings)
+    totals = _totals_lines(ctx, settings)
+    sign = ""
+    if _setting(settings, "show_signature", True):
+        sign = _ascii_safe(_label(settings, "signature_caption", "SIGN OF Q.P."))
+    left_lines: list[str] = []
+    if not getattr(ctx, "is_continued", False) and _setting(settings, "show_gst_strip", True):
+        left_lines = [line for line in _footer_strip_lines(ctx, settings) if line]
+    if _setting(settings, "dot_matrix_item_count", True):
+        count = _item_count_line(ctx, settings)
+        if count:
+            left_lines = [count] + left_lines
+    sign_w = min(dm.foot_left_w, len(sign) + 4) if sign else 0
+    left_w = max(0, dm.foot_left_w - sign_w)
+
+    rows = max(1, len(left_lines), len(totals))
+    sign_at = -1
+    if sign:
+        total_l = _label(settings, "total_label", "Total")
+        wanted = next((i for i, row in enumerate(totals) if row.startswith(total_l)), rows - 1)
+        order = [wanted] + [i for i in range(rows) if i != wanted]
+        sign_at = next((i for i in order if len(left_lines[i] if i < len(left_lines) else "") <= left_w), -1)
+        if sign_at < 0:
+            rows += 1
+            sign_at = rows - 1
+
+    out = [_border_line(settings)]
+    for i in range(rows):
+        left = left_lines[i] if i < len(left_lines) else ""
+        right = totals[i] if i < len(totals) else ""
+        if i == sign_at:
+            block = _cell(left, left_w) + _cell(sign, sign_w, "c")
+        else:
+            block = _cell(left, dm.foot_left_w)
+        line = _lr_zones_line(block, right, left_w=dm.foot_left_w, right_w=dm.foot_right_w,
+                              line_w=dm.line_width, settings=settings, inner_pipe=True)
+        # ESC E is a printer code, not a character: it wraps the finished line, or the
+        # markers would be counted as text and the amount would be cut off.
+        total_l = _label(settings, "total_label", "Total")
+        tail = right.strip()[len(total_l):].strip() if right.strip().startswith(total_l) else ""
+        is_total = bool(tail) and tail.replace(".", "").replace(",", "").replace("-", "").isdigit()
+        if is_total and _setting(settings, "dot_matrix_bold_total", True):
+            line = _bold(line)
+        out.append(line)
+    out.append(_border_line(settings))
+    return out
+
+
 def _build_footer(ctx, settings: dict) -> list[str]:
+    # Both slips end the same way now: the nice line, the signature in the middle and
+    # the money on the right, one block. The old slip's separate "I WISH FOR YOUR
+    # SPEEDY RECOVERY" block is gone -- the shop asked for that room back.
+    return _compact_footer(ctx, settings)
+
+
+def _build_footer_classic_unused(ctx, settings: dict) -> list[str]:
     continued = bool(getattr(ctx, "is_continued", False))
     out: list[str] = []
 
@@ -1049,12 +1198,12 @@ def _build_footer(ctx, settings: dict) -> list[str]:
         # used to take Total, LESS and Due down with it, because both lived
         # under the same switch and the bill came out with no amount on it.
         show_strip = _setting(settings, "show_gst_strip", True)
-        strip = _footer_strip_line(ctx, settings) if show_strip else ""
+        strip = _footer_strip_lines(ctx, settings) if show_strip else []
         totals = _totals_lines(ctx, settings)
         if strip or totals:
             out.append(_foot_hbar(settings))
-            for i in range(max(1, len(totals))):
-                left = strip if i == 0 else ""
+            for i in range(max(1, len(totals), len(strip))):
+                left = strip[i] if i < len(strip) else ""
                 right = totals[i] if i < len(totals) else ""
                 out.append(_foot_row(left, right, settings))
     elif continued:
@@ -1075,6 +1224,14 @@ def _build_footer(ctx, settings: dict) -> list[str]:
 
     out.append(_border_line(settings))
     return out
+
+
+def printed_text(text: str) -> str:
+    """The characters that reach the paper: bold and double-height are printer codes,
+    not letters, and must not be counted when a line's width is measured."""
+    for mark in (_BOLD_ON, _BOLD_OFF, _TITLE_EM_ON, _TITLE_EM_OFF):
+        text = text.replace(mark, "")
+    return text
 
 
 def _encode_line_with_bold(line: str) -> bytes:
@@ -1558,6 +1715,55 @@ def _report_plain_settings(settings: dict) -> dict:
     return out
 
 
+_MONEY_WORDS = ("amount", "total", "due", "paid", "credit", "debit", "value", "balance",
+                "discount", "gst", "cgst", "sgst", "cash", "online", "expenditure", "returns")
+_COUNT_WORDS = ("qty", "quantity", "stock", "nag", "bills", "purchases", "records", "count",
+                "free", "strips")
+
+
+def _report_totals_row(headers: list, rows: list) -> list[str]:
+    """"Total" and the sum of every column worth adding.
+
+    A printed report used to end with its last row: the counter added the money column
+    by hand. Only columns whose name says money or a count are summed -- a batch number
+    or a phone number is never a total.
+    """
+    hdrs = [str(h or "").strip().lower() for h in headers]
+    sums: dict[int, float] = {}
+    decimals: dict[int, bool] = {}
+    for i, h in enumerate(hdrs):
+        if not (any(w in h for w in _MONEY_WORDS) or any(w in h for w in _COUNT_WORDS)):
+            continue
+        total = 0.0
+        seen = False
+        dec = False
+        for row in rows or []:
+            if i >= len(row):
+                continue
+            raw = str(row[i] if row[i] is not None else "").strip()
+            raw = raw.replace(",", "").replace("\u20b9", "").replace("Rs.", "").strip()
+            if not raw:
+                continue
+            try:
+                value = float(raw)
+            except ValueError:
+                continue
+            seen = True
+            dec = dec or ("." in raw)
+            total += value
+        if seen:
+            sums[i] = total
+            decimals[i] = dec
+    if not sums:
+        return []
+    out = [""] * len(hdrs)
+    for i, total in sums.items():
+        out[i] = f"{total:.2f}" if decimals.get(i) else str(int(round(total)))
+    label_at = next((i for i in range(len(hdrs)) if i not in sums), 0)
+    out[label_at] = "TOTAL"
+    return out
+
+
 def format_report_text(
     title: str,
     headers: list,
@@ -1601,6 +1807,12 @@ def format_report_text(
         while len(cells) < len(hdrs):
             cells.append("")
         lines.append(_table_row_plain(cells[: len(hdrs)], widths, aligns))
+    totals = _report_totals_row(hdrs, rows or [])
+    if totals:
+        lines.append("-" * dm.line_width)
+        lines.append(_BOLD_ON)
+        lines.append(_table_row_plain(totals, widths, aligns))
+        lines.append(_BOLD_OFF)
     return "\n".join(lines)
 
 
@@ -1618,6 +1830,27 @@ def format_reports_combined(
     return "\n".join(blocks)
 
 
+SCHEDULE_PORTRAIT_COLS = 80          # A4 portrait at 10 CPI
+SCHEDULE_LANDSCAPE_COLS = 110        # A4 landscape at 10 CPI, margins kept
+
+
+def _schedule_settings(line_w: int, use_borders: bool) -> dict:
+    """Settings for the register's own table: its real width, and the rules it asked for.
+
+    The old dict had neither, so _dm() fell back to A5 (110 columns) and _is_compact()
+    to "compact" (no vertical rules) -- the register printed 110-wide rows with no pipes
+    on an 80-column page.
+    """
+    base = _layout_for_paper("A4")
+    layout = replace(base, line_width=line_w)
+    return {
+        "paper_size": "A4",
+        "dot_matrix_style": CLASSIC_STYLE,
+        "dot_matrix_vertical_borders": bool(use_borders),
+        _DM_SETTINGS_KEY: layout,
+    }
+
+
 def _schedule_portrait_col_widths(
     headers: list,
     data_width: int = 76,
@@ -1625,44 +1858,80 @@ def _schedule_portrait_col_widths(
     col_gap: int = 1,
     style: str = "classic",
 ) -> tuple[int, ...]:
-    """Fixed portrait widths — total cell chars + gaps = data_width."""
+    """Column widths that ADD UP to the page.
+
+    The old version took fixed widths and, when they did not fit, stretched one column
+    by the difference with a `max(8, ...)` floor -- which cannot shrink. Nine columns of
+    fixed widths summed to 78 where 66 were free, and the register printed 90-character
+    rows on an 80-column page. Now the wide text columns give room back in turn, and
+    spare room goes to the medicine name.
+    """
     classic = {
-        "Date / Bill": 10,
-        "Customer": 10,
-        "Doctor": 11,
-        "Medicine": 15,
-        "Batch": 7,
-        "Expiry": 8,
-        "Schedule": 4,
-        "Qty": 3,
-        "Content/Drug": 10,
-        "Sign": 6,
+        "Date / Bill": 10, "Customer": 10, "Doctor": 11, "Medicine": 15, "Batch": 7,
+        "Expiry": 8, "Schedule": 4, "Qty": 3, "Content/Drug": 10, "Sign": 6,
     }
     # Narrower doctor; Batch/Expiry merged; Sign at end — classic unchanged.
     sign_style = {
-        "Date / Bill": 10,
-        "Customer": 11,
-        "Doctor": 7,
-        "Medicine": 16,
-        "Batch/Expiry": 10,
-        "Batch": 10,
-        "Expiry": 8,
-        "Schedule": 4,
-        "Qty": 3,
-        "Content/Drug": 10,
-        "Sign": 6,
+        "Date / Bill": 10, "Customer": 11, "Doctor": 7, "Medicine": 16, "Batch/Expiry": 10,
+        "Batch": 10, "Expiry": 8, "Schedule": 4, "Qty": 3, "Content/Drug": 10, "Sign": 6,
+    }
+    # What a column must never go below, or its own values stop making sense.
+    floors = {
+        "Date / Bill": 8, "Batch/Expiry": 7, "Batch": 6, "Expiry": 5, "Schedule": 3,
+        "Qty": 3, "Sign": 5,
     }
     defaults = sign_style if (style or "").strip().lower() == "sign" else classic
     n = max(1, len(headers))
     gap_total = max(0, n - 1) * max(0, col_gap)
     usable = max(n * 3, data_width - gap_total)
     widths = [max(3, defaults.get(h, 8)) for h in headers]
-    total = sum(widths)
-    if total != usable and widths:
+
+    # Too wide: take from the roomiest text columns first, never below their floor.
+    give_back = ["Content/Drug", "Doctor", "Customer", "Medicine", "Date / Bill", "Batch", "Expiry"]
+    guard = 0
+    while sum(widths) > usable and guard < 400:
+        guard += 1
+        order = [h for h in give_back if h in headers] + [h for h in headers if h not in give_back]
+        took = False
+        for h in order:
+            i = headers.index(h)
+            if widths[i] > floors.get(h, 6):
+                widths[i] -= 1
+                took = True
+                if sum(widths) <= usable:
+                    break
+        if not took:        # every column is at its floor: the page is simply too narrow
+            break
+    # Room to spare: the medicine name wants it, then the customer.
+    if sum(widths) < usable and widths:
+        # The medicine name first, whatever order the columns are in.
         prefer = ("Medicine", "Customer", "Patient Details")
-        idx = next((i for i, h in enumerate(headers) if h in prefer), len(widths) - 1)
-        widths[idx] = max(8, widths[idx] + (usable - total))
+        idx = next((headers.index(h) for h in prefer if h in headers), len(widths) - 1)
+        widths[idx] += usable - sum(widths)
     return tuple(widths)
+
+
+# A header that will not fit is shortened, not sliced: "Sche" and "Content/Dr" were
+# what the register actually printed.
+_SCHEDULE_SHORT_HEADERS = {
+    "Schedule": ("Sch", "Sc"),
+    "Content/Drug": ("Content", "Drug"),
+    "Date / Bill": ("Date", "Dt"),
+    "Batch/Expiry": ("Batch/Exp", "Batch"),
+    "Customer": ("Custmr", "Cust"),
+    "Medicine": ("Medicin", "Med"),
+    "Doctor": ("Doctr", "Dr"),
+}
+
+
+def _schedule_header_label(header: str, width: int) -> str:
+    text = _ascii_safe(header)
+    if len(text) <= width:
+        return text
+    for short in _SCHEDULE_SHORT_HEADERS.get(header, ()):  # longest first
+        if len(short) <= width:
+            return short
+    return text[:width]
 
 
 def _strip_fy_in_schedule_cell(header: str, cell: str) -> str:
@@ -1919,11 +2188,11 @@ def _format_schedule_page_block(
     sr_offset: int = 0,
     page_no: int = 1,
     page_count: int = 1,
+    line_w: int = SCHEDULE_PORTRAIT_COLS,
 ) -> str:
     """One physical page of schedule text (title + table)."""
-    line_w = 80
     sr_w = 3
-    settings = {"dot_matrix_vertical_borders": use_borders}
+    settings = _schedule_settings(line_w, use_borders)
     lines: list[str] = []
     lines.append(_TITLE_EM_ON)
     lines.append(_center(_ascii_safe(title), line_w))
@@ -1951,9 +2220,13 @@ def _format_schedule_page_block(
         sep = _table_sep_dynamic(widths, settings)
         lines.append(sep)
         lines.append(_BOLD_ON)
+        def _label_for(h: str, i: int) -> str:
+            return _schedule_header_label(h, data_widths[i] if i < len(data_widths) else 8)
+
         if hdrs and hdrs[0] == "Date / Bill":
             hdr1 = ["Sr", "Date"] + [
-                ("Batch" if h == "Batch/Expiry" else h) for h in hdrs[1:]
+                ("Batch" if h == "Batch/Expiry" else _label_for(h, i + 1))
+                for i, h in enumerate(hdrs[1:])
             ]
             lines.append(_row(hdr1))
             hdr2 = ["", "Bill"] + [
@@ -1962,14 +2235,14 @@ def _format_schedule_page_block(
             lines.append(_row(hdr2))
         elif "Batch/Expiry" in hdrs:
             bi = hdrs.index("Batch/Expiry")
-            hdr1 = ["Sr"] + list(hdrs)
+            hdr1 = ["Sr"] + [_label_for(h, i) for i, h in enumerate(hdrs)]
             hdr1[bi + 1] = "Batch"
             lines.append(_row(hdr1))
             hdr2 = [""] * len(widths)
             hdr2[bi + 1] = "Expiry"
             lines.append(_row(hdr2))
         else:
-            lines.append(_row(["Sr"] + hdrs))
+            lines.append(_row(["Sr"] + [_label_for(h, i) for i, h in enumerate(hdrs)]))
         lines.append(_BOLD_OFF)
         lines.append(sep)
 
@@ -2007,7 +2280,8 @@ def _format_schedule_page_block(
     aligns = tuple("l" for _ in hdrs)
     lines.append(_BOLD_ON)
     if hdrs and hdrs[0] == "Date / Bill":
-        hdr1 = list(hdrs)
+        hdr1 = [_schedule_header_label(h, data_widths[i] if i < len(data_widths) else 8)
+                for i, h in enumerate(hdrs)]
         hdr1[0] = "Date"
         if "Batch/Expiry" in hdr1:
             hdr1[hdr1.index("Batch/Expiry")] = "Batch"
@@ -2022,8 +2296,10 @@ def _format_schedule_page_block(
             f"{'':>3} {_schedule_spaced_values(hdr2, hdrs, data_widths, aligns, col_gap=col_gap)}"
         )
     else:
+        shown = [_schedule_header_label(h, data_widths[i] if i < len(data_widths) else 8)
+                 for i, h in enumerate(hdrs)]
         lines.append(
-            f"{'Sr':>3} {_schedule_spaced_values(hdrs, hdrs, data_widths, aligns, col_gap=col_gap)}"
+            f"{'Sr':>3} {_schedule_spaced_values(shown, hdrs, data_widths, aligns, col_gap=col_gap)}"
         )
     lines.append(_BOLD_OFF)
 
@@ -2046,14 +2322,12 @@ def _format_schedule_page_block(
             lines.append(plain_row_sep)
         else:
             lines.append("")
-        qty_w = data_widths[-1] if data_widths else 4
-        if "Sign" in hdrs and hdrs[-1] == "Sign" and len(data_widths) >= 2:
-            qty_i = hdrs.index("Qty") if "Qty" in hdrs else len(data_widths) - 2
-            qty_w = data_widths[qty_i]
-            pad = 4 + sum(data_widths[:qty_i]) + qty_i * len(col_gap)
-            lines.append(f"{'Total':>{pad}}{int(total_qty):>{qty_w}}")
-        else:
-            lines.append(f"{'Total':>{line_w - qty_w}}{int(total_qty):>{qty_w}}")
+        # "Total" used to be pushed to the end of the line whatever column the count
+        # belonged to; it now sits under Qty, wherever Qty is.
+        qty_i = hdrs.index("Qty") if "Qty" in hdrs else len(data_widths) - 1
+        qty_w = data_widths[qty_i] if data_widths else 4
+        pad = 4 + sum(data_widths[:qty_i]) + qty_i * len(col_gap)
+        lines.append(f"{'Total':>{max(6, pad)}}{int(total_qty):>{qty_w}}")
     return "\n".join(lines)
 
 
@@ -2066,6 +2340,7 @@ def format_schedule_report_text(
     total_qty: int | None = None,
     dm_style: str = "classic",
     borders: bool = True,
+    line_w: int = SCHEDULE_PORTRAIT_COLS,
 ) -> str:
     """ESC/P schedule report — classic or Sign preset; optional | / +---+ borders.
 
@@ -2093,6 +2368,7 @@ def format_schedule_report_text(
                     sr_offset=pi * per,
                     page_no=pi + 1,
                     page_count=page_count,
+                    line_w=line_w,
                 )
             )
         return f"\n{_PAGE_BREAK}\n".join(blocks)
@@ -2105,6 +2381,7 @@ def format_schedule_report_text(
         sr_offset=0,
         page_no=1,
         page_count=1,
+        line_w=line_w,
     )
 
 
@@ -2136,17 +2413,18 @@ def print_schedule_report_dot_matrix(
     rows = list(plain.get("rows") or [])
     total_qty = plain.get("total_qty")
 
-    if layout_key.startswith("land"):
-        text = format_report_text(title, headers, rows, paper=paper_u)
-        draft = True
-    else:
-        text = format_schedule_report_text(
-            title, subtitle, headers, rows,
-            total_qty=total_qty,
-            dm_style=style,
-            borders=use_borders,
-        )
-        draft = True
+    # Landscape used to print the plain export report instead of the register, so the
+    # stacked Date/Bill, the Sign column and the total simply disappeared. Both choices
+    # print the register now; landscape only gives it the wider page.
+    wide = layout_key.startswith("land")
+    text = format_schedule_report_text(
+        title, subtitle, headers, rows,
+        total_qty=total_qty,
+        dm_style=style,
+        borders=use_borders,
+        line_w=SCHEDULE_LANDSCAPE_COLS if wide else SCHEDULE_PORTRAIT_COLS,
+    )
+    draft = True
 
     layout = _layout_for_paper(paper_u)
     payload = render_escp_document(

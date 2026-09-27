@@ -589,7 +589,9 @@ def prepare_schedule_report_display(
         out_headers.append(title)
         builders.append(fn)
 
-    if hset & {"Date", "Bill No"}:
+    if "Date / Bill" in hset:       # already merged by an earlier pass
+        add_col("Date / Bill", lambda d: _esc_html(d.get("Date / Bill", "")))
+    elif hset & {"Date", "Bill No"}:
         add_col(
             "Date / Bill",
             lambda d: _cell_two_line(
@@ -612,6 +614,11 @@ def prepare_schedule_report_display(
 
         add_col("Medicine", _medicine_cell)
 
+    # "Batch/Expiry" arrives already merged when the Sign preset has reshaped the
+    # register first; it used to fall through this list and the batch and expiry
+    # vanished from the printed H1 register -- the very data the signature is against.
+    if "Batch/Expiry" in hset:
+        add_col("Batch/Expiry", lambda d: _esc_html(d.get("Batch/Expiry", "")))
     for col in ("Batch", "Expiry", "Schedule"):
         if col in hset:
             add_col(col, lambda d, c=col: _esc_html(d.get(c, "")))
@@ -619,6 +626,9 @@ def prepare_schedule_report_display(
     if "Qty" in hset:
         qty_out_idx = len(out_headers)
         add_col("Qty", lambda d: _esc_html(d.get("Qty", "")))
+
+    if "Sign" in hset:      # the box the customer signs in, on the register itself
+        add_col("Sign", lambda d: _esc_html(d.get("Sign", "")))
 
     if not out_headers:
         out_headers = [h for h in headers if h not in _PORTRAIT_SKIP_COLS]

@@ -1194,6 +1194,23 @@ def get_contacts(conn: sqlite3.Connection) -> dict[str, Any]:
     if is_online_mode():
         from core.online_catalog import customers, suppliers, doctors
 
+        def _due(stored: Any, pid: Any, live: dict[int, float] | None) -> float:
+            # The catalog row's total_due is a stored figure: the server only rewrites it when
+            # a receipt / return cascade runs, the desktop holds its copy for minutes (and a
+            # disk snapshot across restarts), and a bill saved without a customer_id, or one
+            # still queued on this PC, never reaches it. Sales' Previous Due and Payments work
+            # the due out from the ledger instead, so Contacts does the same and they agree.
+            if live is None:
+                return float(stored or 0)
+            try:
+                return float(live.get(int(pid or 0), 0.0))
+            except (TypeError, ValueError):
+                return float(stored or 0)
+
+        cust_rows = [c for c in customers() if isinstance(c, dict)][:500]
+        sup_rows = [s for s in suppliers() if isinstance(s, dict)]
+        live_c = _live_party_due_map("customer") if cust_rows else None
+        live_s = _live_party_due_map("supplier") if sup_rows else None
         return {
             "doctors": [
                 {
@@ -1212,11 +1229,12 @@ def get_contacts(conn: sqlite3.Connection) -> dict[str, Any]:
                     "phone": c.get("phone") or "",
                     "address": c.get("address") or "",
                     "village": c.get("address") or "",
-                    "total_due": float(c.get("total_due") or 0),
+                    "total_due": _due(
+                        c.get("total_due"), c.get("id") or c.get("local_id"), live_c
+                    ),
                 }
-                for c in customers()
-                if isinstance(c, dict)
-            ][:500],
+                for c in cust_rows
+            ],
             "suppliers": [
                 {
                     "id": s.get("id") or s.get("local_id"),
@@ -1224,10 +1242,11 @@ def get_contacts(conn: sqlite3.Connection) -> dict[str, Any]:
                     "phone": s.get("phone") or "",
                     "gstin": s.get("gstin") or "",
                     "address": s.get("address") or "",
-                    "total_due": float(s.get("total_due") or 0),
+                    "total_due": _due(
+                        s.get("total_due"), s.get("id") or s.get("local_id"), live_s
+                    ),
                 }
-                for s in suppliers()
-                if isinstance(s, dict)
+                for s in sup_rows
             ],
             "villages": load_villages(conn),
             "default_village": get_default_village(conn),
@@ -1873,10 +1892,34 @@ def _rows_any(data: dict | None) -> list:
     return []
 
 
-def _apply_live_party_dues(kind: str, parties: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Replace catalog total_due with FIFO remaining so Payment outstanding is live."""
-    if not parties:
-        return parties
+def _all_online_sales_rows(sq) -> list:
+    """Every Online sale, page after page (the server hands out at most 5000 a call).
+
+    Newest first, so a single capped read silently dropped a big shop's OLDEST bills: the
+    customer's receipts then had nothing to clear against and the due came out too low
+    (or the customer vanished from the dues altogether).
+    """
+    from core.desktop_pages_service import (
+        SALES_HISTORY_ROW_CEILING,
+        _all_sales_history_rows,
+    )
+
+    cap = max(SALES_HISTORY_ROW_CEILING, 200000)
+    return _rows_any(
+        _all_sales_history_rows(
+            sq, cap, from_date="2000-01-01", to_date="2099-12-31"
+        )
+        or {}
+    )
+
+
+def _live_party_due_map(kind: str) -> dict[int, float] | None:
+    """party id -> remaining due, from the ledger (bills, receipts, returns), Online.
+
+    The same oldest-bill-first arithmetic Sales (online_customer_remaining_due) and Purchase
+    History use. None when the ledger could not be read; a party with no open bill is simply
+    absent (its due is 0).
+    """
     try:
         from core import store_query_client as sq
         from core.online_mutation_queue import merge_server_rows
@@ -1890,12 +1933,7 @@ def _apply_live_party_dues(kind: str, parties: list[dict[str, Any]]) -> list[dic
             )
 
             sales = merge_server_rows(
-                _rows_any(
-                    sq.list_sales(
-                        from_date="2000-01-01", to_date="2099-12-31", limit=5000
-                    )
-                    or {}
-                ),
+                _all_online_sales_rows(sq),
                 overlay_sales_dicts(),
                 collection="sales",
             )
@@ -1909,11 +1947,15 @@ def _apply_live_party_dues(kind: str, parties: list[dict[str, Any]]) -> list[dic
                 overlay_sales_return_dicts(),
                 collection="sales_returns",
             )
+            # Fills customer_id from the name on bills saved without one, so the
+            # loop below books them to the right customer too.
             fifo = fifo_sales_remaining_by_bill(sales, pays, rets)
             dues: dict[int, float] = {}
             for r in sales:
                 if not isinstance(r, dict) or r.get("deleted"):
                     continue
+                if int(r.get("is_autosave") or 0):
+                    continue  # a draft owes nothing
                 try:
                     cid = int(r.get("customer_id") or 0)
                     sid = int(r.get("id") or r.get("local_id") or 0)
@@ -1923,17 +1965,10 @@ def _apply_live_party_dues(kind: str, parties: list[dict[str, Any]]) -> list[dic
                     continue
                 hit = fifo.get(sid)
                 rem = float(hit[0]) if hit is not None else float(
-                    r.get("due_amount") or 0
+                    r.get("due_amount") or r.get("total_due") or 0
                 )
                 dues[cid] = round(dues.get(cid, 0.0) + rem, 2)
-            for p in parties:
-                try:
-                    pid = int(p.get("id") or 0)
-                except (TypeError, ValueError):
-                    pid = 0
-                if pid in dues:
-                    p["due"] = dues[pid]
-            return parties
+            return dues
 
         from core.due_fifo import fifo_paid_via_by_bill, purchase_remaining_and_via
         from core.online_mutation_queue import (
@@ -1961,6 +1996,8 @@ def _apply_live_party_dues(kind: str, parties: list[dict[str, Any]]) -> list[dic
         for r in purch:
             if not isinstance(r, dict) or r.get("deleted"):
                 continue
+            if int(r.get("is_autosave") or 0):
+                continue
             try:
                 sid = int(r.get("supplier_id") or 0)
                 pid = int(r.get("id") or r.get("local_id") or 0)
@@ -1970,15 +2007,26 @@ def _apply_live_party_dues(kind: str, parties: list[dict[str, Any]]) -> list[dic
                 continue
             rem, _via = purchase_remaining_and_via(r, fifo.get(pid, 0.0))
             dues[sid] = round(dues.get(sid, 0.0) + rem, 2)
-        for p in parties:
-            try:
-                pid = int(p.get("id") or 0)
-            except (TypeError, ValueError):
-                pid = 0
-            if pid in dues:
-                p["due"] = dues[pid]
-    except Exception:
-        pass
+        return dues
+    except Exception as exc:
+        log.warning("live %s dues: %s", kind, exc)
+        return None
+
+
+def _apply_live_party_dues(kind: str, parties: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Replace catalog total_due with FIFO remaining so Payment outstanding is live."""
+    if not parties:
+        return parties
+    dues = _live_party_due_map(kind)
+    if not dues:
+        return parties
+    for p in parties:
+        try:
+            pid = int(p.get("id") or 0)
+        except (TypeError, ValueError):
+            pid = 0
+        if pid in dues:
+            p["due"] = dues[pid]
     return parties
 
 
