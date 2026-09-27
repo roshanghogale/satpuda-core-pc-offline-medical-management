@@ -1,6 +1,7 @@
 """Read helpers for Tauri pages — same store DB as python main.py (Tk)."""
 from __future__ import annotations
 
+import re
 import time
 from datetime import date, datetime
 from typing import Any, Optional
@@ -3069,6 +3070,22 @@ def _sales_village_lists(conn) -> tuple[list[str], str]:
         return [], ""
 
 
+def _sane_bill_date(bill_date: Any):
+    """The Bill Date box as the owner types a year: 2 -> 20 -> 202 -> 2026. The
+    browser reports every step ("0020-07-21"), and each one asked the server for
+    that year's next number -- a 500 on the server, 118 times (2026-09-27). A date
+    whose year is not 2000-2100 is treated as not given (today)."""
+    if bill_date in (None, ""):
+        return None
+    if hasattr(bill_date, "year"):
+        return bill_date if 2000 <= bill_date.year <= 2100 else None
+    s = str(bill_date).strip()[:10]
+    m = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", s)
+    if not m or not (2000 <= int(m.group(1)) <= 2100):
+        return None
+    return s
+
+
 def _next_sales_bill_hint(conn, bill_date: Any = None) -> str:
     """Next bill number for a bill dated ``bill_date`` (today when blank).
 
@@ -3076,6 +3093,7 @@ def _next_sales_bill_hint(conn, bill_date: Any = None) -> str:
     20 March shows the old year's next number. This always asked for today's, so a
     back-dated bill showed a number it was never going to get.
     """
+    bill_date = _sane_bill_date(bill_date)
     try:
         from core.fy_serial import next_sales_bill_hint
 

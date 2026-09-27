@@ -827,25 +827,69 @@ def ensure_store_session(
     # sync_hint.source_device_id matched every peer — so each device treated the
     # others' writes as its own echo and skipped the live UI refresh.
     device = device_id or _pc_device_id() or store_key or "mac2-pc"
-    data = pair_store(
-        android_key=android_key,
-        store_name=store_name,
-        device_id=device,
-        device_type="pc",
-        device_name=f"Mac2:{store_key}",
-    )
-    store = data.get("store") or {}
-    session = {
-        "token": data.get("token"),
-        "store_id": store.get("store_id"),
-        "store_key": store.get("store_key") or store_key,
-        "store_name": store.get("store_name") or store_name,
-        "android_key": store.get("android_key") or android_key,
-        "device_id": device,
-        "paired_at": _dt.datetime.utcnow().isoformat() + "Z",
-    }
-    save_session(store_key, session)
+    # One pairing at a time. A page opens several store calls at once; when the
+    # token had run out each of them re-paired on its own -- store #127's PC asked
+    # /auth/pair about fifteen times in two seconds, 711 times in half an hour
+    # (2026-09-27). The first caller pairs; the others take the session it made.
+    with _PAIR_LOCK:
+        just = load_session(store_key)
+        if (just.get("token") or "").strip() and _paired_within(just, _PAIR_REUSE_SEC):
+            return just
+        refused = _PAIR_REFUSED.get(store_key)
+        if refused and time.time() < refused[0]:
+            raise refused[2]          # refused a moment ago: not asked again until the wait is over
+        try:
+            data = pair_store(
+                android_key=android_key,
+                store_name=store_name,
+                device_id=device,
+                device_type="pc",
+                device_name=f"Mac2:{store_key}",
+            )
+        except ServerHttpError as exc:
+            if exc.status in (401, 403, 404):
+                tries = (refused[1] if refused else 0) + 1
+                wait = min(_PAIR_BACKOFF_MAX_SEC, _PAIR_BACKOFF_FIRST_SEC * 2 ** (tries - 1))
+                _PAIR_REFUSED[store_key] = (time.time() + wait, tries, exc)
+            raise
+        _PAIR_REFUSED.pop(store_key, None)
+        store = data.get("store") or {}
+        session = {
+            "token": data.get("token"),
+            "store_id": store.get("store_id"),
+            "store_key": store.get("store_key") or store_key,
+            "store_name": store.get("store_name") or store_name,
+            "android_key": store.get("android_key") or android_key,
+            "device_id": device,
+            "paired_at": _dt.datetime.utcnow().isoformat() + "Z",
+        }
+        save_session(store_key, session)
+    # The server's name for the store is the one the shop sees from now on, so the
+    # next pairing sends that and not a folder key like "Store_Shree_Gajanan_...".
+    if store.get("store_name"):
+        try:
+            from core.store_manager import adopt_server_display_name
+
+            adopt_server_display_name(store_key, str(store.get("store_name")))
+        except Exception:
+            pass
     return session
+
+
+_PAIR_LOCK = threading.Lock()
+_PAIR_REUSE_SEC = 10.0            # a session paired this recently is taken as it is
+_PAIR_BACKOFF_FIRST_SEC = 30.0    # a refused pairing waits 30 s, then 60, 120 ... up to 10 min
+_PAIR_BACKOFF_MAX_SEC = 600.0
+_PAIR_REFUSED: dict = {}          # store_key -> (not before, refusals in a row, the error)
+
+
+def _paired_within(session: dict, seconds: float) -> bool:
+    at = str(session.get("paired_at") or "").rstrip("Z")
+    try:
+        when = _dt.datetime.fromisoformat(at)
+    except ValueError:
+        return False
+    return (_dt.datetime.utcnow() - when).total_seconds() < seconds
 
 
 def store_token_for_active(force_pair: bool = False) -> str:

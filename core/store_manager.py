@@ -386,6 +386,28 @@ def get_active_store() -> Optional[dict]:
     return None
 
 
+def adopt_server_display_name(store_key: str, server_name: str) -> bool:
+    """After the server paired this PC by its SC- key: show the server's name for the store.
+
+    Only the label changes; the folder key (``Store_...``), the database and the
+    Drive folder stay as they are. A PC whose label was its folder key used to send
+    that to the server when it re-paired and was refused (2026-09-27, store #127).
+    """
+    name = normalize_display_name(server_name)
+    if not store_key or not name:
+        return False
+    reg = load_registry()
+    changed = False
+    for s in reg.get('stores') or []:
+        if s.get('store_key') == store_key and normalize_display_name(s.get('display_name', '')) != name:
+            s['display_name'] = name
+            s['display_name_from_server'] = True
+            changed = True
+    if changed:
+        save_registry(reg)
+    return changed
+
+
 def get_active_display_name() -> str:
     store = get_active_store()
     if store:

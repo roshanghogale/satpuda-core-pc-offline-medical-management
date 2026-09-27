@@ -501,6 +501,8 @@ def next_sales_bill_hint(
             if token:
                 raw = bill_date or date.today()
                 date_s = raw.isoformat() if hasattr(raw, "isoformat") else str(raw)[:10]
+                if not (date_s[:4].isdigit() and 2000 <= int(date_s[:4]) <= 2100):
+                    date_s = date.today().isoformat()     # a year still being typed ("0020")
                 data = api.peek_fy(token, "sales", date_s, timeout=4.0) or {}
                 hint = _hint_from_peek_payload(data)
                 if hint:
