@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useDebouncedFilterEffect, useFilterEffect } from '../hooks/useLiveFilters'
 import { DayPresetRow } from '../components/DayPresets'
+import { isAllValue, pickOption, presetRange, RANGE_WORDS, registerVoicePage, type VoiceHandler } from '../voice/voiceBus'
 import type { AppNavigate } from '../App'
 import { ensureLocalEngine } from '../backend'
 import { usePageHotkeys, focusPageFilter } from '../hooks/usePageHotkeys'
@@ -611,6 +612,83 @@ export function SalesHistoryPage({
     })
   }
 
+  // ── Voice (test build): "aajche bill", "due only", "export ughad" ──
+  // Sets the same state the preset buttons, dropdowns and buttons above set.
+  const voiceHandlerRef = useRef<VoiceHandler>(async () => null)
+  voiceHandlerRef.current = async (cmd) => {
+    const a = cmd.args || {}
+    const PAGE_SAY = 'Sales History'
+    if (cmd.intent === 'page_filter') {
+      const f = String(a.filter || '')
+      const all = isAllValue(a.value)
+      if (f === 'clear') {
+        clear()
+        return { ok: true, say: `${PAGE_SAY}: sagle filter kadhle` }
+      }
+      if (f === 'range') {
+        const r = presetRange(a.value)
+        if (!r) return { ok: false, say: `"${a.value}" he divas samajle nahi` }
+        // Exactly what the Today / Yesterday / … buttons do.
+        seedingDatesRef.current = false
+        setFrom(r.from)
+        setTo(r.to)
+        return { ok: true, say: `${PAGE_SAY}: ${RANGE_WORDS[r.key]}` }
+      }
+      if (f === 'due') {
+        const v = all ? '' : pickOption(a.value, DUE_OPTIONS.map((o) => o.value))
+        if (v == null) return { ok: false, say: `Due filter "${a.value}" nahi` }
+        setDue(v)
+        return { ok: true, say: `${PAGE_SAY} due: ${v || 'All'}` }
+      }
+      if (f === 'schedule') {
+        const v = all ? '' : pickOption(a.value, schedules)
+        if (v == null) return { ok: false, say: `Schedule "${a.value}" yaadit nahi` }
+        setSchedule(v)
+        return { ok: true, say: `${PAGE_SAY} schedule: ${v || 'All'}` }
+      }
+      if (f === 'sort') {
+        const v = pickOption(a.value, sortOptions)
+        if (v == null) return { ok: false, say: `Sort "${a.value}" nahi` }
+        setSort(v)
+        return { ok: true, say: `${PAGE_SAY} kram: ${v}` }
+      }
+      return { ok: false, say: `${PAGE_SAY} var "${f}" filter nahi` }
+    }
+    if (cmd.intent === 'search') {
+      setQ(String(a.query || ''))
+      return { ok: true, say: `${PAGE_SAY} shodh: ${a.query}` }
+    }
+    if (cmd.intent === 'page_action') {
+      const act = String(a.action || '')
+      if (act === 'export') {
+        setExportOpen(true)
+        return { ok: true, say: 'Sales History export ughadla' }
+      }
+      if (act === 'refresh') {
+        void load()
+        return { ok: true, say: 'Sales History refresh kela' }
+      }
+      if (act === 'print_all') {
+        // Opens the picker only; printing is still the shop's click there.
+        setPrintAllSchedule('')
+        void openPrintAll()
+        return { ok: true, say: 'Print All Bills ughadla (nivda ani print kara)' }
+      }
+      if (act === 'bill_details' || act === 'bill_preview') {
+        const row = selectedRow ?? 0
+        const id = idAt(row)
+        if (!id) return { ok: false, say: 'Yaadit bill nahi' }
+        const billNo = String(data?.rows?.[row]?.[0] ?? id)
+        if (act === 'bill_details') void viewBillDetails(id)
+        else void openBillPreview(id)
+        return { ok: true, say: `Bill ${billNo}: ${act === 'bill_details' ? 'mahiti' : 'preview'} ughadla` }
+      }
+      return { ok: false, say: `Sales History var "${act}" he kaam voice var nahi` }
+    }
+    return null
+  }
+  useEffect(() => registerVoicePage('sales_history', () => voiceHandlerRef.current), [])
+
   return (
     <PageRoot className="list-page">
       <SectionFrame title="Filter Options">
@@ -643,6 +721,7 @@ export function SalesHistoryPage({
                 if (e.key === 'Enter') void load()
               }}
               placeholder="Bill no / customer / phone / doctor"
+              data-voice-field="search"
             />
           </Field>
           <Field label="Medicine Name">
@@ -664,6 +743,7 @@ export function SalesHistoryPage({
               maxVisible={80}
               listLabel="Medicines"
               placeholder="Search by medicine on bill"
+              voiceField="medicine"
             />
           </Field>
           <Field label="Batch Number">
@@ -697,6 +777,7 @@ export function SalesHistoryPage({
               listLabel="Customers"
               placeholder="Customer name"
               pageFilter
+              voiceField="customer"
             />
           </Field>
           <Field label="From Date">

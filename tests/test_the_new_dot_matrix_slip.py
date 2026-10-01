@@ -161,3 +161,56 @@ class WhatTheShopPicked(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheBoldTotalReachesThePaper(unittest.TestCase):
+    """1 Oct 2026: with "Total printed bold" on, the slip printed "Total" and no amount.
+    The A6 printer line was cut to 64 letters with the bold codes counted as letters,
+    so the last 10 -- the figure -- fell off. The bytes the printer gets are checked here."""
+
+    def raw(self, **settings):
+        ctx = _Ctx(3)
+        merged = dmp._settings_for_ctx(shop_settings(dot_matrix_slip_height_cm=10.16, **settings), ctx)
+        text = dmp.format_bill_text(ctx, merged)
+        total_row = next(l for l in dmp.printed_text(text).splitlines() if "Total" in l and "SIGN" in l)
+        amount = total_row.split("Total")[-1].strip()
+        return dmp.render_escp_document(text, paper="A6", layout=dmp._dm(merged)), amount
+
+    def test_the_amount_is_printed_in_bold(self):
+        payload, amount = self.raw(dot_matrix_bold_total=True)
+        self.assertTrue(amount and amount.replace(".", "").isdigit(), amount)
+        at = payload.index(b"\x1bE")
+        row = payload[at:payload.index(b"\r\n", at)]
+        self.assertIn(amount.encode(), row)
+        self.assertIn(b"\x1bF", row)
+        self.assertNotIn(b"BOLD---", payload)
+
+    def test_the_amount_is_printed_without_bold_too(self):
+        payload, amount = self.raw(dot_matrix_bold_total=False)
+        self.assertIn(amount.encode(), payload)
+
+    def test_every_printed_line_keeps_its_width(self):
+        payload, _ = self.raw(dot_matrix_bold_total=True)
+        body = payload.split(b"\r\n")[1:-1]
+        widths = {len(row.replace(b"\x1bE", b"").replace(b"\x1bF", b"")) for row in body if row}
+        self.assertLessEqual(len(widths), 1, widths)
+
+
+class TheWholeBillInBold(unittest.TestCase):
+    def test_off_by_default(self):
+        self.assertFalse(DEFAULT_BILL_PRINT_SETTINGS["dot_matrix_bold_all"])
+
+    def test_every_line_is_bold_and_the_paper_is_the_same(self):
+        ctx = _Ctx(3)
+        plain = dmp.format_bill_text(ctx, dmp._settings_for_ctx(shop_settings(dot_matrix_slip_height_cm=10.16), ctx))
+        bold = dmp.format_bill_text(ctx, dmp._settings_for_ctx(
+            shop_settings(dot_matrix_slip_height_cm=10.16, dot_matrix_bold_all=True), ctx))
+        self.assertEqual(dmp.printed_text(bold), dmp.printed_text(plain))
+        for line in bold.splitlines():
+            if line.strip():
+                self.assertTrue(line.startswith("---BOLD---") and line.endswith("---NOBOLD---"), line)
+        merged = dmp._settings_for_ctx(shop_settings(dot_matrix_slip_height_cm=10.16, dot_matrix_bold_all=True), ctx)
+        payload = dmp.render_escp_document(bold, paper="A6", layout=dmp._dm(merged))
+        rows = [r for r in payload.split(b"\r\n")[1:-1] if r.strip(b" \x1bEF")]
+        self.assertTrue(all(b"\x1bE" in r for r in rows))
+        self.assertNotIn(b"BOLD---", payload)

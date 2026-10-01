@@ -5,6 +5,8 @@ import {
   type MedicineBatch,
   type MedicineNameRow,
 } from '../pagesApi'
+import { isVoiceModeOn } from '../voice/voiceMode'
+import { VOICE_CLOSE_EVENT, VOICE_OPEN_EVENT } from '../voice/voiceField'
 
 type Props = {
   billDate: string
@@ -18,6 +20,8 @@ type Props = {
   inputRef?: React.RefObject<HTMLInputElement | null>
   /** Enter on an empty name (classic: jump to overall discount). */
   onEmptyEnter?: () => void
+  /** Name voice finds this field by. */
+  voiceField?: string
 }
 
 /**
@@ -35,6 +39,7 @@ export function TwoStepMedicinePicker({
   onBatchPicked,
   inputRef,
   onEmptyEnter,
+  voiceField = 'medicine',
 }: Props) {
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const localInputRef = useRef<HTMLInputElement | null>(null)
@@ -179,6 +184,28 @@ export function TwoStepMedicinePicker({
         if (req === nameReqRef.current) setLoadingBoth(false)
       })
   }
+
+  // Voice asked for this list (voice mode only stops it opening by itself).
+  const voiceOpenRef = useRef(() => {})
+  voiceOpenRef.current = () => {
+    if (stepRef.current === 0) openStep1()
+  }
+  const voiceCloseRef = useRef(() => {})
+  voiceCloseRef.current = () => {
+    if (stepRef.current > 0) closeList()
+  }
+  useEffect(() => {
+    const el = localInputRef.current
+    if (!el) return
+    const openIt = () => voiceOpenRef.current()
+    const closeIt = () => voiceCloseRef.current()
+    el.addEventListener(VOICE_OPEN_EVENT, openIt)
+    el.addEventListener(VOICE_CLOSE_EVENT, closeIt)
+    return () => {
+      el.removeEventListener(VOICE_OPEN_EVENT, openIt)
+      el.removeEventListener(VOICE_CLOSE_EVENT, closeIt)
+    }
+  }, [])
 
   const pickName = async (row: MedicineNameRow) => {
     pickingRef.current = true
@@ -334,7 +361,7 @@ export function TwoStepMedicinePicker({
   }
 
   return (
-    <div className="two-step-med" ref={wrapRef}>
+    <div className="two-step-med" ref={wrapRef} data-voice-wrap="">
       <input
         ref={setInputRef}
         type="text"
@@ -346,6 +373,7 @@ export function TwoStepMedicinePicker({
         data-nav-chain={navChain}
         data-nav-enter={listOpen ? undefined : 'med-next'}
         data-nav-skip-enter={listOpen ? '1' : undefined}
+        data-voice-field={voiceField || undefined}
         placeholder="Search medicine…"
         autoComplete="off"
         onChange={(e) => {
@@ -356,7 +384,8 @@ export function TwoStepMedicinePicker({
         }}
         onFocus={() => {
           if (stepRef.current === 2) return
-          if (!value.trim()) openStep1()
+          // A field voice focused stays closed: nobody is at the keyboard to close it.
+          if (!value.trim() && !isVoiceModeOn()) openStep1()
         }}
         onBlur={(e) => {
           const next = e.relatedTarget as Node | null
@@ -386,6 +415,7 @@ export function TwoStepMedicinePicker({
               key={n.name}
               type="button"
               className={`two-step-row${i === hi1 ? ' active' : ''}`}
+              data-voice-label={n.name}
               onMouseEnter={() => {
                 hi1Ref.current = i
                 setHi1(i)
@@ -423,6 +453,7 @@ export function TwoStepMedicinePicker({
               key={`${b.id}-${b.batch}-${b.expiry}`}
               type="button"
               className={`two-step-row two-step-row-batch${i === hi2 ? ' active' : ''}`}
+              data-voice-label={`${b.batch || '(none)'} · exp ${b.expiry || '—'} · ${availOf(b)}`}
               onMouseEnter={() => {
                 hi2Ref.current = i
                 setHi2(i)

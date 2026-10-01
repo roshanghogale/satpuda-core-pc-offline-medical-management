@@ -33,9 +33,13 @@ import {
   type SalesLinePayload,
   type SalesRuntimePrefs,
 } from '../pagesApi'
+import { fetchRegulars, saveRegulars, type RegularItem } from '../pagesApi'
 import { mutateContact } from '../settingsApi'
 import { VILLAGES_CHANGED_EVENT, dispatchPaymentsChanged } from '../syncRefresh'
 import { useLayoutRowCount } from '../layoutRows'
+import { registerVoicePage, type VoiceHandler } from '../voice/voiceBus'
+import { voicePicked } from '../voice/voiceField'
+import { SHORTCUTS_EVENT, shortcutBadge, voiceShortcuts, type ShortcutMap } from '../voice/voiceClient'
 import {
   billDiscountLossMessages,
   billMargin,
@@ -54,6 +58,7 @@ import {
   type RecoveredSale,
 } from './SalesDialogs'
 import { TwoStepMedicinePicker } from './TwoStepMedicinePicker'
+import { RegularManagerDialog, RegularOfferDialog } from './RegularMedicinesDialog'
 import { belowReturnedProblem } from './billLineRules'
 import { ModernCombo } from './ModernCombo'
 import { RowContextMenu } from './MedicineEditDialog'
@@ -350,6 +355,27 @@ export function SalesPage({
   onNavigate?: AppNavigate
 }) {
   const [defaults, setDefaults] = useState<SalesFormDefaults | null>(null)
+  // Voice shortcuts ("doctor 2"): upper-cased doctor name -> its number, shown as a badge.
+  const [doctorNumbers, setDoctorNumbers] = useState<Record<string, string>>({})
+  useEffect(() => {
+    const take = (m: ShortcutMap) => {
+      const out: Record<string, string> = {}
+      for (const [n, name] of Object.entries(m.doctor || {})) out[name.trim().toUpperCase()] = n
+      setDoctorNumbers(out)
+    }
+    let alive = true
+    // No voice service: no badges, nothing else changes.
+    voiceShortcuts().then((r) => alive && take(r.shortcuts)).catch(() => {})
+    const on = (e: Event) => {
+      const m = (e as CustomEvent<ShortcutMap>).detail
+      if (m) take(m)
+    }
+    window.addEventListener(SHORTCUTS_EVENT, on)
+    return () => {
+      alive = false
+      window.removeEventListener(SHORTCUTS_EVENT, on)
+    }
+  }, [])
   const [prefs, setPrefs] = useState<SalesRuntimePrefs | null>(null)
   const [customers, setCustomers] = useState<CustomerDetail[]>([])
   const [selectedMedId, setSelectedMedId] = useState<number | null>(null)
@@ -520,7 +546,12 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
     [activeTab],
   )
 
-  const showAlert = useCallback((a: AlertState) => setAlert(a), [])
+  /** The last box shown, so a spoken save can say WHY it did not save. */
+  const lastAlertRef = useRef<AlertState | null>(null)
+  const showAlert = useCallback((a: AlertState) => {
+    lastAlertRef.current = a
+    setAlert(a)
+  }, [])
 
   /** Focus target after closing validation alerts (doctor / customer / etc.). */
   const focusAfterCode = useCallback(
@@ -1133,7 +1164,7 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
           prevDue: 0,
           prevCredit: 0,
         })
-        return
+        return null
       }
       if (replaceContact) {
         contactDirtyRef.current = { phone: false, address: false }
@@ -1162,10 +1193,10 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
       } else {
         patchTab(duePatch)
       }
-      if (!force) return
+      if (!force) return local?.id ?? null
       try {
         const res = await lookupCustomerByName(trimmed, true)
-        if (seq !== customerLookupSeq.current) return
+        if (seq !== customerLookupSeq.current) return null
         if (!res.found || !res.customer) {
           if (!local) {
             patchTab({
@@ -1175,7 +1206,7 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
               prevCredit: 0,
             })
           }
-          return
+          return local?.id ?? null
         }
         const c = res.customer
         const contactPatch: Partial<SaleTab> = {
@@ -1202,15 +1233,43 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
           next[idx] = { ...next[idx], ...c }
           return next
         })
+        return c.id ?? null
       } catch {
         /* keep optimistic local balance */
+        return local?.id ?? null
       }
     },
     [customers, defaults?.default_village, patchTab],
   )
 
+  // ── Regular medicines: the customer's own standing list (RegularMedicinesDialog) ──
+  const [regularOffer, setRegularOffer] = useState<{ customerId: number; customer: string; items: RegularItem[] } | null>(null)
+  const [regularEdit, setRegularEdit] = useState<{ customerId: number | null; customer: string; items: RegularItem[] } | null>(null)
+  const [regularBusy, setRegularBusy] = useState(false)
+  const regularOfferedRef = useRef<string>('')
+
+  /** Picked a customer who has a regular list: offer it, once per bill and customer. */
+  const offerRegulars = async (customerId: number | null, name: string, force = false) => {
+    if (!customerId) return false
+    const key = `${activeTab}:${customerId}`
+    if (!force && regularOfferedRef.current === key) return false
+    try {
+      const r = await fetchRegulars(customerId)
+      if (!r.items?.length) return false
+      regularOfferedRef.current = key
+      setRegularOffer({ customerId, customer: r.customer || name, items: r.items })
+      return true
+    } catch {
+      return false
+    }
+  }
+
   const onPickCustomer = (name: string) => {
-    void applyCustomerBalance(name, { force: true, replaceContact: true })
+    void applyCustomerBalance(name, { force: true, replaceContact: true }).then((id) => {
+      void offerRegulars(id ?? tabRef.current.customerId ?? null, name)
+    })
+    // A medicine voice held back for want of a customer goes on now.
+    voicePicked('customer', name)
   }
 
   const rememberVillage = useCallback(async (raw: string) => {
@@ -1525,10 +1584,12 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
     return true
   }
 
-  const removeLineAt = (idx: number) => {
+  /** False when a return on the bill refused it (the box says why). */
+  const removeLineAt = (idx: number): boolean => {
     const next = tabRef.current.items.filter((_, j) => j !== idx)
-    if (returnsBlock(next)) return
+    if (returnsBlock(next)) return false
     patchTab({ items: next })
+    return true
   }
 
   const startLineEdit = (idx: number) => {
@@ -2233,6 +2294,406 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
     runConfiguredEnter,
   }
 
+  // ── Voice (test build) ──────────────────────────────────────────────────
+  // A spoken command lands here through voice/voiceBus. It drives the SAME
+  // functions the keyboard does -- buildSalesLine, mergeOrPushLine, patchTab,
+  // saveSales, printSlot -- so every stock, expiry and doctor check the typed
+  // bill gets, the spoken bill gets too. Save and print never arrive here
+  // unconfirmed: the voice bar asks "Yes / No" first.
+  const lastVoiceAddRef = useRef<{ id: number; step: number; name: string; unitWord: string } | null>(null)
+  const stripTypes = ['tablet', 'capsule', 'bolus']
+  const packOf = (unit: string) => {
+    const nums = (String(unit || '').match(/\d+/g) || []).map(Number).filter((n) => n > 0)
+    if (!nums.length) return 1
+    if (nums.length === 1) return nums[0]
+    return nums.slice(1).reduce((x, y) => x * y, 1)
+  }
+  const reservedNow = () => {
+    const map: Record<string, number> = {}
+    for (const it of tabRef.current.items) {
+      if (!it.id) continue
+      map[String(it.id)] = (map[String(it.id)] || 0) + (Number(it.qty) || 0)
+    }
+    return map
+  }
+  /** Until the bill shows `n` lines (a change made just now has rendered), at most ~0.6 s. */
+  const waitForLines = async (n: number) => {
+    for (let k = 0; k < 24 && tabRef.current.items.length !== n; k++) {
+      await new Promise((r) => window.setTimeout(r, 25))
+    }
+  }
+  const addById = async (id: number, qty: number) => {
+    const cur = tabRef.current
+    const r = await buildSalesLine({
+      medicine_id: id,
+      qty,
+      medicine_discount: 0,
+      bill_date: cur.billDate,
+      doctor_name: cur.doctor,
+      customer_name: cur.customer,
+      reserved: reservedNow(),
+    })
+    if (!r.ok || !r.line) return { ok: false, error: r.error || 'Jodta ala nahi', code: r.code }
+    lastAlertRef.current = null
+    mergeOrPushLine(lineFromPayload(r.line))
+    // A merge that would sell below cost asks in a box first: the line is not on the bill yet.
+    const box = lastAlertRef.current as AlertState | null
+    if (box) {
+      const first = (box.message || '').split('\n').map((x) => x.trim()).find(Boolean) || ''
+      return { ok: false, error: `${box.title}: ${first} — popup var "ho" mhana`, code: 'popup' }
+    }
+    return { ok: true, line: r.line }
+  }
+  /** One medicine by name, as typing it would add it: earliest expiry that covers the qty,
+   *  strips counted in tablets for strip medicines. Used by voice and the regular list. */
+  const addMedicineByName = async (name: string, said: number, unit: string) => {
+    const cur = tabRef.current
+    const res = await fetchMedicineBatches(name, { bill_date: cur.billDate, reserved: reservedNow() })
+    const batches = (res.batches || [])
+      .filter((b) => (Number(b.available ?? b.stock) || 0) > 0)
+      .sort((x, y) => String(x.expiry).localeCompare(String(y.expiry)))
+    if (!batches.length) return { ok: false as const, say: `${name}: stock nahi`, code: 'out_of_stock' }
+    const type = String(batches[0].type || '').toLowerCase()
+    const strip = stripTypes.includes(type)
+    const tps = strip ? packOf(batches[0].unit) : 1
+    const qty = Math.max(1, Math.round(unit === 'strip' && strip ? said * tps : said))
+    const batch = batches.find((b) => (Number(b.available ?? b.stock) || 0) >= qty) || batches[0]
+    const before = tabRef.current.items.length
+    const r = await addById(batch.id, qty)
+    if (!r.ok) return { ok: false as const, say: `${name}: ${r.error}`, code: r.code }
+    await waitForLines(before + 1).catch(() => undefined)
+    const unitWord =
+      unit === 'strip' && strip ? (said === 1 ? 'patta' : 'patte') : strip ? 'goli' : unit === 'unit' ? 'nag' : ''
+    return { ok: true as const, batch, step: unit === 'strip' && strip ? tps : 1, unitWord, strip, said }
+  }
+  /** The regular list on the bill, one medicine after another; what could not go on is told. */
+  const giveRegulars = async (items: RegularItem[]) => {
+    setRegularBusy(true)
+    const problems: string[] = []
+    let added = 0
+    try {
+      for (const it of items) {
+        const r = await addMedicineByName(it.name, Number(it.qty) || 1, it.unit || '')
+        if (r.ok) added += 1
+        else problems.push(r.code === 'doctor_required' ? `${it.name}: doctor lagto — aadhi doctor nivda` : r.say)
+      }
+    } finally {
+      setRegularBusy(false)
+      setRegularOffer(null)
+    }
+    if (problems.length) {
+      showAlert({
+        title: 'Regular aushadha',
+        message: `${added} bill madhe ghatli.\n\nHi rahili:\n${problems.join('\n')}`,
+        kind: 'warning',
+      })
+    }
+    return { added, problems }
+  }
+
+  const voiceHandlerRef = useRef<VoiceHandler>(async () => null)
+  voiceHandlerRef.current = async (cmd) => {
+    const a = cmd.args || {}
+    const t = tabRef.current
+
+    switch (cmd.intent) {
+      case 'new_bill': {
+        if (t.items.length) {
+          addTab()
+          return { ok: true, say: 'Navin bill ughadla (aadhicha bill tyachya tab madhe surakshit)' }
+        }
+        clearMedicineFields()
+        return { ok: true, say: 'Navin bill tayar' }
+      }
+
+      case 'add_medicine': {
+        const name = String(a.medicine || '')
+        const said = Number(a.qty) || 1
+        // "Dolo 650 10 de" with 2 already on the bill: the bill gets 10, not 12. Only
+        // "ajun / aankhi 10" (a.more) adds to what is there.
+        const sameMed = (it: LineItem) => {
+          const nm = String(it.name || it.medicine || '').trim().toUpperCase()
+          const w = name.trim().toUpperCase()
+          return !!w && (nm === w || nm.startsWith(w + ' ') || w.startsWith(nm + ' '))
+        }
+        const before = tabRef.current.items
+        const keep = before.filter((it) => !sameMed(it))
+        const replacing = !a.more && keep.length < before.length
+        if (replacing) {
+          if (returnsBlock(keep)) return { ok: false, say: `${name}: ya bill var return aahe — qty badalta yet nahi` }
+          patchTab({ items: keep })
+          await waitForLines(keep.length)
+        }
+        const r = await addMedicineByName(name, said, String(a.unit || ''))
+        if (!r.ok) {
+          if (replacing) patchTab({ items: before })     // nothing is lost when the new qty cannot go on
+          return { ok: false, say: r.say, code: r.code }
+        }
+        lastVoiceAddRef.current = {
+          id: r.batch.id,
+          step: r.step,
+          name,
+          unitWord: a.unit === 'strip' && r.strip ? 'patta' : r.unitWord,
+        }
+        return {
+          ok: true,
+          say:
+            `${name} × ${said} ${r.unitWord}`.trim() +
+            (replacing ? ' kele (aadhichi qty badalli)' : a.more ? ' ajun jodle' : ' jodla') +
+            ` · batch ${r.batch.batch} · exp ${r.batch.expiry}`,
+        }
+      }
+
+      case 'give_regulars': {
+        // "Regular de": the customer's regular list onto the bill
+        const cid = t.customerId
+        if (!cid) return { ok: false, say: 'Aadhi grahak nivda — mag "regular de" mhana' }
+        const reg = await fetchRegulars(cid).catch(() => null)
+        if (!reg || !reg.items?.length) return { ok: false, say: `${t.customer}: regular yaadi nahi` }
+        const out = await giveRegulars(reg.items)
+        return {
+          ok: out.added > 0,
+          say: `${t.customer}: ${out.added} regular aushadha ghatli` + (out.problems.length ? ` · ${out.problems.length} rahili` : ''),
+        }
+      }
+
+      case 'one_more': {
+        const lastAdd = lastVoiceAddRef.current
+        const lastLine = t.items[t.items.length - 1]
+        const id = lastAdd?.id ?? lastLine?.id
+        if (!id) return { ok: false, say: 'Bill madhe ajun kahich nahi' }
+        // "ajun 10": ten more of what was said last (its strips stay strips)
+        const many = Number(a.qty) > 0 ? Number(a.qty) : 1
+        const step = (lastAdd && lastAdd.id === id ? lastAdd.step : 1) * many
+        const r = await addById(id, step)
+        if (!r.ok) return { ok: false, say: String(r.error), code: r.code }
+        const nm = lastAdd?.name || lastLine?.name || ''
+        return {
+          ok: true,
+          say: `${nm} — ajun ${many === 1 ? 'ek' : many} ${lastAdd?.unitWord || ''} jodla`.replace(/\s+/g, ' '),
+        }
+      }
+
+      case 'remove_medicine': {
+        if (!t.items.length) return { ok: false, say: 'Kadhayla kahich nahi — bill rikama aahe' }
+        // "Dolo kadhun tak": the line of the medicine that was named, newest first.
+        const want = String(a.medicine || '').trim().toUpperCase()
+        const brand = want.split(/\s+/)[0] || want
+        let at = -1
+        for (let i = t.items.length - 1; i >= 0; i--) {
+          const nm = String(t.items[i].name || t.items[i].medicine || '').toUpperCase()
+          if (nm === want || nm.startsWith(want) || (brand && nm.split(/\s+/)[0] === brand)) {
+            at = i
+            break
+          }
+        }
+        if (at < 0) return { ok: false, say: `${a.medicine} bill madhe nahi` }
+        const gone = t.items[at]
+        // A saved bill with returns refuses the removal and says why in a box.
+        if (!removeLineAt(at)) {
+          return { ok: false, say: `${gone.name || gone.medicine}: kadhta yet nahi — screen var sandesh baga` }
+        }
+        if (lastVoiceAddRef.current && lastVoiceAddRef.current.id === gone.id) lastVoiceAddRef.current = null
+        return { ok: true, say: `${gone.name || gone.medicine} kadhla` }
+      }
+
+      case 'remove_last': {
+        if (!t.items.length) return { ok: false, say: 'Kadhayla kahich nahi — bill rikama aahe' }
+        const gone = t.items[t.items.length - 1]
+        if (!removeLineAt(t.items.length - 1)) {
+          return { ok: false, say: `${gone.name || gone.medicine}: kadhta yet nahi — screen var sandesh baga` }
+        }
+        lastVoiceAddRef.current = null
+        return { ok: true, say: `${gone.name || gone.medicine} kadhla` }
+      }
+
+      // "Dusri line kadh": the n-th line as the shop counts them on screen (1 = top).
+      case 'remove_line': {
+        const n = Number(a.n)
+        if (!Number.isInteger(n) || n < 1 || n > t.items.length) {
+          return { ok: false, say: `Bill madhe ${a.n ?? '?'} line nahit` }
+        }
+        const gone = t.items[n - 1]
+        if (!removeLineAt(n - 1)) {
+          return { ok: false, say: `${gone.name || gone.medicine}: kadhta yet nahi — screen var sandesh baga` }
+        }
+        if (lastVoiceAddRef.current && lastVoiceAddRef.current.id === gone.id) lastVoiceAddRef.current = null
+        return { ok: true, say: `${n} ri line kadhli: ${String(gone.name || gone.medicine || '').toUpperCase()}` }
+      }
+
+      case 'set_customer': {
+        const name = String(a.name || '').trim()
+        if (!name) return { ok: false, say: 'Grahakache naav sanga' }
+        patchTab({ customer: name })
+        onPickCustomer(name)
+        return { ok: true, say: `Grahak: ${name}${a.new ? ' (navin)' : ''}` }
+      }
+
+      case 'set_doctor': {
+        const name = String(a.name || '').trim()
+        // The doctor's number comes with the name, as when picked by hand.
+        const known = defaults?.doctor_phones?.[name.toUpperCase()]
+        patchTab(known ? { doctor: name, doctorPhone: known } : { doctor: name })
+        voicePicked('doctor', name)
+        return { ok: true, say: `Doctor: ${name}${known ? ` (${known})` : ''}` }
+      }
+
+      // "Doctor clear kar" / "grahak kadh": the name goes, and what came with it
+      // (the doctor's number; the customer's phone, balance and village).
+      case 'clear_field': {
+        const f = String(a.field || '').trim().toLowerCase()
+        if (f === 'doctor') {
+          patchTab({ doctor: '', doctorPhone: '' })
+          return { ok: true, say: 'Doctor pusla' }
+        }
+        if (f === 'customer') {
+          ++customerLookupSeq.current
+          contactDirtyRef.current = { phone: false, address: false }
+          patchTab({
+            customer: '',
+            customerId: null,
+            prevDue: 0,
+            prevCredit: 0,
+            phone: '',
+            address: defaults?.default_village || '',
+          })
+          return { ok: true, say: 'Grahak pusla' }
+        }
+        return null
+      }
+
+      case 'discount': {
+        const amt = Number(a.amount)
+        if (!Number.isFinite(amt) || amt < 0) return { ok: false, say: 'Discount kiti te sanga' }
+        const sub = t.items.reduce((sum, it) => sum + (Number(it.amount) || 0), 0)
+        if (a.percent) {
+          patchTab({ overallDiscPct: String(amt), overallDisc: String(overallDiscFromPct(sub, amt)) })
+          return { ok: true, say: `Discount ${amt}%` }
+        }
+        patchTab({
+          overallDisc: String(amt),
+          overallDiscPct: sub > 0 ? String(Math.round((amt / sub) * 10000) / 100) : '0',
+        })
+        return { ok: true, say: `Discount ₹${amt}` }
+      }
+
+      case 'cash':
+      case 'online': {
+        // An amount of 0 is said on purpose ("online zero", "online kadh"): it clears that
+        // field. Only no amount at all means "the whole bill".
+        const given = a.amount != null && a.amount !== '' && Number.isFinite(Number(a.amount)) && Number(a.amount) >= 0
+        let amt = Number(a.amount)
+        if (!given) amt = await freshPayable()
+        const other = cmd.intent === 'cash' ? 'online' : 'cash'
+        patchTab({
+          paymentMode: 'Cash',
+          [cmd.intent]: amt.toFixed(2),
+          ...(given ? {} : { [other]: '0' }),
+        } as Partial<SaleTab>)
+        return { ok: true, say: `${cmd.intent === 'cash' ? 'Cash' : 'Online'} ₹${amt.toFixed(2)}` }
+      }
+
+      case 'udhari': {
+        if (a.keep_paid) {
+          // "Cash 100, baki udhari": what was paid stays, the rest is due.
+          patchTab({ paymentMode: 'Due' })
+          return { ok: true, say: 'Baki udhari var (Due)' }
+        }
+        patchTab({ paymentMode: 'Due', cash: '0', online: '0' })
+        return { ok: true, say: 'Udhari var (Due)' }
+      }
+
+      case 'save_bill': {
+        if (!t.items.length) return { ok: false, say: 'Bill rikama aahe' }
+        lastAlertRef.current = null
+        const ok = await saveSales(false)
+        const box = lastAlertRef.current as AlertState | null
+        const firstLine = (box?.message || '').split('\n').map((x) => x.trim()).find(Boolean) || ''
+        if (ok) {
+          const no = /Bill (\S+) saved/.exec(box?.message || '')?.[1]
+          // The bar shows and says it; a plain "Bill Saved" box would only wait
+          // for an OK nobody needs to say. One with warnings stays to be read.
+          if (box && box.title === 'Bill Saved' && box.kind !== 'warning') {
+            setAlert((cur) => (cur === box ? null : cur))
+          }
+          return {
+            ok: true,
+            say: `Bill ${no ? `${no} ` : ''}save zala ✓${box?.kind === 'warning' ? ' — screen var sandesh baga' : ''}`,
+          }
+        }
+        if (box?.title === 'Discount Loss') {
+          return { ok: false, say: `Discount loss: ${firstLine} — tari save karu? Popup var "ho" mhana` }
+        }
+        if (box) return { ok: false, say: `Bill save zala nahi — ${box.title}: ${firstLine}` }
+        return {
+          ok: false,
+          say: savingRef.current
+            ? 'Bill save zala nahi — aadhicha save chalu aahe'
+            : 'Bill save zala nahi — bill ajun load hot aahe',
+        }
+      }
+
+      case 'clear_bill': {
+        // Everything on this bill: lines, customer, doctor, discount, payments.
+        // The voice bar has already asked "Bill clear karu?".
+        const num = (v: unknown) => Number(v) || 0
+        const blank =
+          !t.items.length &&
+          !String(t.customer || '').trim() &&
+          !String(t.doctor || '').trim() &&
+          !num(t.overallDisc) &&
+          !num(t.cash) &&
+          !num(t.online)
+        if (blank) return { ok: false, say: 'Bill aadhich rikama aahe' }
+        await clearForm()
+        lastVoiceAddRef.current = null
+        return { ok: true, say: 'Bill clear kela — aushadha, grahak, doctor, discount, payment sagla kadhla' }
+      }
+
+      case 'print_bill': {
+        await printSlot(1)
+        return { ok: true, say: 'Print pathavla' }
+      }
+
+      case 'search': {
+        setMedSearch(String(a.query || ''))
+        focusNavOrder(8)
+        return { ok: true, say: `Shodh: ${a.query}` }
+      }
+
+      // Windows the Sales screen opens from its buttons / F-keys. None of them
+      // saves anything; the shop still acts inside the window.
+      case 'page_action': {
+        const act = String(a.action || '')
+        if (act === 'recent_bills') {
+          await openRecent()
+          return { ok: true, say: 'Recent bills ughadle' }
+        }
+        if (act === 'tools') {
+          setToolsOpen(true)
+          return { ok: true, say: 'Sales tabs & tools ughadle' }
+        }
+        if (act === 'sales_return') {
+          openSalesReturn()
+          return { ok: true, say: 'Sales return ughadla' }
+        }
+        if (act === 'add_no_stock') {
+          setQuickOpen(true)
+          return { ok: true, say: 'Add no stock ughadla' }
+        }
+        if (act === 'new_tab') {
+          addTab()
+          return { ok: true, say: 'Navin sale tab ughadla' }
+        }
+        return { ok: false, say: `Sales var "${act}" he kaam voice var nahi` }
+      }
+
+      default:
+        return null
+    }
+  }
+  useEffect(() => registerVoicePage('sales', () => voiceHandlerRef.current), [])
+
   // Enter-field actions from data-nav-enter / data-nav-action
   useEffect(() => {
     const onNav = (e: Event) => {
@@ -2753,7 +3214,82 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
               setQuickOpen(true)
             },
           },
+          {
+            label: 'Regular medicines',
+            detail: tab.customerId
+              ? `${tab.customer}: nehmichi aushadha (BP, sugar …)`
+              : 'Regular grahak ani tyanchi yaadi',
+            variant: 'primary',
+            onClick: () => {
+              setToolsOpen(false)
+              const cid = tabRef.current.customerId
+              const name = tabRef.current.customer
+              if (!cid) {
+                setRegularEdit({ customerId: null, customer: '', items: [] })
+                return
+              }
+              void fetchRegulars(cid)
+                .then((r) => setRegularEdit({ customerId: cid, customer: r.customer || name, items: r.items || [] }))
+                .catch((e) =>
+                  showAlert({ title: 'Regular medicines', message: e instanceof Error ? e.message : String(e), kind: 'error' }),
+                )
+            },
+          },
         ]}
+      />
+      <RegularOfferDialog
+        open={!!regularOffer}
+        customer={regularOffer?.customer || ''}
+        items={regularOffer?.items || []}
+        busy={regularBusy}
+        onGive={(items) => void giveRegulars(items)}
+        onSkip={() => {
+          setRegularOffer(null)
+          window.setTimeout(() => medRef.current?.focus(), 0)
+        }}
+        onEdit={() => {
+          const o = regularOffer
+          setRegularOffer(null)
+          if (o) setRegularEdit({ customerId: o.customerId, customer: o.customer, items: o.items })
+        }}
+      />
+      <RegularManagerDialog
+        open={!!regularEdit}
+        customerId={regularEdit?.customerId ?? null}
+        customer={regularEdit?.customer || ''}
+        initial={regularEdit?.items || []}
+        billItems={tab.items
+          .filter((it) => it.id)
+          .map((it) => ({ name: String(it.name || it.medicine || ''), qty: Number(it.qty) || 1 }))}
+        billDate={tab.billDate}
+        busy={regularBusy}
+        onClose={() => setRegularEdit(null)}
+        onPickCustomer={(name) => {
+          setRegularEdit(null)
+          patchTab({ customer: name })
+          onPickCustomer(name)
+        }}
+        onSave={(items) => {
+          const e = regularEdit
+          if (!e?.customerId) return
+          setRegularBusy(true)
+          void saveRegulars({ customer_id: e.customerId, customer: e.customer, phone: tabRef.current.phone, items })
+            .then(() => {
+              setRegularEdit(null)
+              regularOfferedRef.current = ''
+              showAlert({
+                title: 'Regular medicines',
+                message: items.length
+                  ? `${e.customer}: ${items.length} aushadha regular yaadit save zali.`
+                  : `${e.customer}: regular yaadi kadhli.`,
+                kind: 'info',
+              })
+            })
+            .catch((err) =>
+              showAlert({ title: 'Regular medicines', message: err instanceof Error ? err.message : String(err), kind: 'error' }),
+            )
+            .finally(() => setRegularBusy(false))
+        }}
       />
 
 
@@ -2825,6 +3361,7 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
               navOrder={2}
               navChain={NAV}
               placeholder="Empty = Counter Sale"
+              voiceField="customer"
               minChars={0}
               filterLocal
               listLabel="Customers"
@@ -2849,6 +3386,7 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
               data-nav-order={3}
               data-nav-chain={NAV}
               data-nav-enter="phone-enter"
+              data-voice-field="customer_phone"
               value={tab.phone}
               onChange={(e) => {
                 contactDirtyRef.current.phone = true
@@ -2868,6 +3406,8 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
               navOrder={4}
               navChain={NAV}
               placeholder="Village / address"
+              // The one address box on Sales: "address" finds it too.
+              voiceField="village address"
               minChars={0}
               filterLocal
               listLabel="Villages"
@@ -2938,13 +3478,14 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
               navOrder={5}
               navChain={NAV}
               placeholder="Doctor name"
+              voiceField="doctor"
               minChars={0}
               filterLocal
               listLabel="Doctors"
-              items={(defaults?.doctors || []).map((d) => ({
-                id: d,
-                label: d,
-              }))}
+              items={(defaults?.doctors || []).map((d) => {
+                const n = doctorNumbers[d.trim().toUpperCase()]
+                return { id: d, label: d, meta: n ? shortcutBadge(n) : undefined }
+              })}
               onChange={(v) => {
                 // A name typed out in full is as good as picked: its number comes too.
                 const known = defaults?.doctor_phones?.[v.trim().toUpperCase()]
@@ -2959,6 +3500,7 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
                     ? { doctor: it.label, doctorPhone: known }
                     : { doctor: it.label },
                 )
+                voicePicked('doctor', it.label)
               }}
               onEnter={() => focusNavOrder(6)}
             />
@@ -2969,6 +3511,7 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
               className="mono"
               data-nav-order={6}
               data-nav-chain={NAV}
+              data-voice-field="doctor_phone"
               value={tab.doctorPhone}
               onChange={(e) => patchTab({ doctorPhone: e.target.value })}
             />

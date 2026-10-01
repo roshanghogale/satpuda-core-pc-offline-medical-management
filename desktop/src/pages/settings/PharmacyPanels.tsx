@@ -1126,6 +1126,11 @@ export function PharmacyPanel(props: Props) {
               onChange={(v) => setBill((b) => ({ ...b, dot_matrix_bold_total: v }))}
             />
             <Check
+              label="Whole bill printed bold (darker, prints a little slower)"
+              checked={Boolean(bill.dot_matrix_bold_all ?? false)}
+              onChange={(v) => setBill((b) => ({ ...b, dot_matrix_bold_all: v }))}
+            />
+            <Check
               label='Item count line ("8 aushadhe, 59 nag")'
               checked={Boolean(bill.dot_matrix_item_count ?? true)}
               onChange={(v) => setBill((b) => ({ ...b, dot_matrix_item_count: v }))}

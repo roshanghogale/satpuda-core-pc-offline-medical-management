@@ -133,6 +133,9 @@ export function ExportDialog({
   const [pageLayout, setPageLayout] = useState('portrait')
   const [dmStyle, setDmStyle] = useState('classic')
   const [dmBorders, setDmBorders] = useState(true)
+  // Print: which printer, and A4 vertical / horizontal (the Schedule register keeps its own layout)
+  const [printTo, setPrintTo] = useState<'' | 'dot_matrix' | 'printer'>('')
+  const [printPage, setPrintPage] = useState<'portrait' | 'landscape'>('portrait')
   const [dateMode, setDateMode] = useState<
     'page' | 'year' | 'month' | 'custom'
   >('page')
@@ -271,6 +274,9 @@ export function ExportDialog({
         schedule,
         format: format === 'excel' ? 'xlsx' : format,
         print: Boolean(opts?.print),
+        print_to: printTo,
+        // the PDF file keeps its wide page; the page chosen under Print is for printing
+        page_layout: report === 'schedule_report' ? pageLayout : opts?.print ? printPage : 'landscape',
       })
       if (opts?.print) {
         if (!data.ok && data.error) {
@@ -281,12 +287,13 @@ export function ExportDialog({
         // said only that it was "saved" and threw the path away.
         const savedTo = data.pdf_path || data.path || ''
         const where = savedTo ? `\n\nSaved to:\n${savedTo}` : ''
+        const what = report === 'schedule_report' ? 'Schedule report' : 'Report'
         const note =
           (data.printed
-            ? 'Schedule report saved and sent to printer (dot matrix when configured).'
+            ? `${what} sent to the ${printTo === 'printer' ? 'printer' : printTo === 'dot_matrix' ? 'dot matrix' : 'printer (Settings)'}.`
             : data.print_error
-              ? `Saved, but print failed: ${data.print_error}`
-              : 'Schedule report saved.') + where
+              ? `Print failed: ${data.print_error}`
+              : `${what} saved.`) + where
         setError('')
         window.alert(note)
         onClose()
@@ -626,17 +633,51 @@ export function ExportDialog({
               >
                 PDF
               </button>
-              {report === 'schedule_report' ? (
+              <fieldset className="export-fieldset" style={{ marginTop: 8 }}>
+                <legend>Print</legend>
+                <label className="muted" style={{ display: 'block', marginBottom: 4 }}>
+                  Printer
+                </label>
+                <select
+                  className="settings-input"
+                  value={printTo}
+                  onChange={(e) => setPrintTo(e.target.value as '' | 'dot_matrix' | 'printer')}
+                >
+                  <option value="">As set in Settings → Printer</option>
+                  <option value="dot_matrix">Dot matrix</option>
+                  <option value="printer">Normal printer (laser / inkjet)</option>
+                </select>
+                {report === 'schedule_report' ? (
+                  <p className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+                    Page and style as chosen before: {layouts.find((l) => l.key === pageLayout)?.label || pageLayout}
+                    {' · '}
+                    {dmStyles.find((l) => l.key === dmStyle)?.label || dmStyle}
+                  </p>
+                ) : (
+                  <>
+                    <label className="muted" style={{ display: 'block', margin: '10px 0 4px' }}>
+                      Page
+                    </label>
+                    <select
+                      className="settings-input"
+                      value={printPage}
+                      onChange={(e) => setPrintPage(e.target.value as 'portrait' | 'landscape')}
+                    >
+                      <option value="portrait">A4 vertical (portrait)</option>
+                      <option value="landscape">A4 horizontal (landscape)</option>
+                    </select>
+                  </>
+                )}
                 <button
                   type="button"
                   className="btn btn-primary"
-                  style={{ width: '100%', justifyContent: 'center' }}
+                  style={{ width: '100%', justifyContent: 'center', marginTop: 10 }}
                   disabled={busy}
                   onClick={() => void doDownload('pdf', { print: true })}
                 >
-                  Print (Dot matrix / PDF)
+                  Print
                 </button>
-              ) : null}
+              </fieldset>
             </div>
           ) : null}
         </div>

@@ -1694,3 +1694,32 @@ export type ExportFileResult = {
 export function runExportFile(body: Record<string, unknown>) {
   return postJson<ExportFileResult>('/api/export/run', body)
 }
+
+// ── Regular medicines (core/regular_medicines.py) ────────────────────────────────────────
+export type RegularItem = { name: string; qty: number; unit: '' | 'strip' | 'tablet' | 'unit' }
+export type RegularList = {
+  customer_id: number
+  customer: string
+  phone: string
+  items: RegularItem[]
+  updated?: string
+}
+
+export function fetchRegulars(customerId: number) {
+  return getJson<RegularList & { ok: boolean }>(`/api/sales/regulars${qs({ customer_id: customerId })}`)
+}
+
+export function fetchAllRegulars() {
+  return getJson<{ ok: boolean; lists: RegularList[] }>('/api/sales/regulars')
+}
+
+export async function saveRegulars(body: { customer_id: number; customer: string; phone?: string; items: RegularItem[] }) {
+  const res = await fetch(`${getApiBase()}/api/sales/regulars`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const data = (await res.json().catch(() => ({}))) as RegularList & { ok?: boolean; error?: string }
+  if (!res.ok || data.ok === false) throw new Error(data.error || `HTTP ${res.status}`)
+  return data
+}

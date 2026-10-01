@@ -36,6 +36,9 @@ import {
 } from './settings/PrefsPanels'
 import { DataSystemPanel, ImportPanel } from './settings/ImportDataPanels'
 import { AlertPrefsPanel } from './settings/AlertPrefsPanel'
+import { VoiceCommandsPanel } from '../voice/VoiceCommandsPanel'
+import { useVoiceEnabled } from '../voice/voiceEnabled'
+import { registerVoicePage, sendToPage, setVoicePlace, type VoiceHandler } from '../voice/voiceBus'
 import {
   RestartAppDialog,
   type RestartPrompt,
@@ -120,10 +123,17 @@ export function SettingsPage({
   const [login, setLogin] = useState<Record<string, unknown>>({})
   const [printer, setPrinter] = useState<Record<string, unknown>>({})
 
-  const tab = useMemo(
-    () => SETTINGS_TABS.find((t) => t.id === tabId) || SETTINGS_TABS[0],
-    [tabId],
-  )
+  // Voice switched off for this store (admin panel): no Voice Commands section.
+  const voiceOn = useVoiceEnabled().enabled
+  const tab = useMemo(() => {
+    const t = SETTINGS_TABS.find((x) => x.id === tabId) || SETTINGS_TABS[0]
+    if (voiceOn || !t.sections?.some((s) => s.id === 'voice')) return t
+    return { ...t, sections: t.sections.filter((s) => s.id !== 'voice') }
+  }, [tabId, voiceOn])
+
+  useEffect(() => {
+    if (!voiceOn && sectionId === 'voice') setSectionId(tab.sections?.[0]?.id || 'cheatsheet')
+  }, [voiceOn, sectionId, tab])
 
   useEffect(() => {
     if (initialTab) setTabId(initialTab)
@@ -137,13 +147,69 @@ export function SettingsPage({
     if (initialSection) setSectionId(initialSection)
   }, [initialSection])
 
+  /** What a voice command asked to land on when it also changed the tab: the
+   *  tab-change reset below would otherwise put the tab's FIRST section back. */
+  const forcedRef = useRef<{ section?: string; toggle?: string; nested?: string } | null>(null)
+  const tabIdRef = useRef(tabId)
+  tabIdRef.current = tabId
+
   useEffect(() => {
+    const forced = forcedRef.current
+    forcedRef.current = null
     const firstSection = tab.sections?.[0]?.id || ''
     const firstToggle = tab.toggles?.[0]?.id || 'supplier'
-    if (!initialSection) setSectionId(firstSection || 'profile')
-    if (!initialToggle) setToggleId(firstToggle)
-    setNestedId(tab.nestedTabs?.[0]?.id || 'low')
+    if (forced?.section) setSectionId(forced.section)
+    else if (!initialSection) setSectionId(firstSection || 'profile')
+    if (forced?.toggle) setToggleId(forced.toggle)
+    else if (!initialToggle) setToggleId(firstToggle)
+    setNestedId(forced?.nested || tab.nestedTabs?.[0]?.id || 'low')
   }, [tabId, tab, initialSection, initialToggle])
+
+  // ── Voice (test build): "printer settings ughad", "customer ledger", "expired alerts" ──
+  // Sets the same tab / section / sub-tab state the buttons above set.
+  const voiceHandlerRef = useRef<VoiceHandler>(async () => null)
+  voiceHandlerRef.current = async (cmd) => {
+    // "Rajesh shodh" while a ledger is showing: that panel owns the search.
+    if (cmd.intent === 'search' && tabIdRef.current === 'ledger') return sendToPage('ledger', cmd)
+    if (cmd.intent !== 'open_settings') return null
+    const a = cmd.args || {}
+    const wantTab = String(a.tab || '').trim().toLowerCase()
+    const wantSec = String(a.section || '').trim().toLowerCase()
+    const has = (t: (typeof SETTINGS_TABS)[number], id: string) =>
+      Boolean(
+        t.sections?.some((x) => x.id === id) ||
+          t.toggles?.some((x) => x.id === id) ||
+          t.nestedTabs?.some((x) => x.id === id),
+      )
+    // A section said without its tab ("printer setup") is found by its id.
+    const t =
+      SETTINGS_TABS.find((x) => x.id === wantTab) ||
+      (!wantTab && wantSec ? SETTINGS_TABS.find((x) => has(x, wantSec)) : undefined)
+    if (!t) return { ok: false, say: `Settings madhe "${a.tab || a.section}" nahi` }
+    const forced: { section?: string; toggle?: string; nested?: string } = {}
+    let label = t.label.replace(/^[^A-Za-z]+/, '')
+    if (wantSec) {
+      const sec = t.sections?.find((x) => x.id === wantSec)
+      const tog = t.toggles?.find((x) => x.id === wantSec)
+      const nest = t.nestedTabs?.find((x) => x.id === wantSec)
+      if (sec) forced.section = sec.id
+      else if (tog) forced.toggle = tog.id
+      else if (nest) forced.nested = nest.id
+      else return { ok: false, say: `${label}: "${a.section}" vibhag nahi` }
+      label = `${label} → ${(sec || tog || nest)!.label}`
+    }
+    if (tabIdRef.current !== t.id) {
+      forcedRef.current = forced
+      setTabId(t.id)
+    }
+    if (forced.section) setSectionId(forced.section)
+    if (forced.toggle) setToggleId(forced.toggle)
+    if (forced.nested) setNestedId(forced.nested)
+    return { ok: true, say: `Settings: ${label} ughadla` }
+  }
+  useEffect(() => registerVoicePage('settings', () => voiceHandlerRef.current), [])
+  // The voice bar tells the service which panel is showing: "payment/customer", "reorder/by_supplier".
+  useEffect(() => setVoicePlace('settings', `${tabId}/${toggleId}`), [tabId, toggleId])
 
   const reload = useCallback(async () => {
     setError('')
@@ -749,7 +815,7 @@ export function SettingsPage({
     }
 
     if (tabId === 'shortcuts') {
-      return <ShortcutsPanel />
+      return sectionId === 'voice' && voiceOn ? <VoiceCommandsPanel /> : <ShortcutsPanel />
     }
 
     if (tabId === 'alerts') {

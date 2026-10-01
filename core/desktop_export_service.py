@@ -1,7 +1,8 @@
 """Named export report builders for the Tauri desktop (mirrors Tk export menus)."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+import re
+from datetime import date, datetime, timedelta
 from typing import Any, Optional
 
 
@@ -1576,6 +1577,7 @@ def _schedule_styled_pdf_bytes(
     data: dict[str, Any],
     *,
     do_print: bool = False,
+    print_to: str = "",
 ) -> dict[str, Any]:
     """Build Classic-style schedule HTML/PDF; optionally RAW-print on dot matrix."""
     import base64
@@ -1653,7 +1655,9 @@ def _schedule_styled_pdf_bytes(
         try:
             from core.printer_manager import PrinterManager
 
-            if PrinterManager.is_dot_matrix_mode():
+            want = (print_to or "").lower()
+            on_dm = want == "dot_matrix" or (want != "printer" and PrinterManager.is_dot_matrix_mode())
+            if on_dm:
                 display = prepare_schedule_report_display(
                     hdrs,
                     shaped,
@@ -1719,8 +1723,14 @@ def export_to_file(
     current_rows: Optional[list[list[Any]]] = None,
     schedule: Optional[dict[str, Any]] = None,
     do_print: bool = False,
+    print_to: str = "",
+    page_layout: str = "",
 ) -> dict[str, Any]:
-    """Run export and return downloadable file bytes (PDF / XLSX / CSV)."""
+    """Run export and return downloadable file bytes (PDF / XLSX / CSV), or print it.
+
+    print_to: "dot_matrix" | "printer" | "" (the printer type in Settings decides);
+    page_layout: "portrait" (A4 vertical) | "landscape" (A4 horizontal) for every report
+    but the Schedule register, which keeps its own layout and Classic / Sign style."""
     import base64
     import csv
     import io
@@ -1752,7 +1762,20 @@ def export_to_file(
 
     # Schedule report PDF/print → Classic styled HTML path (vertical + DM styles).
     if report == "schedule_report" and (format_key == "pdf" or do_print):
-        return _schedule_styled_pdf_bytes(data, do_print=do_print)
+        return _schedule_styled_pdf_bytes(data, do_print=do_print, print_to=print_to)
+
+    if do_print:
+        target = (print_to or "").lower()
+        if target not in ("dot_matrix", "printer"):
+            try:
+                from core.printer_manager import PrinterManager
+
+                target = "dot_matrix" if PrinterManager.is_dot_matrix_mode() else "printer"
+            except Exception:
+                target = "printer"
+        out = print_report(title, cols, rows, target, page_layout or "portrait")
+        out.setdefault("row_count", len(rows))
+        return out
 
     if format_key == "csv":
         buf = io.StringIO()
@@ -1785,7 +1808,8 @@ def export_to_file(
 
         fd, path = tempfile.mkstemp(suffix=".pdf", prefix="desktop_export_")
         os.close(fd)
-        saved = _save_pdf_to_path(path, title, cols, rows)
+        saved = _save_pdf_to_path(path, title, cols, rows,
+                                  orientation="portrait" if str(page_layout).startswith("port") else "landscape")
         with open(saved, "rb") as fh:
             payload = fh.read()
         for p in (saved, path):
@@ -1813,3 +1837,174 @@ def export_to_file(
         "content_base64": base64.b64encode(payload).decode("ascii"),
         "row_count": len(rows),
     }
+
+
+# ── Alert & Monitoring: export and print every list (1 Oct 2026) ─────────────────────────
+_ALERT_PDF_CSS = (
+    "@page{size:A4 landscape;margin:10mm}body{font-family:Segoe UI,Arial;font-size:9pt}"
+    "h2{margin:0 0 4px}h3{margin:14px 0 4px}table{width:100%;border-collapse:collapse;margin-bottom:8px}"
+    "th{background:#2c3e50;color:#fff;padding:4px;text-align:left}td{border:1px solid #ccc;padding:3px}"
+    "tr:nth-child(even){background:#f7f7f7}"
+)
+
+
+def _alert_sections(sections: Any) -> list[tuple[str, list[str], list[list[Any]]]]:
+    out: list[tuple[str, list[str], list[list[Any]]]] = []
+    for s in sections or []:
+        if not isinstance(s, dict):
+            continue
+        cols = [str(c) for c in (s.get("columns") or [])]
+        rows = [_flatten_export_row(r)[: len(cols)] for r in (s.get("rows") or [])]
+        out.append((str(s.get("title") or "Alerts"), cols, rows))
+    return out
+
+
+def _alerts_pdf(path: str, title: str, sections, landscape: bool = True) -> str:
+    from datetime import datetime
+
+    from core.export_manager import _totals_html
+
+    def esc(v: Any) -> str:
+        return str(v).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    body = ""
+    for sec_title, cols, rows in sections:
+        hdr = "".join(f"<th>{esc(h)}</th>" for h in cols)
+        trs = "".join("<tr>" + "".join(f"<td>{esc(v)}</td>" for v in r) + "</tr>" for r in rows)
+        body += (f"<h3>{esc(sec_title)} ({len(rows)})</h3><table><thead><tr>{hdr}</tr></thead>"
+                 f"<tbody>{trs}</tbody>{_totals_html(cols, rows)}</table>")
+    html = (f"<!DOCTYPE html><html><head><meta charset=UTF-8><title>{esc(title)}</title>"
+            f"<style>{_ALERT_PDF_CSS.replace('A4 landscape', 'A4 landscape' if landscape else 'A4 portrait')}</style>"
+            f"</head><body><h2>{esc(title)}</h2>"
+            f"<p>{datetime.now().strftime('%d/%m/%Y %H:%M')}</p>{body}</body></html>")
+    from core.document_output import save_html_as_pdf
+
+    pdf_path, html_path = save_html_as_pdf(html, path)
+    return pdf_path or html_path
+
+
+def export_alert_sections(body: dict[str, Any]) -> dict[str, Any]:
+    """Alert & Monitoring -> a file (CSV / Excel / PDF) or paper (dot matrix A4 / A5, or the
+    normal Windows printer), for the list on screen or all five at once.
+
+    body: {title, sections: [{title, columns, rows}], format: csv|xlsx|pdf,
+           print_to: ""|"dot_matrix"|"printer", paper: A4|A5}"""
+    import base64
+    import csv
+    import io
+    import os
+    import tempfile
+
+    sections = [s for s in _alert_sections(body.get("sections")) if s[1]]
+    if not sections or not any(rows for _, _, rows in sections):
+        return {"ok": False, "error": "Export karayla kahi nahi — yaadi rikami aahe."}
+    title = str(body.get("title") or "Alert & Monitoring")
+    stamp = date.today().isoformat()
+    base = f"alerts_{stamp}"
+    print_to = str(body.get("print_to") or "").strip().lower()
+
+    landscape = str(body.get("page_layout") or "").lower().startswith("land")
+    if print_to == "dot_matrix":
+        from core.dot_matrix_print import print_dot_matrix_reports_combined
+
+        paper = "A5" if str(body.get("paper") or "").upper() == "A5" else "A4"
+        try:
+            print_dot_matrix_reports_combined([(t, c, r) for t, c, r in sections if r], paper=paper,
+                                              landscape=landscape and paper == "A4")
+        except Exception as exc:
+            return {"ok": False, "error": f"Dot matrix var print zala nahi: {exc}"}
+        return {"ok": True, "printed": True, "message": f"Dot matrix ({paper}) var print la pathavle."}
+
+    if print_to == "printer":
+        fd, path = tempfile.mkstemp(suffix=".pdf", prefix="alerts_print_")
+        os.close(fd)
+        saved = _alerts_pdf(path, title, sections, landscape=landscape)
+        if os.name != "nt":
+            return {"ok": False, "error": "Printer var print fakt Windows var."}
+        try:
+            os.startfile(saved, "print")
+        except OSError as exc:
+            return {"ok": False, "error": f"Printer var print zala nahi: {exc}", "path": saved}
+        return {"ok": True, "printed": True, "message": "Printer la pathavle.", "path": saved}
+
+    fmt = str(body.get("format") or "csv").strip().lower()
+    if fmt == "excel":
+        fmt = "xlsx"
+    if fmt == "csv":
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        for i, (t, cols, rows) in enumerate(sections):
+            if i:
+                w.writerow([])
+            if len(sections) > 1:
+                w.writerow([t])
+            w.writerow(cols)
+            w.writerows(rows)
+        payload, mime = buf.getvalue().encode("utf-8-sig"), "text/csv;charset=utf-8"
+    elif fmt == "xlsx":
+        try:
+            import openpyxl
+        except ImportError:
+            return {"ok": False, "error": "openpyxl not installed for Excel export."}
+        wb = openpyxl.Workbook()
+        wb.remove(wb.active)
+        for t, cols, rows in sections:
+            # Excel refuses these in a sheet name
+            ws = wb.create_sheet(title="".join(" " if c in "[]:*?/\\" else c for c in t)[:31] or "Alerts")
+            ws.append(cols)
+            for r in rows:
+                ws.append(list(r))
+        bio = io.BytesIO()
+        wb.save(bio)
+        payload, mime = bio.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    elif fmt == "pdf":
+        fd, path = tempfile.mkstemp(suffix=".pdf", prefix="alerts_")
+        os.close(fd)
+        saved = _alerts_pdf(path, title, sections, landscape=landscape)
+        with open(saved, "rb") as fh:
+            payload = fh.read()
+        mime = "application/pdf" if saved.lower().endswith(".pdf") else "text/html"
+        fmt = "pdf" if mime.endswith("pdf") else "html"
+    else:
+        return {"ok": False, "error": f"Unknown export format: {fmt}"}
+    return {
+        "ok": True,
+        "filename": f"{base}.{fmt}",
+        "mime": mime,
+        "format": fmt,
+        "content_base64": base64.b64encode(payload).decode("ascii"),
+        "row_count": sum(len(r) for _, _, r in sections),
+    }
+
+
+def print_report(title: str, cols: list, rows: list, print_to: str, page_layout: str = "portrait") -> dict[str, Any]:
+    """One report on paper: the dot matrix (RAW, A4 vertical 80 / horizontal 110 columns) or the
+    normal Windows printer (a PDF on A4 vertical / horizontal, sent with the "print" verb)."""
+    import os
+    import tempfile
+
+    landscape = str(page_layout or "").lower().startswith("land")
+    if (print_to or "").lower() == "dot_matrix":
+        from core.dot_matrix_print import print_dot_matrix_report
+
+        try:
+            print_dot_matrix_report(title, cols, rows, paper="A4", landscape=landscape)
+        except Exception as exc:
+            return {"ok": False, "printed": False, "print_error": str(exc),
+                    "error": f"Dot matrix var print zala nahi: {exc}"}
+        return {"ok": True, "printed": True,
+                "message": f"Dot matrix var print la pathavle (A4 {'horizontal' if landscape else 'vertical'})."}
+    from core.export_manager import _save_pdf_to_path
+
+    fd, path = tempfile.mkstemp(suffix=".pdf", prefix="report_print_")
+    os.close(fd)
+    saved = _save_pdf_to_path(path, title, cols, rows, orientation="landscape" if landscape else "portrait")
+    if os.name != "nt":
+        return {"ok": False, "printed": False, "error": "Printer var print fakt Windows var.", "path": saved}
+    try:
+        os.startfile(saved, "print")
+    except OSError as exc:
+        return {"ok": False, "printed": False, "print_error": str(exc),
+                "error": f"Printer var print zala nahi: {exc}", "path": saved}
+    return {"ok": True, "printed": True, "path": saved, "pdf_path": saved,
+            "message": f"Printer la pathavle (A4 {'horizontal' if landscape else 'vertical'})."}

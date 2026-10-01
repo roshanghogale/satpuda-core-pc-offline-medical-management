@@ -93,6 +93,9 @@ export type SettingsBundle = {
     expired: unknown[][]
     near_expiry: unknown[][]
     customer_due: unknown[][]
+    /** Every stocked batch with an expiry (past or future), for the Month / Year filter:
+     *  name, batch, expiry, days left, qty, supplier, bill, purchase date, expiry ISO. */
+    expiry_by_batch?: unknown[][]
   }
   shelf?: {
     racks: {
@@ -428,6 +431,26 @@ export function applyAlertNavigation(
     returnsBulkPrefill: nav.returnsBulkPrefill,
     disposalPrefill: nav.disposalPrefill,
   })
+}
+
+/** Alert & Monitoring: a file (csv / xlsx / pdf) or paper (dot matrix / normal printer). */
+export function exportAlerts(body: {
+  title: string
+  sections: { title: string; columns: string[]; rows: unknown[][] }[]
+  format?: 'csv' | 'xlsx' | 'pdf'
+  print_to?: '' | 'dot_matrix' | 'printer'
+  paper?: 'A4' | 'A5'
+  page_layout?: 'portrait' | 'landscape'
+}) {
+  return jsonFetch<{
+    ok: boolean
+    error?: string
+    message?: string
+    printed?: boolean
+    filename?: string
+    mime?: string
+    content_base64?: string
+  }>('/api/settings/alerts/export', { method: 'PUT', body: JSON.stringify(body) })
 }
 
 export function alertAction(body: Record<string, unknown>) {

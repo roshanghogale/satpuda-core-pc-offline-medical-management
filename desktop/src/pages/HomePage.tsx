@@ -9,6 +9,7 @@ import { ensureLocalEngine } from '../backend'
 import { IS_DEMO } from '../demoMode'
 import type { AppNavigate } from '../App'
 import { HomeExportDialog } from '../components/HomeExportDialog'
+import { registerVoicePage, type VoiceHandler } from '../voice/voiceBus'
 import { usePageHotkeys } from '../hooks/usePageHotkeys'
 import { QuickActionIcon } from '../quickActionIcons'
 import { Panel } from './pageChrome'
@@ -255,6 +256,24 @@ export function HomePage({ onNavigate, syncRefreshNonce = 0, active }: Props) {
       }
     })()
   }, [syncRefreshNonce])
+
+  // ── Voice (test build): "export ughad", "dashboard refresh" ──
+  const voiceHandlerRef = useRef<VoiceHandler>(async () => null)
+  voiceHandlerRef.current = async (cmd) => {
+    if (cmd.intent !== 'page_action') return null
+    const act = String(cmd.args?.action || '')
+    if (act === 'export') {
+      setExportOpen(true)
+      return { ok: true, say: 'Export ughadla' }
+    }
+    if (act === 'refresh') {
+      refreshBanner()
+      await loadDashboard()
+      return { ok: true, say: 'Home dashboard refresh kela' }
+    }
+    return { ok: false, say: `Home var "${act}" he kaam voice var nahi` }
+  }
+  useEffect(() => registerVoicePage('home', () => voiceHandlerRef.current), [])
 
   return (
     <div className="home-page">

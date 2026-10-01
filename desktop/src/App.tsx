@@ -63,6 +63,8 @@ import {
 } from './theme'
 import { restartDesktopApp } from './restartApp'
 import { DesktopUiPrefsProvider } from './desktopUiPrefsContext'
+import { VoiceBar } from './voice/VoiceBar'
+import { useVoiceEnabled } from './voice/voiceEnabled'
 
 const NAV_LABELS: Record<PageId, string> = {
   home: 'Home',
@@ -119,6 +121,7 @@ const LIST_PAGES = new Set<PageId>(['inventory', 'sales_history', 'purchase_hist
 
 export default function App() {
   const [page, setPage] = useState<PageId>('home')
+  const voiceSwitch = useVoiceEnabled()
   const [visited, setVisited] = useState<Set<PageId>>(() => new Set(['home']))
   /** Bumped on store switch so keep-alive pages remount even if restart is delayed. */
   const [storeEpoch, setStoreEpoch] = useState(0)
@@ -862,6 +865,9 @@ export default function App() {
         }}
         onNavigate={navigate}
       />
+      {/* Voice test build: hold F1 to speak, Ctrl+K to type a command. Only when the
+          store's voice switch (admin panel) is on: off, there is no bar and F1 does nothing. */}
+      {voiceSwitch.enabled ? <VoiceBar page={page} navigate={navigate} /> : null}
     </div>
     </DesktopUiPrefsProvider>
   )

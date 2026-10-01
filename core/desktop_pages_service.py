@@ -7,6 +7,47 @@ from datetime import date, datetime
 from typing import Any, Optional
 
 
+def history_search_rank(q: str | None, bill_no: Any, *texts: Any) -> int:
+    """How a history row answers the search box: 2 = it IS the bill typed, 1 = the text is in
+    its bill number, name, phone or doctor, 0 = no match.
+
+    A sale is stored as "SCB2/FY2026-27". Searched as stored, "2" matched every bill of
+    the year through its "/FY2026" and bill 2 -- one of the oldest -- sat at the bottom of
+    the list (1 Oct 2026). Only the number the shop sees ("SCB2") is searched, and the
+    bill whose number is the one typed comes first."""
+    from core.fy_serial import display_sales_bill_no
+
+    want = (q or "").strip().lower()
+    if not want:
+        return 1
+    shown = display_sales_bill_no(str(bill_no or "")).lower()
+    digits = re.sub(r"\D", "", shown)
+    if shown == want or (want.isdigit() and digits and int(digits) == int(want)
+                         and re.fullmatch(r"[a-z]*\d+", shown)):
+        return 2
+    if want in shown or any(want in str(t or "").lower() for t in texts):
+        return 1
+    return 0
+
+
+def _search_history_dicts(rows: list, q: str | None) -> list:
+    """Online history rows narrowed to the search box, the bill typed first."""
+    if not (q or "").strip():
+        return rows
+    ranked = []
+    for i, r in enumerate(rows):
+        if not isinstance(r, dict):
+            continue
+        rank = history_search_rank(
+            q, r.get("bill_no"), r.get("customer_name"), r.get("customer_phone") or r.get("phone"),
+            r.get("doctor_name"),
+        )
+        if rank:
+            ranked.append((-rank, i, r))
+    ranked.sort(key=lambda x: (x[0], x[1]))
+    return [r for _, _, r in ranked]
+
+
 def _server_search_term(q: str | None, party: str | None) -> str:
     """The ONE search term the server can take, out of the two the page has.
 
@@ -1995,6 +2036,7 @@ def _list_sales_history_range(
                 merged_sales, sort, no_key="bill_no", date_key="bill_date",
                 name_key="customer_name",
             )
+            merged_sales = _search_history_dicts(merged_sales, q)
             for r in merged_sales:
                 if not isinstance(r, dict):
                     continue
@@ -2151,10 +2193,14 @@ def _list_sales_history_range(
         params.append(td)
 
     q = (q or "").strip()
+    # The bill number the shop sees: "SCB2", not the stored "SCB2/FY2026-27" whose year
+    # put a "2" in every bill (see history_search_rank).
+    shown_no = ("CASE WHEN instr(COALESCE(s.bill_no,''),'/FY')>0 "
+                "THEN substr(s.bill_no,1,instr(s.bill_no,'/FY')-1) ELSE COALESCE(s.bill_no,'') END")
     if q:
         like = f"%{q}%"
         where.append(
-            "(s.bill_no LIKE ? OR c.name LIKE ? OR c.phone LIKE ? OR s.doctor_name LIKE ?)"
+            f"({shown_no} LIKE ? OR c.name LIKE ? OR c.phone LIKE ? OR s.doctor_name LIKE ?)"
         )
         params.extend([like, like, like, like])
 
@@ -2249,10 +2295,13 @@ def _list_sales_history_range(
         FROM sales s
         LEFT JOIN customers c ON s.customer_id=c.id
         WHERE {' AND '.join(where)}
-        ORDER BY s.bill_date DESC, COALESCE(s.fy_serial, s.id) DESC, s.id DESC
+        ORDER BY ({shown_no} = ? COLLATE NOCASE OR COALESCE(s.fy_serial, -1) = ?) DESC,
+                 s.bill_date DESC, COALESCE(s.fy_serial, s.id) DESC, s.id DESC
         LIMIT ?
     """
     count_params = list(params)
+    params.append(q)            # the bill typed is never cut off by the row cap
+    params.append(int(q) if q.isdigit() else -2)
     # One row past the cap says whether the range holds more than the list will show.
     params.append(row_cap + 1)
     rows_total = None
@@ -2289,6 +2338,9 @@ def _list_sales_history_range(
         rows_raw.sort(key=lambda r: str(r[3] or "").lower(), reverse=True)
     elif "A-Z" in sort_key:
         rows_raw.sort(key=lambda r: str(r[3] or "").lower())
+    if q:
+        # the bill whose number was typed comes first, whatever the sort (stable)
+        rows_raw.sort(key=lambda r: -history_search_rank(q, r[1], r[3], r[4], r[5]))
 
     rows: list[list[Any]] = []
     row_styles: list[Optional[dict[str, Any]]] = []

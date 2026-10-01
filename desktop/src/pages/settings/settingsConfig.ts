@@ -194,7 +194,10 @@ export const SETTINGS_TABS: TabDef[] = [
     id: 'shortcuts',
     label: '⌨ Shortcuts',
     ctrlDigit: null,
-    layout: 'scroll',
-    sections: [{ id: 'cheatsheet', label: 'Keyboard Shortcuts' }],
+    layout: 'sections',
+    sections: [
+      { id: 'cheatsheet', label: 'Keyboard Shortcuts' },
+      { id: 'voice', label: 'Voice Commands' },
+    ],
   },
 ]

@@ -108,6 +108,7 @@ DEFAULT_BILL_PRINT_SETTINGS = {
     "dot_matrix_style": "compact",
     # The three the shop picked from the printed samples on 25-09-2026.
     "dot_matrix_bold_total": True,      # Total struck twice by the printer
+    "dot_matrix_bold_all": False,       # every line of the slip in bold (asked for 1 Oct 2026)
     "dot_matrix_item_count": True,      # "8 aushadhe, 59 nag" above HAVE A NICE DAY
     "dot_matrix_due_lines": True,       # Prev/Bill/Total Due, but only when money is owed
     # Dot matrix A6: top margin (cm) — how far BELOW the perforation the first

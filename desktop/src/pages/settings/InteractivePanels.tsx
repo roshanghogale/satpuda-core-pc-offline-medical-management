@@ -5,6 +5,7 @@ import {
   alertAction,
   applyAlertNavigation,
   deletePayment,
+  exportAlerts,
   fetchLedger,
   mutateContact,
   mutateShelf,
@@ -18,10 +19,17 @@ import {
 } from '../../settingsApi'
 import { focusTableSection, usePageHotkeys } from '../../hooks/usePageHotkeys'
 import { SHORTCUT_SECTIONS } from './shortcutSections'
+import { presetRange, RANGE_WORDS, registerVoicePage, type VoiceHandler } from '../../voice/voiceBus'
 import { dispatchPaymentsChanged, dispatchVillagesChanged } from '../../syncRefresh'
 import { useLayoutRowCount } from '../../layoutRows'
 import { resolveParty } from '../../partyNamePick'
 import { ModernCombo } from '../ModernCombo'
+import {
+  VoiceNoBar,
+  VoiceNoSelect,
+  onlyNumbered,
+  useContactShortcuts,
+} from '../../voice/ContactVoiceNo'
 import {
   Check,
   Field,
@@ -166,6 +174,11 @@ export function ContactsPanel({
     address: '',
   })
   const [village, setVillage] = useState('')
+  // Voice shortcut numbers ("Voice no." column); hidden when the voice service is down.
+  const voiceNo = useContactShortcuts()
+  const showVoiceNo = !!voiceNo.map
+  const [voiceOnly, setVoiceOnly] = useState(false)
+  const numbered = voiceOnly && showVoiceNo
   const customerRef = useRef(customer)
   customerRef.current = customer
   const doctorRef = useRef(doctor)
@@ -362,37 +375,28 @@ export function ContactsPanel({
     },
   })
 
-  const doctors = useMemo(
-    () =>
-      contacts.doctors.filter((d) =>
-        filterText(search, [d.name, d.reg_no, d.phone]),
-      ),
-    [contacts.doctors, search],
-  )
-  const customers = useMemo(
-    () =>
-      contacts.customers.filter((d) =>
-        filterText(search, [d.name, d.phone, d.address, d.total_due]),
-      ),
-    [contacts.customers, search],
-  )
-  const suppliers = useMemo(
-    () =>
-      contacts.suppliers.filter((d) =>
-        filterText(search, [
-          d.name,
-          d.phone,
-          d.gstin,
-          d.address,
-          d.total_due,
-        ]),
-      ),
-    [contacts.suppliers, search],
-  )
-  const villages = useMemo(
-    () => contacts.villages.filter((v) => filterText(search, [v])),
-    [contacts.villages, search],
-  )
+  const doctors = useMemo(() => {
+    const rows = contacts.doctors.filter((d) =>
+      filterText(search, [d.name, d.reg_no, d.phone]),
+    )
+    return numbered ? onlyNumbered(rows, voiceNo, 'doctor', (d) => d.name) : rows
+  }, [contacts.doctors, search, numbered, voiceNo])
+  const customers = useMemo(() => {
+    const rows = contacts.customers.filter((d) =>
+      filterText(search, [d.name, d.phone, d.address, d.total_due]),
+    )
+    return numbered ? onlyNumbered(rows, voiceNo, 'customer', (d) => d.name) : rows
+  }, [contacts.customers, search, numbered, voiceNo])
+  const suppliers = useMemo(() => {
+    const rows = contacts.suppliers.filter((d) =>
+      filterText(search, [d.name, d.phone, d.gstin, d.address, d.total_due]),
+    )
+    return numbered ? onlyNumbered(rows, voiceNo, 'supplier', (d) => d.name) : rows
+  }, [contacts.suppliers, search, numbered, voiceNo])
+  const villages = useMemo(() => {
+    const rows = contacts.villages.filter((v) => filterText(search, [v]))
+    return numbered ? onlyNumbered(rows, voiceNo, 'village', (v) => v) : rows
+  }, [contacts.villages, search, numbered, voiceNo])
 
   return (
     <>
@@ -469,6 +473,7 @@ export function ContactsPanel({
               </button>
             ) : null}
           </div>
+          <VoiceNoBar sc={voiceNo} kind="doctor" only={voiceOnly} onOnly={setVoiceOnly} />
           <div ref={tableWrapRef}>
           <CappedTableWrap
             visibleRows={doctorRows}
@@ -477,6 +482,7 @@ export function ContactsPanel({
             <table className="settings-table">
               <thead>
                 <tr>
+                  {showVoiceNo ? <th style={{ width: 70 }}>Voice no.</th> : null}
                   <th>Name</th>
                   <th>Reg No</th>
                   <th>Phone</th>
@@ -486,6 +492,11 @@ export function ContactsPanel({
               <tbody>
                 {doctors.map((d) => (
                   <tr key={d.id}>
+                    {showVoiceNo ? (
+                      <td>
+                        <VoiceNoSelect sc={voiceNo} kind="doctor" name={d.name} />
+                      </td>
+                    ) : null}
                     <td>{d.name}</td>
                     <td>{d.reg_no}</td>
                     <td>{d.phone}</td>
@@ -520,7 +531,7 @@ export function ContactsPanel({
                 ))}
                 {!doctors.length ? (
                   <tr>
-                    <td colSpan={4}>No doctors</td>
+                    <td colSpan={showVoiceNo ? 5 : 4}>No doctors</td>
                   </tr>
                 ) : null}
               </tbody>
@@ -695,6 +706,7 @@ export function ContactsPanel({
               </button>
             ) : null}
           </div>
+          <VoiceNoBar sc={voiceNo} kind="customer" only={voiceOnly} onOnly={setVoiceOnly} />
           <div ref={tableWrapRef}>
           <CappedTableWrap
             visibleRows={customerRows}
@@ -703,6 +715,7 @@ export function ContactsPanel({
             <table className="settings-table">
               <thead>
                 <tr>
+                  {showVoiceNo ? <th style={{ width: 70 }}>Voice no.</th> : null}
                   <th>Name</th>
                   <th>Phone</th>
                   <th>Address</th>
@@ -713,6 +726,11 @@ export function ContactsPanel({
               <tbody>
                 {customers.map((d) => (
                   <tr key={d.id}>
+                    {showVoiceNo ? (
+                      <td>
+                        <VoiceNoSelect sc={voiceNo} kind="customer" name={d.name} />
+                      </td>
+                    ) : null}
                     <td>{d.name}</td>
                     <td>{d.phone}</td>
                     <td>{d.address || ''}</td>
@@ -748,7 +766,7 @@ export function ContactsPanel({
                 ))}
                 {!customers.length ? (
                   <tr>
-                    <td colSpan={5}>No customers</td>
+                    <td colSpan={showVoiceNo ? 6 : 5}>No customers</td>
                   </tr>
                 ) : null}
               </tbody>
@@ -791,9 +809,15 @@ export function ContactsPanel({
               void saveVillage()
             }}
           />
+          <VoiceNoBar sc={voiceNo} kind="village" only={voiceOnly} onOnly={setVoiceOnly} />
           <ul className="settings-plain-list">
             {villages.map((v) => (
               <li key={v}>
+                {showVoiceNo ? (
+                  <>
+                    <VoiceNoSelect sc={voiceNo} kind="village" name={v} />{' '}
+                  </>
+                ) : null}
                 {v}
                 {contacts.default_village === v ? ' (default)' : ''}{' '}
                 <button
@@ -915,6 +939,7 @@ export function ContactsPanel({
               </button>
             ) : null}
           </div>
+          <VoiceNoBar sc={voiceNo} kind="supplier" only={voiceOnly} onOnly={setVoiceOnly} />
           <div ref={tableWrapRef}>
           <CappedTableWrap
             visibleRows={supplierRows}
@@ -923,6 +948,7 @@ export function ContactsPanel({
             <table className="settings-table">
               <thead>
                 <tr>
+                  {showVoiceNo ? <th style={{ width: 70 }}>Voice no.</th> : null}
                   <th>Name</th>
                   <th>Phone</th>
                   <th>GSTIN</th>
@@ -934,6 +960,11 @@ export function ContactsPanel({
               <tbody>
                 {suppliers.map((d) => (
                   <tr key={d.id}>
+                    {showVoiceNo ? (
+                      <td>
+                        <VoiceNoSelect sc={voiceNo} kind="supplier" name={d.name} />
+                      </td>
+                    ) : null}
                     <td>{d.name}</td>
                     <td>{d.phone}</td>
                     <td>{d.gstin}</td>
@@ -971,7 +1002,7 @@ export function ContactsPanel({
                 ))}
                 {!suppliers.length ? (
                   <tr>
-                    <td colSpan={6}>No suppliers</td>
+                    <td colSpan={showVoiceNo ? 7 : 6}>No suppliers</td>
                   </tr>
                 ) : null}
               </tbody>
@@ -999,12 +1030,15 @@ const ALERT_SPECS: Record<
     dismissRow?: boolean
     dismissAllExpired?: boolean
     dismissAllOos?: boolean
+    /** What the Month / Year filter looks at; the date is the row's last (hidden) cell. */
+    periodOf?: 'purchase' | 'expiry'
   }
 > = {
   low: {
     key: 'low_stock',
     title: 'Low Stock',
-    headers: ['Medicine Name', 'Current Stock', 'Unit', 'Supplier'],
+    headers: ['Medicine Name', 'Current Stock', 'Unit', 'Supplier', 'Last Batch', 'Expiry', 'Last Bill No', 'Last Purchase'],
+    periodOf: 'purchase',
     file: 'alerts-low',
     actionLabel: 'Reorder',
     bulkReorder: true,
@@ -1020,7 +1054,11 @@ const ALERT_SPECS: Record<
       'Purchase Rate',
       'Medicine Type',
       'Supplier',
+      'Last Batch',
+      'Last Bill No',
+      'Last Purchase',
     ],
+    periodOf: 'purchase',
     file: 'alerts-out',
     actionLabel: 'Reorder',
     bulkReorder: true,
@@ -1037,7 +1075,9 @@ const ALERT_SPECS: Record<
       'Quantity Expired',
       'Supplier Name',
       'Bill Number',
+      'Purchase Date',
     ],
+    periodOf: 'expiry',
     file: 'alerts-expired',
     actionLabel: 'Return',
     bulkReturn: true,
@@ -1055,7 +1095,9 @@ const ALERT_SPECS: Record<
       'Available Qty',
       'Supplier Name',
       'Bill Number',
+      'Purchase Date',
     ],
+    periodOf: 'expiry',
     file: 'alerts-near',
     actionLabel: 'Return',
     bulkReturn: true,
@@ -1078,6 +1120,209 @@ const ALERT_SPECS: Record<
   },
 }
 
+const ALERT_ROWS_SHOWN = 1000
+
+function downloadBase64(filename: string, mime: string, b64: string) {
+  const bin = atob(b64)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i)
+  const url = URL.createObjectURL(new Blob([bytes], { type: mime }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+type ExportHow = 'csv' | 'xlsx' | 'pdf' | 'dm_a4' | 'dm_a5' | 'printer'
+const EXPORT_HOW: { key: ExportHow; label: string }[] = [
+  { key: 'xlsx', label: 'Excel file' },
+  { key: 'pdf', label: 'PDF file' },
+  { key: 'csv', label: 'CSV file' },
+  { key: 'dm_a4', label: 'Print — dot matrix, A4' },
+  { key: 'dm_a5', label: 'Print — dot matrix, A5' },
+  { key: 'printer', label: 'Print — normal printer (laser / inkjet)' },
+]
+
+/** Export or print the list on screen, or all five lists at once, as the screen filters them
+ *  (search and Month / Year). */
+function AlertsExportDialog({
+  alerts,
+  current,
+  period,
+  search,
+  onClose,
+  onDone,
+}: {
+  alerts: Alerts
+  current: string
+  period: string
+  search: string
+  onClose: () => void
+  onDone: (msg: string) => void
+}) {
+  const [which, setWhich] = useState<'current' | 'all'>('current')
+  const [how, setHow] = useState<ExportHow>('xlsx')
+  const [pageLayout, setPageLayout] = useState<'portrait' | 'landscape'>('portrait')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const keys = which === 'all' ? Object.keys(ALERT_SPECS) : [current]
+  const sections = keys.map((k) => {
+    const sp = ALERT_SPECS[k]
+    const rows = alertRows(alerts, sp.key as string, sp.periodOf, sp.periodOf ? period : '')
+      .filter((r) => filterText(k === current ? search : '', r.slice(0, sp.headers.length)))
+      .map((r) => r.slice(0, sp.headers.length))
+    const t = sp.periodOf && period ? `${sp.title} — ${periodLabel(period)}` : sp.title
+    return { title: t, columns: sp.headers, rows }
+  })
+  const total = sections.reduce((n, s) => n + s.rows.length, 0)
+
+  async function go() {
+    setBusy(true)
+    setError('')
+    try {
+      const printTo = how === 'printer' ? 'printer' : how.startsWith('dm_') ? 'dot_matrix' : ''
+      const res = await exportAlerts({
+        title: which === 'all' ? 'Alert & Monitoring' : sections[0]?.title || 'Alerts',
+        sections,
+        format: printTo ? undefined : (how as 'csv' | 'xlsx' | 'pdf'),
+        print_to: printTo as '' | 'dot_matrix' | 'printer',
+        paper: how === 'dm_a5' ? 'A5' : 'A4',
+        page_layout: pageLayout,
+      })
+      if (!res.ok) {
+        setError(res.error || 'Export zala nahi.')
+        return
+      }
+      if (res.content_base64 && res.filename) {
+        downloadBase64(res.filename, res.mime || 'application/octet-stream', res.content_base64)
+        onDone(`Saved ${res.filename}`)
+      } else {
+        onDone(res.message || 'Printed.')
+      }
+      onClose()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <div className="modal-card" role="dialog" aria-modal="true" aria-label="Export / Print"
+        onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <h2>Export / Print — Alert &amp; Monitoring</h2>
+          <button type="button" className="icon-btn" onClick={onClose}>
+            ✕
+          </button>
+        </div>
+        <div className="modal-body">
+          <Field label="What">
+            <select className="settings-input" value={which}
+              onChange={(e) => setWhich(e.target.value as 'current' | 'all')}>
+              <option value="current">This list ({ALERT_SPECS[current]?.title})</option>
+              <option value="all">All lists (Low, Out of Stock, Expired, Near Expiry, Dues)</option>
+            </select>
+          </Field>
+          <Field label="How">
+            <select className="settings-input" value={how} onChange={(e) => setHow(e.target.value as ExportHow)}>
+              {EXPORT_HOW.map((o) => (
+                <option key={o.key} value={o.key}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {how !== 'csv' && how !== 'xlsx' && how !== 'dm_a5' ? (
+            <Field label="Page">
+              <select className="settings-input" value={pageLayout}
+                onChange={(e) => setPageLayout(e.target.value as 'portrait' | 'landscape')}>
+                <option value="portrait">A4 vertical (portrait)</option>
+                <option value="landscape">A4 horizontal (landscape)</option>
+              </select>
+            </Field>
+          ) : null}
+          <Note>
+            {total} rows{period ? ` · ${periodLabel(period)}` : ''}
+            {which === 'all' ? ` · ${sections.map((s) => `${s.title}: ${s.rows.length}`).join(' · ')}` : ''}
+          </Note>
+          {error ? <p className="settings-error">{error}</p> : null}
+          <div className="settings-inline-actions">
+            <SaveBtn label={how.startsWith('dm_') || how === 'printer' ? 'Print' : 'Save file'}
+              saving={busy} onClick={() => void go()} />
+            <SaveBtn label="Cancel" onClick={onClose} />
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** A spoken month / year ("this", "last", "next", "2027-03", "03", "2027") -> "2027-03" / "2027". */
+function resolvePeriod(kind: string, value: string): string {
+  const now = new Date()
+  const v = value.trim().toLowerCase()
+  if (kind === 'year') {
+    if (/^\d{4}$/.test(v)) return v
+    const y = now.getFullYear() + (v === 'last' ? -1 : v === 'next' ? 1 : v === 'this' || !v ? 0 : NaN)
+    return Number.isFinite(y) ? String(y) : ''
+  }
+  if (/^\d{4}-\d{2}$/.test(v)) return v
+  if (/^\d{1,2}$/.test(v) && Number(v) >= 1 && Number(v) <= 12) {
+    return `${now.getFullYear()}-${String(Number(v)).padStart(2, '0')}`
+  }
+  const shift = v === 'last' ? -1 : v === 'next' ? 1 : v === 'this' || !v ? 0 : NaN
+  if (!Number.isFinite(shift)) return ''
+  const d = new Date(now.getFullYear(), now.getMonth() + shift, 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+function periodLabel(p: string): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(p)
+  return m ? `${MONTHS[Number(m[2]) - 1] || m[2]} ${m[1]}` : p
+}
+
+/** A row's date for the Month / Year filter: its last cell, YYYY-MM-DD ('' when none). */
+function rowIso(r: unknown[]): string {
+  const v = String(r[r.length - 1] ?? '')
+  return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : ''
+}
+
+/** The rows of one tab. With a month or year, Expired / Near Expiry list every batch whose
+ *  expiry falls in it (not only those inside the near-expiry days), and Low / Out of Stock
+ *  the medicines last bought in it. */
+function alertRows(alerts: Alerts, key: string, periodOf: string | undefined, period: string): unknown[][] {
+  const base = ((alerts as Record<string, unknown>)[key] as unknown[][]) || []
+  if (!period || !periodOf) return base
+  if (periodOf === 'expiry') {
+    const all = (alerts.expiry_by_batch as unknown[][]) || []
+    // all: name, batch, expiry, days, qty, supplier, bill, purchase date, expiry ISO
+    const picked = all.filter((r) => rowIso(r).startsWith(period))
+    if (key === 'expired') {
+      return picked
+        .filter((r) => Number(r[3]) < 0)
+        .map((r) => [r[0], r[1], r[2], r[4], r[5], r[6], r[7], r[8]])
+    }
+    return picked.filter((r) => Number(r[3]) >= 0)
+  }
+  return base.filter((r) => rowIso(r).startsWith(period))
+}
+
+/** Years that have something to show, newest first, plus this year. */
+function alertYears(alerts: Alerts): string[] {
+  const ys = new Set<string>([String(new Date().getFullYear())])
+  for (const key of ['low_stock', 'out_of_stock', 'expiry_by_batch']) {
+    for (const r of ((alerts as Record<string, unknown>)[key] as unknown[][]) || []) {
+      const iso = rowIso(r)
+      if (iso) ys.add(iso.slice(0, 4))
+    }
+  }
+  return [...ys].sort().reverse()
+}
+
 export function AlertsPanel({
   nestedId,
   alerts,
@@ -1096,11 +1341,17 @@ export function AlertsPanel({
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [msg, setMsg] = useState('')
+  // Month ("2026-10") or year ("2026"); empty = the alert rules as before.
+  const [month, setMonth] = useState('')
+  const [year, setYear] = useState('')
+  const [exportOpen, setExportOpen] = useState(false)
   const spec = ALERT_SPECS[nestedId] || ALERT_SPECS.low
-  const rows = ((alerts[spec.key] as unknown[][]) || []).filter((r) =>
-    filterText(search, r),
+  const period = month || year
+  const rows = alertRows(alerts, spec.key as string, spec.periodOf, period).filter((r) =>
+    filterText(search, r.slice(0, spec.headers.length)),
   )
-  const count = alerts.counts?.[spec.key as string] ?? rows.length
+  const count = period ? rows.length : (alerts.counts?.[spec.key as string] ?? rows.length)
+  const years = alertYears(alerts)
   const selectedRow = selectedIdx != null ? rows[selectedIdx] : null
 
   usePageHotkeys({ onSave: () => onRefresh() })
@@ -1214,14 +1465,64 @@ export function AlertsPanel({
     setMsg('')
   }, [nestedId])
 
+  useEffect(() => setSelectedIdx(null), [month, year])
+
+  // ── Voice: "ya mahinyache", "march 2027", "2027 che", "filter kadh", "refresh", "export" ──
+  const voiceHandlerRef = useRef<VoiceHandler>(async () => null)
+  voiceHandlerRef.current = async (cmd) => {
+    const a = cmd.args || {}
+    if (cmd.intent === 'page_filter' && (a.filter === 'month' || a.filter === 'year')) {
+      if (!spec.periodOf) return { ok: false, say: `${spec.title}: mahina / varsh filter nahi` }
+      const v = resolvePeriod(String(a.filter), String(a.value ?? ''))
+      if (!v) return { ok: false, say: `"${a.value ?? ''}" mahina / varsh samajla nahi` }
+      if (a.filter === 'month') {
+        setMonth(v)
+        setYear('')
+      } else {
+        setYear(v)
+        setMonth('')
+      }
+      const n = alertRows(alerts, spec.key as string, spec.periodOf, v).length
+      return { ok: true, say: `${spec.title}: ${periodLabel(v)} — ${n} ol` }
+    }
+    if (cmd.intent === 'page_filter' && a.filter === 'clear') {
+      setMonth('')
+      setYear('')
+      setSearch('')
+      return { ok: true, say: `${spec.title}: sagle dakhavle` }
+    }
+    if (cmd.intent === 'page_action' && a.action === 'refresh') {
+      onRefresh()
+      return { ok: true, say: 'Alerts parat vachle' }
+    }
+    if (cmd.intent === 'page_action' && a.action === 'export') {
+      exportCsv()
+      return { ok: true, say: `${spec.title}: CSV export kela` }
+    }
+    if (cmd.intent === 'search') {
+      setSearch(String(a.query || ''))
+      return { ok: true, say: `${spec.title}: shodh ${a.query || ''}` }
+    }
+    if (cmd.intent === 'page_filter' || cmd.intent === 'page_action') {
+      return { ok: false, say: `${spec.title} var he kaam voice var nahi` }
+    }
+    return null
+  }
+  useEffect(() => registerVoicePage('alerts', () => voiceHandlerRef.current), [])
+
   return (
     <>
       <PanelTitle>
-        {spec.title} ({count})
+        {spec.title} ({count}){period ? ` — ${periodLabel(period)}` : ''}
       </PanelTitle>
       <Note>
         Central dashboard for stock, expiry, and customer due alerts. Select a
         row for Reorder/Return actions. F5 refreshes.
+        {spec.periodOf === 'expiry'
+          ? ' Month / Year shows every batch whose expiry falls in it, batch-wise.'
+          : spec.periodOf === 'purchase'
+            ? ' Month / Year shows the medicines last bought in it.'
+            : ''}
       </Note>
       <div className="settings-inline-actions">
         <Field label="Search">
@@ -1232,8 +1533,49 @@ export function AlertsPanel({
             onChange={(e) => setSearch(e.target.value)}
           />
         </Field>
+        {spec.periodOf ? (
+          <>
+            <Field label="Month">
+              <input
+                type="month"
+                className="settings-input"
+                value={month}
+                onChange={(e) => {
+                  setMonth(e.target.value)
+                  if (e.target.value) setYear('')
+                }}
+              />
+            </Field>
+            <Field label="Year">
+              <select
+                className="settings-input"
+                value={year}
+                onChange={(e) => {
+                  setYear(e.target.value)
+                  if (e.target.value) setMonth('')
+                }}
+              >
+                <option value="">All</option>
+                {years.map((y) => (
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {period ? (
+              <SaveBtn
+                label="Clear Month / Year"
+                onClick={() => {
+                  setMonth('')
+                  setYear('')
+                }}
+              />
+            ) : null}
+          </>
+        ) : null}
         <SaveBtn label="Refresh (F5)" onClick={() => onRefresh()} />
-        <SaveBtn label="Export CSV" onClick={exportCsv} />
+        <SaveBtn label="Export / Print" onClick={() => setExportOpen(true)} />
         <SaveBtn
           label="Reorder by Supplier"
           saving={busy}
@@ -1302,6 +1644,16 @@ export function AlertsPanel({
       )}
       {err ? <p className="settings-error">{err}</p> : null}
       {msg ? <p className="settings-msg">{msg}</p> : null}
+      {exportOpen ? (
+        <AlertsExportDialog
+          alerts={alerts}
+          current={nestedId}
+          period={period}
+          search={search}
+          onClose={() => setExportOpen(false)}
+          onDone={(m) => setMsg(m)}
+        />
+      ) : null}
       <div className="settings-table-wrap">
         <table className="settings-table">
           <thead>
@@ -1312,7 +1664,7 @@ export function AlertsPanel({
             </tr>
           </thead>
           <tbody>
-            {rows.slice(0, 400).map((r, i) => (
+            {rows.slice(0, ALERT_ROWS_SHOWN).map((r, i) => (
               <tr
                 key={i}
                 className={selectedIdx === i ? 'row-selected' : ''}
@@ -1330,6 +1682,13 @@ export function AlertsPanel({
             {!rows.length ? (
               <tr>
                 <td colSpan={spec.headers.length}>No rows</td>
+              </tr>
+            ) : null}
+            {rows.length > ALERT_ROWS_SHOWN ? (
+              <tr>
+                <td colSpan={spec.headers.length}>
+                  First {ALERT_ROWS_SHOWN} of {rows.length} shown — Export CSV has every row.
+                </td>
               </tr>
             ) : null}
           </tbody>
@@ -1401,7 +1760,8 @@ export function PaymentPanel({
     setEditHint('')
   }
 
-  async function save() {
+  /** Null when saved, else why not (voice shows it). */
+  async function save(): Promise<string | null> {
     setErr('')
     setMsg('')
     try {
@@ -1447,12 +1807,68 @@ export function PaymentPanel({
           (next.warnings?.length ? ` Please check: ${next.warnings.join(' ')}` : ''),
       )
       clearForm()
+      return null
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e))
+      const why = e instanceof Error ? e.message : String(e)
+      setErr(why)
+      return why
     }
   }
 
   usePageHotkeys({ onSave: () => void save() })
+
+  // ── Voice (test build): "Ramesh Patil 500 cash", "grahak Ramesh", "save kar" ──
+  // Fills the same boxes the shop fills by hand. Nothing is saved until "save kar",
+  // and the voice bar asks "Yes / No" before that reaches here.
+  const voiceHandlerRef = useRef<VoiceHandler>(async () => null)
+  voiceHandlerRef.current = async (cmd) => {
+    const a = cmd.args || {}
+    const who = kind === 'supplier' ? 'Supplier' : 'Grahak'
+    if (cmd.intent === 'save_bill') {
+      if (!party.trim()) return { ok: false, say: `Payment save zala nahi — ${who} nivdala nahi` }
+      const why = await save()
+      return why ? { ok: false, say: `Payment save zala nahi — ${why}` } : { ok: true, say: `Payment save zala ✓ — ${party}` }
+    }
+    if (cmd.intent !== 'payment' && cmd.intent !== 'set_customer') return null
+    if (a.kind && a.kind !== kind) {
+      return { ok: false, say: `He ${who} payment aahe — "${a.kind} payment ughad" mhana` }
+    }
+    // The party said, else the one already in the box.
+    const name = String(a.name ?? '').trim()
+    const want = name.toLowerCase()
+    const lower = (s: string) => s.toLowerCase()
+    const p = want
+      ? data.parties.find((x) => lower(x.name) === want) ||
+        data.parties.find((x) => lower(x.name).startsWith(want)) ||
+        data.parties.find((x) => lower(x.name).includes(want))
+      : selectedParty
+    if (!p) return { ok: false, say: name ? `"${name}": ${who} yaadit nahi` : `${who}che naav sanga` }
+    setParty(p.name)
+    setPartyId(p.id)
+    const amt = Number(a.amount)
+    const hasAmt = a.amount != null && a.amount !== '' && Number.isFinite(amt) && amt > 0
+    // As a click on the supplier does: its due goes in when no amount was said.
+    if (kind === 'supplier' && !hasAmt && p.due > 0) setAmount(p.due.toFixed(2))
+    if (cmd.intent === 'set_customer' || !hasAmt) {
+      return { ok: true, say: `${who}: ${p.name} — baki ₹${money(p.due)}${cmd.intent === 'payment' ? ' · kiti rakkam? "500 cash" mhana' : ''}` }
+    }
+    const online = String(a.mode || '').toLowerCase() === 'online'
+    let modeWord = online ? 'online' : 'cash'
+    if (kind === 'supplier') {
+      setAmount(String(amt))
+      if (a.mode) {
+        const pick = paymentModes.find((m) => (online ? /online|upi/i : /cash/i).test(m))
+        if (pick) setMode(pick)
+      } else {
+        modeWord = mode
+      }
+    } else {
+      setCash(online ? '0' : String(amt))
+      setOnline(online ? String(amt) : '0')
+    }
+    return { ok: true, say: `${p.name}: ₹${amt} ${modeWord} — 'save kar' mhana` }
+  }
+  useEffect(() => registerVoicePage('payment', () => voiceHandlerRef.current), [])
 
   async function remove(row: Record<string, unknown>) {
     setErr('')
@@ -1530,6 +1946,7 @@ export function PaymentPanel({
           listLabel={kind === 'supplier' ? 'Suppliers' : 'Customers'}
           emptyText="No matching party"
           items={partyItems}
+          voiceField={kind}
           onChange={(v) => {
             setParty(v)
             // Typing has moved off whatever was clicked, so the id that told two
@@ -1715,10 +2132,15 @@ export function LedgerPanel({
   const [err, setErr] = useState('')
   const ledgerTableRef = useRef<HTMLDivElement>(null)
 
-  async function load(nextParty = party) {
+  async function load(nextParty = party, range?: { from: string; to: string }) {
     setErr('')
     try {
-      const res = await fetchLedger({ kind, party: nextParty, from, to })
+      const res = await fetchLedger({
+        kind,
+        party: nextParty,
+        from: range ? range.from : from,
+        to: range ? range.to : to,
+      })
       setData(res)
       if (!from) setFrom(res.from)
       if (!to) setTo(res.to)
@@ -1742,6 +2164,48 @@ export function LedgerPanel({
     onF2: () => focusTableSection(ledgerTableRef, { preferInput: false }),
     onApplyFilter: () => void load(party),
   })
+
+  // ── Voice (test build): "ledger aajche", "ledger ha mahina", "ledger reset" ──
+  // The same From / To the date boxes hold, then the same statement read.
+  const voiceHandlerRef = useRef<VoiceHandler>(async () => null)
+  voiceHandlerRef.current = async (cmd) => {
+    const a = cmd.args || {}
+    const who = kind === 'supplier' ? 'Supplier ledger' : 'Customer ledger'
+    if (cmd.intent === 'page_filter' && a.filter === 'range') {
+      const r = presetRange(a.value)
+      if (!r) return { ok: false, say: `"${a.value}" he divas samajle nahi` }
+      // 'all' is the Reset button's range: engine default From, To = today.
+      const next = r.key === 'all' ? { from: '', to: new Date().toISOString().slice(0, 10) } : r
+      setFrom(next.from)
+      setTo(next.to)
+      await load(party, next)
+      return { ok: true, say: `${who}: ${RANGE_WORDS[r.key]}` }
+    }
+    if (cmd.intent === 'page_filter' && a.filter === 'clear') {
+      setParty('')
+      setFrom('')
+      setTo(new Date().toISOString().slice(0, 10))
+      setData(null)
+      await load('', { from: '', to: new Date().toISOString().slice(0, 10) })
+      return { ok: true, say: `${who}: reset kela` }
+    }
+    if (cmd.intent === 'page_action' && a.action === 'refresh') {
+      await load(party)
+      return { ok: true, say: `${who}: statement parat vachla` }
+    }
+    if (cmd.intent === 'search' || (cmd.intent === 'page_filter' && a.filter === 'party')) {
+      const name = String(a.query || a.value || '').trim()
+      if (!name) return { ok: false, say: 'Konacha ledger? naav sanga' }
+      setParty(name)
+      await load(name)
+      return { ok: true, say: `${who}: ${name}` }
+    }
+    if (cmd.intent === 'page_filter' || cmd.intent === 'page_action') {
+      return { ok: false, say: `${who} var he kaam voice var nahi` }
+    }
+    return null
+  }
+  useEffect(() => registerVoicePage('ledger', () => voiceHandlerRef.current), [])
 
   const onFilterEnter = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
@@ -2035,6 +2499,40 @@ function ReorderBySupplierEditor({
   function removeLine(idx: number) {
     setLines((prev) => prev.filter((_, i) => i !== idx))
   }
+
+  // ── Voice (test build): "Dolo 650 das" adds a line for the chosen supplier ──
+  // The same engine call as the Add button; nothing is saved by voice.
+  const voiceHandlerRef = useRef<VoiceHandler>(async () => null)
+  voiceHandlerRef.current = async (cmd) => {
+    if (cmd.intent !== 'add_medicine') return null
+    const a = cmd.args || {}
+    const said = String(a.medicine ?? '').trim()
+    if (!supplierId) return { ok: false, say: `${said || 'Aushadh'}: aadhi supplier nivda (Load by Supplier)` }
+    if (!said) return { ok: false, say: 'Konta aushadh? naav sanga' }
+    const want = said.toLowerCase()
+    // The supplier's own spelling when it has this medicine.
+    const name =
+      medicines.find((m) => m.toLowerCase() === want) ||
+      medicines.find((m) => m.toLowerCase().startsWith(want)) ||
+      medicines.find((m) => m.toLowerCase().includes(want)) ||
+      said
+    try {
+      const res = await reorderAction({
+        action: 'build_line',
+        supplier_id: Number(supplierId),
+        medicine_name: name,
+        pack_size: '',
+        quantity: Number(a.qty) || 0,
+      })
+      const line = res.line as ReorderLine | undefined
+      if (!line?.medicine_name) return { ok: false, say: `${said}: ${String(res.error || 'line banli nahi')}` }
+      setLines((prev) => [...prev, line])
+      return { ok: true, say: `${line.medicine_name} × ${line.quantity} reorder yaadit jodla` }
+    } catch (e) {
+      return { ok: false, say: `${said}: ${e instanceof Error ? e.message : e}` }
+    }
+  }
+  useEffect(() => registerVoicePage('reorder', () => voiceHandlerRef.current), [])
 
   async function saveSupplierOrder(status: 'draft' | 'ordered') {
     if (!lines.length) {

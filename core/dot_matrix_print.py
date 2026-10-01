@@ -989,7 +989,10 @@ def format_bill_text(ctx, settings: dict | None = None) -> str:
         elif len(lines) > slip:
             slip = len(lines)
 
-    return "\n".join(lines)
+    text = "\n".join(lines)
+    if _setting(merged, "dot_matrix_bold_all", False):
+        text = bold_whole_bill(text)
+    return text
 
 
 def _footer_strip_lines(ctx, settings: dict) -> list[str]:
@@ -1256,11 +1259,66 @@ def _encode_line_with_bold(line: str) -> bytes:
     return bytes(out)
 
 
+_MARKS = (_BOLD_ON, _BOLD_OFF, _TITLE_EM_ON, _TITLE_EM_OFF)
+
+
+def _fit_printed(line: str, width: int) -> str:
+    """Cut and pad a line to `width` PRINTED columns, the printer codes kept and not counted.
+
+    A bold Total row is "---BOLD---<64 letters>---NOBOLD---": cut to 64 as plain text it
+    lost its last 10 letters -- the amount -- and the off code (1 Oct 2026)."""
+    out: list[str] = []
+    seen = 0
+    i = 0
+    open_bold = False
+    while i < len(line):
+        mark = next((m for m in _MARKS if line.startswith(m, i)), None)
+        if mark:
+            out.append(mark)
+            if mark == _BOLD_ON:
+                open_bold = True
+            elif mark == _BOLD_OFF:
+                open_bold = False
+            i += len(mark)
+            continue
+        if seen < width:
+            out.append(line[i])
+            seen += 1
+        i += 1
+    if seen < width:
+        # the padding goes inside an open bold span, so the off code stays at the end
+        pad = " " * (width - seen)
+        if out and out[-1] == _BOLD_OFF:
+            out.insert(len(out) - 1, pad)
+        else:
+            out.append(pad)
+    if open_bold:
+        out.append(_BOLD_OFF)
+    return "".join(out)
+
+
 def _a6_line_pad(line: str, dm: DmLayout) -> str:
     """A6 line prep — preserve leading spaces when layout uses space-based right columns."""
     if dm.preserve_leading_spaces:
-        return line[: dm.line_width].ljust(dm.line_width)
+        return _fit_printed(line, dm.line_width)
     return line.lstrip()
+
+
+def bold_whole_bill(text: str) -> str:
+    """Every printed line in bold ("dot_matrix_bold_all"): each line carries its own
+    on/off codes, so the RAW printer and the Windows-driver path both draw it bold and the
+    line widths stay as they were. The bold Total row is already bold."""
+    out = []
+    for line in text.split("\n"):
+        if line in _MARKS or line == _PAGE_BREAK or not line.strip() or line.startswith(_BOLD_ON):
+            out.append(line)
+        else:
+            out.append(_bold_raw(line))
+    return "\n".join(out)
+
+
+def _bold_raw(line: str) -> str:
+    return f"{_BOLD_ON}{line}{_BOLD_OFF}"
 
 
 def _a6_init_suffix(dm: DmLayout) -> bytes:
@@ -1771,8 +1829,10 @@ def format_report_text(
     settings: dict | None = None,
     *,
     paper: str = "A4",
+    landscape: bool = False,
 ) -> str:
-    """Plain-text export report for dot matrix A4 portrait (HTML/PDF style, no rules)."""
+    """Plain-text export report for dot matrix A4 -- vertical (80 columns), or horizontal
+    (110 columns, the sheet fed sideways, as the Schedule register's landscape prints)."""
     from datetime import datetime
 
     merged = _settings_with_layout(dict(settings or {}))
@@ -1781,6 +1841,8 @@ def format_report_text(
     report["paper_size"] = paper_u
     report["print_paper_hint"] = paper_u
     dm = _layout_for_paper(paper_u)
+    if landscape and paper_u == "A4":
+        dm = replace(dm, line_width=SCHEDULE_LANDSCAPE_COLS)
     report[_DM_SETTINGS_KEY] = replace(dm, preserve_leading_spaces=True)
 
     lines: list[str] = []
@@ -1821,12 +1883,13 @@ def format_reports_combined(
     settings: dict | None = None,
     *,
     paper: str = "A4",
+    landscape: bool = False,
 ) -> str:
     blocks: list[str] = []
     for i, (title, headers, rows) in enumerate(sections or []):
         if i:
             blocks.append("")
-        blocks.append(format_report_text(title, headers, rows, settings, paper=paper))
+        blocks.append(format_report_text(title, headers, rows, settings, paper=paper, landscape=landscape))
     return "\n".join(blocks)
 
 
@@ -2447,8 +2510,9 @@ def print_dot_matrix_report(
     *,
     paper: str = "A4",
     printer_name: str | None = None,
+    landscape: bool = False,
 ) -> None:
-    """Print export report on dot matrix (A4 portrait, HTML-style plain columns)."""
+    """Print export report on dot matrix (A4 vertical or horizontal, HTML-style plain columns)."""
     if not sys.platform.startswith("win"):
         raise DotMatrixPrintError("Dot matrix RAW printing is only implemented on Windows.")
     merged = dict(settings or {})
@@ -2458,7 +2522,7 @@ def print_dot_matrix_report(
     except Exception:
         pass
     paper_u = (paper or "A4").upper()
-    text = format_report_text(title, headers, rows, merged, paper=paper_u)
+    text = format_report_text(title, headers, rows, merged, paper=paper_u, landscape=landscape)
     layout = _layout_for_paper(paper_u)
     payload = render_escp_document(text, paper=paper_u, layout=layout, form_feed_end=True)
     from core.printer_manager import PrinterManager, PrinterError
@@ -2476,12 +2540,14 @@ def print_dot_matrix_reports_combined(
     *,
     paper: str = "A4",
     printer_name: str | None = None,
+    landscape: bool = False,
 ) -> None:
     if not sections:
         return
     if len(sections) == 1:
         title, headers, rows = sections[0]
-        print_dot_matrix_report(title, headers, rows, settings, paper=paper, printer_name=printer_name)
+        print_dot_matrix_report(title, headers, rows, settings, paper=paper, printer_name=printer_name,
+                                landscape=landscape)
         return
     if not sys.platform.startswith("win"):
         raise DotMatrixPrintError("Dot matrix RAW printing is only implemented on Windows.")
@@ -2492,7 +2558,7 @@ def print_dot_matrix_reports_combined(
     except Exception:
         pass
     paper_u = (paper or "A4").upper()
-    text = format_reports_combined(sections, merged, paper=paper_u)
+    text = format_reports_combined(sections, merged, paper=paper_u, landscape=landscape)
     layout = _layout_for_paper(paper_u)
     payload = render_escp_document(text, paper=paper_u, layout=layout, form_feed_end=True)
     from core.printer_manager import PrinterManager, PrinterError

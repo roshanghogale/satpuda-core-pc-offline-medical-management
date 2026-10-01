@@ -1,6 +1,18 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import { matchRank, rankByName, NO_MATCH } from '../nameSearchRank'
+import { isVoiceModeOn } from '../voice/voiceMode'
+import { VOICE_CLOSE_EVENT, VOICE_OPEN_EVENT } from '../voice/voiceField'
+import {
+  SHORTCUTS_EVENT,
+  cachedShortcutMap,
+  isShortcutKind,
+  refreshShortcutCache,
+  type ShortcutKind,
+  type ShortcutMap,
+} from '../voice/voiceClient'
+
+const normName = (s: string) => s.trim().replace(/\s+/g, ' ').toUpperCase()
 
 export type ModernComboItem = {
   id: string
@@ -48,6 +60,9 @@ type Props = {
   keepOrder?: boolean
   /** Fired when the input receives focus. */
   onFocus?: () => void
+  /** Name(s) voice finds this field by ("customer", "doctor"...; space-separated).
+   *  A pageFilter field answers to "search" when none is given. */
+  voiceField?: string
 }
 
 /**
@@ -80,12 +95,16 @@ export function ModernCombo({
   pageFilter = false,
   onFocus,
   onBlur: onFieldBlur,
+  voiceField,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const localRef = useRef<HTMLInputElement | null>(null)
   const listId = useId()
   const [open, setOpen] = useState(false)
   const [hi, setHi] = useState(0)
+  // Voice opened this list: an empty box shows the numbered shortcuts first.
+  const [voiceOpened, setVoiceOpened] = useState(false)
+  const [shortcutRows, setShortcutRows] = useState<Record<string, string> | null>(null)
   const hiRef = useRef(0)
   const hiTouchedRef = useRef(false)
   hiRef.current = hi
@@ -98,8 +117,40 @@ export function ModernCombo({
     }
   }
 
-  const filtered = useMemo(() => {
+  const voiceName = voiceField || (pageFilter ? 'search' : undefined)
+  const shortcutKind = useMemo<ShortcutKind | null>(() => {
+    const k = (voiceName || '').split(/\s+/).find((w) => isShortcutKind(w))
+    return k ? (k as ShortcutKind) : null
+  }, [voiceName])
+
+  // Shortcut rows (number -> name) in force now: voice opened the list, the box is empty.
+  const activeShortcuts =
+    voiceOpened && !value.trim() && shortcutRows && Object.keys(shortcutRows).length ? shortcutRows : null
+
+  const { filtered, shortcutOf } = useMemo(() => {
     const q = value.trim()
+    const shortcutOf = new Map<string, number>()
+    if (activeShortcuts) {
+      // The shortcut rows first, in number order (1, 2, 3...), then every other row.
+      const want = new Map<string, number>()
+      for (const [n, name] of Object.entries(activeShortcuts)) {
+        const k = Number(n)
+        if (Number.isFinite(k) && k >= 1) want.set(normName(name), k)
+      }
+      const hits: { it: ModernComboItem; n: number }[] = []
+      const rest: ModernComboItem[] = []
+      const seen = new Set<number>()
+      for (const it of items) {
+        const n = want.get(normName(it.label))
+        if (n != null && !seen.has(n)) {
+          seen.add(n)
+          hits.push({ it, n })
+          shortcutOf.set(it.id, n)
+        } else rest.push(it)
+      }
+      hits.sort((a, b) => a.n - b.n)
+      return { filtered: [...hits.map((h) => h.it), ...rest].slice(0, maxVisible), shortcutOf }
+    }
     let rows = items
     if (filterLocal && q) {
       // Keep matching on label OR meta -- a medicine is often found by its
@@ -126,8 +177,8 @@ export function ModernCombo({
         }
       }
     }
-    return rows.slice(0, maxVisible)
-  }, [items, filterLocal, value, maxVisible, keepOrder])
+    return { filtered: rows.slice(0, maxVisible), shortcutOf }
+  }, [items, filterLocal, value, maxVisible, keepOrder, activeShortcuts])
 
   const filteredRef = useRef(filtered)
   filteredRef.current = filtered
@@ -166,10 +217,48 @@ export function ModernCombo({
     return () => document.removeEventListener('mousedown', onDoc)
   }, [])
 
+  // Voice asked for this list (voice mode only stops it opening by itself).
+  useEffect(() => {
+    const el = localRef.current
+    if (!el) return
+    const openIt = () => {
+      setOpen(true)
+      setVoiceOpened(true)
+    }
+    const closeIt = () => {
+      setOpen(false)
+      setVoiceOpened(false)
+    }
+    el.addEventListener(VOICE_OPEN_EVENT, openIt)
+    el.addEventListener(VOICE_CLOSE_EVENT, closeIt)
+    return () => {
+      el.removeEventListener(VOICE_OPEN_EVENT, openIt)
+      el.removeEventListener(VOICE_CLOSE_EVENT, closeIt)
+    }
+  }, [])
+
+  // The numbers for this kind: the cached map at once, the service's answer a moment later.
+  useEffect(() => {
+    if (!voiceOpened || !shortcutKind) return
+    let alive = true
+    const take = (m: ShortcutMap | null) => {
+      if (alive) setShortcutRows(m ? { ...m[shortcutKind] } : null)
+    }
+    take(cachedShortcutMap())
+    void refreshShortcutCache().then(take)
+    const on = (e: Event) => take((e as CustomEvent<ShortcutMap>).detail || null)
+    window.addEventListener(SHORTCUTS_EVENT, on)
+    return () => {
+      alive = false
+      window.removeEventListener(SHORTCUTS_EVENT, on)
+    }
+  }, [voiceOpened, shortcutKind])
+
   const pick = (item: ModernComboItem) => {
     onChange(item.label)
     onPick?.(item)
     setOpen(false)
+    setVoiceOpened(false)
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -262,6 +351,7 @@ export function ModernCombo({
     <div
       className={`modern-combo${className ? ` ${className}` : ''}`}
       ref={wrapRef}
+      data-voice-wrap=""
     >
       <input
         ref={setRefs}
@@ -279,18 +369,21 @@ export function ModernCombo({
         data-nav-enter={canShow ? undefined : navEnter}
         data-nav-skip-enter={onEnter ? '1' : undefined}
         data-page-filter={pageFilter ? 'primary' : undefined}
+        data-voice-field={voiceName}
         onChange={(e) => {
           onChange(e.target.value)
           setOpen(true)
         }}
         onFocus={() => {
           onFocus?.()
-          if (openOnFocus) setOpen(true)
+          // A field voice focused stays closed: nobody is at the keyboard to close it.
+          if (openOnFocus && !isVoiceModeOn()) setOpen(true)
         }}
         onBlur={(e) => {
           const next = e.relatedTarget as Node | null
           if (next && wrapRef.current?.contains(next)) return
           setOpen(false)
+          setVoiceOpened(false)
           onFieldBlur?.()
         }}
         onKeyDown={onKeyDown}
@@ -316,6 +409,8 @@ export function ModernCombo({
               role="option"
               aria-selected={i === hi}
               className={`modern-combo-row${i === hi ? ' active' : ''}`}
+              data-voice-label={item.label}
+              data-voice-shortcut={shortcutOf.get(item.id)}
               onMouseEnter={() => {
                 hiRef.current = i
                 setHi(i)

@@ -193,7 +193,7 @@ class TheSalesReturnPopup(unittest.TestCase):
         self.assertIn("savingRef.current = false", save[sent:])
         # the Returns tab had the same hole on F5 -- closed there too
         returns = src(*PAGES, "ReturnsPage.tsx")
-        rsave = between(returns, "const saveSales = async () => {", "const deleteSelectedSalesReturn")
+        rsave = between(returns, "const saveSales = async (", "const deleteSelectedSalesReturn")
         self.assertLess(rsave.index("if (salesSavingRef.current) return"),
                         rsave.index("salesSavingRef.current = true"))
 

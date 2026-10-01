@@ -618,6 +618,8 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                             "/api/startup/alerts/snooze",
                             "/api/sync/status",
                             "/api/license/status",
+                            "/api/voice/enabled",
+                            "/api/voice/pack",
                             "/api/login/status",
                             "/api/login/verify",
                             "/api/sales/history/delete",
@@ -751,6 +753,18 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
 
                 _json_response(self, 200, get_license_status())
                 return
+            if path == "/api/voice/enabled":
+                # The admin panel's per-store voice switch (see core/voice_switch.py).
+                from core.voice_switch import voice_status
+
+                _json_response(self, 200, voice_status())
+                return
+            if path == "/api/voice/pack":
+                # The downloadable voice pack (core/voice_pack.py): installed? downloading?
+                from core import voice_pack
+
+                _json_response(self, 200, voice_pack.status())
+                return
             if path == "/api/login/status":
                 from core.desktop_login_service import get_app_login_status
 
@@ -765,6 +779,25 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 from core.desktop_settings_service import get_layout_lists
 
                 _json_response(self, 200, get_layout_lists())
+                return
+            if path == "/api/sales/regulars":
+                # A customer's regular medicines (core/regular_medicines.py), or every list
+                from core import regular_medicines as rm
+
+                conn = _db.get("conn")
+                if conn is None:
+                    _json_response(self, 503, {"error": "Database not open"})
+                    return
+                try:
+                    from urllib.parse import parse_qs
+
+                    cid = (parse_qs(urlparse(self.path).query).get("customer_id") or [""])[0].strip()
+                    if cid:
+                        _json_response(self, 200, {"ok": True, **rm.get_regulars(conn, cid)})
+                    else:
+                        _json_response(self, 200, {"ok": True, "lists": rm.list_regulars(conn)})
+                except Exception as exc:
+                    _json_response(self, 400, {"ok": False, "error": str(exc)})
                 return
             if path == "/api/settings/alerts":
                 from core.desktop_settings_service import get_alerts
@@ -1614,6 +1647,14 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
             self._handle_settings_write()
             return
         try:
+            if path in ("/api/voice/pack/install", "/api/voice/pack/cancel", "/api/voice/pack/remove",
+                        "/api/voice/pack/start", "/api/voice/pack/check"):
+                from core import voice_pack
+
+                action = path.rsplit("/", 1)[-1]
+                _json_response(self, 200, getattr(voice_pack, action)() if action != "start"
+                               else voice_pack.start_service())
+                return
             if path == "/api/prefs":
                 from core.desktop_ui_prefs import save_desktop_ui_prefs
 
@@ -1786,6 +1827,8 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                         if isinstance(body.get("schedule"), dict)
                         else None,
                         do_print=bool(body.get("print") or body.get("do_print")),
+                        print_to=str(body.get("print_to") or ""),
+                        page_layout=str(body.get("page_layout") or ""),
                     )
                     status = 200 if result.get("ok") else 400
                     _json_response(self, status, result)
@@ -2244,6 +2287,26 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
 
                 _json_response(self, 200, alert_action(conn, body))
                 return
+            if path in ("/api/sales/regulars",):
+                from core import regular_medicines as rm
+
+                if conn is None:
+                    _json_response(self, 503, {"error": "Database not open"})
+                    return
+                try:
+                    out = rm.save_regulars(conn, body.get("customer_id"), str(body.get("customer") or ""),
+                                           str(body.get("phone") or ""), body.get("items") or [])
+                    _json_response(self, 200, {"ok": True, **out})
+                except Exception as exc:
+                    _json_response(self, 400, {"ok": False, "error": str(exc)})
+                return
+            if path in ("/api/settings/alerts/export",):
+                # Alert & Monitoring: CSV / Excel / PDF, or dot matrix / normal printer
+                from core.desktop_export_service import export_alert_sections
+
+                result = export_alert_sections(body)
+                _json_response(self, 200 if result.get("ok") else 400, result)
+                return
             if path in ("/api/settings/printer/test",):
                 _json_response(self, 200, svc.test_printer_setup(body))
                 return
@@ -2490,6 +2553,16 @@ def start_desktop_api(
     except Exception:
         pass
     _start_backup_schedule()
+    try:
+        # the voice pack, when this store has it and voice is on: start its service
+        import atexit
+
+        from core import voice_pack
+
+        voice_pack.autostart()
+        atexit.register(voice_pack.stop_service)
+    except Exception:
+        pass
     try:
         from core.sync_prefs import is_online_mode as _online_flush
 

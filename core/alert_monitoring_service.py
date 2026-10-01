@@ -5,6 +5,7 @@ Uses threshold values from Settings -> Layout & Lists -> Thresholds.
 """
 from __future__ import annotations
 
+import re
 from datetime import date
 from typing import Any, Dict, List, Set, Tuple
 
@@ -85,20 +86,91 @@ def medicine_pack_keys_fully_out_of_stock(conn) -> Set[Tuple[str, str]]:
     return {key for key, total in by_pack.items() if total <= 0}
 
 
-def _latest_supplier_by_medicine_id(conn) -> Dict[int, str]:
+def _norm_batch(batch: Any) -> str:
+    """A batch as purchase save matches it: no spaces, upper case ("ab 12" is AB12)."""
+    return re.sub(r"\s+", "", str(batch or "")).upper()
+
+
+def _iso_day(raw: Any) -> str:
+    """'2026-09-14 10:22:01' / '2026-09-14' -> '2026-09-14'; anything else -> ''."""
+    text = str(raw or "").strip()[:10]
+    return text if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text) else ""
+
+
+def _show_day(iso: str) -> str:
+    return f"{iso[8:10]}-{iso[5:7]}-{iso[:4]}" if iso else ""
+
+
+def _real_purchases_sql(conn) -> str:
+    """Saved purchases only: a draft (autosave) or a deleted bill is not where a batch came from."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(purchases)").fetchall()}
+    where = ["pi.medicine_id IS NOT NULL"]
+    if "is_autosave" in cols:
+        where.append("COALESCE(p.is_autosave,0)=0")
+    if "deleted" in cols:
+        where.append("COALESCE(p.deleted,0)=0")
+    return " AND ".join(where)
+
+
+def _purchase_trail(conn) -> Dict[str, Any]:
+    """Where each batch on the shelf came from.
+
+    by_batch: (medicine id, batch) -> {bill, date, supplier} of the newest saved bill that
+    brought it; by_med: medicine id -> the same for its newest bill; by_name: medicine name ->
+    the newest bill of any row of that name (with its batch and expiry); shelf: medicine id ->
+    the supplier written on the row itself (purchase, opening stock or import write it)."""
     cur = conn.cursor()
-    cur.execute("""
-        SELECT pi.medicine_id, s.name, p.purchase_date, p.id
+    cur.execute(f"""
+        SELECT pi.medicine_id, COALESCE(pi.batch_no,''), COALESCE(pi.expiry_date,''),
+               COALESCE(p.bill_number,''), COALESCE(p.purchase_date,''), COALESCE(s.name,''),
+               COALESCE(m.name,'')
         FROM purchase_items pi
         JOIN purchases p ON p.id = pi.purchase_id
         LEFT JOIN suppliers s ON s.id = p.supplier_id
-        WHERE pi.medicine_id IS NOT NULL
+        LEFT JOIN medicines m ON m.id = pi.medicine_id
+        WHERE {_real_purchases_sql(conn)}
         ORDER BY p.purchase_date DESC, p.id DESC
     """)
-    out: Dict[int, str] = {}
-    for med_id, supplier, _pd, _pid in cur.fetchall():
-        if med_id not in out and supplier:
-            out[int(med_id)] = supplier
+    by_batch: Dict[Tuple[int, str], Dict[str, str]] = {}
+    by_med: Dict[int, Dict[str, str]] = {}
+    by_name: Dict[str, Dict[str, str]] = {}
+    for med_id, batch, expiry, bill, pdate, supplier, name in cur.fetchall():
+        info = {"bill": str(bill or ""), "date": _iso_day(pdate), "supplier": str(supplier or ""),
+                "batch": str(batch or ""), "expiry": str(expiry or "")}
+        mid = int(med_id)
+        by_batch.setdefault((mid, _norm_batch(batch)), info)
+        by_med.setdefault(mid, info)
+        if name:
+            by_name.setdefault(str(name), info)
+    shelf: Dict[int, str] = {}
+    try:
+        for mid, sup in cur.execute(
+                "SELECT id, COALESCE(supplier_name,'') FROM medicines").fetchall():
+            if sup and str(sup).strip():
+                shelf[int(mid)] = str(sup).strip()
+    except Exception:
+        pass
+    return {"by_batch": by_batch, "by_med": by_med, "by_name": by_name, "shelf": shelf}
+
+
+def _batch_source(trail: Dict[str, Any], med_id: Any, batch: Any) -> Dict[str, str]:
+    """Supplier, bill number and purchase date of one shelf batch."""
+    try:
+        mid = int(med_id)
+    except (TypeError, ValueError):
+        return {"bill": "", "date": "", "supplier": ""}
+    hit = trail["by_batch"].get((mid, _norm_batch(batch))) or {}
+    latest = trail["by_med"].get(mid) or {}
+    supplier = hit.get("supplier") or trail["shelf"].get(mid, "") or latest.get("supplier", "")
+    return {"bill": hit.get("bill", ""), "date": hit.get("date", ""), "supplier": supplier}
+
+
+def _latest_supplier_by_medicine_id(conn) -> Dict[int, str]:
+    """The supplier of each medicine row: the one written on the row, else its newest
+    saved bill's. Reading only the bills left every opening-stock or imported row blank."""
+    trail = _purchase_trail(conn)
+    out: Dict[int, str] = {mid: info["supplier"] for mid, info in trail["by_med"].items() if info["supplier"]}
+    out.update(trail["shelf"])
     return out
 
 
@@ -147,20 +219,9 @@ def online_latest_supplier_by_medicine_id() -> Dict[int, str]:
 
 
 def _bill_by_medicine_batch(conn) -> Dict[Tuple[int, str], str]:
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT pi.medicine_id, COALESCE(pi.batch_no, ''), p.bill_number,
-               p.purchase_date, p.id
-        FROM purchase_items pi
-        JOIN purchases p ON p.id = pi.purchase_id
-        ORDER BY p.purchase_date DESC, p.id DESC
-    """)
-    out: Dict[Tuple[int, str], str] = {}
-    for med_id, batch, bill, _pd, _pid in cur.fetchall():
-        key = (int(med_id), batch or "")
-        if key not in out and bill:
-            out[key] = str(bill)
-    return out
+    """(medicine id, batch as purchase save matches it) -> bill number of its newest saved bill."""
+    trail = _purchase_trail(conn)
+    return {k: v["bill"] for k, v in trail["by_batch"].items() if v["bill"]}
 
 
 def _fmt_expiry_display(raw: str) -> str:
@@ -173,10 +234,18 @@ def _fmt_expiry_display(raw: str) -> str:
     return dt.strftime("%d-%m-%Y")
 
 
-def fetch_low_stock_alerts(conn) -> List[Tuple[Any, ...]]:
+def _num(qty: Any) -> Any:
+    q = float(qty or 0)
+    return int(q) if q == int(q) else round(q, 2)
+
+
+def fetch_low_stock_alerts(conn, detail: bool = False) -> List[Tuple[Any, ...]]:
+    """Low stock, one row per medicine name (its batches summed). With `detail` each row
+    also carries its newest bill: batch, expiry, bill number, purchase date, and (hidden,
+    last) that date as YYYY-MM-DD for the month / year filter."""
     cur = conn.cursor()
     low_thr, _ = load_thresholds(conn)
-    suppliers = _latest_supplier_by_medicine_id(conn)
+    trail = _purchase_trail(conn)
     oos = medicine_names_fully_out_of_stock(conn)
 
     cur.execute(f"""
@@ -223,19 +292,22 @@ def fetch_low_stock_alerts(conn) -> List[Tuple[Any, ...]]:
         unit = info.get("unit") or ""
         if not is_low_stock_qty(qty, med_type, low_thr, cur, unit=unit or None):
             continue
-        supplier = suppliers.get(int(info["sample_id"]), "") if info.get("sample_id") else ""
-        rows.append((
-            name,
-            int(qty) if qty == int(qty) else round(qty, 2),
-            unit or "",
-            supplier,
-        ))
+        mid = int(info["sample_id"]) if info.get("sample_id") else 0
+        last = trail["by_name"].get(name) or trail["by_med"].get(mid) or {}
+        supplier = trail["shelf"].get(mid, "") or last.get("supplier", "")
+        row: Tuple[Any, ...] = (name, _num(qty), unit or "", supplier)
+        if detail:
+            row += (last.get("batch", ""), _fmt_expiry_display(last.get("expiry", "")),
+                    last.get("bill", ""), _show_day(last.get("date", "")), last.get("date", ""))
+        rows.append(row)
     return rows
 
 
-def fetch_out_of_stock_medicines(conn) -> List[Tuple[Any, ...]]:
+def fetch_out_of_stock_medicines(conn, detail: bool = False) -> List[Tuple[Any, ...]]:
+    """Out of stock, one row per name + pack. With `detail`: the newest bill's batch, bill
+    number and purchase date, and (hidden, last) that date for the month / year filter."""
     cur = conn.cursor()
-    suppliers = _latest_supplier_by_medicine_id(conn)
+    trail = _purchase_trail(conn)
     oos_packs = medicine_pack_keys_fully_out_of_stock(conn)
     if not oos_packs:
         return []
@@ -254,56 +326,26 @@ def fetch_out_of_stock_medicines(conn) -> List[Tuple[Any, ...]]:
         if key not in oos_packs or key in seen:
             continue
         seen.add(key)
-        supplier = suppliers.get(int(med_id), "") if med_id else ""
-        rows.append((
+        mid = int(med_id) if med_id else 0
+        last = trail["by_med"].get(mid) or trail["by_name"].get(name) or {}
+        supplier = trail["shelf"].get(mid, "") or last.get("supplier", "")
+        row: Tuple[Any, ...] = (
             name,
             unit or "",
             round(float(mrp or 0), 2),
             round(float(rate or 0), 2),
             med_type,
             supplier,
-        ))
+        )
+        if detail:
+            row += (last.get("batch", ""), last.get("bill", ""), _show_day(last.get("date", "")),
+                    last.get("date", ""))
+        rows.append(row)
     return rows
 
 
-def fetch_expired_medicines(conn) -> List[Tuple[Any, ...]]:
+def _stocked_batches(conn) -> List[Tuple[Any, ...]]:
     cur = conn.cursor()
-    suppliers = _latest_supplier_by_medicine_id(conn)
-    bills = _bill_by_medicine_batch(conn)
-    today = date.today()
-
-    cur.execute(f"""
-        SELECT id, name, COALESCE(batch_no,''), COALESCE(expiry_date,''),
-               COALESCE(stock_qty,0)
-        FROM medicines
-        WHERE {HIDDEN_FILTER_SQL} AND COALESCE(stock_qty,0) > 0
-        ORDER BY name COLLATE NOCASE, batch_no
-    """)
-    rows: List[Tuple[Any, ...]] = []
-    for med_id, name, batch, expiry_raw, qty in cur.fetchall():
-        expiry_dt = alert_expiry_date(expiry_raw)
-        if not expiry_dt or expiry_dt >= today:
-            continue
-        supplier = suppliers.get(int(med_id), "")
-        bill = bills.get((int(med_id), batch or ""), "")
-        rows.append((
-            name,
-            batch,
-            _fmt_expiry_display(expiry_raw),
-            int(qty) if float(qty) == int(qty) else round(float(qty), 2),
-            supplier,
-            bill,
-        ))
-    return rows
-
-
-def fetch_near_expiry_medicines(conn) -> List[Tuple[Any, ...]]:
-    cur = conn.cursor()
-    _, near_thr = load_thresholds(conn)
-    suppliers = _latest_supplier_by_medicine_id(conn)
-    bills = _bill_by_medicine_batch(conn)
-    today = date.today()
-
     cur.execute(f"""
         SELECT id, name, COALESCE(type,''), COALESCE(batch_no,''),
                COALESCE(expiry_date,''), COALESCE(stock_qty,0)
@@ -311,25 +353,68 @@ def fetch_near_expiry_medicines(conn) -> List[Tuple[Any, ...]]:
         WHERE {HIDDEN_FILTER_SQL} AND COALESCE(stock_qty,0) > 0
         ORDER BY name COLLATE NOCASE, batch_no
     """)
+    return cur.fetchall()
+
+
+def fetch_expired_medicines(conn, detail: bool = False) -> List[Tuple[Any, ...]]:
+    """Expired batches still on the shelf. With `detail`: purchase date, and (hidden, last)
+    the expiry as YYYY-MM-DD for the month / year filter."""
+    trail = _purchase_trail(conn)
+    today = date.today()
     rows: List[Tuple[Any, ...]] = []
-    for med_id, name, med_type, batch, expiry_raw, qty in cur.fetchall():
+    for med_id, name, _type, batch, expiry_raw, qty in _stocked_batches(conn):
+        expiry_dt = alert_expiry_date(expiry_raw)
+        if not expiry_dt or expiry_dt >= today:
+            continue
+        src = _batch_source(trail, med_id, batch)
+        row: Tuple[Any, ...] = (
+            name, batch, _fmt_expiry_display(expiry_raw), _num(qty), src["supplier"], src["bill"],
+        )
+        if detail:
+            row += (_show_day(src["date"]), expiry_dt.isoformat())
+        rows.append(row)
+    return rows
+
+
+def fetch_near_expiry_medicines(conn, detail: bool = False) -> List[Tuple[Any, ...]]:
+    """Batches whose expiry falls inside the near-expiry threshold. With `detail`: purchase
+    date, and (hidden, last) the expiry as YYYY-MM-DD."""
+    _, near_thr = load_thresholds(conn)
+    trail = _purchase_trail(conn)
+    today = date.today()
+    rows: List[Tuple[Any, ...]] = []
+    for med_id, name, med_type, batch, expiry_raw, qty in _stocked_batches(conn):
         expiry_dt = alert_expiry_date(expiry_raw)
         if not expiry_dt:
             continue
         days_left = (expiry_dt - today).days
         if not is_near_expiry(days_left, med_type, near_thr):
             continue
-        supplier = suppliers.get(int(med_id), "")
-        bill = bills.get((int(med_id), batch or ""), "")
-        rows.append((
-            name,
-            batch,
-            _fmt_expiry_display(expiry_raw),
-            days_left,
-            int(qty) if float(qty) == int(qty) else round(float(qty), 2),
-            supplier,
-            bill,
-        ))
+        src = _batch_source(trail, med_id, batch)
+        row: Tuple[Any, ...] = (
+            name, batch, _fmt_expiry_display(expiry_raw), days_left, _num(qty), src["supplier"], src["bill"],
+        )
+        if detail:
+            row += (_show_day(src["date"]), expiry_dt.isoformat())
+        rows.append(row)
+    return rows
+
+
+def fetch_expiry_by_batch(conn) -> List[Tuple[Any, ...]]:
+    """Every batch on the shelf that has an expiry, past or future -- what the month / year
+    filter of the Expired and Near Expiry tabs picks from ("everything expiring in March
+    2027" is further away than the near-expiry threshold).
+    Row: name, batch, expiry, days left, qty, supplier, bill, purchase date, expiry ISO."""
+    trail = _purchase_trail(conn)
+    today = date.today()
+    rows: List[Tuple[Any, ...]] = []
+    for med_id, name, _type, batch, expiry_raw, qty in _stocked_batches(conn):
+        expiry_dt = alert_expiry_date(expiry_raw)
+        if not expiry_dt:
+            continue
+        src = _batch_source(trail, med_id, batch)
+        rows.append((name, batch, _fmt_expiry_display(expiry_raw), (expiry_dt - today).days, _num(qty),
+                     src["supplier"], src["bill"], _show_day(src["date"]), expiry_dt.isoformat()))
     return rows
 
 
@@ -504,7 +589,9 @@ def fetch_customer_due_summary_online(conn) -> List[Tuple[Any, ...]]:
     return rows
 
 
-def fetch_all_monitoring_sections(conn) -> Dict[str, List[Tuple[Any, ...]]]:
+def fetch_all_monitoring_sections(conn, detail: bool = False) -> Dict[str, List[Tuple[Any, ...]]]:
+    """Every alert list. `detail` (the Alert & Monitoring screen) adds the batch / bill /
+    purchase-date columns and the "expiry_by_batch" list its month / year filter uses."""
     try:
         from core.sync_prefs import is_online_mode
 
@@ -514,14 +601,68 @@ def fetch_all_monitoring_sections(conn) -> Dict[str, List[Tuple[Any, ...]]]:
     if online:
         # No fallback to the SQL below: Online that is an empty :memory: shell, and
         # a failed store read would come back as a clean, empty alert list.
-        return _fetch_all_monitoring_online(conn)
-    return {
-        "low_stock": fetch_low_stock_alerts(conn),
-        "out_of_stock": fetch_out_of_stock_medicines(conn),
-        "expired": fetch_expired_medicines(conn),
-        "near_expiry": fetch_near_expiry_medicines(conn),
+        return _fetch_all_monitoring_online(conn, detail=detail)
+    out = {
+        "low_stock": fetch_low_stock_alerts(conn, detail=detail),
+        "out_of_stock": fetch_out_of_stock_medicines(conn, detail=detail),
+        "expired": fetch_expired_medicines(conn, detail=detail),
+        "near_expiry": fetch_near_expiry_medicines(conn, detail=detail),
         "customer_due": fetch_customer_due_bills(conn),
     }
+    if detail:
+        out["expiry_by_batch"] = fetch_expiry_by_batch(conn)
+    return out
+
+
+def online_purchase_trail(meds: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """_purchase_trail for Online, from the store's purchases off the sync pull and the
+    shelf rows' own supplier_name."""
+    from core import online_catalog as oc
+
+    def _int(v: Any) -> int:
+        try:
+            return int(v or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    names_by_id = {_int(m.get("id") or m.get("local_id")): str(m.get("name") or "") for m in meds}
+    shelf = {_int(m.get("id") or m.get("local_id")): str(m.get("supplier_name") or "").strip()
+             for m in meds if str(m.get("supplier_name") or "").strip()}
+    docs = [d for d in oc._pull_sync_pages("purchases", limit=50000) if isinstance(d, dict)]
+    docs.sort(key=lambda d: (str(d.get("purchase_date") or ""), _int(d.get("id") or d.get("local_id"))),
+              reverse=True)
+    sup_names: Dict[int, str] = {}
+    by_batch: Dict[Tuple[int, str], Dict[str, str]] = {}
+    by_med: Dict[int, Dict[str, str]] = {}
+    by_name: Dict[str, Dict[str, str]] = {}
+    for d in docs:
+        if d.get("deleted") or d.get("is_autosave"):
+            continue
+        sid = _int(d.get("supplier_id"))
+        supplier = ""
+        if sid:
+            if sid not in sup_names:
+                try:
+                    sup_names[sid] = str((oc.find_supplier_by_id(sid) or {}).get("name") or "").strip()
+                except Exception:
+                    sup_names[sid] = ""
+            supplier = sup_names[sid]
+        supplier = supplier or str(d.get("supplier_name") or "").strip()
+        for it in d.get("items") or []:
+            if not isinstance(it, dict):
+                continue
+            mid = _int(it.get("medicine_id"))
+            if not mid:
+                continue
+            info = {"bill": str(d.get("bill_number") or ""), "date": _iso_day(d.get("purchase_date")),
+                    "supplier": supplier, "batch": str(it.get("batch_no") or ""),
+                    "expiry": str(it.get("expiry_date") or "")}
+            by_batch.setdefault((mid, _norm_batch(it.get("batch_no"))), info)
+            by_med.setdefault(mid, info)
+            name = names_by_id.get(mid) or str(it.get("medicine_name") or it.get("name") or "")
+            if name:
+                by_name.setdefault(name, info)
+    return {"by_batch": by_batch, "by_med": by_med, "by_name": by_name, "shelf": shelf}
 
 
 def online_visible_medicines() -> List[Dict[str, Any]]:
@@ -543,15 +684,33 @@ def online_visible_medicines() -> List[Dict[str, Any]]:
     ]
 
 
-def online_stock_sections(conn, meds=None) -> Dict[str, List[Tuple[Any, ...]]]:
+def online_stock_sections(conn, meds=None, detail: bool = False) -> Dict[str, List[Tuple[Any, ...]]]:
     """Low / out / expired / near-expiry rows from the store's shelf (Online).
 
-    Shared by Alert & Monitoring and the startup popup so the two cannot drift.
+    Shared by Alert & Monitoring and the startup popup so the two cannot drift. `detail`
+    (Alert & Monitoring) adds the columns of fetch_*(detail=True) and "expiry_by_batch".
+    Supplier and Bill Number used to be written as "" here: always blank Online.
     """
     low_thr, near_thr = load_thresholds(conn)
     today = date.today()
     if meds is None:
         meds = online_visible_medicines()
+
+    def _mid(m: Dict[str, Any]) -> int:
+        try:
+            return int(m.get("id") or m.get("local_id") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    if detail:
+        try:
+            trail = online_purchase_trail(meds)
+        except Exception:
+            trail = {"by_batch": {}, "by_med": {}, "by_name": {}, "shelf": {}}
+    else:
+        trail = {"by_batch": {}, "by_med": {}, "by_name": {},
+                 "shelf": {_mid(m): str(m.get("supplier_name") or "").strip() for m in meds
+                           if str(m.get("supplier_name") or "").strip()}}
 
     by_name: Dict[str, Dict[str, Any]] = {}
     by_pack: Dict[Tuple[str, str], Dict[str, Any]] = {}
@@ -563,13 +722,14 @@ def online_stock_sections(conn, meds=None) -> Dict[str, List[Tuple[Any, ...]]]:
         qty = float(m.get("stock_qty") or 0)
         med_type = (m.get("type") or "") or ""
         entry = by_name.setdefault(name, {
-            "total_qty": 0.0, "type": med_type, "unit": unit,
+            "total_qty": 0.0, "type": med_type, "unit": unit, "sample_id": _mid(m),
         })
         entry["total_qty"] += qty
         if med_type and not entry["type"]:
             entry["type"] = med_type
         if qty >= float(entry.get("_best_qty") or 0):
             entry["_best_qty"] = qty
+            entry["sample_id"] = _mid(m)
             if unit:
                 entry["unit"] = unit
             if med_type:
@@ -578,6 +738,7 @@ def online_stock_sections(conn, meds=None) -> Dict[str, List[Tuple[Any, ...]]]:
         pack = by_pack.setdefault(pk, {
             "total_qty": 0.0, "type": med_type,
             "mrp": float(m.get("mrp") or 0), "rate": float(m.get("rate") or 0),
+            "sample_id": _mid(m), "name": name,
         })
         pack["total_qty"] += qty
         if med_type and not pack["type"]:
@@ -594,28 +755,41 @@ def online_stock_sections(conn, meds=None) -> Dict[str, List[Tuple[Any, ...]]]:
         unit = info.get("unit") or ""
         if not is_low_stock_qty(qty, med_type, low_thr, None, unit=unit or None):
             continue
-        low_rows.append((
+        mid = int(info.get("sample_id") or 0)
+        last = trail["by_name"].get(name) or trail["by_med"].get(mid) or {}
+        row: Tuple[Any, ...] = (
             name,
             int(qty) if qty == int(qty) else round(qty, 2),
             unit,
-            "",
-        ))
+            trail["shelf"].get(mid, "") or last.get("supplier", ""),
+        )
+        if detail:
+            row += (last.get("batch", ""), _fmt_expiry_display(last.get("expiry", "")),
+                    last.get("bill", ""), _show_day(last.get("date", "")), last.get("date", ""))
+        low_rows.append(row)
 
     oos_rows: List[Tuple[Any, ...]] = []
     for (name, unit), info in sorted(by_pack.items(), key=lambda x: (x[0][0].lower(), x[0][1])):
         if float(info["total_qty"]) > 0:
             continue
-        oos_rows.append((
+        mid = int(info.get("sample_id") or 0)
+        last = trail["by_med"].get(mid) or trail["by_name"].get(info.get("name") or name) or {}
+        row = (
             name,
             unit or "",
             round(float(info.get("mrp") or 0), 2),
             round(float(info.get("rate") or 0), 2),
             info.get("type") or "",
-            "",
-        ))
+            trail["shelf"].get(mid, "") or last.get("supplier", ""),
+        )
+        if detail:
+            row += (last.get("batch", ""), last.get("bill", ""), _show_day(last.get("date", "")),
+                    last.get("date", ""))
+        oos_rows.append(row)
 
     expired_rows: List[Tuple[Any, ...]] = []
     near_rows: List[Tuple[Any, ...]] = []
+    all_rows: List[Tuple[Any, ...]] = []
     for m in meds:
         qty = float(m.get("stock_qty") or 0)
         if qty <= 0:
@@ -628,31 +802,39 @@ def online_stock_sections(conn, meds=None) -> Dict[str, List[Tuple[Any, ...]]]:
         batch = m.get("batch_no") or ""
         med_type = m.get("type") or ""
         qty_disp = int(qty) if qty == int(qty) else round(qty, 2)
+        src = _batch_source(trail, _mid(m), batch)
+        days_left = (expiry_dt - today).days
+        if detail:
+            all_rows.append((name, batch, _fmt_expiry_display(str(expiry_raw)), days_left, qty_disp,
+                             src["supplier"], src["bill"], _show_day(src["date"]), expiry_dt.isoformat()))
+        extra: Tuple[Any, ...] = (_show_day(src["date"]), expiry_dt.isoformat()) if detail else ()
         if expiry_dt < today:
             expired_rows.append((
-                name, batch, _fmt_expiry_display(str(expiry_raw)), qty_disp, "", "",
-            ))
+                name, batch, _fmt_expiry_display(str(expiry_raw)), qty_disp, src["supplier"], src["bill"],
+            ) + extra)
             continue
-        days_left = (expiry_dt - today).days
         if is_near_expiry(days_left, med_type, near_thr):
             near_rows.append((
                 name, batch, _fmt_expiry_display(str(expiry_raw)),
-                days_left, qty_disp, "", "",
-            ))
+                days_left, qty_disp, src["supplier"], src["bill"],
+            ) + extra)
 
-    return {
+    out = {
         "low_stock": low_rows,
         "out_of_stock": oos_rows,
         "expired": expired_rows,
         "near_expiry": near_rows,
     }
+    if detail:
+        out["expiry_by_batch"] = all_rows
+    return out
 
 
-def _fetch_all_monitoring_online(conn) -> Dict[str, List[Tuple[Any, ...]]]:
+def _fetch_all_monitoring_online(conn, detail: bool = False) -> Dict[str, List[Tuple[Any, ...]]]:
     """Online: stock/expiry alerts from store inventory; dues from list_sales."""
     from core import store_query_client as sq
 
-    stock = online_stock_sections(conn)
+    stock = online_stock_sections(conn, detail=detail)
     today = date.today()
     due_settings = load_due_alert_settings(conn)
     due_rows: List[Tuple[Any, ...]] = []

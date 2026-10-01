@@ -632,6 +632,13 @@ def fetch_server_license() -> dict | None:
 
         token = api.store_token_for_active()
         data = api.get_license(token)
+        if isinstance(data, dict):
+            # A whole GET /auth/license answer for THIS PC's store: the voice
+            # switch in it is the admin panel's word (no field = OFF).
+            try:
+                remember_server_voice(data)
+            except Exception:
+                pass
         return data if isinstance(data, dict) else None
     except Exception:
         return None
@@ -841,6 +848,95 @@ def _cache_server_license_locally(lic: dict) -> None:
     remote_activation = str(lic.get("activation_date") or "")[:10]
     if remote_activation and remote_activation != _stored_activation_date_file():
         save_activation_date_local(remote_activation)
+    # Only when the dict actually speaks about voice: some callers cache a
+    # hand-built partial licence, and that must not switch voice off.
+    if "voice_enabled" in lic:
+        try:
+            remember_server_voice(lic)
+        except Exception:
+            pass
+
+
+# ── Voice assistant switch (admin panel, per store) ────────────────────────────
+#
+# The server sends ``voice_enabled`` (bool) and ``voice_tier`` ('auto'|'1'|'2'|'3')
+# in the plain licence, NOT in the signed blob: it is a feature switch, not
+# access. The last answer is kept in voice.dat (same encryption as expiry.dat)
+# so an offline PC keeps the last known value. Nothing ever fetched = OFF.
+
+VOICE_TIERS = ('auto', '1', '2', '3')
+_VOICE_LIVE: dict = {}  # last answer from the server in THIS process: enabled, tier, at
+
+
+def _voice_cache_path() -> str:
+    return os.path.join(_appdata_dir(), 'voice.dat')
+
+
+def normalize_voice_tier(value) -> str:
+    """One of VOICE_TIERS; anything unknown is 'auto' (never a higher level)."""
+    if value is None or isinstance(value, bool):
+        return 'auto'
+    t = str(value).strip().lower()
+    return t if t in VOICE_TIERS else 'auto'
+
+
+def voice_from_license(lic) -> dict:
+    """{enabled, tier} from a server licence dict. Missing / non-true = OFF."""
+    lic = lic if isinstance(lic, dict) else {}
+    return {
+        'enabled': lic.get('voice_enabled') is True,
+        'tier': normalize_voice_tier(lic.get('voice_tier')),
+    }
+
+
+def read_cached_voice() -> dict | None:
+    """The last server answer saved on this PC, or None if there never was one."""
+    path = _voice_cache_path()
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, 'rb') as f:
+            data = _decrypt(f.read())
+    except Exception:
+        return None
+    if not isinstance(data, dict) or 'enabled' not in data:
+        return None
+    return {
+        'enabled': data.get('enabled') is True,
+        'tier': normalize_voice_tier(data.get('tier')),
+        'saved_at': str(data.get('saved_at') or ''),
+    }
+
+
+def remember_server_voice(lic) -> dict:
+    """Record what the server just said about voice: in memory, and on disk
+    when it changed (same value, no write -- like expiry.dat)."""
+    v = voice_from_license(lic)
+    _VOICE_LIVE.clear()
+    _VOICE_LIVE.update(v, at=time.time())
+    cur = read_cached_voice()
+    if cur is None or cur['enabled'] != v['enabled'] or cur['tier'] != v['tier']:
+        path = _voice_cache_path()
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'wb') as f:
+                f.write(_encrypt({
+                    'enabled': v['enabled'],
+                    'tier': v['tier'],
+                    'saved_at': time.strftime('%Y-%m-%dT%H:%M:%S'),
+                }))
+        except Exception:
+            pass
+    return v
+
+
+def live_server_voice(max_age_s: float) -> dict | None:
+    """The server's answer from this process, if it is recent enough."""
+    at = _VOICE_LIVE.get('at')
+    if not at or time.time() - float(at) > max_age_s:
+        return None
+    return {'enabled': _VOICE_LIVE.get('enabled') is True,
+            'tier': normalize_voice_tier(_VOICE_LIVE.get('tier'))}
 
 
 def _resolve_remote_store_id(admin_token: str) -> str:

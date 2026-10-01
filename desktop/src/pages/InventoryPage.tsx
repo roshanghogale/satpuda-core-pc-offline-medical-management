@@ -20,6 +20,7 @@ import {
 import { AlertDialog, type AlertState } from './SalesDialogs'
 import { ModernCombo } from './ModernCombo'
 import { useLayoutRowCount } from '../layoutRows'
+import { isAllValue, pickOption, registerVoicePage, type VoiceHandler } from '../voice/voiceBus'
 import { useDashboardSection } from '../dashboardSections'
 import {
   ActionBar,
@@ -88,6 +89,132 @@ export function InventoryPage({
   const [sortBy, setSortBy] = useState('')
   const [types, setTypes] = useState<string[]>([])
   const [schedules, setSchedules] = useState<string[]>([])
+
+  // ── Voice (test build): "out of stock dakhav", "kami stock", "Dolo shodh" ──
+  // Sets the same filters the dropdowns set; the page's own filter effects
+  // reload the list, so voice and mouse can never disagree.
+  const voiceHandlerRef = useRef<VoiceHandler>(async () => null)
+  voiceHandlerRef.current = async (cmd) => {
+    const a = cmd.args || {}
+    if (cmd.intent === 'inventory_filter') {
+      if (a.filter === 'clear') {
+        setQ('')
+        setTypeFilter('')
+        setStockStatus('')
+        setExpiryStatus('')
+        setSchedule('')
+        return { ok: true, say: 'Sagla stock dakhavla (filter kadhle)' }
+      }
+      if (a.filter === 'stock') {
+        const value = a.value === 'out' ? 'Out of Stock' : a.value === 'low' ? 'Low Stock' : 'In Stock'
+        setExpiryStatus('')
+        setStockStatus(value)
+        return { ok: true, say: `Inventory: ${value}` }
+      }
+      if (a.filter === 'expiry') {
+        const value = a.value === 'expired' ? 'Expired' : 'Near Expiry'
+        setStockStatus('')
+        setExpiryStatus(value)
+        return { ok: true, say: `Inventory: ${value}` }
+      }
+    }
+    if (cmd.intent === 'page_filter') {
+      const f = String(a.filter || '')
+      const all = isAllValue(a.value)
+      if (f === 'clear') {
+        setQ('')
+        setTypeFilter('')
+        setStockStatus('')
+        setExpiryStatus('')
+        setSchedule('')
+        setSortBy('')
+        return { ok: true, say: 'Inventory: sagle filter kadhle' }
+      }
+      if (f === 'stock') {
+        const v = all ? '' : pickOption(a.value, ['In Stock', 'Low Stock', 'Out of Stock'])
+        if (v == null) return { ok: false, say: `Stock filter "${a.value}" nahi` }
+        setStockStatus(v)
+        return { ok: true, say: `Inventory stock: ${v || 'All'}` }
+      }
+      if (f === 'expiry') {
+        const v = all ? '' : pickOption(a.value, ['Near Expiry', 'Expired'])
+        if (v == null) return { ok: false, say: `Expiry filter "${a.value}" nahi` }
+        setExpiryStatus(v)
+        return { ok: true, say: `Inventory expiry: ${v || 'All'}` }
+      }
+      if (f === 'type') {
+        const v = all ? '' : pickOption(a.value, types)
+        if (v == null) return { ok: false, say: `"${a.value}" prakar ya dukanat nahi` }
+        setTypeFilter(v)
+        return { ok: true, say: `Inventory prakar: ${v || 'All'}` }
+      }
+      if (f === 'schedule') {
+        const v = all ? '' : pickOption(a.value, schedules)
+        if (v == null) return { ok: false, say: `Schedule "${a.value}" yaadit nahi` }
+        setSchedule(v)
+        return { ok: true, say: `Inventory schedule: ${v || 'All'}` }
+      }
+      if (f === 'sort') {
+        const opts = data?.sort_options?.length ? data.sort_options : [...INVENTORY_SORTS]
+        const v = pickOption(a.value, opts)
+        if (v == null) return { ok: false, say: `Sort "${a.value}" nahi` }
+        setSortBy(v === 'Best match' ? '' : v)
+        return { ok: true, say: `Inventory kram: ${v}` }
+      }
+      return { ok: false, say: `Inventory var "${f}" filter nahi` }
+    }
+    if (cmd.intent === 'page_action') {
+      const act = String(a.action || '')
+      if (act === 'export') {
+        setExportOpen(true)
+        return { ok: true, say: 'Inventory export ughadla' }
+      }
+      if (act === 'expired_return') {
+        setExpiredReturnOpen(true)
+        return { ok: true, say: 'Return expired ughadla' }
+      }
+      if (act === 'refresh') {
+        // The Refresh button: every filter off, list read again.
+        setQ('')
+        setTypeFilter('')
+        setStockStatus('')
+        setExpiryStatus('')
+        setSchedule('')
+        setSortBy('')
+        void load('')
+        return { ok: true, say: 'Inventory refresh kela' }
+      }
+      if (act === 'medicine_details') {
+        // "Dolo chi mahiti": search for it and open the first match; with no
+        // name, the first row of the list on screen.
+        const name = String(a.medicine || a.query || '').trim()
+        let id = view.ids[0] && view.ids[0] > 0 ? view.ids[0] : null
+        let shownName = String(view.rows[0]?.[nameIndex] ?? '')
+        if (name) {
+          setQ(name)
+          try {
+            const res = await fetchInventory({ q: name, type: '', stock: '', expiry: '', schedule: '', sort: '' })
+            const ids = res.row_ids || []
+            id = ids[0] && ids[0] > 0 ? ids[0] : null
+            const ni = colIndex(res.columns, 'name')
+            shownName = String(res.rows?.[0]?.[ni >= 0 ? ni : 0] ?? name)
+          } catch (e) {
+            return { ok: false, say: `Shodh zala nahi: ${e instanceof Error ? e.message : e}` }
+          }
+        }
+        if (!id) return { ok: false, say: name ? `${name}: inventory madhe nahi` : 'Yaadit aushadh nahi' }
+        setDialog({ id, mode: 'view' })
+        return { ok: true, say: `${shownName}: mahiti ughadli` }
+      }
+      return { ok: false, say: `Inventory var "${act}" he kaam voice var nahi` }
+    }
+    if (cmd.intent === 'search') {
+      setQ(String(a.query || ''))
+      return { ok: true, say: `Inventory shodh: ${a.query}` }
+    }
+    return null
+  }
+  useEffect(() => registerVoicePage('inventory', () => voiceHandlerRef.current), [])
   const [data, setData] = useState<TablePayload | null>(null)
   const inventoryRows = useLayoutRowCount('inventory_rows')
   const showSummary = useDashboardSection('inventory_summary')

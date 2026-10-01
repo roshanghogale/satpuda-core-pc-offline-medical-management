@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { registerVoicePage, type VoiceHandler } from '../voice/voiceBus'
 import { ensureLocalEngine } from '../backend'
 import {
   deleteGeneralProduct,
@@ -132,6 +133,29 @@ export function GeneralProductsPage() {
   }
 
   const rows = products.map((p) => [p.name, p.rate.toFixed(2), p.mrp.toFixed(2)])
+
+  // ── Voice (test build): "general products refresh", "shodh sabun" ──
+  const voiceHandlerRef = useRef<VoiceHandler>(async () => null)
+  voiceHandlerRef.current = async (cmd) => {
+    const a = cmd.args || {}
+    if (cmd.intent === 'search') {
+      setQ(String(a.query || ''))
+      return { ok: true, say: `General Products shodh: ${a.query}` }
+    }
+    if (cmd.intent === 'page_filter' && a.filter === 'clear') {
+      setQ('')
+      return { ok: true, say: 'General Products: shodh kadhla' }
+    }
+    if (cmd.intent === 'page_action' && a.action === 'refresh') {
+      await load()
+      return { ok: true, say: 'General Products refresh kela' }
+    }
+    if (cmd.intent === 'page_action' || cmd.intent === 'page_filter') {
+      return { ok: false, say: 'General Products var he kaam voice var nahi' }
+    }
+    return null
+  }
+  useEffect(() => registerVoicePage('general_products', () => voiceHandlerRef.current), [])
 
   return (
     <PageRoot>

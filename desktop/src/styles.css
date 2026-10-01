@@ -740,3 +740,163 @@
   background: var(--accent-soft, rgba(37, 99, 235, 0.12));
   box-shadow: inset 3px 0 0 var(--accent, #2563eb);
 }
+
+/* ── Voice bar (voice test build) ──────────────────────────────────────────
+ * Bottom-right, above everything, never in the way of the bill table.
+ * Colours come from the theme so it reads in light and dark. */
+.vb-panel {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  width: 380px;
+  max-width: calc(100vw - 28px);
+  z-index: 9000;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+  padding: 10px 12px;
+  font-size: 13px;
+}
+.vb-panel.vb-listening { border-color: #e5484d; box-shadow: 0 0 0 3px rgba(229, 72, 77, 0.25), 0 10px 30px rgba(0,0,0,.22); }
+.vb-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.vb-status { flex: 1; font-weight: 600; font-size: 12px; }
+.vb-icon { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 14px; padding: 2px 6px; }
+.vb-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+.vb-ok { background: #30a46c; }
+.vb-off { background: #8b8d98; }
+.vb-think { background: #f5a524; animation: vb-pulse 0.9s infinite; }
+.vb-rec { background: #e5484d; animation: vb-pulse 0.6s infinite; }
+@keyframes vb-pulse { 50% { opacity: 0.35; } }
+.vb-row { display: flex; gap: 8px; align-items: center; }
+.vb-mic {
+  width: 46px; height: 46px; border-radius: 50%; border: 2px solid var(--border);
+  background: var(--surface-alt, var(--surface)); font-size: 20px; cursor: pointer; flex: none;
+}
+.vb-mic.on { background: #e5484d; border-color: #e5484d; }
+.vb-mic:disabled { opacity: 0.45; cursor: not-allowed; }
+.vb-input { flex: 1; min-width: 0; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); }
+.vb-last { border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; position: relative; }
+.vb-good { background: rgba(48, 164, 108, 0.12); }
+.vb-bad { background: rgba(229, 72, 77, 0.12); }
+.vb-heard { font-size: 11px; color: var(--text-muted); margin-bottom: 2px; }
+.vb-say { font-size: 14px; font-weight: 600; }
+.vb-secs { position: absolute; top: 6px; right: 8px; font-size: 10px; color: var(--text-muted); }
+.vb-hint { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; line-height: 1.5; }
+.vb-confirm { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; background: rgba(245, 165, 36, 0.14); border-radius: 8px; padding: 8px; margin-bottom: 8px; font-weight: 600; }
+.vb-confirm span { flex: 1 1 100%; }
+.vb-yes, .vb-no { border: none; border-radius: 6px; padding: 6px 12px; cursor: pointer; font-weight: 600; }
+.vb-yes { background: #30a46c; color: #fff; }
+.vb-no { background: #8b8d98; color: #fff; }
+.vb-history { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 6px; max-height: 120px; overflow: auto; }
+.vb-history div { font-size: 11px; line-height: 1.5; }
+.vb-h-ok { color: var(--text); }
+.vb-h-bad { color: #e5484d; }
+.vb-h-at { color: var(--text-muted); margin-right: 4px; }
+.vb-setup { display: grid; gap: 6px; margin-bottom: 8px; padding: 8px; border-radius: 8px; background: var(--surface-alt, var(--surface)); border: 1px solid var(--border); }
+.vb-setup label { display: grid; grid-template-columns: 60px 1fr; align-items: center; gap: 6px; font-size: 12px; }
+.vb-setup select { min-width: 0; }
+.vb-setup .vb-check { display: flex; gap: 6px; }
+.vb-small { font-size: 11px; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; margin-top: 6px; }
+.vb-warn { font-size: 11px; color: #e5484d; }
+/* Voice ON / OFF: hands-free listening. Green when the service is listening. */
+.vb-toggle { border: 1px solid var(--border); border-radius: 12px; padding: 3px 10px; font-size: 11px; font-weight: 700; cursor: pointer; background: var(--surface); color: var(--text-muted); }
+.vb-toggle.on { background: #30a46c; border-color: #30a46c; color: #fff; }
+.vb-level { display: inline-block; width: 46px; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; flex: none; }
+.vb-level > span { display: block; height: 100%; background: #30a46c; transition: width 0.12s linear; }
+.vb-choices { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; background: rgba(245, 165, 36, 0.14); border-radius: 8px; padding: 8px; margin-bottom: 8px; font-weight: 600; }
+.vb-choices > span { flex: 1 1 100%; }
+.vb-choice { border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; cursor: pointer; background: var(--surface); color: var(--text); font-weight: 600; text-align: left; }
+.vb-choice b { margin-right: 6px; color: #30a46c; }
+/* A long list ("doctor konte aahet"): numbered and scrollable. */
+.vb-choices-many { max-height: 240px; overflow-y: auto; }
+.vb-fab {
+  position: fixed; right: 14px; bottom: 14px; z-index: 9000; border-radius: 22px;
+  padding: 8px 12px; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text); cursor: pointer; box-shadow: 0 6px 18px rgba(0,0,0,.2); display: flex; gap: 6px; align-items: center;
+}
+/* What the bar understood, and the history's colours: green done, amber asked, red not understood. */
+.vb-ask { background: rgba(245, 165, 36, 0.16); }
+.vb-understood { font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
+.vb-h-done { color: #30a46c; }
+.vb-h-ask { color: #c27c0e; }
+.vb-h-bad { color: #e5484d; }
+.vb-history b { font-weight: 600; }
+/* A dropdown voice opened: its name, and a way to close it by hand. */
+.vb-field { display: flex; align-items: center; gap: 6px; background: rgba(37, 99, 235, 0.1); border-radius: 8px; padding: 6px 8px; margin-bottom: 8px; font-size: 12px; }
+.vb-field > span { flex: 1; }
+/* The number to say for each row of a voice-opened list. */
+[data-voice-n] { position: relative; padding-left: 28px !important; }
+[data-voice-n]::after {
+  content: attr(data-voice-n);
+  position: absolute; left: 5px; top: 50%; transform: translateY(-50%);
+  min-width: 18px; height: 18px; line-height: 18px; padding: 0 4px; box-sizing: border-box;
+  border-radius: 9px; background: var(--accent, #2563eb); color: #fff;
+  font-size: 11px; font-weight: 700; text-align: center; pointer-events: none;
+}
+/* Voice level, gates and compare (voice test build). */
+.vb-setup { max-height: 45vh; overflow-y: auto; }
+/* With the level settings open the bar can outgrow a small screen: it scrolls instead of losing its head. */
+.vb-panel { max-height: calc(100vh - 28px); overflow-y: auto; }
+.vb-source { font-size: 11px; color: var(--text-muted); }
+/* "Satpuda" heard alone: the bar waits for the command. */
+.vb-panel.vb-wake-wait { border-color: #30a46c; box-shadow: 0 0 0 3px rgba(48, 164, 108, 0.3), 0 10px 30px rgba(0,0,0,.22); }
+.vb-panel.vb-wake-wait .vb-status { color: #30a46c; }
+.vb-ignored { font-size: 11px; color: var(--text-muted); margin: -4px 0 6px 18px; }
+.vb-alt { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.vb-h-eng { margin-left: 6px; font-size: 10px; color: var(--text-muted); border: 1px solid var(--border); border-radius: 6px; padding: 0 4px; }
+.vb-history .vb-h-alt { color: var(--text-muted); padding-left: 12px; }
+.vl-box { display: grid; gap: 6px; font-size: 12px; }
+.vl-box.vl-compact { border-top: 1px solid var(--border); padding-top: 6px; margin-top: 2px; }
+.vl-hw { font-size: 11px; color: var(--text-muted); }
+.vl-hw b { color: var(--text); }
+.vl-dim { font-size: 11px; color: var(--text-muted); }
+.vl-box .vl-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.vl-label { width: 52px; flex: none; font-weight: 600; }
+.vl-seg { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.vl-opt { font-size: 11px; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; }
+.vl-opt.on { background: #30a46c; border-color: #30a46c; color: #fff; font-weight: 700; }
+.vl-opt:disabled { opacity: 0.45; cursor: not-allowed; }
+.vl-opt small { font-size: 9px; opacity: 0.8; }
+.vl-box .vl-check { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; }
+.vl-box .vl-threshold { display: flex; }
+.vl-box .vl-threshold input { flex: 1; min-width: 80px; }
+.vl-box .vb-small { margin-top: 0; }
+.vl-speaker { display: grid; gap: 4px; }
+/* The voice pack: the bar's download card and the Settings > Voice block. */
+.vp-card { display: grid; gap: 4px; font-size: 12px; margin-bottom: 8px; padding: 8px; border-radius: 8px; background: var(--surface-alt, var(--surface)); border: 1px solid var(--border); }
+.vp-card .vb-small { justify-self: start; margin-top: 2px; }
+.vp-busy { display: grid; gap: 4px; }
+.vp-busy .vb-small { justify-self: start; margin-top: 0; }
+.vp-bar { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
+.vp-bar > span { display: block; height: 100%; background: #30a46c; transition: width 0.3s linear; }
+/* No count to show (checking, starting): a stripe that keeps moving. */
+.vp-bar > span.vp-bar-run { width: 30%; animation: vp-run 1.2s ease-in-out infinite; }
+@keyframes vp-run { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
+.vb-small:disabled { opacity: 0.45; cursor: not-allowed; }
+.vb-small.vp-danger { border-color: #e5484d; color: #e5484d; }
+/* Speaker enrollment wizard: above everything, the bar too. */
+.vb-enroll-backdrop { position: fixed; inset: 0; z-index: 9500; background: rgba(0, 0, 0, 0.45); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.vb-enroll { width: 440px; max-width: 100%; max-height: calc(100vh - 32px); overflow-y: auto; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.3); padding: 14px 16px; display: grid; gap: 10px; font-size: 13px; }
+.vb-enroll-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.vb-enroll-count { font-size: 12px; color: var(--text-muted); font-weight: 600; }
+.vb-enroll-dots { display: flex; gap: 6px; }
+.vb-enroll-dots span { flex: 1; height: 5px; border-radius: 3px; background: var(--border); }
+.vb-enroll-dots span.on { background: #30a46c; }
+.vb-enroll-dots span.now { background: #f5a524; }
+.vb-enroll-note { margin: 0; font-size: 12px; color: var(--text-muted); }
+.vb-enroll-sentence { font-size: 20px; font-weight: 700; text-align: center; padding: 6px 0; }
+.vb-enroll-btn { width: 100%; padding: 18px 12px; border-radius: 12px; border: 2px solid var(--border); background: var(--surface-alt, var(--surface)); color: var(--text); font-size: 16px; font-weight: 700; cursor: pointer; user-select: none; touch-action: none; }
+.vb-enroll-btn.on { background: #e5484d; border-color: #e5484d; color: #fff; animation: vb-pulse 0.9s infinite; }
+.vb-enroll-btn:disabled { opacity: 0.6; cursor: progress; }
+.vb-enroll-msg { font-size: 12px; text-align: center; color: #30a46c; font-weight: 600; }
+.vb-enroll-list { margin: 0; padding-left: 0; list-style: none; display: grid; gap: 3px; font-size: 12px; }
+.vb-enroll-list li { display: flex; align-items: center; gap: 6px; color: var(--text-muted); }
+.vb-enroll-list li.now { color: var(--text); font-weight: 600; }
+.vb-enroll-list li > span { width: 12px; color: #30a46c; }
+.vb-enroll-list .vb-small { margin: 0 0 0 auto; padding: 1px 6px; }
+.vb-enroll-finish { display: grid; gap: 10px; justify-items: center; text-align: center; }
+.vb-enroll-ok { font-size: 15px; font-weight: 700; color: #30a46c; }
+.vb-enroll-foot { display: flex; justify-content: flex-end; }
+.vb-enroll-msg.vb-warn { color: #e5484d; }

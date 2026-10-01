@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { norm, pickOption, registerVoicePage, setVoicePlace, type VoiceHandler } from '../voice/voiceBus'
 import { focusTableSection, usePageHotkeys } from '../hooks/usePageHotkeys'
 import { ensureLocalEngine } from '../backend'
 import {
@@ -103,7 +104,13 @@ export function ReturnsPage({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [note, setNote] = useState('')
-  const [alert, setAlert] = useState<AlertState | null>(null)
+  const [alert, setAlertState] = useState<AlertState | null>(null)
+  /** The last box shown, so a spoken add / save can say WHY it did not go through. */
+  const lastAlertRef = useRef<AlertState | null>(null)
+  const setAlert = useCallback((a: AlertState | null) => {
+    lastAlertRef.current = a
+    setAlertState(a)
+  }, [])
   const [salesHistSel, setSalesHistSel] = useState<number | null>(null)
   const [purchaseHistSel, setPurchaseHistSel] = useState<number | null>(null)
   const [purchaseDetail, setPurchaseDetail] = useState<{
@@ -419,7 +426,7 @@ export function ReturnsPage({
     setError('')
     // Same bill again: keep what has already been entered.
     if (salesBillRef.current && Number(salesBillRef.current.sale_id) === Number(saleId)) {
-      return
+      return salesBillRef.current
     }
     try {
       const loaded = await loadSalesReturnBill(saleId)
@@ -429,7 +436,7 @@ export function ReturnsPage({
           message: loaded.error || 'Bill not found.',
           kind: 'warning',
         })
-        return
+        return null
       }
       setSalesBill(loaded)
       // The box is a PERCENTAGE -- the engine hands it to calc_return_refund as
@@ -442,8 +449,10 @@ export function ReturnsPage({
       setSalesPickInfo('Pick a medicine from the loaded bill, enter qty, then Add to Return.')
       setSalesBillInfo(describeSalesBill(loaded))
       setNote(`Loaded ${loaded.bill_no}`)
+      return loaded
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
+      return null
     }
   }
 
@@ -473,15 +482,16 @@ export function ReturnsPage({
   // Set before the request goes out. F5 is not stopped by the disabled button,
   // so two quick presses saved the same return twice -- two refunds.
   const salesSavingRef = useRef(false)
-  const saveSales = async () => {
-    if (salesSavingRef.current) return
+  /** True when the return was saved (voice says so; the screen shows its own note). */
+  const saveSales = async (): Promise<boolean> => {
+    if (salesSavingRef.current) return false
     const pre = checkSalesReturnSave(salesBill, salesReturnItems, salesDisc)
     if (pre || !salesBill) {
       setAlert({
         ...(pre || { title: 'Load bill', message: 'Search and load a sales bill first.' }),
         kind: 'warning',
       })
-      return
+      return false
     }
     salesSavingRef.current = true
     setSaving(true)
@@ -495,15 +505,17 @@ export function ReturnsPage({
           message: res.error || 'Could not save return.',
           kind: 'error',
         })
-        return
+        return false
       }
       const msg = salesReturnSavedMessage(res, salesSettle)
       clearSalesForm()
       setNote(msg)
       dispatchPaymentsChanged('customer')
       await refreshSummary()
+      return true
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
+      return false
     } finally {
       salesSavingRef.current = false
       setSaving(false)
@@ -852,7 +864,7 @@ export function ReturnsPage({
       purchaseBillRef.current &&
       Number(purchaseBillRef.current.purchase_id) === Number(purchaseId)
     ) {
-      return
+      return purchaseBillRef.current
     }
     try {
       const loaded = await loadPurchaseReturnBill(purchaseId)
@@ -862,7 +874,7 @@ export function ReturnsPage({
           message: loaded.error || 'Purchase not found.',
           kind: 'warning',
         })
-        return
+        return null
       }
       setPurchaseBill(loaded)
       setPurchaseReturnItems([])
@@ -882,8 +894,10 @@ export function ReturnsPage({
             : ''),
       )
       setNote(`Loaded ${loaded.bill_label}`)
+      return loaded
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
+      return null
     }
   }
 
@@ -971,14 +985,15 @@ export function ReturnsPage({
     )
   }
 
-  const savePurchase = async () => {
+  /** True when the return was saved. */
+  const savePurchase = async (): Promise<boolean> => {
     if (!purchaseBill?.purchase_id) {
       setAlert({
         title: 'Load bill',
         message: 'Search and load a purchase bill first.',
         kind: 'warning',
       })
-      return
+      return false
     }
     const items = purchaseReturnItems.map((it) => ({
       medicine_id: it.medicine_id,
@@ -994,7 +1009,7 @@ export function ReturnsPage({
         message: 'Enter return quantity for at least one item.',
         kind: 'warning',
       })
-      return
+      return false
     }
     setSaving(true)
     try {
@@ -1018,7 +1033,7 @@ export function ReturnsPage({
           message: res.error || 'Could not save return.',
           kind: 'error',
         })
-        return
+        return false
       }
       let msg = `Saved ${res.return_no} — credit ${money(res.refund_amount || 0)}`
       if (editReturn) {
@@ -1037,8 +1052,10 @@ export function ReturnsPage({
       clearPurchaseForm()
       setNote(msg)
       await refreshSummary()
+      return true
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
+      return false
     } finally {
       setSaving(false)
     }
@@ -1329,6 +1346,202 @@ export function ReturnsPage({
   const activeBulkGroup = bulkGroups[bulkIdx] || null
   const bulkWriteoffs = bulkData?.writeoff_lines || []
 
+  // ── Voice (test build): "write-off tab", "purchase return", "cash parat" ──
+  // Sets the same tab / select state the buttons and dropdowns set.
+  const voiceHandlerRef = useRef<VoiceHandler>(async () => null)
+  voiceHandlerRef.current = async (cmd) => {
+    const a = cmd.args || {}
+    const TAB_NAMES: Record<Tab, string> = {
+      sales: 'Sales Return',
+      purchase: 'Purchase Return',
+      disposal: 'Write-off',
+      bulk: 'Bulk Purchase Return',
+    }
+    const TAB_ALIASES: Record<string, Tab> = {
+      sales: 'sales', salesreturn: 'sales', grahak: 'sales',
+      purchase: 'purchase', purchasereturn: 'purchase', supplier: 'purchase',
+      disposal: 'disposal', writeoff: 'disposal', write: 'disposal', nash: 'disposal',
+      bulk: 'bulk', bulkreturn: 'bulk', bulkpurchasereturn: 'bulk',
+    }
+    if (cmd.intent === 'page_filter') {
+      const f = String(a.filter || '')
+      if (f === 'tab') {
+        const t = TAB_ALIASES[norm(a.value)]
+        if (!t) return { ok: false, say: `Returns madhe "${a.value}" tab nahi` }
+        setTab(t)
+        return { ok: true, say: `Returns: ${TAB_NAMES[t]}` }
+      }
+      if (f === 'disposal_mode') {
+        const v = pickOption(a.value, ['writeoff', 'return'])
+        if (!v) return { ok: false, say: `Mode "${a.value}" nahi` }
+        setTab('disposal')
+        setDispMode(v as 'writeoff' | 'return')
+        return { ok: true, say: `Write-off mode: ${v === 'writeoff' ? 'Write-off' : 'Purchase return (disposal)'}` }
+      }
+      if (f === 'refund') {
+        const v = pickOption(a.value, ['ledger', 'cash', 'online'])
+        if (!v) return { ok: false, say: `Parat kasa "${a.value}" samajla nahi` }
+        setTab('sales')
+        setSalesSettle(v as RefundSettle)
+        const words: Record<string, string> = {
+          ledger: 'grahakachya khatyat jama (cash nahi)',
+          cash: 'cash parat',
+          online: 'online / UPI parat',
+        }
+        return { ok: true, say: `Sales return paise: ${words[v]}` }
+      }
+      return { ok: false, say: `Returns var "${f}" filter nahi` }
+    }
+    if (cmd.intent === 'page_action') {
+      const act = String(a.action || '')
+      if (act === 'refresh') {
+        await refreshSummary()
+        return { ok: true, say: 'Returns refresh kela' }
+      }
+      if (act === 'load_bulk') {
+        // The "Load candidates" button: reads near-expiry stock, saves nothing.
+        setTab('bulk')
+        void loadBulkPrefill()
+        return { ok: true, say: 'Bulk return: near-expiry yaadi aanli' }
+      }
+      return { ok: false, say: `Returns var "${act}" he kaam voice var nahi` }
+    }
+
+    // ── The return being written up, on the Sales Return / Purchase Return tab:
+    // "bill S-102 load kar", "Dolo 650 don patte", "dusri line kadh", "save kar".
+    // The same checks as the buttons: quantity left to return, whole tablets, no twice.
+    const FORM_INTENTS = ['load_bill', 'add_medicine', 'remove_last', 'remove_line', 'remove_medicine', 'save_bill']
+    if (!FORM_INTENTS.includes(cmd.intent)) return null
+    if (tab !== 'sales' && tab !== 'purchase') {
+      return { ok: false, say: `${TAB_NAMES[tab]}: he ya tab var voice ne hot nahi — Sales Return kinva Purchase Return tab ughada` }
+    }
+    const sales = tab === 'sales'
+    const boxLine = () => {
+      const box = lastAlertRef.current
+      return box ? ` — ${box.title}: ${(box.message || '').split('\n')[0]}` : ' — screen var sandesh baga'
+    }
+
+    if (cmd.intent === 'load_bill') {
+      const no = String(a.bill_no ?? '').trim()
+      if (!no) return { ok: false, say: 'Konta bill? Bill number sanga' }
+      const want = no.toUpperCase()
+      try {
+        lastAlertRef.current = null
+        if (sales) {
+          const bills = (await searchSalesReturnBills(no, '')).bills || []
+          const hit =
+            bills.find((b) => String(b.bill_no).toUpperCase() === want) ||
+            (bills.length === 1 ? bills[0] : undefined) ||
+            bills.find((b) => String(b.bill_no).toUpperCase().endsWith(want))
+          if (!hit) {
+            return { ok: false, say: bills.length ? `Bill ${no}: ${bills.length} bill sapadle — purna number sanga` : `Bill ${no}: yaadit bill nahi` }
+          }
+          setSalesQuery(hit.label)
+          const loaded = await loadSales(hit.sale_id)
+          if (!loaded) return { ok: false, say: `Bill ${no} load zala nahi${boxLine()}` }
+          return {
+            ok: true,
+            say: `Bill ${loaded.bill_no || no} load kela — ${loaded.customer || 'grahak'} · ${loaded.items?.length ?? 0} aushadha`,
+          }
+        }
+        const bills = (await searchPurchaseReturnBills(no)).purchases || []
+        const hit =
+          bills.find((b) => String(b.bill_label).toUpperCase() === want) ||
+          (bills.length === 1 ? bills[0] : undefined) ||
+          bills.find((b) => String(b.bill_label).toUpperCase().endsWith(want))
+        if (!hit) {
+          return { ok: false, say: bills.length ? `Bill ${no}: ${bills.length} bill sapadle — purna number sanga` : `Bill ${no}: yaadit bill nahi` }
+        }
+        setPurchaseQuery(hit.label)
+        const loaded = await loadPurchase(hit.purchase_id)
+        if (!loaded) return { ok: false, say: `Purchase bill ${no} load zala nahi${boxLine()}` }
+        return {
+          ok: true,
+          say: `Purchase bill ${loaded.bill_label || no} load kela — ${loaded.supplier || 'supplier'} · ${loaded.items?.length ?? 0} aushadha`,
+        }
+      } catch (e) {
+        return { ok: false, say: `Bill ${no} load zala nahi — ${e instanceof Error ? e.message : e}` }
+      }
+    }
+
+    if (cmd.intent === 'add_medicine') {
+      const bill = sales ? salesBillRef.current : purchaseBillRef.current
+      const items = bill?.items || []
+      if (!items.length) return { ok: false, say: 'Aadhi bill load kara — "bill number … load kar" mhana' }
+      const want = String(a.medicine ?? '').trim().toLowerCase()
+      const brand = want.split(/\s+/)[0] || want
+      const lower = (s: string) => s.toLowerCase()
+      const item =
+        items.find((it) => lower(it.name) === want) ||
+        items.find((it) => lower(it.name).startsWith(want)) ||
+        items.find((it) => lower(it.name).includes(want)) ||
+        items.find((it) => lower(it.name).split(/\s+/)[0] === brand)
+      if (!item) return { ok: false, say: `${a.medicine}: ya bill madhe nahi` }
+      const said = Number(a.qty) || 1
+      const tps = Number(item.tablets_per_stripe) || 1
+      // A sale counts a strip medicine in tablets: "don patte" is its tablets. A purchase counts strips.
+      const qty = sales && a.unit === 'strip' && item.is_tablet && tps > 1 ? said * tps : said
+      if (sales) {
+        const r = checkSalesReturnAdd(salesBill, salesReturnItems, item.medicine_id, item.name, String(qty))
+        if (!r.ok) return { ok: false, say: `${item.name}: ${r.alert.message}` }
+        setSalesReturnItems((rows) => [...rows, r.line])
+        setSalesPickInfo(`Added ${r.line.name} × ${r.line.qty}. Add more or save.`)
+      } else {
+        const remaining = purchaseRemainingQty(item.medicine_id, item.remaining_qty)
+        if (qty > remaining) return { ok: false, say: `${item.name}: Cannot return more than ${remaining} for ${item.name}.` }
+        const part = partTabletProblem(item.name, qty, item.is_tablet, item.tablets_per_stripe)
+        if (part) return { ok: false, say: `${item.name}: ${part}` }
+        if (purchaseReturnItems.some((r) => r.medicine_id === item.medicine_id)) {
+          return { ok: false, say: `${item.name}: ${item.name} is already in the return list. Remove it first to change qty.` }
+        }
+        setPurchaseReturnItems((rows) => [
+          ...rows,
+          {
+            medicine_id: item.medicine_id,
+            name: item.name,
+            batch: item.batch,
+            qty,
+            rate: item.rate || 0,
+            amount: Math.round(qty * (item.rate || 0) * 100) / 100,
+            type: item.type,
+            is_tablet: item.is_tablet,
+            tablets_per_stripe: item.tablets_per_stripe,
+          },
+        ])
+        setPurchasePickInfo(`Added ${item.name} × ${qty}. Add more or save.`)
+      }
+      return { ok: true, say: `${item.name} × ${qty}${qty !== said ? ` (${said} patte)` : ''} return madhe jodla` }
+    }
+
+    if (cmd.intent === 'remove_last' || cmd.intent === 'remove_line' || cmd.intent === 'remove_medicine') {
+      const lines: { name: string }[] = sales ? salesReturnItems : purchaseReturnItems
+      if (!lines.length) return { ok: false, say: 'Kadhayla kahich nahi — return yaadi rikami aahe' }
+      let at = lines.length - 1
+      if (cmd.intent === 'remove_line') {
+        const n = Number(a.n)
+        if (!Number.isInteger(n) || n < 1 || n > lines.length) return { ok: false, say: `Return madhe ${a.n ?? '?'} line nahit` }
+        at = n - 1
+      } else if (cmd.intent === 'remove_medicine') {
+        const want = String(a.medicine ?? '').trim().toLowerCase()
+        at = lines.findIndex((r) => r.name.toLowerCase().startsWith(want) || r.name.toLowerCase().includes(want))
+        if (!want || at < 0) return { ok: false, say: `${a.medicine} return yaadit nahi` }
+      }
+      const gone = lines[at]
+      if (sales) setSalesReturnItems((rows) => rows.filter((_, i) => i !== at))
+      else setPurchaseReturnItems((rows) => rows.filter((_, i) => i !== at))
+      return { ok: true, say: cmd.intent === 'remove_line' ? `${at + 1} ri line kadhli: ${gone.name}` : `${gone.name} return madhun kadhla` }
+    }
+
+    // save_bill: the voice bar has already asked "Yes / No".
+    lastAlertRef.current = null
+    const saved = sales ? await saveSales() : await savePurchase()
+    if (saved) return { ok: true, say: `${TAB_NAMES[tab]} save zala ✓` }
+    return { ok: false, say: `Return save zala nahi${boxLine()}` }
+  }
+  useEffect(() => registerVoicePage('returns', () => voiceHandlerRef.current), [])
+  // The voice bar tells the service which tab is showing.
+  useEffect(() => setVoicePlace('returns', tab), [tab])
+
   return (
     <PageRoot className="returns-page">
       <div className="page-toggle-bar settings-inline-actions">
@@ -1378,6 +1591,7 @@ export function ReturnsPage({
                   value={salesQuery}
                   inputRef={salesSearchRef}
                   placeholder="Search bill…"
+                  voiceField="search"
                   minChars={0}
                   filterLocal
                   openOnFocus
@@ -1407,6 +1621,7 @@ export function ReturnsPage({
                 <ModernCombo
                   value={salesMedQuery}
                   placeholder="Search medicine…"
+                  voiceField="medicine"
                   minChars={0}
                   filterLocal
                   openOnFocus
@@ -1702,6 +1917,7 @@ export function ReturnsPage({
                 <ModernCombo
                   value={purchaseQuery}
                   placeholder="Search purchase…"
+                  voiceField="search"
                   minChars={0}
                   filterLocal
                   openOnFocus

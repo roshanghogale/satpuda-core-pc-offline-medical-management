@@ -733,7 +733,7 @@ def export_all_combined_direct(parent, sections, fmt="xlsx"):
         return None, f"Export failed. {e}"
 
 
-def _save_pdf_to_path(path, title, headers, rows):
+def _save_pdf_to_path(path, title, headers, rows, orientation="landscape"):
     from datetime import datetime
     date_str = datetime.now().strftime("%d/%m/%Y %H:%M")
 
@@ -748,7 +748,7 @@ def _save_pdf_to_path(path, title, headers, rows):
         for i, row in enumerate(rows)
     )
     html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><title>{esc(title)}</title>
-<style>@page{{size:A4 landscape;margin:10mm}}body{{font-family:Segoe UI,Arial;font-size:9pt}}
+<style>@page{{size:A4 {'portrait' if str(orientation).startswith('port') else 'landscape'};margin:10mm}}body{{font-family:Segoe UI,Arial;font-size:9pt}}
 table{{width:100%;border-collapse:collapse}}th{{background:#2c3e50;color:#fff;padding:4px}}
 td{{border:1px solid #ccc;padding:3px}}tr.even{{background:#f7f7f7}}</style></head><body>
 <h2>{esc(title)}</h2><p>{date_str} — {len(rows)} records</p>

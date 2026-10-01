@@ -45,6 +45,7 @@ import {
 import { ModernCombo } from './ModernCombo'
 import { belowReturnedProblem, samePurchaseLine } from './billLineRules'
 import { useLayoutRowCount } from '../layoutRows'
+import { registerVoicePage, type VoiceHandler } from '../voice/voiceBus'
 import {
   ActionBtn,
   DocTabBar,
@@ -2262,6 +2263,37 @@ export function PurchasePage({
     Number(summary.amount_paid) ||
     (Number(tab.cash) || 0) + (Number(tab.online) || 0)
 
+  // ── Voice (test build): "recent purchase bills", "GST slab dakhav", "navin purchase tab" ──
+  // Opens the same windows the buttons / F-keys open. Nothing here saves.
+  const voiceHandlerRef = useRef<VoiceHandler>(async () => null)
+  voiceHandlerRef.current = async (cmd) => {
+    if (cmd.intent !== 'page_action') return null
+    const act = String(cmd.args?.action || '')
+    if (act === 'recent_bills') {
+      await openRecent()
+      return { ok: true, say: 'Recent purchase bills ughadle' }
+    }
+    if (act === 'gst_slab') {
+      await openGstSlab()
+      return { ok: true, say: 'GST Slab ughadla' }
+    }
+    if (act === 'tools') {
+      setToolsOpen(true)
+      return { ok: true, say: 'Purchase tabs & tools ughadle' }
+    }
+    if (act === 'new_tab') {
+      addTab()
+      return { ok: true, say: 'Navin purchase tab ughadla' }
+    }
+    if (act === 'import_bill') {
+      if (importing) return { ok: false, say: 'Aadhicha import chalu aahe' }
+      openImportPicker()
+      return { ok: true, say: 'Import bill: file nivda' }
+    }
+    return { ok: false, say: `Purchase var "${act}" he kaam voice var nahi` }
+  }
+  useEffect(() => registerVoicePage('purchase', () => voiceHandlerRef.current), [])
+
   return (
     <PageRoot
       navChain={NAV}
@@ -2406,6 +2438,7 @@ export function PurchasePage({
                 navChain={NAV}
                 navEnter="supplier-enter"
                 placeholder="Search supplier…"
+                voiceField="supplier"
                 minChars={0}
                 filterLocal
                 listLabel="Suppliers"
@@ -2522,6 +2555,7 @@ export function PurchasePage({
               <ModernCombo
                 value={medicine}
                 inputRef={medRef}
+                voiceField="medicine"
                 navOrder={9}
                 navChain={NAV}
                 navEnter="medicine-enter"

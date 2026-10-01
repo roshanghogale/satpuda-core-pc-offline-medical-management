@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, useRef } from 'react'
 import { useDebouncedFilterEffect, useFilterEffect } from '../hooks/useLiveFilters'
 import { DayPresetRow } from '../components/DayPresets'
+import { isAllValue, pickOption, presetRange, RANGE_WORDS, registerVoicePage, type VoiceHandler } from '../voice/voiceBus'
 import type { AppNavigate } from '../App'
 import { ensureLocalEngine } from '../backend'
 import { usePageHotkeys, focusPageFilter } from '../hooks/usePageHotkeys'
@@ -346,6 +347,68 @@ export function PurchaseHistoryPage({
     })
   }
 
+  // ── Voice (test build): "aajche bill", "due only", "export ughad" ──
+  // Sets the same state the preset buttons, dropdowns and buttons above set.
+  const voiceHandlerRef = useRef<VoiceHandler>(async () => null)
+  voiceHandlerRef.current = async (cmd) => {
+    const a = cmd.args || {}
+    const PAGE_SAY = 'Purchase History'
+    if (cmd.intent === 'page_filter') {
+      const f = String(a.filter || '')
+      const all = isAllValue(a.value)
+      if (f === 'clear') {
+        clear()
+        return { ok: true, say: `${PAGE_SAY}: sagle filter kadhle` }
+      }
+      if (f === 'range') {
+        const r = presetRange(a.value)
+        if (!r) return { ok: false, say: `"${a.value}" he divas samajle nahi` }
+        // Exactly what the Today / Yesterday / … buttons do.
+        seedingDatesRef.current = false
+        setFrom(r.from)
+        setTo(r.to)
+        return { ok: true, say: `${PAGE_SAY}: ${RANGE_WORDS[r.key]}` }
+      }
+      if (f === 'due') {
+        const v = all ? '' : pickOption(a.value, DUE_OPTIONS.map((o) => o.value))
+        if (v == null) return { ok: false, say: `Due filter "${a.value}" nahi` }
+        setDue(v)
+        return { ok: true, say: `${PAGE_SAY} due: ${v || 'All'}` }
+      }
+      if (f === 'schedule') {
+        const v = all ? '' : pickOption(a.value, schedules)
+        if (v == null) return { ok: false, say: `Schedule "${a.value}" yaadit nahi` }
+        setSchedule(v)
+        return { ok: true, say: `${PAGE_SAY} schedule: ${v || 'All'}` }
+      }
+      if (f === 'sort') {
+        const v = pickOption(a.value, sortOptions)
+        if (v == null) return { ok: false, say: `Sort "${a.value}" nahi` }
+        setSort(v)
+        return { ok: true, say: `${PAGE_SAY} kram: ${v}` }
+      }
+      return { ok: false, say: `${PAGE_SAY} var "${f}" filter nahi` }
+    }
+    if (cmd.intent === 'search') {
+      setQ(String(a.query || ''))
+      return { ok: true, say: `${PAGE_SAY} shodh: ${a.query}` }
+    }
+    if (cmd.intent === 'page_action') {
+      const act = String(a.action || '')
+      if (act === 'export') {
+        setExportOpen(true)
+        return { ok: true, say: 'Purchase History export ughadla' }
+      }
+      if (act === 'refresh') {
+        void load()
+        return { ok: true, say: 'Purchase History refresh kela' }
+      }
+      return { ok: false, say: `Purchase History var "${act}" he kaam voice var nahi` }
+    }
+    return null
+  }
+  useEffect(() => registerVoicePage('purchase_history', () => voiceHandlerRef.current), [])
+
   return (
     <PageRoot className="list-page">
       <SectionFrame title="Filter Options">
@@ -378,6 +441,7 @@ export function PurchaseHistoryPage({
                 if (e.key === 'Enter') void load()
               }}
               placeholder="Purchase no / bill no / supplier"
+              data-voice-field="search"
             />
           </Field>
           <Field label="Supplier">
@@ -400,6 +464,7 @@ export function PurchaseHistoryPage({
               listLabel="Suppliers"
               placeholder="Supplier name"
               pageFilter
+              voiceField="supplier"
             />
           </Field>
           <Field label="Medicine Name">
@@ -421,6 +486,7 @@ export function PurchaseHistoryPage({
               maxVisible={80}
               listLabel="Medicines"
               placeholder="Medicine on purchase"
+              voiceField="medicine"
             />
           </Field>
           <Field label="Batch Number">

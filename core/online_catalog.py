@@ -715,6 +715,8 @@ def medicines(*, force: bool = False) -> list[dict]:
                             "is_hidden": r.get("is_hidden") or 0,
                             "manufacturer": r.get("manufacturer") or "",
                             "location": r.get("location") or "",
+                            # the batch's own supplier, for Alert & Monitoring
+                            "supplier_name": r.get("supplier_name") or "",
                             # Carry the fields an EDIT needs. Dropping version
                             # here made every doc built from this cache born
                             # stale: _meta() stamped version 1 against a server

@@ -1428,11 +1428,11 @@ def save_thresholds(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str,
 def get_alerts(conn: sqlite3.Connection) -> dict[str, Any]:
     from core.alert_monitoring_service import fetch_all_monitoring_sections
 
-    raw = fetch_all_monitoring_sections(conn)
+    raw = fetch_all_monitoring_sections(conn, detail=True)
     out: dict[str, Any] = {}
     for key, rows in raw.items():
         out[key] = [list(r) for r in rows]
-    out["counts"] = {k: len(v) for k, v in out.items() if k != "counts"}
+    out["counts"] = {k: len(v) for k, v in out.items() if k not in ("counts", "expiry_by_batch")}
     return out
 
 
