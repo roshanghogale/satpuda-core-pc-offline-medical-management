@@ -66,12 +66,12 @@ class OnPaper(unittest.TestCase):
         text = format_reports_combined([(LOW["title"], LOW["columns"], LOW["rows"])], {}, paper="A4")
         self.assertIn("CIPCAL 500", text)
 
-    @unittest.skipUnless(os.name == "nt", "Windows printing")
     def test_normal_printer_prints_the_pdf(self):
-        with mock.patch("os.startfile") as start:
+        with mock.patch("core.printer_manager.PrinterManager._resolve_printer", return_value="HP LaserJet"), \
+                mock.patch("core.printer_manager.PrinterManager.print_pdf_silently") as sumatra:
             res = export_alert_sections({"sections": [LOW], "print_to": "printer"})
         self.assertTrue(res["ok"], res)
-        self.assertEqual(start.call_args[0][1], "print")
+        self.assertEqual("HP LaserJet", sumatra.call_args[0][1])
 
     def test_a_printer_error_is_told_not_hidden(self):
         with mock.patch("core.dot_matrix_print.print_dot_matrix_reports_combined",

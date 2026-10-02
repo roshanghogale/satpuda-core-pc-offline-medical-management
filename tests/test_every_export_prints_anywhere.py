@@ -37,14 +37,28 @@ class AReportPrints(unittest.TestCase):
         self.assertTrue(res["ok"], res)
         self.assertTrue(dm.call_args[1]["landscape"])
 
-    @unittest.skipUnless(os.name == "nt", "Windows printing")
     def test_on_a_normal_printer_vertical(self):
-        with mock.patch("os.startfile") as start, \
+        # Through SumatraPDF, as bills print -- not the Windows "print" verb, which does
+        # nothing on a PC whose PDF viewer is Edge (2 Oct 2026).
+        with mock.patch("core.printer_manager.PrinterManager._resolve_printer", return_value="HP LaserJet"), \
+                mock.patch("core.printer_manager.PrinterManager.print_pdf_silently") as sumatra, \
+                mock.patch("os.startfile") as start, \
                 mock.patch("core.export_manager._save_pdf_to_path", return_value="x.pdf") as pdf:
             res = ex.print_report("Stock Statement", COLS, ROWS, "printer", "portrait")
         self.assertTrue(res["ok"], res)
         self.assertEqual(pdf.call_args[1]["orientation"], "portrait")
-        self.assertEqual(start.call_args[0], ("x.pdf", "print"))
+        self.assertEqual(sumatra.call_args[0], ("x.pdf", "HP LaserJet"))
+        self.assertEqual(sumatra.call_args[1]["print_settings"], "portrait")
+        start.assert_not_called()
+
+    def test_a_pdf_printer_is_named_not_reported_as_printed(self):
+        with mock.patch("core.printer_manager.PrinterManager._resolve_printer", return_value="Microsoft Print to PDF"), \
+                mock.patch("core.printer_manager.PrinterManager.print_pdf_silently") as sumatra, \
+                mock.patch("core.export_manager._save_pdf_to_path", return_value="x.pdf"):
+            res = ex.print_report("Stock", COLS, ROWS, "printer", "landscape")
+        self.assertFalse(res["ok"])
+        self.assertIn("Microsoft Print to PDF", res["error"])
+        sumatra.assert_not_called()
 
     def test_export_to_file_prints_any_report(self):
         data = {"columns": COLS, "rows": ROWS, "title": "Near Expiry Report", "filename": "near"}
@@ -84,11 +98,11 @@ class TheScheduleRegisterGoesWhereTheShopSays(unittest.TestCase):
                 mock.patch("core.dot_matrix_print.print_schedule_report_dot_matrix") as dm, \
                 mock.patch("core.document_output.save_schedule_report_document",
                            return_value=(__file__, __file__)), \
-                mock.patch("os.startfile") as start:
+                mock.patch.object(ex, "print_pdf_on_printer", return_value="") as sent:
             res = ex._schedule_styled_pdf_bytes(self.data(), do_print=True, print_to="printer")
         self.assertTrue(res["printed"], res)
         dm.assert_not_called()
-        self.assertEqual(start.call_args[0][1], "print")
+        sent.assert_called_once()
 
 
 class AlertsPage(unittest.TestCase):

@@ -187,25 +187,43 @@ def _is_foreign_os_path(raw: str) -> bool:
     return looks_windows
 
 
+def _writable_dir(path: str) -> bool:
+    """Can a bill be written here? A folder can exist and still refuse.
+
+    A saved folder from another Windows account (the other user's Documents,
+    copied with the settings or left from an old profile) exists, so makedirs
+    said yes -- and every bill print then failed with "Permission denied" while
+    writing Bill_<no>.html (2 Oct 2026). Such a folder now falls through to
+    this PC's own Documents.
+    """
+    # One probe file, not tempfile.mkstemp: on Windows mkstemp retries a refusing
+    # folder ~2 billion times, so the check itself would hang the print.
+    probe = os.path.join(path, f".satpuda_write_test_{os.getpid()}")
+    try:
+        os.makedirs(path, exist_ok=True)
+        with open(probe, "w", encoding="utf-8") as fh:
+            fh.write("ok")
+        os.remove(probe)
+        return True
+    except OSError:
+        return False
+
+
 def resolve_sales_bill_save_dir() -> str:
     """Directory to write bill files; creates custom folder when configured."""
     custom = load_sales_bill_save_dir()
     if _is_foreign_os_path(custom):
         custom = ""
-    if custom:
-        try:
-            os.makedirs(custom, exist_ok=True)
-            return custom
-        except OSError:
-            pass
+    if custom and _writable_dir(custom):
+        return custom
     # Also accept a configured path that exists on disk but failed isdir check earlier.
     try:
         from core.bill_config import load_bill_print_settings
         raw = str(load_bill_print_settings().get("sales_bill_save_dir") or "").strip()
         if raw and not _is_foreign_os_path(raw):
             path = os.path.abspath(os.path.normpath(raw))
-            os.makedirs(path, exist_ok=True)
-            return path
+            if _writable_dir(path):
+                return path
     except Exception:
         pass
     # Documents, where a shop looks for its own papers. Bills used to land in
@@ -225,7 +243,7 @@ def resolve_sales_bill_save_dir() -> str:
         os.path.join(home, "download"),
     ])
     for path in candidates:
-        if path and os.path.isdir(path):
+        if path and os.path.isdir(path) and _writable_dir(path):
             return path
     fallback = os.path.join(home, "Documents")
     os.makedirs(fallback, exist_ok=True)

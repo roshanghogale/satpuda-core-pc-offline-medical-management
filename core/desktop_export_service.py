@@ -1680,7 +1680,10 @@ def _schedule_styled_pdf_bytes(
                 )
                 printed = True
             elif pdf_path and os.name == "nt":
-                os.startfile(pdf_path, "print")
+                problem = print_pdf_on_printer(
+                    pdf_path, landscape=str(page_layout or "").lower().startswith("land"))
+                if problem:
+                    raise RuntimeError(problem)
                 printed = True
             else:
                 # Open file as last resort (browser/PDF viewer print).
@@ -1919,12 +1922,9 @@ def export_alert_sections(body: dict[str, Any]) -> dict[str, Any]:
         fd, path = tempfile.mkstemp(suffix=".pdf", prefix="alerts_print_")
         os.close(fd)
         saved = _alerts_pdf(path, title, sections, landscape=landscape)
-        if os.name != "nt":
-            return {"ok": False, "error": "Printer var print fakt Windows var."}
-        try:
-            os.startfile(saved, "print")
-        except OSError as exc:
-            return {"ok": False, "error": f"Printer var print zala nahi: {exc}", "path": saved}
+        problem = print_pdf_on_printer(saved, landscape=landscape)
+        if problem:
+            return {"ok": False, "error": problem, "path": saved}
         return {"ok": True, "printed": True, "message": "Printer la pathavle.", "path": saved}
 
     fmt = str(body.get("format") or "csv").strip().lower()
@@ -1977,9 +1977,32 @@ def export_alert_sections(body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def print_pdf_on_printer(pdf_path: str, *, landscape: bool = False) -> str:
+    """A report PDF to the shop's selected (normal) printer. "" when sent, else why not.
+
+    Through the bundled SumatraPDF, as bills print. The Windows "print" verb used
+    before needs a PDF program that registers one; with Edge as the PDF viewer
+    (most Windows 11 PCs) it did nothing and the screen still said "printed".
+    A PDF "printer" (Microsoft Print to PDF) is skipped silently by Sumatra, so it
+    is named here instead.
+    """
+    from core.printer_manager import PrinterManager
+
+    try:
+        printer = PrinterManager._resolve_printer(None)
+        if PrinterManager._is_virtual_pdf_printer(printer):
+            return (f'Nivadlela printer "{printer}" ha PDF printer aahe, kagad printer nahi. '
+                    "Settings → Printer madhe khara printer nivda. PDF save zali: " + pdf_path)
+        PrinterManager.print_pdf_silently(
+            pdf_path, printer, print_settings="landscape" if landscape else "portrait")
+    except Exception as exc:
+        return f"Printer var print zala nahi: {exc}"
+    return ""
+
+
 def print_report(title: str, cols: list, rows: list, print_to: str, page_layout: str = "portrait") -> dict[str, Any]:
     """One report on paper: the dot matrix (RAW, A4 vertical 80 / horizontal 110 columns) or the
-    normal Windows printer (a PDF on A4 vertical / horizontal, sent with the "print" verb)."""
+    normal Windows printer (a PDF on A4 vertical / horizontal, printed with the bundled SumatraPDF)."""
     import os
     import tempfile
 
@@ -1999,12 +2022,9 @@ def print_report(title: str, cols: list, rows: list, print_to: str, page_layout:
     fd, path = tempfile.mkstemp(suffix=".pdf", prefix="report_print_")
     os.close(fd)
     saved = _save_pdf_to_path(path, title, cols, rows, orientation="landscape" if landscape else "portrait")
-    if os.name != "nt":
-        return {"ok": False, "printed": False, "error": "Printer var print fakt Windows var.", "path": saved}
-    try:
-        os.startfile(saved, "print")
-    except OSError as exc:
-        return {"ok": False, "printed": False, "print_error": str(exc),
-                "error": f"Printer var print zala nahi: {exc}", "path": saved}
+    problem = print_pdf_on_printer(saved, landscape=landscape)
+    if problem:
+        return {"ok": False, "printed": False, "print_error": problem, "error": problem,
+                "path": saved, "pdf_path": saved}
     return {"ok": True, "printed": True, "path": saved, "pdf_path": saved,
             "message": f"Printer la pathavle (A4 {'horizontal' if landscape else 'vertical'})."}
