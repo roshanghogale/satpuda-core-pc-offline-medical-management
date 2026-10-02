@@ -1170,6 +1170,21 @@ class PrinterManager:
 
         cls._assert_printer_ready(printer)
         cfg = cls.load_settings()
+        if cls.pdf_print_method(cfg, printer) == 'gdi':
+            try:
+                cls.print_pdf_gdi(
+                    pdf_path, printer, copies=copies,
+                    black_only=cls.is_black_only_print(cfg),
+                    landscape='landscape' in (print_settings or '').lower(),
+                )
+                return
+            except Exception as exc:
+                # Sumatra is still there to try; a GDI failure is logged, not shown.
+                try:
+                    from core.print_log import print_log
+                    print_log(f'print_pdf_gdi failed on "{printer}": {exc} -- trying SumatraPDF', level='WARN')
+                except Exception:
+                    pass
         settings_arg = cls.sumatra_print_settings(cfg, print_settings)
         try:
             from core.print_log import print_log
@@ -1243,6 +1258,112 @@ class PrinterManager:
         )
         os.makedirs(path, exist_ok=True)
         return os.path.join(path, 'last_dot_matrix_bill.prn')
+
+    @classmethod
+    def _is_xps_driver(cls, printer_name: str) -> bool:
+        """A v4 (XPS-pipeline) driver -- the HP Smart Tank's "PCL-3 (V4)", for one."""
+        try:
+            import win32print
+
+            h = win32print.OpenPrinter(printer_name)
+            try:
+                info = win32print.GetPrinter(h, 2)
+            finally:
+                win32print.ClosePrinter(h)
+        except Exception:
+            return False
+        proc = str(info.get('pPrintProcessor') or '').upper()
+        driver = str(info.get('pDriverName') or '').upper()
+        return proc == 'MS_XPS_PROC' or '(V4)' in driver
+
+    @classmethod
+    def pdf_print_method(cls, cfg: dict[str, Any] | None, printer_name: str) -> str:
+        """'gdi' or 'sumatra' for a PDF on this printer.
+
+        SumatraPDF 3.6 sends nothing to a v4 (XPS) driver: on the shop's HP Smart
+        Tank it changed the printer's settings, exited with 0, and no job ever
+        reached the spooler -- every bill "printed" and the tray stayed empty
+        (2 Oct 2026). Windows' own GDI printing reaches the same printer at once.
+        Settings → printer_settings.json "pdf_print_method": "gdi" / "sumatra"
+        forces one; "auto" (the default) picks GDI for v4 drivers only, so a
+        printer that already works through Sumatra is left as it was.
+        """
+        method = str((cfg or {}).get('pdf_print_method') or 'auto').strip().lower()
+        if method in ('gdi', 'sumatra'):
+            return method
+        return 'gdi' if cls.is_windows() and cls._is_xps_driver(printer_name) else 'sumatra'
+
+    @classmethod
+    def print_pdf_gdi(
+        cls,
+        pdf_path: str,
+        printer_name: str,
+        *,
+        copies: int = 1,
+        black_only: bool = False,
+        landscape: bool = False,
+        dpi_cap: int = 300,
+    ) -> None:
+        """Print a PDF through Windows GDI: each page drawn as a picture on the printer.
+
+        Sizing follows Sumatra's default ("shrink"): a page larger than the
+        printable area is fitted, a smaller one prints at its real size, centred
+        across and from the top. Pages are rendered at no more than 300 dpi and
+        stretched by the driver, so an A4 page stays near 25 MB instead of 100.
+        """
+        import pypdfium2 as pdfium
+        import win32con
+        import win32ui
+        from PIL import ImageWin
+
+        copies = max(1, min(int(copies or 1), 10))
+        dc = win32ui.CreateDC()
+        dc.CreatePrinterDC(printer_name)
+        try:
+            dpi_x = dc.GetDeviceCaps(win32con.LOGPIXELSX) or 300
+            dpi_y = dc.GetDeviceCaps(win32con.LOGPIXELSY) or 300
+            area_w = dc.GetDeviceCaps(win32con.HORZRES)
+            area_h = dc.GetDeviceCaps(win32con.VERTRES)
+            doc = pdfium.PdfDocument(pdf_path)
+            try:
+                pages = []
+                for i in range(len(doc)):
+                    page = doc[i]
+                    w_pt, h_pt = page.get_size()
+                    render_dpi = min(dpi_cap, dpi_x)
+                    img = page.render(scale=render_dpi / 72.0).to_pil()
+                    img = img.convert('L' if black_only else 'RGB')
+                    turn = (landscape or w_pt > h_pt) and area_h > area_w
+                    if turn:
+                        img = img.rotate(90, expand=True)
+                        w_pt, h_pt = h_pt, w_pt
+                    # device size of the page at its real size, then shrink to fit
+                    dev_w = w_pt / 72.0 * dpi_x
+                    dev_h = h_pt / 72.0 * dpi_y
+                    shrink = min(1.0, area_w / dev_w, area_h / dev_h)
+                    dev_w, dev_h = int(dev_w * shrink), int(dev_h * shrink)
+                    left = max(0, (area_w - dev_w) // 2)
+                    pages.append((img, (left, 0, left + dev_w, dev_h)))
+            finally:
+                doc.close()
+            dc.StartDoc(os.path.basename(pdf_path))
+            try:
+                for _ in range(copies):
+                    for img, rect in pages:
+                        dc.StartPage()
+                        ImageWin.Dib(img).draw(dc.GetHandleOutput(), rect)
+                        dc.EndPage()
+            except Exception:
+                dc.AbortDoc()
+                raise
+            dc.EndDoc()
+        finally:
+            dc.DeleteDC()
+        try:
+            from core.print_log import print_log
+            print_log(f'print_pdf_gdi OK printer="{printer_name}" pdf="{pdf_path}" pages={len(pages)} copies={copies}')
+        except Exception:
+            pass
 
     @classmethod
     def _save_raw_debug_copy(cls, data: bytes, printer_name: str) -> str:
