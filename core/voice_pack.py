@@ -256,11 +256,27 @@ def cancel() -> dict:
     return status()
 
 
+_start_lock = threading.Lock()
+
+
 def start_service() -> dict:
-    """Start the voice service from the installed pack, unless one is already answering."""
+    """Start the voice service from the installed pack, unless one is already answering.
+
+    Or already STARTING: the engine's autostart and the voice bar's own "start" came 4 s
+    apart, before the first service had loaded its model and opened its port, so two
+    services ran at 2.7 GB each (2 Oct 2026). The one this engine started is waited for.
+    """
     global _service
-    if service_running():
-        return status()
+    with _start_lock:
+        if _service is not None and _service.poll() is None:
+            return status()
+        if service_running():
+            return status()
+        return _spawn_service()
+
+
+def _spawn_service() -> dict:
+    global _service
     cur = _current()
     pyw = os.path.join(cur, "python", "pythonw.exe")
     script = os.path.join(cur, "voice", "voice_service.py")
