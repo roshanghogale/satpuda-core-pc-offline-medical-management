@@ -4891,6 +4891,69 @@ def system_action(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, A
             )
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
+    if action == "add_server_store":
+        from core.admin_gate import check as _gate
+
+        if is_satellite_device():
+            return {"ok": False, "error": "This device is linked to one store only. Unlock it first."}
+        _gate(conn, "join_server_store", data)
+        _admin = _vendor_admin_token(data)
+        if isinstance(_admin, dict):
+            return _admin
+        try:
+            from core import server_live as live
+
+            res = live.add_server_store(
+                store_id=str(data.get("store_id") or ""),
+                confirm_name=str(data.get("confirm_name") or ""),
+                admin_token=_admin,
+            )
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+        return {**res, "stores": list_stores(), "active_store_key": get_active_store_key()}
+    if action == "remove_store":
+        from core.admin_gate import check as _gate
+        from core.store_manager import remove_store
+
+        if is_satellite_device():
+            return {"ok": False, "error": "This device is linked to one store only."}
+        _gate(conn, "delete_store", data)
+        try:
+            gone = remove_store(
+                str(data.get("store_key") or ""),
+                confirm_name=str(data.get("confirm_name") or ""),
+            )
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {
+            "ok": True,
+            "stores": list_stores(),
+            "active_store_key": get_active_store_key(),
+            "message": (
+                f'"{gone["display_name"]}" removed from this PC. Its files are kept in '
+                f'{gone["kept_in"]}; nothing on the server was deleted.'
+            ),
+        }
+    if action == "unlock_store_switching":
+        # A PC set up from a Drive restore is locked to that one store, and no
+        # password used to open it. The vendor administrator signing in is what
+        # makes it an ordinary PC that can switch, add and remove stores.
+        from core.store_manager import allow_store_switching
+
+        try:
+            _admin = _vendor_admin_token(data)
+        except Exception as exc:
+            return {"ok": False, "error": f"The Satpuda server refused the administrator sign-in: {exc}"}
+        if isinstance(_admin, dict):
+            return _admin
+        allow_store_switching()
+        return {
+            "ok": True,
+            "device_role": "admin",
+            "stores": list_stores(),
+            "active_store_key": get_active_store_key(),
+            "message": "This PC can now switch, add and remove stores.",
+        }
     if action == "confirm_active_store":
         # No admin gate: this is the operator saying "yes, this is my shop" to
         # the banner a registry rebuild put up. It changes nothing but the flag.

@@ -1514,6 +1514,25 @@ export function DataSystemPanel({
       }))
       setNewStoreName('')
     }
+    if (
+      (action === 'add_server_store' ||
+        action === 'remove_store' ||
+        action === 'unlock_store_switching') &&
+      Array.isArray(res.stores)
+    ) {
+      setSystem((s) => ({
+        ...s,
+        stores: res.stores,
+        active_store_key: res.active_store_key ?? s.active_store_key,
+        ...(action === 'unlock_store_switching' ? { is_satellite: false } : {}),
+      }))
+      if (res.message) setMsg(String(res.message))
+    }
+    if (action === 'add_server_store' && res.ok !== false) {
+      setServerStores(null)
+      setJoinPickId('')
+      setJoinTypedName('')
+    }
     if (action === 'switch_store' && res.active_store_key) {
       setSystem((s) => ({
         ...s,
@@ -1759,7 +1778,25 @@ export function DataSystemPanel({
             <Note>
               This device is linked to one store only:{' '}
               <strong>{activeStoreName || activeKey || '—'}</strong>. Store
-              switching and creation are disabled on this device.
+              switching and creation are disabled on this device.{' '}
+              <button
+                type="button"
+                className="settings-action-btn"
+                disabled={busy}
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      'Let this PC switch, add and remove stores?\n\n' +
+                        'Needs the Satpuda administrator username and password ' +
+                        '(typed in Administrator Tools).',
+                    )
+                  ) {
+                    void run('unlock_store_switching')
+                  }
+                }}
+              >
+                Allow other stores on this PC
+              </button>
             </Note>
           ) : (
           <>
@@ -1791,6 +1828,28 @@ export function DataSystemPanel({
                         onClick={() => run('switch_store', { store_key: key })}
                       >
                         Switch
+                      </button>
+                      <button
+                        type="button"
+                        className="settings-action-btn"
+                        disabled={busy || isActive || !key || stores.length < 2}
+                        title={
+                          isActive
+                            ? 'Switch to another store first'
+                            : 'Take this store off this PC (its files are kept)'
+                        }
+                        onClick={() => {
+                          const typed = window.prompt(
+                            `Remove "${name}" from this PC?\n\n` +
+                              'Its files are moved to a "removed_stores" folder, not deleted, ' +
+                              'and nothing on the server is deleted.\n\n' +
+                              'Type the store name to confirm:',
+                          )
+                          if (typed == null) return
+                          void run('remove_store', { store_key: key, confirm_name: typed.trim() })
+                        }}
+                      >
+                        Remove from PC
                       </button>
                     </td>
                   </tr>
@@ -1946,7 +2005,17 @@ export function DataSystemPanel({
                           {s.is_this_pc ? ' (this PC is on this one)' : ''}
                           {taken ? (
                             <div className="settings-hint">
-                              Already connected to “{taken}” on this PC.
+                              Already connected to “{taken}” on this PC.{' '}
+                              {!isSatellite ? (
+                                <button
+                                  type="button"
+                                  className="settings-action-btn"
+                                  disabled={busy}
+                                  onClick={() => void run('switch_store', { store_key: taken })}
+                                >
+                                  Switch to it
+                                </button>
+                              ) : null}
                             </div>
                           ) : null}
                         </td>
@@ -1960,14 +2029,15 @@ export function DataSystemPanel({
               {joinPickId ? (
                 <>
                   <Note>
-                    This PC will read the books of{' '}
+                    <em>Connect this PC</em> makes the store open now read the books of{' '}
                     <strong>
                       {serverStores.find((s) => s.store_id === joinPickId)?.store_name}
                     </strong>{' '}
                     (id {joinPickId}) as the store{' '}
                     <strong>{activeStoreName || activeKey}</strong>. Two shops
                     can share a name, so type the store name exactly as it is
-                    shown above to confirm.
+                    shown above to confirm. <em>Add as another store</em> keeps
+                    this store and puts the chosen one in the Switch list.
                   </Note>
                   <div className="settings-inline-row">
                     <Field label="Type the store name to confirm">
@@ -2001,6 +2071,45 @@ export function DataSystemPanel({
                     >
                       Connect this PC
                     </button>
+                    {!isSatellite ? (
+                      <button
+                        type="button"
+                        className="settings-action-btn"
+                        title="Keep this store as it is and add the chosen one beside it, for Switch"
+                        disabled={
+                          busy ||
+                          joinTypedName.trim().toLowerCase() !==
+                            String(
+                              serverStores.find((s) => s.store_id === joinPickId)
+                                ?.store_name || '\u0000',
+                            )
+                              .trim()
+                              .toLowerCase()
+                        }
+                        onClick={async () => {
+                          const r = (await run('add_server_store', {
+                            store_id: joinPickId,
+                            confirm_name: joinTypedName.trim(),
+                          })) as Record<string, unknown> | null
+                          const newKey = String(
+                            r?.created_store_key ||
+                              (r?.code === 'already_on_pc' ? r?.store_key : '') ||
+                              '',
+                          )
+                          if (
+                            newKey &&
+                            window.confirm(
+                              String(r?.message || r?.error || 'Store added.') +
+                                '\n\nSwitch to it now?',
+                            )
+                          ) {
+                            void run('switch_store', { store_key: newKey })
+                          }
+                        }}
+                      >
+                        Add as another store on this PC
+                      </button>
+                    ) : null}
                   </div>
                 </>
               ) : null}

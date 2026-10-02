@@ -45,18 +45,65 @@ def _generate_key() -> str:
     return f"SC-{secrets.token_hex(4).upper()}"
 
 
+def _read(p: str) -> str:
+    try:
+        if os.path.isfile(p):
+            return open(p, encoding='utf-8-sig').read().strip()
+    except Exception:
+        pass
+    return ''
+
+
+def _legacy_is_for(store_key: str, legacy_key: str) -> bool:
+    """Is the pre-multi-store key file THIS store's?
+
+    It belongs to one store. "Any store, while nobody has claimed it" was the
+    rule, and it let a switch to a second store pair that store with the first
+    shop's key: the Switch button opened the same books under the other name and
+    relabelled the store after the first shop (2 Oct 2026). Now: the store that
+    claimed it; else the store whose registry entry carries that key; else the
+    first store to pair with it (``claim_legacy_key``) -- never a second one.
+    """
+    owner = _legacy_owner()
+    if owner:
+        return owner == store_key
+    try:
+        from core.store_manager import list_stores
+
+        stores = list_stores()
+    except Exception:
+        stores = []
+    for s in stores:
+        if str(s.get('android_key') or '').strip() == legacy_key:
+            return s.get('store_key') == store_key
+    others_paired = any(
+        _read(_local_path(str(s.get('store_key') or ''))) == legacy_key
+        for s in stores if s.get('store_key') and s.get('store_key') != store_key
+    )
+    return not others_paired
+
+
+def claim_legacy_key(store_key: str, key: str) -> None:
+    """The first store to PAIR with the old shared key owns it from then on."""
+    if not store_key or not key or _legacy_owner():
+        return
+    if _read(_legacy_path()) != key:
+        return
+    try:
+        with open(os.path.join(_appdata_dir(), 'store_key_owner.txt'), 'w', encoding='utf-8') as fh:
+            fh.write(store_key)
+    except Exception:
+        pass
+
+
 def get_local_android_key(store_key: str = '') -> str:
-    for p in (_local_path(store_key), _legacy_path()):
-        try:
-            if os.path.isfile(p):
-                val = open(p, encoding='utf-8-sig').read().strip()
-                if val:
-                    return val
-        except Exception:
-            continue
-        # The legacy file is only this store's when no store has claimed it.
-        if _legacy_owner() not in ('', store_key or _active_store_key()):
-            break
+    key = store_key or _active_store_key()
+    own = _read(_local_path(key))
+    if own:
+        return own
+    legacy = _read(_legacy_path())
+    if legacy and _legacy_is_for(key, legacy):
+        return legacy
     return ''
 
 

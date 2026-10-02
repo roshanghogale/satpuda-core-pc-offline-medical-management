@@ -752,6 +752,65 @@ def setup_initial_store_on_activation(display_name: str) -> dict:
     )
 
 
+def remove_store(store_key: str, *, confirm_name: str = '') -> dict:
+    """Take a store off this PC, keeping its files.
+
+    There was no way to do this at all: a store added by mistake stayed in the
+    Switch list for good. The store's folder is MOVED to ``removed_stores``
+    (outside ``stores``, or the startup reconcile would add it straight back),
+    with its pairing key and server session beside it, so nothing is lost and
+    the folder can be put back by hand. The server's copy of an Online store is
+    not touched -- removing it here only means this PC stops opening it.
+    """
+    key = str(store_key or '').strip()
+    entry = _find_store_by_key(key)
+    if not entry:
+        raise ValueError('That store is not on this PC.')
+    name = entry.get('display_name') or key
+    if not names_match(str(confirm_name or ''), name):
+        raise ValueError(f'Type the store name "{name}" exactly to remove it.')
+    if key == get_active_store_key():
+        raise ValueError('This is the store open now. Switch to another store first, then remove it.')
+    if len(list_stores()) < 2:
+        raise ValueError('The only store on this PC cannot be removed.')
+
+    stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+    dest = os.path.join(_appdata_dir(), 'removed_stores', f'{key}_{stamp}')
+    os.makedirs(dest, exist_ok=True)
+    src = os.path.join(get_stores_root(), key)
+    if os.path.isdir(src):
+        shutil.move(src, os.path.join(dest, key))
+    for fname in (f'store_key_{key}.txt', f'server_session_{key}.json'):
+        p = os.path.join(_appdata_dir(), fname)
+        if os.path.isfile(p):
+            shutil.move(p, os.path.join(dest, fname))
+    with open(os.path.join(dest, 'store.json'), 'w', encoding='utf-8') as fh:
+        json.dump({**entry, 'removed_at': datetime.now().isoformat(timespec='seconds')},
+                  fh, indent=2, ensure_ascii=False)
+
+    reg = load_registry(_allow_reconcile=False)
+    reg['stores'] = [s for s in (reg.get('stores') or []) if s.get('store_key') != key]
+    save_registry(reg)
+    try:
+        from core.server_live import forget_store_adoption
+        forget_store_adoption(key)
+    except Exception:
+        pass
+    try:
+        from core.sync_coordinator import after_store_registry_changed
+        after_store_registry_changed()
+    except Exception:
+        pass
+    return {'store_key': key, 'display_name': name, 'kept_in': dest}
+
+
+def allow_store_switching() -> None:
+    """A single-store PC (set up from a Drive restore) may hold other stores from now on."""
+    reg = load_registry(_allow_reconcile=False)
+    reg['device_role'] = 'admin'
+    save_registry(reg)
+
+
 def setup_satellite_store_from_restore(display_name: str, db_path: str) -> dict:
     display_name = normalize_display_name(display_name)
     if not display_name:

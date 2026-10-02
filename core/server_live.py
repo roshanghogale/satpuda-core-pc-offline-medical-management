@@ -373,6 +373,10 @@ def _link_by_pairing_key(*, store_key: str, name: str) -> dict:
         store_name=name,
         device_id=_pc_device_id(),
     )
+    if (session or {}).get("token"):
+        from core.store_link import claim_legacy_key
+
+        claim_legacy_key(store_key, key)
     sid = str(session.get("store_id") or "").strip()
     if sid:
         adopted = _load_adoptions().get(store_key)
@@ -634,6 +638,99 @@ def list_server_stores(*, admin_token: str = "") -> list[dict]:
             }
         )
     return out
+
+
+def add_server_store(*, store_id: str, confirm_name: str, admin_token: str = "") -> dict:
+    """Put a store from the server on this PC as ANOTHER store, beside the ones it has.
+
+    ``join_server_store`` re-points the store that is open now, so after typing
+    the administrator username and password the only thing on offer was to
+    swap this shop's books for another's -- the store never reached the Switch
+    list, which is what people were trying to do. This adds it there instead:
+    a new local store under the server store's own name, paired with that
+    store's SC- key, not opened until somebody presses Switch.
+
+    The same refusals as a join: the vendor administrator typed at that moment,
+    the name typed exactly, one server store per local store.
+    """
+    from core import server_api as api
+    from core.server_api import _pc_device_id
+    from core.store_link import _save_local
+    from core.store_manager import (
+        _find_store_by_display_name,
+        create_store,
+        list_stores,
+    )
+
+    want_id = str(store_id or "").strip()
+    typed = str(confirm_name or "").strip()
+    if not want_id:
+        raise ValueError("Store to add not given.")
+    admin = _require_admin_token(admin_token)
+    remote = None
+    for s in api.list_remote_stores(admin):
+        if _remote_store_id(s) == want_id:
+            remote = s
+            break
+    if remote is None:
+        raise RuntimeError("That store is no longer on the server. Show the list again.")
+    real_name = str(remote.get("store_name") or "").strip()
+    if not real_name or typed.lower() != real_name.lower():
+        raise RuntimeError(f'To add "{real_name}" you have to type its name exactly.')
+
+    # Already here? Then the answer is Switch, not a second copy of the books.
+    for key, entry in _load_adoptions().items():
+        if isinstance(entry, dict) and str(entry.get("store_id") or "").strip() == want_id:
+            if any(s.get("store_key") == key for s in list_stores()):
+                return {"ok": False, "code": "already_on_pc", "store_key": key,
+                        "error": f'"{real_name}" is already on this PC. Press Switch next to it.'}
+    from core.store_link import get_local_android_key
+
+    remote_key = str(remote.get("android_key") or "").strip()
+    for s in list_stores():
+        key = str(s.get("store_key") or "")
+        same_key = bool(remote_key) and get_local_android_key(key).strip() == remote_key
+        if key and (_slug_store_id(key) == want_id or same_key):
+            return {"ok": False, "code": "already_on_pc", "store_key": key,
+                    "error": f'"{real_name}" is already on this PC. Press Switch next to it.'}
+    same_name = _find_store_by_display_name(real_name)
+    if same_name:
+        return {"ok": False, "code": "name_on_pc", "store_key": same_name.get("store_key"),
+                "error": (f'This PC already has a store called "{real_name}" that is not linked '
+                          "to this one. Switch to it and use Connect this PC, or remove it first.")}
+
+    android_key = str(remote.get("android_key") or "").strip()
+    if not android_key:
+        remote = api.regenerate_android_key(admin, want_id)
+        android_key = str(remote.get("android_key") or "").strip()
+    if not android_key:
+        raise RuntimeError("That store has no pairing key on the server.")
+
+    from core.store_manager import display_name_key
+
+    new_key = display_name_key(real_name)
+    # Pair FIRST: if the server refuses, nothing on this PC has changed.
+    session = api.ensure_store_session(
+        store_key=new_key,
+        android_key=android_key,
+        store_name=real_name,
+        device_id=_pc_device_id(),
+        force_pair=True,
+    )
+    if not (session or {}).get("token"):
+        raise RuntimeError("The server did not accept this PC for that store.")
+    entry = create_store(real_name, activate=False, allow_existing_remote=True)
+    new_key = str(entry.get("store_key") or new_key)
+    _save_local(android_key, new_key)
+    _record_store_adoption(new_key, remote)
+    _mark_joined_existing(new_key)
+    return {
+        "ok": True,
+        "created_store_key": new_key,
+        "created_store_name": real_name,
+        "store_id": want_id,
+        "message": f'"{real_name}" is now on this PC. Press Switch next to it to open it.',
+    }
 
 
 def join_server_store(
