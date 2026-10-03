@@ -1838,6 +1838,10 @@ def sync_down_doc(conn, collection: str, doc_id: str, data: dict) -> str:
                         data.get('doctor_name'),
                         data.get('created_at'),
                     ))
+                from core.fy_serial import stamp_pulled_fy_fields
+                stamp_pulled_fy_fields(cur, 'sales', sale_id, data.get('bill_no'), data.get('bill_date'),
+                                       fy_start_year=data.get('fy_start_year'),
+                                       fy_serial=data.get('fy_serial'))
                 sale_med_ids = []
                 for item in data.get('items') or []:
                     medicine_id = int(_line_medicine_id(item))

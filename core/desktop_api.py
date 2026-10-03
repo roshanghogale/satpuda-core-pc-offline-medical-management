@@ -238,6 +238,14 @@ def _open_conn(db_path: str) -> sqlite3.Connection:
         capture_from(conn)
     except Exception:
         pass
+    # A store taken Offline before pulled bills kept their serial: give them it
+    # now, or the bill just made lists below that day's older ones.
+    try:
+        from core.fy_serial import backfill_missing_fy_serials
+
+        backfill_missing_fy_serials(conn)
+    except Exception as exc:
+        print(f"[fy_serial] backfill: {exc}", flush=True)
     return conn
 
 

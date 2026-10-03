@@ -437,6 +437,68 @@ def resync_purchase_fy_number(
     return fresh
 
 
+def _int_or_none(value) -> int | None:
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None
+
+
+def stamp_pulled_fy_fields(
+    cur: sqlite3.Cursor,
+    table: str,
+    row_id: int,
+    code: str | None,
+    when: date | str | None,
+    *,
+    fy_start_year=None,
+    fy_serial=None,
+) -> bool:
+    """FY year and serial on a bill or purchase written from the server's copy.
+
+    The server's sale was written into the store without them, so after going
+    Offline every old bill sorted by its row id and every new bill by its serial:
+    the bill just made (SCB 120) sat below that day's older bills (ids in the
+    thousands) in Sales History and on Home. Nothing is written when the number
+    holds no serial, because 0 would sort below everything just the same.
+    """
+    if not _has_fy_columns(cur, table):
+        return False
+    prefix = _SALES_PREFIX if table == "sales" else ""
+    serial = _int_or_none(fy_serial) or _parse_serial(code, prefix)
+    if not serial:
+        return False
+    fy = (_int_or_none(fy_start_year) or fy_start_year_in_code(code)
+          or fy_start_year_for_date(str(when or "")[:10] or None))
+    cur.execute(f"UPDATE {table} SET fy_start_year=?, fy_serial=? WHERE id=?",
+                (fy, serial, int(row_id)))
+    return True
+
+
+def backfill_missing_fy_serials(conn: sqlite3.Connection) -> dict[str, int]:
+    """Give every saved bill and purchase without a serial the one its number holds.
+
+    Repairs stores taken Offline before stamp_pulled_fy_fields existed. Rows whose
+    number holds no serial are left alone.
+    """
+    cur = conn.cursor()
+    done = {"sales": 0, "purchases": 0}
+    for table, code_col, date_col in (("sales", "bill_no", "bill_date"),
+                                      ("purchases", "purchase_no", "purchase_date")):
+        if not _table_exists(cur, table) or not _has_fy_columns(cur, table):
+            continue
+        rows = cur.execute(
+            f"SELECT id, {code_col}, {date_col} FROM {table} WHERE fy_serial IS NULL"
+        ).fetchall()
+        for rid, code, when in rows:
+            if stamp_pulled_fy_fields(cur, table, rid, code, when):
+                done[table] += 1
+    if done["sales"] or done["purchases"]:
+        conn.commit()
+    return done
+
+
 def patch_sale_fy_fields(
     cur: sqlite3.Cursor,
     sale_id: int,

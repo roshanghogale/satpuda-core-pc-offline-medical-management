@@ -677,6 +677,10 @@ def download_store_for_offline(
             from core.store_kv_carry import try_pull
 
             carried = try_pull(conn)
+            # Bills from the server keep their serial, so a new bill lists on top.
+            from core.fy_serial import backfill_missing_fy_serials
+
+            backfill_missing_fy_serials(conn)
             _mark_prepared_mirror(conn)
             conn.commit()
         finally:

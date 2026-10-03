@@ -1730,7 +1730,7 @@ def fetch_recent_sales(conn, limit=5):
         SELECT s.id, s.bill_no, s.bill_date, c.name, s.total_amount
         FROM sales s JOIN customers c ON s.customer_id=c.id
         WHERE COALESCE(s.is_autosave, 0) = 0 AND COALESCE(s.deleted, 0) = 0
-        ORDER BY s.bill_date DESC, COALESCE(s.created_at, s.id) DESC, s.id DESC
+        ORDER BY s.bill_date DESC, COALESCE(s.fy_serial, s.id) DESC, s.id DESC
         LIMIT ?
     """, (limit,))
     return cur.fetchall()
@@ -1742,7 +1742,7 @@ def fetch_last_sale_id(conn):
     cur.execute("""
         SELECT s.id FROM sales s
         WHERE COALESCE(s.is_autosave, 0) = 0 AND COALESCE(s.deleted, 0) = 0
-        ORDER BY s.bill_date DESC, COALESCE(s.created_at, s.id) DESC, s.id DESC
+        ORDER BY s.bill_date DESC, COALESCE(s.fy_serial, s.id) DESC, s.id DESC
         LIMIT 1
     """)
     row = cur.fetchone()
