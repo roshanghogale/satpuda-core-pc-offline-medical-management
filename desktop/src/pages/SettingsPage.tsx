@@ -10,8 +10,10 @@ import {
   fetchShelf,
   fetchReorder,
   saveSettingsSection,
+  systemAction,
   type SettingsBundle,
 } from '../settingsApi'
+import { getApiBase } from '../api'
 import { ensureLocalEngine } from '../backend'
 import type { AppNavigate } from '../App'
 import type { ReorderPrefill } from '../pagesApi'
@@ -427,6 +429,60 @@ export function SettingsPage({
     return () => window.removeEventListener('keydown', onKey)
   }, [tabId, tab.sections, active])
 
+  /** Online -> Offline: the store's copy comes down FIRST, as a background job whose
+   *  progress shows ("Merging sales 1,250/4,237"), and only a finished copy switches the
+   *  mode. A big shop's copy takes minutes; done inside the switch it looked stuck, the app
+   *  was closed half way, and the next start was "Local data found" (Vaibhav, 3 Oct 2026). */
+  async function prepareOfflineCopy(): Promise<boolean> {
+    setSaving(true)
+    try {
+      const start = await systemAction({ action: 'download_offline' })
+      if (start.ok === false && !start.background) {
+        setMsg(`Offline copy zali nahi: ${String(start.error || '')}`)
+        return false
+      }
+      if (!start.background) return start.ok !== false
+      const t0 = Date.now()
+      while (Date.now() - t0 < 60 * 60 * 1000) {
+        await new Promise((r) => setTimeout(r, 800))
+        const st = await systemAction({ action: 'heavy_job_status' })
+        setMsg(`Offline sathi server varun data PC var yet aahe — app band karu naka. ${String(st.message || '')}`)
+        if (st.done) {
+          const res = (st.result && typeof st.result === 'object' ? st.result : {}) as Record<string, unknown>
+          if (st.ok === false || res.ok === false) {
+            setMsg(`Offline copy zali nahi, mode Online ch aahe: ${String(res.error || st.error || '')}`)
+            return false
+          }
+          return true
+        }
+      }
+      setMsg('Offline copy ajun chalu aahe — thodya velane punha Save Sync Mode daba.')
+      return false
+    } catch (e) {
+      setMsg(`Offline copy zali nahi: ${e instanceof Error ? e.message : String(e)}`)
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function saveSystem() {
+    if (String((system as Record<string, unknown>).sync_mode || '') === 'offline') {
+      let online = false
+      try {
+        const h = await fetch(`${getApiBase()}/api/health`).then((r) => r.json())
+        online = !!h.online_mode
+      } catch {
+        online = false
+      }
+      if (online) {
+        if (!(await prepareOfflineCopy())) return
+        return save('system', { ...system, offline_prepared: true })
+      }
+    }
+    return save('system', system)
+  }
+
   async function save(
     section:
       | 'appearance'
@@ -459,6 +515,11 @@ export function SettingsPage({
             'is this shop, open Data & System → Stores and use ' +
             '"Connect this PC to a store on the server".',
         )
+        return
+      }
+      if (section === 'system' && (next as { ok?: boolean }).ok === false) {
+        // e.g. offline_copy_failed: the store did not reach this PC, so the mode stayed Online
+        setMsg(String((next as { error?: string }).error || 'Sync mode was not changed.'))
         return
       }
       if (section === 'appearance') {
@@ -782,7 +843,7 @@ export function SettingsPage({
           setSystem={setSystem}
           opts={opts}
           saving={saving}
-          onSaveSystem={() => save('system', system)}
+          onSaveSystem={() => void saveSystem()}
           onStoreSwitched={async () => {
             await reload()
             await onStoreSwitched?.()

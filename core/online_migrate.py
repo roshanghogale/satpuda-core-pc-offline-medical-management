@@ -129,6 +129,54 @@ def local_store_db_exists(db_path: str | None = None) -> bool:
 _MIRROR_MARKER = "offline_mirror_prepared_at"
 
 
+_MIRROR_STARTED = "offline_mirror_started"
+_PENDING_TABLES = ("sales", "purchases", "sales_returns", "purchase_returns",
+                   "customer_payments", "supplier_payments", "medicines", "customers", "suppliers")
+
+
+def _mark_mirror_started(conn) -> None:
+    """Said BEFORE the download: this file is becoming a copy of the server.
+
+    The offline download takes minutes on a big shop (Vaibhav: 4,237 bills). Stopped
+    half way -- the app closed while the screen seemed stuck -- the file had server rows
+    and no mark, so the next Online start called it "Local data found" and offered to
+    push the server's own rows back (3 Oct 2026). With this mark a half copy is known for
+    what it is and simply made again."""
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute("INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)",
+                     (_MIRROR_STARTED, time.strftime("%Y-%m-%dT%H:%M:%S")))
+        conn.commit()
+    except Exception:
+        pass
+
+
+def pending_local_work(db_path: str) -> dict:
+    """{table: n} of rows made on this PC that never reached the server (sync_status not 'synced')."""
+    out: dict = {}
+    if not db_path or not os.path.isfile(db_path):
+        return out
+    try:
+        c = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    except Exception:
+        return out
+    try:
+        for table in _PENDING_TABLES:
+            try:
+                have = {r[1] for r in c.execute(f"PRAGMA table_info({table})")}
+                if "sync_status" not in have:
+                    continue
+                n = c.execute(f"SELECT COUNT(*) FROM {table} "
+                              "WHERE COALESCE(sync_status, 'synced') <> 'synced'").fetchone()[0]
+            except Exception:
+                continue
+            if int(n or 0) > 0:
+                out[table] = int(n)
+    finally:
+        c.close()
+    return out
+
+
 def _mark_prepared_mirror(conn) -> None:
     """Record that this local DB is a clean download, not offline work."""
     try:
@@ -141,6 +189,21 @@ def _mark_prepared_mirror(conn) -> None:
         )
     except Exception:
         pass
+
+
+def has_complete_mirror(db_path: str | None = None) -> bool:
+    """A finished offline copy (the download's last step marked it) with no unsent work."""
+    path = (db_path or store_db_path() or "").strip()
+    if not path or not os.path.isfile(path) or pending_local_work(path):
+        return False
+    try:
+        c = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            return bool(c.execute("SELECT 1 FROM app_meta WHERE key=?", (_MIRROR_MARKER,)).fetchone())
+        finally:
+            c.close()
+    except Exception:
+        return False
 
 
 def is_clean_prepared_mirror(db_path: str | None = None) -> bool:
@@ -163,7 +226,7 @@ def is_clean_prepared_mirror(db_path: str | None = None) -> bool:
         return False
     try:
         row = conn.execute(
-            "SELECT value FROM app_meta WHERE key=?", (_MIRROR_MARKER,)
+            "SELECT value FROM app_meta WHERE key IN (?, ?)", (_MIRROR_MARKER, _MIRROR_STARTED)
         ).fetchone()
         if not row:
             return False
@@ -569,6 +632,14 @@ def download_store_for_offline(
         return {"ok": False, "error": "No active store selected."}
 
     _progress(progress_cb, "Preparing local store…")
+    # A file holding work made on this PC that never reached the server is not
+    # overwritten by the server's copy: that work would be gone.
+    pending = pending_local_work(path)
+    if pending:
+        return {"ok": False, "code": "pending_local_work", "pending": pending,
+                "error": ("Ya PC var server la na gelele records aahet ("
+                          + ", ".join(f"{t} {n}" for t, n in pending.items())
+                          + "). Aadhi Online madhe 'Push to Server' kara, mag Offline la ja.")}
     rows = 0
     guard = _preserved_sync_watermarks() if preserve_sync_state else contextlib.nullcontext()
     with guard, allow_local_store_db():
@@ -579,6 +650,7 @@ def download_store_for_offline(
 
             initialise(conn)
             conn.commit()
+            _mark_mirror_started(conn)
             from core import server_live
 
             rows = int(

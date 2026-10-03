@@ -89,5 +89,41 @@ class WhatARestoreWouldLose(unittest.TestCase):
         self.assertNotIn("code", _restore_refusal("network down"))
 
 
+
+class TheShopsFssaiSurvivesAPhoneFile(unittest.TestCase):
+    """The phone's database has no FSSAI columns; a file back from the phone used to make
+    the PC print bills without the FSSAI number. This PC's own is kept."""
+
+    def test_the_fssai_number_is_kept(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        dest_dir = os.path.join(d, "stores", "Store_Test")
+        os.makedirs(dest_dir)
+        dest = os.path.join(dest_dir, "veterinary.db")
+        from core.db_setup import initialise
+
+        c = sqlite3.connect(dest)
+        initialise(c)
+        c.execute("DELETE FROM pharmacy_profile")
+        c.execute("INSERT INTO pharmacy_profile (name, fssai_number, show_fssai_on_bill) VALUES ('TEST', '11223344556677', 1)")
+        c.commit()
+        c.close()
+        phone = os.path.join(os.path.dirname(__file__), "fixtures", "android_made_store.db")
+        tmp = tempfile.mkdtemp(dir=d)
+        incoming = os.path.join(tmp, "in.db")
+        shutil.copy2(phone, incoming)
+        with mock.patch("core.store_manager.get_store_db_path", return_value=dest), \
+                mock.patch("core.store_manager.get_store_dir", return_value=dest_dir), \
+                mock.patch.object(bm, "_close_all_db_users"), \
+                mock.patch.object(bm, "_after_restore_sync_policy"):
+            ok, msg = bm._apply_restored_db({"db_path": incoming, "tmp_dir": ""}, "Test", "Store_Test",
+                                            allow_loss=True)
+        self.assertTrue(ok, msg)
+        c = sqlite3.connect(dest)
+        row = c.execute("SELECT fssai_number, show_fssai_on_bill FROM pharmacy_profile ORDER BY id LIMIT 1").fetchone()
+        c.close()
+        self.assertEqual(("11223344556677", 1), (row[0], int(row[1])))
+
+
 if __name__ == "__main__":
     unittest.main()

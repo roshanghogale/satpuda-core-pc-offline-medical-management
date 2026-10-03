@@ -21,6 +21,17 @@ def _has_pairing_key() -> bool:
         return False
 
 
+def _reopen_engine_conn() -> None:
+    """The engine's connection back, if a job closed it (Online: the in-memory shell)."""
+    try:
+        from core import desktop_api as dap
+
+        if dap._db.get("conn") is None:
+            dap.reopen_active_store()
+    except Exception as exc:
+        log.warning("reopen after migrate: %s", exc)
+
+
 def _restore_refusal(result: Any) -> dict[str, Any]:
     """A failed restore for the screen; one that would discard this device's newer records
     carries code "would_lose" so the screen asks, and re-sends with confirm_loss."""
@@ -5339,9 +5350,16 @@ def system_action(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, A
 
         def _mig(work_conn: sqlite3.Connection, progress: ProgressCb) -> dict[str, Any]:
             path = str(data.get("db_path") or "") or None
-            if action == "online_migrate_push":
-                return push_local_then_wipe(db_path=path, progress_cb=progress)
-            return wipe_local_store(db_path=path, progress_cb=progress)
+            try:
+                if action == "online_migrate_push":
+                    return push_local_then_wipe(db_path=path, progress_cb=progress)
+                return wipe_local_store(db_path=path, progress_cb=progress)
+            finally:
+                # Pushing / removing closes every store connection first, the engine's
+                # own included. A push that failed left it closed, and every screen
+                # then said "Database not open" until a restart -- the shop could not
+                # even press Delete Local (Vaibhav, 3 Oct 2026). Open it again, either way.
+                _reopen_engine_conn()
 
         return _begin_heavy(
             conn,

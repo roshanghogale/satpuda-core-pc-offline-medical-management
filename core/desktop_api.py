@@ -2069,6 +2069,15 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
 
             body = _read_json_body(self)
             conn = _db.get("conn")
+            if conn is None:
+                # A job that closed the engine's connection and did not open it again
+                # (a failed push of local data) left every save answering "Database not
+                # open" until a restart. Open it again first.
+                try:
+                    reopen_active_store()
+                except Exception:
+                    pass
+                conn = _db.get("conn")
             if path in ("/api/settings/appearance", "/api/settings/save/appearance"):
                 result = svc.save_appearance(body)
                 if result.get("error"):
@@ -2101,13 +2110,31 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                         if is_online_mode():
                             from core.online_migrate import (
                                 download_store_for_offline,
+                                has_complete_mirror,
                             )
 
-                            prepared = download_store_for_offline()
+                            if body.get("offline_prepared") and has_complete_mirror():
+                                # the screen just made the copy (with its progress shown)
+                                prepared = {"ok": True, "rows": 0, "reused": True}
+                            else:
+                                prepared = download_store_for_offline()
                     except Exception as exc:
-                        # Switching offline BECAUSE the network died is the
-                        # normal case, so never block the switch -- report it.
                         prepared = {"ok": False, "error": str(exc)}
+                    if prepared is not None and not prepared.get("ok"):
+                        # No copy of the store on this PC means an EMPTY Offline till --
+                        # and a shop that then bills into it splits its books. Without a
+                        # finished copy the mode stays Online; with an older finished copy
+                        # (network gone now) the switch goes ahead and says it is old.
+                        from core.online_migrate import has_complete_mirror
+
+                        if not has_complete_mirror():
+                            _json_response(self, 200, {
+                                "ok": False, "code": "offline_copy_failed",
+                                "error": ("Offline la gela nahi: server varun data PC var aala nahi ("
+                                          + str(prepared.get("error") or "") + "). Internet tapasa ani "
+                                          "punha prayatna kara -- tovar Online chalu aahe."),
+                            })
+                            return
 
                 # Going Offline -> Online, upload what this PC has been working on
                 # FIRST, while the local store is still the open connection.
@@ -2265,7 +2292,10 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 if str(body.get("action") or "").strip().lower() in (
                     "download_offline",
                     "prepare_offline",
-                ):
+                ) and _db.get("conn") is None:
+                    # With the engine's connection up, the action goes on to the settings
+                    # service, which runs it as a background job the screen follows
+                    # ("Merging sales 1,250/4,237") -- a big shop's copy takes minutes.
                     try:
                         from core.online_migrate import download_store_for_offline
 

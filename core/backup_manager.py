@@ -1600,7 +1600,10 @@ def restore_backup_from_drive(store_name: str, file_id: str = None) -> tuple:
                 'Ask the admin device to run at least one backup first.'
             )
 
-        files.sort(key=_backup_name_sort_key, reverse=True)
+        # Newest by Drive's own clock (modifiedTime), as the phone picks it -- the name's
+        # timestamp is the uploading device's clock, and a PC and a phone with clocks
+        # apart would each call a different file "latest" (3 Oct 2026).
+        files.sort(key=lambda f: (f.get('modifiedTime') or '', _backup_name_sort_key(f)), reverse=True)
 
         if file_id:
             chosen = [f for f in files if f.get('id') == file_id]
@@ -1656,6 +1659,62 @@ def restore_latest_backup_to_store(
         return False, result
     return _apply_restored_db(result, store_name, store_key, close_conn=close_conn,
                               allow_loss=allow_loss)
+
+
+# A file that came back from the phone has no FSSAI columns (the phone's database never
+# had them), so the restore printed bills without the shop's FSSAI number from then on.
+# What this PC had is put back when the incoming file has nothing of its own.
+_PROFILE_EXTRAS = ("fssai_number", "show_fssai_on_bill")
+
+
+def _profile_extras(db_path: str) -> dict:
+    import sqlite3
+
+    if not db_path or not os.path.isfile(db_path):
+        return {}
+    try:
+        c = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            have = {r[1] for r in c.execute("PRAGMA table_info(pharmacy_profile)")}
+            cols = [k for k in _PROFILE_EXTRAS if k in have]
+            if not cols:
+                return {}
+            row = c.execute(f"SELECT {', '.join(cols)} FROM pharmacy_profile ORDER BY id LIMIT 1").fetchone()
+            return {k: v for k, v in zip(cols, row or ()) if v not in (None, '', 0)}
+        finally:
+            c.close()
+    except Exception:
+        return {}
+
+
+def _restore_profile_extras(db_path: str, kept: dict) -> None:
+    import sqlite3
+
+    if not kept:
+        return
+    try:
+        c = sqlite3.connect(db_path)
+        try:
+            have = {r[1] for r in c.execute("PRAGMA table_info(pharmacy_profile)")}
+            if not have:
+                return
+            for k in kept:
+                if k not in have:
+                    c.execute(f"ALTER TABLE pharmacy_profile ADD COLUMN {k} "
+                              + ("INTEGER DEFAULT 0" if k.startswith("show_") else "TEXT"))
+            row = c.execute(f"SELECT {', '.join(kept)} FROM pharmacy_profile ORDER BY id LIMIT 1").fetchone()
+            if row is None:
+                return
+            current = dict(zip(kept, row))
+            put = {k: v for k, v in kept.items() if current.get(k) in (None, '', 0)}
+            if put:
+                c.execute("UPDATE pharmacy_profile SET " + ", ".join(f"{k}=?" for k in put)
+                          + " WHERE id=(SELECT id FROM pharmacy_profile ORDER BY id LIMIT 1)", tuple(put.values()))
+                c.commit()
+        finally:
+            c.close()
+    except Exception as exc:
+        _logger.warning(f"restore: FSSAI kept from this PC could not be written back: {exc}")
 
 
 WOULD_LOSE = "WOULD_LOSE:"
@@ -1745,7 +1804,9 @@ def _apply_restored_db(result: dict, store_name: str, store_key: str,
         _close_all_db_users(extra_conn=close_conn)
 
         before = _sale_stats(dest) if os.path.isfile(dest) else {'count': 0}
+        kept_profile = _profile_extras(dest)
         _replace_store_database(result['db_path'], dest)
+        _restore_profile_extras(dest, kept_profile)
         after = _sale_stats(dest)
         _after_restore_sync_policy()
 
