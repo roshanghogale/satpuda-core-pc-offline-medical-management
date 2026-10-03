@@ -618,8 +618,8 @@ def load_period(conn, start: str, end: str) -> Period:
 
 
 def _collect_checks(p: Period) -> None:
-    if not p.shop["gstin"]:
-        p.checks.append(("Dukanacha GSTIN nahi", "Settings → Pharmacy", "GSTR-1 / 3B sathi aadhi bhara"))
+    # A shop without a GSTIN (not registered, or not yet) uses every report as it is: the
+    # missing GSTIN is said once on the window, never counted as a problem with its bills.
     if not p.shop["gst_enabled"]:
         p.checks.append(("Bill var GST band aahe", "Settings → Pharmacy",
                          "bill var GST chhapla jaat nahi; report madhe MRP madhla GST mojla aahe"))
@@ -994,8 +994,7 @@ def gstr3b(p: Period, g1: Optional[dict] = None) -> dict:
 def gstr1_json(p: Period, g1: Optional[dict] = None) -> dict:
     """GSTR-1 in the GST portal's JSON layout (to be checked in the offline tool before filing)."""
     g1 = g1 or gstr1(p)
-    if not p.shop["gstin"]:
-        raise ValueError("Dukanacha GSTIN nahi -- Settings → Pharmacy madhe bhara")
+    # No GSTIN: the file is still made (the portal will ask for it); nothing is refused.
     fp = datetime.strptime(p.end, "%Y-%m-%d").strftime("%m%Y")
 
     def det(r):

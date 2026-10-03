@@ -374,8 +374,9 @@ export function GstReportsDialog({ open, onClose }: { open: boolean; onClose: ()
           {err ? <div className="vb-warn" style={{ marginTop: 8 }}>{err}</div> : null}
           {msg ? <div className="settings-hint" style={{ marginTop: 8 }}>{msg}</div> : null}
           {report && !report.shop.gstin ? (
-            <div className="vb-warn" style={{ marginTop: 8 }}>
-              Dukanacha GSTIN nahi — Settings → Pharmacy madhe bhara. Tyashivay GSTR-1 JSON banat nahi.
+            <div className="settings-hint" style={{ marginTop: 8 }}>
+              Dukanacha GSTIN bharlela nahi — sagle reports chaltat. GST nondani asel tar Settings → Pharmacy madhe bhara,
+              mhanje GSTR-1 JSON var to yeil.
             </div>
           ) : null}
           {checks ? (
@@ -456,7 +457,7 @@ export function GstReportsDialog({ open, onClose }: { open: boolean; onClose: ()
           <button
             type="button"
             className="btn btn-neutral"
-            disabled={busy || !report?.shop.gstin}
+            disabled={busy || !report}
             title="GST portal chya offline tool madhe ughadun tapasa, mag upload kara"
             onClick={() => void exportAs('json', false)}
           >

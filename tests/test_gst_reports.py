@@ -227,6 +227,18 @@ class FiledAndCompared(_Store):
         self.assertEqual([], gr.list_filed(c))
 
 
+class AShopWithoutAGstin(_Store):
+    def test_every_report_works_and_nothing_is_refused(self):
+        with mock.patch("core.pharmacy_profile_io.load_pharmacy_profile",
+                        return_value={"name": "TEST MEDICAL", "gstin": "", "gst_enabled": 1}):
+            report = gr.build(self.conn, "2026-09-01", "2026-09-30")
+            js = gr.gstr1_json(gr.load_period(self.conn, "2026-09-01", "2026-09-30"))
+        self.assertTrue(report["sales_register"])
+        self.assertFalse(any("GSTIN" in c["what"] and "Dukan" in c["what"] for c in report["checks"]))
+        self.assertEqual("", js["gstin"])
+        self.assertEqual(0.0, next(r for r in report["tally"] if r["line"].startswith("PHARAK ("))["amount"])
+
+
 class NothingIsWritten(_Store):
     def test_the_store_is_unchanged_by_a_report(self):
         before = self.conn.total_changes

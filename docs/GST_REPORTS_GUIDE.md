@@ -1,10 +1,10 @@
 # GST Reports — vaparnyachi paddhat
 
-Satpuda Core madhle GST reports kase kadhayche, kay aahe ani kase tapasayche. (App madhe: GST Reports → Madat (?))
+Satpuda Core madhle GST reports kase kadhayche, kay aahe ani kase tapasayche, ani itar sagle reports kuthe aahet. (App madhe: GST Reports → Madat (?))
 
 ## 1. Suruvatila ekda (setup)
 
-- Settings → Pharmacy → GSTIN: dukanacha GSTIN bhara. Tyashivay GSTR-1 JSON banat nahi ani rajya (Place of Supply) kalat nahi.
+- Settings → Pharmacy → GSTIN: GST nondani asel tar dukanacha GSTIN bhara (GSTR-1 JSON ani rajya / Place of Supply sathi). Nondani nasel tar rikama theva — sagle reports tari chaltat, kuthlihi bandhi nahi.
 - B2B grahak (hospital, clinic, doctor, dusre dukan je GSTIN deun bill magtat): Settings → Contacts → Customers → Edit → "GSTIN (B2B bill sathi)" ani "Kadhi pasun" bhara → "GSTIN save kara". Tya tarkhepasunchya bills var tyancha GSTIN chhapla jaato ani te bills B2B madhe jaatat.
 - Saadhe (retail) grahak: kahich bharayche nahi — te bills aapoaap B2CS madhe jaatat.
 - Aushadh master madhe HSN code (4 / 6 / 8 ank) ani GST % bhara. Nasel tar "Checks" madhe disel.
@@ -49,3 +49,15 @@ Satpuda Core madhle GST reports kase kadhayche, kay aahe ani kase tapasayche. (A
 - Home: G = GST Reports · B = New Bill · P = Purchase · I = Inventory · E = Export.
 - GST Reports window: Escape = band.
 - Saglya shortcuts chi yaadi: Settings → Shortcuts → Keyboard Shortcuts.
+
+## 8. Sagle reports kuthe aahet
+
+- Home → GST Reports (G): GSTR-3B + Tally, Sales GST register, GSTR-1 (B2B, B2CS / B2CL, Credit notes, HSN B2B / B2C, Documents), Purchase ITC register + rate-wise, Checks, Filed / Tally.
+- Sales History → Export (Ctrl+E): Current view, Sales Register, Monthly Summary, Daily Sales Summary, Customer Due, Doctor-wise Sales, Payment Mode, Schedule Report (Classic / Sign, ubha / aadva).
+- Purchase History → Export (Ctrl+E): Current view, Purchase Register, Monthly Summary, Supplier Due, GST Purchase Report.
+- Inventory → Export (Ctrl+E): Current view, Stock Statement, Near Expiry, Expired Stock, Schedule-wise Stock.
+- Home → Export (E): Sales / Purchases / Inventory / All — purna data.
+- Settings → Alert & Monitoring: Low Stock, Out of Stock, Expired, Near Expiry, Customer Dues — mahina / varsh filter, Export / Print (ek kiva saglya yaadya ekatra).
+- Settings → Ledger: Supplier Ledger, Customer Ledger. Settings → Contacts → Customers: Customer list, Customer due list.
+- Settings → Data & System → Export Data. Returns → history madhun return print.
+- Pratyek export: CSV / Excel / PDF, kiva print — Printer kiva Dot matrix, A4 ubha / aadva.
