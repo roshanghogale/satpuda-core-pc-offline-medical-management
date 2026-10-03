@@ -207,7 +207,7 @@ class TheAltXKey(unittest.TestCase):
         kb = src(*UI, "keyboard.ts")
         self.assertNotRegex(between(kb, "const KEY_TO_PAGE", "}"), r"'[xX]'")
         hooks = src(*UI, "hooks", "usePageHotkeys.ts")
-        self.assertIn("['b', 'p', 'i', 'e', 's', 'w']", hooks)
+        self.assertIn("['b', 'p', 'i', 'e', 's', 'w', 'g']", hooks)
         settings = src(*PAGES, "SettingsPage.tsx")
         alt = between(settings, "if (e.altKey && !e.ctrlKey && !e.metaKey) {", "\n      }\n")
         self.assertIn("digit >= 1 && digit <= 9", alt)

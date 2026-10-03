@@ -244,7 +244,7 @@ class TheSalesReturnKey(unittest.TestCase):
         self.assertNotRegex(between(kb, "const KEY_TO_PAGE", "}"), r"'[rR]'")
         self.assertIn("if (e.ctrlKey || e.altKey || e.metaKey) return", kb)
         hooks = src(*UI, "hooks", "usePageHotkeys.ts")
-        self.assertIn("['b', 'p', 'i', 'e', 's', 'w']", hooks)
+        self.assertIn("['b', 'p', 'i', 'e', 's', 'w', 'g']", hooks)
         # Settings reads Alt only with a digit.
         settings = src(*PAGES, "SettingsPage.tsx")
         alt = between(settings, "if (e.altKey && !e.ctrlKey && !e.metaKey) {", "\n      }\n")

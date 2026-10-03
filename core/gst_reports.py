@@ -346,11 +346,12 @@ def _notes_offline(conn, start: str, end: str, bills_by_id: dict) -> list:
            ORDER BY return_date, id""", (start, end)).fetchall()
     for r in rows:
         items = conn.execute(
-            "SELECT medicine_id, COALESCE(qty,0) FROM sales_return_items WHERE return_id=? ORDER BY id",
-            (int(r[0]),)).fetchall()
+            f"""SELECT ri.medicine_id, COALESCE(ri.qty,0), {_c(conn, 'medicines', 'm', 'name', chr(39) * 2)}
+                FROM sales_return_items ri LEFT JOIN medicines m ON m.id = ri.medicine_id
+                WHERE ri.return_id=? ORDER BY ri.id""", (int(r[0]),)).fetchall()
         bill = bills_by_id.get(int(r[3] or 0)) or (_bill_by_id_offline(conn, int(r[3])) if r[3] else None)
         out.append(_note(int(r[0]), str(r[1] or ""), _iso(r[2]), bill, _d(r[4]),
-                         [(int(m or 0), Decimal(str(q or 0))) for m, q in items]))
+                         [(int(m or 0), Decimal(str(q or 0)), str(nm or "")) for m, q, nm in items]))
     return out
 
 
@@ -374,7 +375,7 @@ def _notes_online(start: str, end: str, bills_by_id: dict) -> list:
                 bill = _bill_from_doc(get_doc("sales", sid) or {})
             except Exception:
                 bill = None
-        items = [(int(i.get("medicine_id") or 0), Decimal(str(i.get("qty") or 0)))
+        items = [(int(i.get("medicine_id") or 0), Decimal(str(i.get("qty") or 0)), str(i.get("name") or ""))
                  for i in doc.get("items") or [] if isinstance(i, dict)]
         out.append(_note(int(doc.get("id") or 0), str(doc.get("return_no") or ""), rd, bill,
                          _d(doc.get("refund_amount")), items))
@@ -388,10 +389,20 @@ def _note(nid: int, no: str, when: str, bill: Optional[Bill], refund: Decimal, i
         return Note(nid, no, when, None, refund, [], "Mool bill sapadla nahi")
     lines = []
     left = {i: ln.qty for i, ln in enumerate(bill.lines)}
-    for mid, qty in items:
+    for mid, qty, name in items:
+        if qty <= 0:
+            continue                 # an empty row the return screen saved (medicine 0, qty 0)
         idx = next((i for i, ln in enumerate(bill.lines) if ln.medicine_id == mid and left[i] >= qty), None)
         if idx is None:
             idx = next((i for i, ln in enumerate(bill.lines) if ln.medicine_id == mid), None)
+        if idx is None and name.strip():
+            # the same medicine, another batch row: the bill sold one batch and the return
+            # was keyed against another -- the line it came from is the one with its name
+            key = " ".join(name.split()).upper()
+            idx = next((i for i, ln in enumerate(bill.lines)
+                        if " ".join(ln.name.split()).upper() == key and left[i] >= qty), None)
+            if idx is None:
+                idx = next((i for i, ln in enumerate(bill.lines) if " ".join(ln.name.split()).upper() == key), None)
         if idx is None:
             return Note(nid, no, when, bill, refund, [], "Return chi goli mool bill madhe nahi")
         ln = bill.lines[idx]
@@ -655,10 +666,29 @@ def bill_tax(b: Bill):
 
 
 def note_tax(n: Note):
-    """A credit note's lines with the return discount spread as a bill's discount is."""
+    """A credit note is what was given back: the refund, spread over the returned lines in
+    proportion to their value (paise half-up, the leftover on the biggest line), each line's
+    tax backed out at its bill line's rate.
+
+    The refund is the figure, not the lines' price: 29 of Vaibhav's 107 returns refunded more
+    or less than "qty x price" (typed on the return screen), and a credit note has to state
+    what the customer actually got back (3 Oct 2026)."""
     gross = sum((v for _, _, v in n.lines), ZERO)
-    disc = max(ZERO, gross - n.refund)
-    return printed_bill_gst([(v, ln.rate) for ln, _, v in n.lines], disc)
+    refund = max(n.refund, ZERO)
+    if not n.lines:
+        return printed_bill_gst([], 0)
+    if gross <= 0:
+        shares = [ZERO for _ in n.lines]
+        shares[0] = refund
+    else:
+        from core.bill_gst import _half_up
+
+        shares = [_half_up(refund * v / gross) for _, _, v in n.lines]
+        left = refund - sum(shares, ZERO)
+        if left:
+            big = max(range(len(n.lines)), key=lambda i: n.lines[i][2])
+            shares[big] += left
+    return printed_bill_gst([(sh, ln.rate) for (ln, _, _), sh in zip(n.lines, shares)], 0)
 
 
 def _inter(state: str, shop_state: str) -> bool:
@@ -678,6 +708,37 @@ def _bill_kind(b: Bill, shop_state: str) -> str:
     if _inter(b.pos, shop_state) and b.total > B2CL_LIMIT:
         return "b2cl"
     return "b2cs"
+
+
+def tally(p: Period) -> list:
+    """The shop's sales against the GST figures: bills' totals, less round-off and bills with
+    no medicine lines, must equal taxable + tax to the paisa. Any difference is shown."""
+    total = sum((b.total for b in p.bills), ZERO)
+    rounding = sum((b.rounding for b in p.bills), ZERO)
+    no_lines = sum((b.total for b in p.bills if not b.lines), ZERO)
+    taxable = tax = ZERO
+    for b in p.bills:
+        if b.lines:
+            g = bill_tax(b)
+            taxable += g.taxable
+            tax += g.tax
+    gap = total - rounding - no_lines - taxable - tax
+    notes = sum((n.refund for n in p.notes), ZERO)
+    n_tax = ZERO
+    for n in p.notes:
+        if not n.problem and n.lines:
+            n_tax += note_tax(n).net
+    return [
+        {"line": "Bills ekun (bill var lihilela total)", "amount": _f(total)},
+        {"line": "  vajaa: round-off", "amount": _f(rounding)},
+        {"line": "  vajaa: aushadh lines nasleli bills (Checks paha)", "amount": _f(no_lines)},
+        {"line": "GST madhe: taxable value", "amount": _f(taxable)},
+        {"line": "GST madhe: tax (CGST + SGST + IGST)", "amount": _f(tax)},
+        {"line": "PHARAK (0 asla pahije)", "amount": _f(gap)},
+        {"line": "Returns ekun (refund)", "amount": _f(notes)},
+        {"line": "  tyatle credit notes madhe aalele", "amount": _f(n_tax)},
+        {"line": "  PHARAK returns (mool bill nasle tar Checks paha)", "amount": _f(notes - n_tax)},
+    ]
 
 
 def sales_register(p: Period) -> list:
@@ -1026,6 +1087,7 @@ def build(conn, start: str, end: str) -> dict:
         "gstr1": g1,
         "gstr3b": gstr3b(p, g1),
         "purchase_register": purchase_register(p),
+        "tally": tally(p),
         "purchase_rates": purchase_rate_summary(p),
         "checks": [{"what": a, "where": b, "detail": c} for a, b, c in p.checks],
         "counts": {"bills": len(p.bills), "credit_notes": len(p.notes), "purchases": len(p.purchases),
@@ -1057,6 +1119,8 @@ def sections(report: dict) -> list:
                        v.get("cgst", ""), v.get("sgst", ""), v.get("cess", "")])
     out.append({"title": "3B Summary", "columns": ["Table", "Taxable / Value", "IGST", "CGST", "SGST", "Cess"],
                 "rows": rows3b})
+    out.append({"title": "Tally", "columns": ["Hisob", "Rakkam"],
+                "rows": [[r["line"], r["amount"]] for r in report.get("tally", [])]})
     out.append({"title": "Sales GST Register",
                 "columns": ["Date", "Bill No", "Customer", "GSTIN", "Place Of Supply", "Type", "Rate",
                             "Taxable Value", "IGST", "CGST", "SGST", "Bill Total"],
@@ -1141,3 +1205,158 @@ def export(conn, body: dict) -> dict:
     if res.get("ok") and res.get("filename"):
         res["filename"] = f"{stem}.{res.get('format') or fmt}"
     return res
+
+
+# ── filed figures: keep what was given to the CA, and compare later ─────────────────────
+#
+# A month's figures are saved when the return is filed ("gst_filed:<from>_<to>:<stamp>",
+# a store setting like the regular lists -- Offline settings table, Online server kv, so
+# every PC of the store sees it). Comparing the store today with a saved filing shows
+# what changed after it: a bill edited or deleted, a bill entered late, a return added --
+# what the next return has to correct.
+
+FILED_PREFIX = "gst_filed:"
+
+
+def _kv_get_all(conn) -> dict:
+    from core.customer_gst import _online as online
+
+    if online():
+        from core import server_api as api
+        from core.server_live import _token
+        from core.store_images import _kv_rows
+
+        res = api._request("GET", "/api/sync/settings/kv", token=_token(), timeout=60)
+        if not isinstance(res, dict) or not res.get("ok"):
+            raise RuntimeError("Server varun saved GST reports vachta ale nahit.")
+        return {str(r.get("name") or ""): r.get("value") for r in _kv_rows(res.get("data"))
+                if str(r.get("name") or "").startswith(FILED_PREFIX)}
+    from core.desktop_settings_service import _ensure_settings_table
+
+    _ensure_settings_table(conn)
+    return {str(n): v for n, v in conn.execute(
+        "SELECT name, value FROM settings WHERE name LIKE ?", (FILED_PREFIX + "%",)).fetchall()}
+
+
+def _kv_set(conn, name: str, value: str) -> None:
+    from core.customer_gst import _online as online
+
+    if online():
+        from core.server_live import push_settings_kv
+
+        push_settings_kv(name, value)
+    else:
+        from core.desktop_settings_service import _setting_set
+
+        _setting_set(conn, name, value)
+        conn.commit()
+
+
+def snapshot(report: dict) -> dict:
+    """What a filing needs to be compared later: the table totals and every bill's figures."""
+    bills: dict = {}
+    for r in report["sales_register"]:
+        b = bills.setdefault(r["bill_no"], [0.0, 0.0, r["date"], r["type"]])
+        b[0] = round(b[0] + r["taxable"], 2)
+        b[1] = round(b[1] + r["igst"] + r["cgst"] + r["sgst"], 2)
+    notes: dict = {}
+    for t in ("cdnr", "cdnur"):
+        for r in report["gstr1"][t]:
+            n = notes.setdefault(r["note_no"], [0.0, 0.0])
+            n[0] = round(n[0] + r["taxable"], 2)
+            n[1] = round(n[1] + r["igst"] + r["cgst"] + r["sgst"], 2)
+    return {"period": report["period"], "gstin": report["shop"].get("gstin", ""),
+            "totals": table_totals(report), "bills": bills, "notes": notes,
+            "counts": report.get("counts", {})}
+
+
+def table_totals(report: dict) -> dict:
+    out = {}
+    g1 = report["gstr1"]
+    for t in ("b2b", "b2cl", "b2cs", "cdnr", "cdnur", "hsn_b2b", "hsn_b2c"):
+        rows = g1[t]
+        out[t] = {k: round(sum(float(r.get(k) or 0) for r in rows), 2) for k in ("taxable", "igst", "cgst", "sgst")}
+        out[t]["rows"] = len(rows)
+    for name, v in report["gstr3b"].items():
+        if isinstance(v, dict):
+            out["3B " + name] = {k: v[k] for k in v if isinstance(v[k], (int, float))}
+    return out
+
+
+def save_filed(conn, start: str, end: str, note: str = "") -> dict:
+    report = build(conn, start, end)
+    snap = snapshot(report)
+    snap.update(saved_at=datetime.now().isoformat(timespec="seconds"), note=str(note or "")[:200])
+    import json
+
+    key = f"{FILED_PREFIX}{report['period']['from']}_{report['period']['to']}:{datetime.now():%Y%m%d%H%M%S}"
+    _kv_set(conn, key, json.dumps(snap, ensure_ascii=False, separators=(",", ":")))
+    return {"key": key, **_filed_row(key, snap)}
+
+
+def _filed_row(key: str, snap: dict) -> dict:
+    t = snap.get("totals", {}).get("3B 3.1(a) Outward taxable supplies", {})
+    return {"key": key, "from": snap["period"]["from"], "to": snap["period"]["to"],
+            "saved_at": snap.get("saved_at", ""), "note": snap.get("note", ""),
+            "bills": len(snap.get("bills", {})), "taxable": t.get("taxable", 0.0),
+            "tax": round(sum(float(t.get(k) or 0) for k in ("igst", "cgst", "sgst")), 2)}
+
+
+def list_filed(conn) -> list:
+    import json
+
+    out = []
+    for key, raw in _kv_get_all(conn).items():
+        try:
+            snap = json.loads(str(raw or ""))
+        except ValueError:
+            continue
+        if isinstance(snap, dict) and snap.get("period"):
+            out.append(_filed_row(key, snap))
+    return sorted(out, key=lambda r: (r["from"], r["saved_at"]), reverse=True)
+
+
+def compare_filed(conn, key: str) -> dict:
+    """The store today against a saved filing: table by table, and bill by bill."""
+    import json
+
+    raw = _kv_get_all(conn).get(str(key))
+    if not raw:
+        raise ValueError("Saved report sapadla nahi")
+    snap = json.loads(str(raw))
+    now = snapshot(build(conn, snap["period"]["from"], snap["period"]["to"]))
+    tables = []
+    for name in sorted(set(snap["totals"]) | set(now["totals"])):
+        a, b = snap["totals"].get(name, {}), now["totals"].get(name, {})
+        for k in sorted(set(a) | set(b)):
+            if k == "rows":
+                continue
+            va, vb = float(a.get(k) or 0), float(b.get(k) or 0)
+            if abs(va - vb) >= 0.01:
+                tables.append({"table": name, "field": k, "filed": round(va, 2), "now": round(vb, 2),
+                               "difference": round(vb - va, 2)})
+    bills = []
+    for no in sorted(set(snap["bills"]) | set(now["bills"]), key=lambda x: (len(x), x)):
+        a, b = snap["bills"].get(no), now["bills"].get(no)
+        if a and not b:
+            bills.append({"bill_no": no, "what": "Filed nantar kadhla / tarikh badalli",
+                          "filed_taxable": a[0], "filed_tax": a[1], "now_taxable": 0.0, "now_tax": 0.0})
+        elif b and not a:
+            bills.append({"bill_no": no, "what": "Filed nantar ala (ushira nond / tarikh badalli)",
+                          "filed_taxable": 0.0, "filed_tax": 0.0, "now_taxable": b[0], "now_tax": b[1]})
+        elif a and b and (abs(a[0] - b[0]) >= 0.01 or abs(a[1] - b[1]) >= 0.01 or a[3] != b[3]):
+            bills.append({"bill_no": no, "what": "Filed nantar badalla" + (f" ({a[3]} -> {b[3]})" if a[3] != b[3] else ""),
+                          "filed_taxable": a[0], "filed_tax": a[1], "now_taxable": b[0], "now_tax": b[1]})
+    for no in sorted(set(snap["notes"]) | set(now["notes"])):
+        a, b = snap["notes"].get(no), now["notes"].get(no)
+        if a != b:
+            bills.append({"bill_no": no, "what": "Credit note badalli / navin / kadhli",
+                          "filed_taxable": (a or [0, 0])[0], "filed_tax": (a or [0, 0])[1],
+                          "now_taxable": (b or [0, 0])[0], "now_tax": (b or [0, 0])[1]})
+    return {"filed": _filed_row(key, snap), "same": not tables and not bills, "tables": tables, "bills": bills}
+
+
+def delete_filed(conn, key: str) -> None:
+    if not str(key).startswith(FILED_PREFIX):
+        raise ValueError("Chukicha saved report")
+    _kv_set(conn, str(key), "")

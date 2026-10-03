@@ -219,9 +219,13 @@ def _file_response(handler: BaseHTTPRequestHandler, file_path: str, content_type
 
 
 def _open_conn(db_path: str) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path, check_same_thread=False)
+    # 30 s of waiting on a lock, as every other store connection has (db_utils.open_store_db):
+    # the UI connection used Python's 5 s default, so a Drive backup snapshot or an upload
+    # running at the moment of a save or a mode switch answered "database is locked".
+    conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30.0)
     conn.row_factory = sqlite3.Row
     try:
+        conn.execute("PRAGMA busy_timeout=30000")
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
     except Exception:
@@ -783,6 +787,18 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 from core.desktop_settings_service import get_layout_lists
 
                 _json_response(self, 200, get_layout_lists())
+                return
+            if path == "/api/reports/gst/filed":
+                conn = _db.get("conn")
+                if conn is None:
+                    _json_response(self, 503, {"error": "Database not open"})
+                    return
+                try:
+                    from core import gst_reports
+
+                    _json_response(self, 200, {"ok": True, "filed": gst_reports.list_filed(conn)})
+                except Exception as exc:
+                    _json_response(self, 400, {"ok": False, "error": str(exc)})
                 return
             if path in ("/api/reports/gst", "/api/customers/gst"):
                 # GST reports for a period (core/gst_reports.py) / a customer's GSTIN (core/customer_gst.py)
@@ -2145,7 +2161,15 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
 
                             counts = _local_business_counts(conn)
                             if any(int(n or 0) > 0 for n in counts.values()):
-                                pushed = push_active_store_to_server_detailed(conn)
+                                # a busy file is waited out, not reported as a failed switch
+                                for attempt in range(3):
+                                    try:
+                                        pushed = push_active_store_to_server_detailed(conn)
+                                        break
+                                    except sqlite3.OperationalError as exc:
+                                        if "locked" not in str(exc).lower() or attempt == 2:
+                                            raise
+                                        time.sleep(2 + 3 * attempt)
                             # and the regular-medicine lists / customer GSTINs made
                             # Offline, which live in settings (core/store_kv_carry.py)
                             from core.store_kv_carry import try_push
@@ -2322,6 +2346,28 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 from core.desktop_alert_service import alert_action
 
                 _json_response(self, 200, alert_action(conn, body))
+                return
+            if path == "/api/reports/gst/filed":
+                if conn is None:
+                    _json_response(self, 503, {"error": "Database not open"})
+                    return
+                try:
+                    from core import gst_reports
+
+                    act = str(body.get("action") or "")
+                    if act == "save":
+                        out = gst_reports.save_filed(conn, str(body.get("from") or ""), str(body.get("to") or ""),
+                                                     str(body.get("note") or ""))
+                    elif act == "compare":
+                        out = gst_reports.compare_filed(conn, str(body.get("key") or ""))
+                    elif act == "delete":
+                        gst_reports.delete_filed(conn, str(body.get("key") or ""))
+                        out = {"deleted": True}
+                    else:
+                        raise ValueError("action save / compare / delete")
+                    _json_response(self, 200, {"ok": True, **out})
+                except Exception as exc:
+                    _json_response(self, 400, {"ok": False, "error": str(exc)})
                 return
             if path in ("/api/reports/gst/export", "/api/customers/gst"):
                 if conn is None:

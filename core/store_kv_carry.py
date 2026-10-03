@@ -15,7 +15,7 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-PREFIXES = ("regular_meds:", "customer_gst:")
+PREFIXES = ("regular_meds:", "customer_gst:", "gst_filed:")
 
 
 def _carried(name: str) -> bool:
@@ -49,8 +49,9 @@ def push_from_local(conn) -> int:
 
     _ensure_settings_table(conn)
     n = 0
+    where = " OR ".join("name LIKE ?" for _ in PREFIXES)
     for name, value in conn.execute(
-        "SELECT name, value FROM settings WHERE name LIKE 'regular_meds:%' OR name LIKE 'customer_gst:%'"
+        f"SELECT name, value FROM settings WHERE {where}", tuple(p + "%" for p in PREFIXES)
     ).fetchall():
         if _carried(name) and str(value or "").strip():
             push_settings_kv(str(name), str(value))

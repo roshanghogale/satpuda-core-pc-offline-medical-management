@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { getApiBase } from '../api'
+import { GST_HELP } from './gstReportsHelp'
 
 type Section = { title: string; columns: string[]; rows: (string | number)[][] }
 type Report = {
@@ -22,7 +23,7 @@ type Report = {
 }
 
 const TABS: { key: string; label: string; tables: string[] }[] = [
-  { key: '3b', label: 'GSTR-3B', tables: ['3B Summary'] },
+  { key: '3b', label: 'GSTR-3B + Tally', tables: ['3B Summary', 'Tally'] },
   { key: 'reg', label: 'Sales register', tables: ['Sales GST Register'] },
   { key: 'b2b', label: 'B2B', tables: ['b2b'] },
   { key: 'b2c', label: 'B2CS / B2CL', tables: ['b2cs', 'b2cl'] },
@@ -31,7 +32,140 @@ const TABS: { key: string; label: string; tables: string[] }[] = [
   { key: 'docs', label: 'Documents', tables: ['docs'] },
   { key: 'itc', label: 'Purchase ITC', tables: ['Purchase ITC Register', 'Purchase Rate-wise'] },
   { key: 'checks', label: 'Checks', tables: ['Checks'] },
+  { key: 'filed', label: 'Filed / Tally', tables: [] },
 ]
+
+type Filed = { key: string; from: string; to: string; saved_at: string; note: string; bills: number; taxable: number; tax: number }
+type Compared = {
+  filed: Filed
+  same: boolean
+  tables: { table: string; field: string; filed: number; now: number; difference: number }[]
+  bills: { bill_no: string; what: string; filed_taxable: number; filed_tax: number; now_taxable: number; now_tax: number }[]
+}
+
+async function filedAction(body: Record<string, unknown>) {
+  const res = await fetch(`${getApiBase()}/api/reports/gst/filed`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const d = await res.json().catch(() => ({}))
+  if (!res.ok || d.ok === false) throw new Error(d.error || `HTTP ${res.status}`)
+  return d
+}
+
+/** Filed / Tally: keep the figures given to the CA, and later see what changed since. */
+function FiledTab({ from, to, onMsg }: { from: string; to: string; onMsg: (m: string, err?: boolean) => void }) {
+  const [list, setList] = useState<Filed[]>([])
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [cmp, setCmp] = useState<Compared | null>(null)
+
+  async function load() {
+    try {
+      const res = await fetch(`${getApiBase()}/api/reports/gst/filed`)
+      const d = await res.json()
+      if (d.ok === false) throw new Error(d.error)
+      setList(d.filed || [])
+    } catch (e) {
+      onMsg(e instanceof Error ? e.message : String(e), true)
+    }
+  }
+  useEffect(() => {
+    void load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function act(body: Record<string, unknown>, after?: (d: Record<string, unknown>) => void) {
+    setBusy(true)
+    try {
+      const d = await filedAction(body)
+      after?.(d)
+      await load()
+    } catch (e) {
+      onMsg(e instanceof Error ? e.message : String(e), true)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div className="settings-hint">
+        Return file kelyavar (kiva CA la dilyavar) he aakde jatan kara. Nantar "Aaj shi julva" dabla ki file kelyanantar konta
+        bill badalla, kadhla kiva ushira nondla te disel — pudhchya return madhe durusti karta yete.
+      </div>
+      <div className="settings-inline-row" style={{ gap: 8, marginTop: 8 }}>
+        <input className="settings-input" placeholder="Note (ux. GSTR-1 file kela, ARN …)" value={note}
+          onChange={(e) => setNote(e.target.value)} style={{ minWidth: 280 }} />
+        <button type="button" className="btn btn-primary" disabled={busy}
+          onClick={() => void act({ action: 'save', from, to, note }, () => { setNote(''); onMsg(`${from} → ${to} che aakde jatan kele`) })}>
+          {from} → {to} Filed mhanun jatan kara
+        </button>
+      </div>
+      <table className="sat-table" style={{ marginTop: 10 }}>
+        <thead>
+          <tr><th>Kalavadhi</th><th>Jatan kele</th><th>Note</th><th className="num">Bills</th><th className="num">Taxable</th><th className="num">Tax</th><th /></tr>
+        </thead>
+        <tbody>
+          {list.map((f) => (
+            <tr key={f.key}>
+              <td>{f.from} → {f.to}</td>
+              <td>{f.saved_at.replace('T', ' ')}</td>
+              <td>{f.note}</td>
+              <td className="num">{f.bills}</td>
+              <td className="num">{money(f.taxable)}</td>
+              <td className="num">{money(f.tax)}</td>
+              <td>
+                <button type="button" className="btn btn-neutral" disabled={busy}
+                  onClick={() => void act({ action: 'compare', key: f.key }, (d) => setCmp(d as unknown as Compared))}>
+                  Aaj shi julva
+                </button>{' '}
+                <button type="button" className="btn btn-neutral" disabled={busy}
+                  onClick={() => { if (window.confirm('Ha jatan kelela report kadhaycha?')) void act({ action: 'delete', key: f.key }) }}>
+                  Kadha
+                </button>
+              </td>
+            </tr>
+          ))}
+          {!list.length ? <tr><td colSpan={7} className="vl-dim">Ajun kahi jatan kele nahi</td></tr> : null}
+        </tbody>
+      </table>
+      {cmp ? (
+        <div style={{ marginTop: 12 }}>
+          <h3 style={{ margin: '6px 0' }}>
+            {cmp.filed.from} → {cmp.filed.to} (jatan {cmp.filed.saved_at.replace('T', ' ')}) vs aaj
+          </h3>
+          {cmp.same ? (
+            <div className="settings-hint">Julte — file kelyanantar kahich badalle nahi.</div>
+          ) : (
+            <>
+              <table className="sat-table">
+                <thead><tr><th>Table</th><th>Field</th><th className="num">Filed</th><th className="num">Aaj</th><th className="num">Pharak</th></tr></thead>
+                <tbody>
+                  {cmp.tables.map((t, i) => (
+                    <tr key={i}><td>{t.table}</td><td>{t.field}</td><td className="num">{money(t.filed)}</td>
+                      <td className="num">{money(t.now)}</td><td className="num">{money(t.difference)}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+              <table className="sat-table" style={{ marginTop: 8 }}>
+                <thead><tr><th>Bill</th><th>Kay zale</th><th className="num">Filed taxable</th><th className="num">Filed tax</th><th className="num">Aaj taxable</th><th className="num">Aaj tax</th></tr></thead>
+                <tbody>
+                  {cmp.bills.map((b) => (
+                    <tr key={b.bill_no + b.what}><td>{b.bill_no}</td><td>{b.what}</td>
+                      <td className="num">{money(b.filed_taxable)}</td><td className="num">{money(b.filed_tax)}</td>
+                      <td className="num">{money(b.now_taxable)}</td><td className="num">{money(b.now_tax)}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+        </div>
+      ) : null}
+    </div>
+  )
+}
 
 const pad = (n: number) => String(n).padStart(2, '0')
 const iso = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
@@ -75,7 +209,7 @@ function downloadBase64(filename: string, mime: string, b64: string) {
 const money = (v: unknown) =>
   typeof v === 'number' ? v.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : String(v ?? '')
 
-const NUMERIC = /^(Rate|Taxable|IGST|CGST|SGST|Cess|Total|Bill Total|Bill Value|Invoice Value|Note Value|Integrated|Central|State\/UT|Taxable \/ Value)/
+const NUMERIC = /^(Rakkam|Rate|Taxable|IGST|CGST|SGST|Cess|Total|Bill Total|Bill Value|Invoice Value|Note Value|Integrated|Central|State\/UT|Taxable \/ Value)/
 
 export function GstReportsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [mode, setMode] = useState<'month' | 'quarter' | 'custom'>('month')
@@ -91,6 +225,7 @@ export function GstReportsDialog({ open, onClose }: { open: boolean; onClose: ()
   const [msg, setMsg] = useState('')
   const [printTo, setPrintTo] = useState<'printer' | 'dot_matrix'>('printer')
   const [layout, setLayout] = useState<'portrait' | 'landscape'>('landscape')
+  const [help, setHelp] = useState(false)
 
   const range = useMemo(() => {
     if (mode === 'month') return monthBounds(month)
@@ -219,7 +354,22 @@ export function GstReportsDialog({ open, onClose }: { open: boolean; onClose: ()
             <button type="button" className="btn btn-neutral" disabled={busy} onClick={() => void load()}>
               {busy ? 'Mojat aahe…' : 'Punha moja'}
             </button>
+            <button type="button" className="btn btn-neutral" onClick={() => setHelp((h) => !h)}>
+              {help ? 'Madat band' : 'Madat (?)'}
+            </button>
           </div>
+          {help ? (
+            <div className="settings-hint" style={{ marginTop: 8, padding: 10, border: '1px solid var(--border, #ccd)', borderRadius: 6 }}>
+              {GST_HELP.map((sec) => (
+                <div key={sec.title} style={{ marginBottom: 8 }}>
+                  <strong>{sec.title}</strong>
+                  <ul style={{ margin: '4px 0 0 18px' }}>
+                    {sec.lines.map((l) => <li key={l}>{l}</li>)}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          ) : null}
 
           {err ? <div className="vb-warn" style={{ marginTop: 8 }}>{err}</div> : null}
           {msg ? <div className="settings-hint" style={{ marginTop: 8 }}>{msg}</div> : null}
@@ -248,6 +398,9 @@ export function GstReportsDialog({ open, onClose }: { open: boolean; onClose: ()
             ))}
           </div>
 
+          {tab === 'filed' ? (
+            <FiledTab from={range.from} to={range.to} onMsg={(m, bad) => (bad ? setErr(m) : setMsg(m))} />
+          ) : null}
           {tables.map((s) => (
             <div key={s.title} style={{ marginTop: 10 }}>
               {shown.tables.length > 1 ? <h3 style={{ margin: '6px 0' }}>{s.title}</h3> : null}

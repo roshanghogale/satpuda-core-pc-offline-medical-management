@@ -1506,11 +1506,17 @@ def _purchase_export(conn, report: str, fd: str, td: str) -> dict[str, Any]:
 
     if report == "supplier_due":
         cols = ["Name", "Phone", "Total Due", "Credit"]
+        # The suppliers table keeps total_credit; "credit" exists in no store, so this
+        # report failed Offline with "no such column: credit" (found 3 Oct 2026).
+        have = {r[1] for r in conn.execute("PRAGMA table_info(suppliers)")}
+        credit_col = next((c for c in ("total_credit", "credit") if c in have), None)
+        credit_sql = f"COALESCE({credit_col},0)" if credit_col else "0"
+        live_sql = "COALESCE(deleted,0)=0 AND " if "deleted" in have else ""
         raw = conn.execute(
-            """
-            SELECT name, COALESCE(phone,''), COALESCE(total_due,0), COALESCE(credit,0)
+            f"""
+            SELECT name, COALESCE(phone,''), COALESCE(total_due,0), {credit_sql}
             FROM suppliers
-            WHERE COALESCE(deleted,0)=0 AND COALESCE(total_due,0)>0
+            WHERE {live_sql}COALESCE(total_due,0)>0
             ORDER BY name
             """
         ).fetchall()

@@ -202,6 +202,31 @@ class DocumentSeries(unittest.TestCase):
                          [(d["from"], d["to"], d["total"], d["cancelled"]) for d in docs])
 
 
+class FiledAndCompared(_Store):
+    def test_what_changed_after_filing_is_shown_bill_by_bill(self):
+        c = self.conn
+        saved = gr.save_filed(c, "2026-09-01", "2026-09-30", "filed with CA")
+        self.assertEqual(1, len(gr.list_filed(c)))
+        self.assertTrue(gr.compare_filed(c, saved["key"])["same"])
+        c.execute("UPDATE sales_items SET amount=amount+11.2 WHERE sale_id=2 AND medicine_id=2")
+        c.execute("UPDATE sales SET total_amount=total_amount+11.2 WHERE id=2")       # edited
+        c.execute("DELETE FROM sales_items WHERE sale_id=3"); c.execute("DELETE FROM sales WHERE id=3")
+        c.execute("INSERT INTO sales (id, bill_no, bill_date, customer_id, customer_name, total_amount)"
+                  " VALUES (9, 'SCB9/FY2026-27', '2026-09-20', 1, 'RAMESH PATIL', 50)")
+        c.execute("INSERT INTO sales_items (sale_id, medicine_id, qty, rate, gst_percent, amount)"
+                  " VALUES (9, 1, 5, 10, 12, 50)")
+        c.commit()
+        diff = gr.compare_filed(c, saved["key"])
+        self.assertFalse(diff["same"])
+        what = {b["bill_no"]: b["what"] for b in diff["bills"]}
+        self.assertTrue(what["SCB2"].startswith("Filed nantar badalla"))
+        self.assertTrue(what["SCB4"].startswith("Filed nantar kadhla"))
+        self.assertTrue(what["SCB9"].startswith("Filed nantar ala"))
+        self.assertTrue(any(t["table"] == "b2b" for t in diff["tables"]))
+        gr.delete_filed(c, saved["key"])
+        self.assertEqual([], gr.list_filed(c))
+
+
 class NothingIsWritten(_Store):
     def test_the_store_is_unchanged_by_a_report(self):
         before = self.conn.total_changes

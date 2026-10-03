@@ -62,6 +62,14 @@ export const SHORTCUT_SECTIONS: ShortcutSection[] = [
       ['P', 'New Purchase'],
       ['I', 'Inventory'],
       ['E / Ctrl+E', 'Export'],
+      ['G', 'GST Reports (GSTR-1, GSTR-3B, registers, Filed / Tally)'],
+    ],
+  },
+  {
+    title: 'GST Reports',
+    rows: [
+      ['Escape', 'Close the GST Reports window'],
+      ['', 'Home → G (or the GST Reports button). Pick Mahina / Timahi / Tarikh, then a tab; Excel saves every table at once'],
     ],
   },
   {

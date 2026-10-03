@@ -130,7 +130,7 @@ export function usePageHotkeys(opts: {
 
       if (!typing && !e.ctrlKey && !e.altKey && !e.metaKey && onLetter) {
         const k = e.key.toLowerCase()
-        if (['b', 'p', 'i', 'e', 's', 'w'].includes(k)) {
+        if (['b', 'p', 'i', 'e', 's', 'w', 'g'].includes(k)) {
           e.preventDefault()
           onLetter(k)
         }

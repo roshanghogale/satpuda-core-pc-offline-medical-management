@@ -160,6 +160,7 @@ export function HomePage({ onNavigate, syncRefreshNonce = 0, active }: Props) {
       else if (k === 'p') onNavigate('purchase')
       else if (k === 'i') onNavigate('inventory')
       else if (k === 'e') setExportOpen(true)
+      else if (k === 'g') setGstOpen(true)
     },
   })
 
