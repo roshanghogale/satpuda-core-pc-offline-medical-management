@@ -2146,6 +2146,14 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                             counts = _local_business_counts(conn)
                             if any(int(n or 0) > 0 for n in counts.values()):
                                 pushed = push_active_store_to_server_detailed(conn)
+                            # and the regular-medicine lists / customer GSTINs made
+                            # Offline, which live in settings (core/store_kv_carry.py)
+                            from core.store_kv_carry import try_push
+
+                            carried = try_push(conn)
+                            if pushed is not None and not carried.get("ok"):
+                                pushed = {**pushed, "error": pushed.get("error") or
+                                          f"regular medicines / GSTINs: {carried.get('error')}"}
                     except Exception as exc:
                         # Never block the switch -- a shop with no internet still
                         # needs to be able to choose Online and retry later.

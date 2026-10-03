@@ -430,6 +430,17 @@ def push_local_then_wipe(
             ok, message = verify_push_before_wipe(
                 conn, str(result.get("store_token") or ""), result
             )
+            if ok:
+                # Regular-medicine lists and customer GSTINs go up too, before the
+                # local file that holds them is removed (core/store_kv_carry.py).
+                from core.store_kv_carry import try_push
+
+                carried = try_push(conn)
+                if not carried.get("ok"):
+                    ok, message = False, (
+                        "Regular medicines / customer GSTINs could not be uploaded "
+                        f"({carried.get('error')}) -- local database kept."
+                    )
         finally:
             try:
                 conn.close()
@@ -587,6 +598,13 @@ def download_store_for_offline(
             # figure is authoritative, so stamp it back over the replayed one.
             _progress(progress_cb, "Correcting stock from server…")
             fixed = _restore_server_stock(conn, progress_cb=progress_cb)
+            # The regular-medicine lists and customer GSTINs live in the server's
+            # settings, which a replace pull leaves alone: bring them too, or Offline
+            # starts without them (core/store_kv_carry.py).
+            _progress(progress_cb, "Regular medicines and customer GSTINs…")
+            from core.store_kv_carry import try_pull
+
+            carried = try_pull(conn)
             _mark_prepared_mirror(conn)
             conn.commit()
         finally:
@@ -595,7 +613,7 @@ def download_store_for_offline(
             except Exception:
                 pass
     _progress(progress_cb, f"Offline copy ready ({rows} records).")
-    return {"ok": True, "rows": rows, "db_path": path}
+    return {"ok": True, "rows": rows, "db_path": path, "settings_carried": carried}
 
 
 def ensure_online_server_only_ready(
