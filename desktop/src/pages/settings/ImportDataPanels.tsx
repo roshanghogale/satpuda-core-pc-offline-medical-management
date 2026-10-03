@@ -1634,7 +1634,23 @@ export function DataSystemPanel({
     }
   }
 
+  /** A restore that would discard this device's newer bills stops and says which; the
+   *  shop confirms, and only then is it sent again with confirm_loss. */
   async function run(action: string, body: Record<string, unknown> = {}) {
+    const res = await runOnce(action, body)
+    if (res && (res as Record<string, unknown>).code === 'would_lose') {
+      const why = String((res as Record<string, unknown>).error || '')
+      if (window.confirm(`${why}
+
+OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
+        return runOnce(action, { ...body, confirm_loss: true })
+      }
+      setErr(`Restore thambavla. ${why}`)
+    }
+    return res
+  }
+
+  async function runOnce(action: string, body: Record<string, unknown> = {}) {
     setBusy(true)
     setErr('')
     setMsg('')

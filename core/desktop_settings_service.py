@@ -21,6 +21,17 @@ def _has_pairing_key() -> bool:
         return False
 
 
+def _restore_refusal(result: Any) -> dict[str, Any]:
+    """A failed restore for the screen; one that would discard this device's newer records
+    carries code "would_lose" so the screen asks, and re-sends with confirm_loss."""
+    from core.backup_manager import WOULD_LOSE
+
+    text = str(result)
+    if text.startswith(WOULD_LOSE):
+        return {"ok": False, "code": "would_lose", "error": text[len(WOULD_LOSE):].strip()}
+    return {"ok": False, "error": text}
+
+
 def _vendor_admin_token(data: dict[str, Any]) -> Any:
     """An admin token for a settings action, or a refusal the screen can show.
 
@@ -5478,9 +5489,10 @@ def system_action(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, A
                     key,
                     close_conn=work_conn,
                     file_id=file_id,
+                    allow_loss=bool(data.get("confirm_loss")),
                 )
             if not ok:
-                return {"ok": False, "error": str(result)}
+                return _restore_refusal(result)
             if is_online_mode():
                 dest = get_store_db_path(key) if key else None
                 if progress:
@@ -5590,9 +5602,10 @@ def system_action(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, A
             with allow_local_store_db():
                 ok, result = restore_local_backup_to_store(
                     name, key, path=path, close_conn=work_conn,
+                    allow_loss=bool(data.get("confirm_loss")),
                 )
             if not ok:
-                return {"ok": False, "error": str(result)}
+                return _restore_refusal(result)
             if is_online_mode():
                 # Same rule as the Drive restore: an Online store lives on the
                 # server, so the restored file has to get there and verify
@@ -5736,10 +5749,11 @@ def system_action(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, A
             if progress:
                 progress("Syncing database from Google Drive…")
             ok, msg = sync_active_store_from_drive(
-                close_conn=work_conn, file_id=file_id
+                close_conn=work_conn, file_id=file_id,
+                allow_loss=bool(data.get("confirm_loss")),
             )
             if not ok:
-                return {"ok": False, "error": str(msg)}
+                return _restore_refusal(msg)
             return {
                 "ok": True,
                 "message": str(msg),

@@ -1643,6 +1643,7 @@ def restore_latest_backup_from_drive(store_name: str) -> tuple:
 
 def restore_latest_backup_to_store(
     store_name: str, store_key: str, *, close_conn=None, file_id: str = None,
+    allow_loss: bool = False,
 ) -> tuple:
     """Restore a Drive backup into the store's local veterinary.db.
 
@@ -1653,11 +1654,75 @@ def restore_latest_backup_to_store(
     ok, result = restore_backup_from_drive(store_name, file_id=file_id)
     if not ok:
         return False, result
-    return _apply_restored_db(result, store_name, store_key, close_conn=close_conn)
+    return _apply_restored_db(result, store_name, store_key, close_conn=close_conn,
+                              allow_loss=allow_loss)
+
+
+WOULD_LOSE = "WOULD_LOSE:"
+
+# What a restore would throw away: records in the store now that the incoming file does
+# not have. Matched on what a person sees (bill / purchase / return numbers) and, for
+# payments, on party + amount + date + entry time -- never on row ids, which two devices
+# continuing from the same file hand out twice.
+_LOSS_CHECKS = (
+    ("sales", ("bill_no",), "bills"),
+    ("purchases", ("purchase_no",), "purchases"),
+    ("sales_returns", ("return_no",), "sales returns"),
+    ("purchase_returns", ("return_no",), "purchase returns"),
+    ("customer_payments", ("customer_id", "amount", "payment_date", "created_at"), "customer payments"),
+    ("supplier_payments", ("supplier_id", "amount", "payment_date", "created_at"), "supplier payments"),
+)
+
+
+def would_lose(local_db: str, incoming_db: str) -> dict:
+    """{label: [shown keys]} of records on this device that the incoming file lacks.
+
+    One device at a time, whole file passed over Drive: the file a device restores must
+    be newer than its own work. A bill made here and not backed up before taking the
+    other device's file is lost by the restore -- this says which, before it happens."""
+    import sqlite3
+
+    if not local_db or not os.path.isfile(local_db) or not os.path.isfile(incoming_db):
+        return {}
+    out: dict = {}
+    a = sqlite3.connect(f"file:{local_db}?mode=ro", uri=True)
+    b = sqlite3.connect(f"file:{incoming_db}?mode=ro", uri=True)
+    try:
+        for table, cols, label in _LOSS_CHECKS:
+            def keys(conn):
+                have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+                use = [c for c in cols if c in have]
+                if not use:
+                    return None
+                where = " AND ".join(f"COALESCE({c},0)=0" for c in ("deleted", "is_autosave") if c in have) or "1=1"
+                return {tuple(str(v) for v in r) for r in conn.execute(
+                    f"SELECT {', '.join(use)} FROM {table} WHERE {where}")}
+            mine, theirs = keys(a), keys(b)
+            if mine is None or theirs is None:
+                continue
+            missing = sorted(mine - theirs)
+            if missing:
+                out[label] = [" ".join(k) for k in missing]
+    finally:
+        a.close()
+        b.close()
+    return out
+
+
+def _loss_message(lost: dict) -> str:
+    parts = []
+    for label, keys in lost.items():
+        sample = ", ".join(keys[:8]) + (" …" if len(keys) > 8 else "")
+        parts.append(f"{len(keys)} {label} ({sample})")
+    return (
+        WOULD_LOSE + " Ya PC var ase " + "; ".join(parts) + " aahet je navin backup file madhe NAHIT. "
+        "Restore kela tar te jaatil. Aadhi ya PC cha Backup Now ghya ani dusrya device var Sync kara -- "
+        "kiva he jaane manya asel tarach pudhe ja."
+    )
 
 
 def _apply_restored_db(result: dict, store_name: str, store_key: str,
-                       *, close_conn=None) -> tuple:
+                       *, close_conn=None, allow_loss: bool = False) -> tuple:
     """Put a downloaded/copied backup in place as the store's veterinary.db.
 
     Shared by the Drive restore and the USB restore so a pendrive copy lands
@@ -1672,6 +1737,11 @@ def _apply_restored_db(result: dict, store_name: str, store_key: str,
 
         # Must close the live desktop/Tk connection + stop Online poller first,
         # otherwise Windows keeps the old DB and the UI looks "not updated".
+        if not allow_loss:
+            lost = would_lose(dest, result['db_path'])
+            if lost:
+                return False, _loss_message(lost)
+
         _close_all_db_users(extra_conn=close_conn)
 
         before = _sale_stats(dest) if os.path.isfile(dest) else {'count': 0}
@@ -1829,7 +1899,7 @@ def _read_local_backup_file(path: str, tmp_dir: str) -> tuple:
 
 def restore_local_backup_to_store(store_name: str, store_key: str, *,
                                   path: str = '', close_conn=None,
-                                  roots=None) -> tuple:
+                                  roots=None, allow_loss: bool = False) -> tuple:
     """Restore a USB / local backup into the store's veterinary.db.
 
     path='' picks the newest usable file found on the connected drives.
@@ -1855,7 +1925,7 @@ def restore_local_backup_to_store(store_name: str, store_key: str, *,
             )
             result['store_name'] = store_name
             return _apply_restored_db(
-                result, store_name, store_key, close_conn=close_conn
+                result, store_name, store_key, close_conn=close_conn, allow_loss=allow_loss
             )
         last_err = candidate.get('name', '')
     shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -1866,7 +1936,8 @@ def restore_local_backup_to_store(store_name: str, store_key: str, *,
     )
 
 
-def sync_active_store_from_drive(*, close_conn=None, file_id: str = None) -> tuple:
+def sync_active_store_from_drive(*, close_conn=None, file_id: str = None,
+                                 allow_loss: bool = False) -> tuple:
     """One-click sync: replace the active store DB with a Drive backup (latest or selected)."""
     try:
         from core.store_manager import get_active_store, get_active_display_name, has_registry
@@ -1890,7 +1961,7 @@ def sync_active_store_from_drive(*, close_conn=None, file_id: str = None) -> tup
         store_key = display_name_key(display_name)
 
     ok, result = restore_latest_backup_to_store(
-        display_name, store_key, close_conn=close_conn, file_id=file_id,
+        display_name, store_key, close_conn=close_conn, file_id=file_id, allow_loss=allow_loss,
     )
     if not ok:
         return False, result
