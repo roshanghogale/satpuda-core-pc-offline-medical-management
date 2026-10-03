@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AppNavigate } from '../../App'
 import type { ReorderPrefill } from '../../pagesApi'
+import { CustomerGstRow } from './CustomerGstRow'
 import {
   alertAction,
   applyAlertNavigation,
@@ -686,6 +687,7 @@ export function ContactsPanel({
               />
             </Field>
           </div>
+          {editId != null ? <CustomerGstRow customerId={editId} customerName={customer.name} /> : null}
           <div className="settings-inline-actions">
             <SaveBtn
               label={editId != null ? 'Save Customer' : 'Add Customer'}

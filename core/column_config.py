@@ -254,6 +254,7 @@ QUICK_ACCESS_BUTTONS = [
     ('export_inventory', '🗃 Export Inventory'),
     ('export_all', '📁 Export All'),
     ('alerts', '🔔 Alerts'),
+    ('gst_reports', '🧾 GST Reports'),
     ('general_products', '🏷 General Products'),
 ]
 

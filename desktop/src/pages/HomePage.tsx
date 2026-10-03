@@ -12,6 +12,7 @@ import { HomeExportDialog } from '../components/HomeExportDialog'
 import { registerVoicePage, type VoiceHandler } from '../voice/voiceBus'
 import { usePageHotkeys } from '../hooks/usePageHotkeys'
 import { QuickActionIcon } from '../quickActionIcons'
+import { GstReportsDialog } from './GstReportsDialog'
 import { Panel } from './pageChrome'
 import {
   BANNER_PREVIEW_EVENT,
@@ -46,6 +47,7 @@ const FALLBACK_QUICK_ACTIONS: HomeQuickAction[] = [
   { key: 'payments', label: 'Payments', style: 'secondary' },
   { key: 'ledger', label: 'Ledger', style: 'danger' },
   { key: 'alerts', label: 'Alerts', style: 'warning' },
+  { key: 'gst_reports', label: 'GST Reports', style: 'success' },
   { key: 'general_products', label: 'General Products', style: 'indigo' },
 ]
 
@@ -128,6 +130,7 @@ export function HomePage({ onNavigate, syncRefreshNonce = 0, active }: Props) {
     FALLBACK_QUICK_ACTIONS,
   )
   const [error, setError] = useState('')
+  const [gstOpen, setGstOpen] = useState(false)
   // Kept apart from `error`: that one is worded for a dead local engine and
   // tells you to restart the app. This one means the app is fine and the
   // server is not, and the numbers on screen are zeroes from an empty
@@ -303,7 +306,7 @@ export function HomePage({ onNavigate, syncRefreshNonce = 0, active }: Props) {
                   type="button"
                   className={`qa-btn qa-${qaStyle(a.style)}`}
                   data-nav-order={i + 1}
-                  onClick={() => handleQuickAction(a.key, onNavigate)}
+                  onClick={() => (a.key === 'gst_reports' ? setGstOpen(true) : handleQuickAction(a.key, onNavigate))}
                 >
                   <QuickActionIcon actionKey={a.key} size={16} />
                   <span className="qa-label">{a.label}</span>
@@ -409,6 +412,7 @@ export function HomePage({ onNavigate, syncRefreshNonce = 0, active }: Props) {
       </Panel>
       ) : null}
       <HomeExportDialog open={exportOpen} onClose={() => setExportOpen(false)} />
+      <GstReportsDialog open={gstOpen} onClose={() => setGstOpen(false)} />
     </div>
   )
 }

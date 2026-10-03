@@ -453,6 +453,7 @@ def _home_quick_actions_payload() -> list[dict[str, Any]]:
         "export_inventory": "info",
         "export_all": "warning",
         "alerts": "warning",
+        "gst_reports": "success",
         "general_products": "indigo",
     }
     vis = get_quick_access_settings()
@@ -619,6 +620,9 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                             "/api/sync/status",
                             "/api/license/status",
                             "/api/voice/enabled",
+                            "/api/reports/gst",
+                            "/api/reports/gst/export",
+                            "/api/customers/gst",
                             "/api/voice/pack",
                             "/api/login/status",
                             "/api/login/verify",
@@ -779,6 +783,30 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 from core.desktop_settings_service import get_layout_lists
 
                 _json_response(self, 200, get_layout_lists())
+                return
+            if path in ("/api/reports/gst", "/api/customers/gst"):
+                # GST reports for a period (core/gst_reports.py) / a customer's GSTIN (core/customer_gst.py)
+                conn = _db.get("conn")
+                if conn is None:
+                    _json_response(self, 503, {"error": "Database not open"})
+                    return
+                try:
+                    from urllib.parse import parse_qs
+
+                    qs = parse_qs(urlparse(self.path).query)
+                    if path == "/api/reports/gst":
+                        from core import gst_reports
+
+                        out = gst_reports.build(conn, (qs.get("from") or [""])[0], (qs.get("to") or [""])[0])
+                    else:
+                        from core import customer_gst
+
+                        cid = (qs.get("customer_id") or [""])[0].strip()
+                        out = (customer_gst.get_customer_gst(conn, cid) if cid
+                               else {"customers": list(customer_gst.all_customer_gst(conn).values())})
+                    _json_response(self, 200, {"ok": True, **out})
+                except Exception as exc:
+                    _json_response(self, 400, {"ok": False, "error": str(exc)})
                 return
             if path == "/api/sales/regulars":
                 # A customer's regular medicines (core/regular_medicines.py), or every list
@@ -2286,6 +2314,25 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 from core.desktop_alert_service import alert_action
 
                 _json_response(self, 200, alert_action(conn, body))
+                return
+            if path in ("/api/reports/gst/export", "/api/customers/gst"):
+                if conn is None:
+                    _json_response(self, 503, {"error": "Database not open"})
+                    return
+                try:
+                    if path == "/api/reports/gst/export":
+                        from core import gst_reports
+
+                        _json_response(self, 200, gst_reports.export(conn, body))
+                    else:
+                        from core import customer_gst
+
+                        out = customer_gst.save_customer_gst(conn, body.get("customer_id"), body.get("gstin"),
+                                                             str(body.get("legal_name") or ""),
+                                                             str(body.get("since") or ""))
+                        _json_response(self, 200, {"ok": True, **out})
+                except Exception as exc:
+                    _json_response(self, 400, {"ok": False, "error": str(exc)})
                 return
             if path in ("/api/sales/regulars",):
                 from core import regular_medicines as rm

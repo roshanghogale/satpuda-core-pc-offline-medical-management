@@ -1998,6 +1998,20 @@ def sync_down_doc(conn, collection: str, doc_id: str, data: dict) -> str:
                         item.get('expiry_date'),
                         float(item.get('item_amount') or 0),
                     ))
+                    # The line's HSN, discount and tax, which this pull used to drop: every
+                    # pulled purchase line had no HSN and no taxable value, so the GST
+                    # reports could not split the bill by rate (3 Oct 2026). Only the
+                    # columns this store's table has, after the insert it always made.
+                    extra = {k: item.get(k) for k in ('hsn_code', 'discount_pct', 'taxable', 'gst_amt')
+                             if item.get(k) not in (None, '')}
+                    if extra:
+                        row_id = cur.lastrowid
+                        have = {r[1] for r in cur.execute('PRAGMA table_info(purchase_items)').fetchall()}
+                        extra = {k: v for k, v in extra.items() if k in have}
+                        if extra and row_id:
+                            cur.execute(
+                                'UPDATE purchase_items SET ' + ', '.join(f'{k}=?' for k in extra)
+                                + ' WHERE id=?', (*extra.values(), row_id))
                 try:
                     from core.purchase_service import _apply_stock_for_purchase
                     _apply_stock_for_purchase(cur, purchase_id)

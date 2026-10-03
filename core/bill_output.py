@@ -187,6 +187,12 @@ def _load_sale_data(
     from core.bill_context import _build_bill_context
 
     ctx = _build_bill_context(profile, bill_info, items, pay_mode, cursor)
+    try:
+        head = cursor.execute("SELECT customer_id, bill_date FROM sales WHERE id=?", (sale_id,)).fetchone()
+    except Exception:
+        head = None
+    if head:
+        _add_customer_gstin(conn, ctx, head[0], head[1])
     if print_slot:
         settings = get_print_slot_settings(load_bill_print_settings(), print_slot)
     else:
@@ -316,6 +322,7 @@ def _load_sale_data_online(
     cursor = conn.cursor()
     from core.bill_context import _build_bill_context
     ctx = _build_bill_context(profile, bill_info, items, pay_mode, cursor)
+    _add_customer_gstin(conn, ctx, doc.get("customer_id"), doc.get("bill_date"))
     if print_slot:
         settings = get_print_slot_settings(load_bill_print_settings(), print_slot)
     else:
@@ -323,6 +330,22 @@ def _load_sale_data_online(
     if settings_override:
         settings.update(settings_override)
     return display_sales_bill_no(bill_info[0]), ctx, settings
+
+
+def _add_customer_gstin(conn, ctx, customer_id, bill_date) -> None:
+    """A B2B tax invoice carries the buyer's GSTIN: printed under the address when the
+    customer has one on file for this bill's date (core/customer_gst.py). Every other bill
+    prints exactly as before -- nothing is added."""
+    try:
+        if not customer_id:
+            return
+        from core.customer_gst import get_customer_gst, gstin_for_bill
+
+        gstin = gstin_for_bill(get_customer_gst(conn, int(customer_id)), str(bill_date or "")[:10])
+        if gstin:
+            ctx.extra_meta_rows = list(getattr(ctx, "extra_meta_rows", None) or []) + [("GSTIN", gstin)]
+    except Exception:
+        pass
 
 
 def _items_per_bill_page(settings: dict, *, dot_matrix: bool = False) -> int:

@@ -100,6 +100,13 @@ export function QuickActionIcon({
           <path d="M6.8 12.8h2.4" {...stroke} />
         </IconBase>
       )
+    case 'gst_reports':
+      return (
+        <IconBase size={size}>
+          <path d="M4 2.8h6l2 2v8.4H4z" {...stroke} />
+          <path d="M6 7h4M6 9h4M6 11h2.5" {...stroke} />
+        </IconBase>
+      )
     case 'general_products':
       return (
         <IconBase size={size}>
