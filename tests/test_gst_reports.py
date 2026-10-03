@@ -246,5 +246,45 @@ class NothingIsWritten(_Store):
         self.assertEqual(before, self.conn.total_changes)
 
 
+class EveryGstReportOutAtOnce(_Store):
+    """CSV / PDF / Print of every GST table at once, not only the tab on screen (3 Oct 2026)."""
+
+    def _export(self, **extra):
+        return gr.export(self.conn, {"from": "2026-09-01", "to": "2026-09-30", "tables": [],
+                                     "page_layout": "landscape", **extra})
+
+    def test_every_file_holds_every_table(self):
+        import base64
+
+        titles = [s["title"] for s in gr.sections(self.report) if s["rows"]]
+        csv_text = base64.b64decode(self._export(format="csv")["content_base64"]).decode("utf-8-sig")
+        for t in titles:
+            self.assertIn(t, csv_text)
+        pdf = self._export(format="pdf")
+        self.assertTrue(pdf["ok"], pdf)
+        self.assertTrue(base64.b64decode(pdf["content_base64"]).startswith(b"%PDF"))
+        xlsx = self._export(format="xlsx")
+        self.assertTrue(xlsx["ok"], xlsx)
+
+    def test_every_table_goes_to_a_normal_printer(self):
+        with mock.patch("core.desktop_export_service.print_pdf_on_printer", return_value="") as pr:
+            res = self._export(print_to="printer")
+        self.assertTrue(res["ok"], res)
+        pr.assert_called_once()
+        with open(res["path"], "rb") as fh:
+            self.assertTrue(fh.read(4) == b"%PDF")
+
+    def test_every_table_goes_to_the_dot_matrix(self):
+        sent = []
+        with mock.patch("core.dot_matrix_print.sys.platform", "win32"),                 mock.patch("core.printer_manager.PrinterManager.resolve_dot_matrix_printer", return_value="EPSON"),                 mock.patch("core.printer_manager.PrinterManager.print_raw_escp",
+                           side_effect=lambda payload, printer, copies=1: sent.append(payload)):
+            res = self._export(print_to="dot_matrix")
+        self.assertTrue(res["ok"], res)
+        self.assertEqual(1, len(sent))
+        text = sent[0].decode("latin-1") if isinstance(sent[0], (bytes, bytearray)) else str(sent[0])
+        for t in ("3B Summary", "Sales GST Register", "b2cs", "Purchase ITC Register"):
+            self.assertIn(t.upper()[:10], text.upper())
+
+
 if __name__ == "__main__":
     unittest.main()

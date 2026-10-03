@@ -35,7 +35,7 @@ Satpuda Core madhle GST reports kase kadhayche, kay aahe ani kase tapasayche, an
 
 - Excel (sagle tables): GST portal chya GSTR-1 Excel sarkhi sheets (b2b, b2cs, cdnr, hsn(b2b), hsn(b2c), docs …) + 3B, Tally, registers, Checks — CA la hich dya.
 - GSTR-1 JSON: portal sathi. Upload karnyaadhi GST offline tool madhe ekda ughadun tapasa.
-- CSV / PDF (ha tab), Print (ha tab): Printer kiva Dot matrix, A4 aadva / ubha.
+- CSV / PDF / Print: aadhi "Sagle GST reports" kiva "Fakt ha tab" nivda. Print la Printer kiva Dot matrix, A4 aadva / ubha.
 
 ## 6. CA sathi mahatvache
 

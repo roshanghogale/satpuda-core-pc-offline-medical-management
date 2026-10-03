@@ -225,6 +225,8 @@ export function GstReportsDialog({ open, onClose }: { open: boolean; onClose: ()
   const [msg, setMsg] = useState('')
   const [printTo, setPrintTo] = useState<'printer' | 'dot_matrix'>('printer')
   const [layout, setLayout] = useState<'portrait' | 'landscape'>('landscape')
+  // CSV / PDF / Print: every GST table (what the CA gets) or the tab on screen, as on Android.
+  const [scope, setScope] = useState<'all' | 'tab'>('all')
   const [help, setHelp] = useState(false)
 
   const range = useMemo(() => {
@@ -463,11 +465,20 @@ export function GstReportsDialog({ open, onClose }: { open: boolean; onClose: ()
           >
             GSTR-1 JSON
           </button>
-          <button type="button" className="btn btn-neutral" disabled={busy || !report} onClick={() => void exportAs('csv', true)}>
-            CSV (ha tab)
+          <select
+            className="settings-input"
+            value={scope}
+            title="CSV, PDF ani Print sathi"
+            onChange={(e) => setScope(e.target.value as typeof scope)}
+          >
+            <option value="all">Sagle GST reports</option>
+            <option value="tab">Fakt ha tab ({shown.label})</option>
+          </select>
+          <button type="button" className="btn btn-neutral" disabled={busy || !report} onClick={() => void exportAs('csv', scope === 'tab')}>
+            CSV
           </button>
-          <button type="button" className="btn btn-neutral" disabled={busy || !report} onClick={() => void exportAs('pdf', true)}>
-            PDF (ha tab)
+          <button type="button" className="btn btn-neutral" disabled={busy || !report} onClick={() => void exportAs('pdf', scope === 'tab')}>
+            PDF
           </button>
           <select className="settings-input" value={printTo} onChange={(e) => setPrintTo(e.target.value as typeof printTo)}>
             <option value="printer">Printer</option>
@@ -477,8 +488,8 @@ export function GstReportsDialog({ open, onClose }: { open: boolean; onClose: ()
             <option value="landscape">A4 aadva</option>
             <option value="portrait">A4 ubha</option>
           </select>
-          <button type="button" className="btn btn-neutral" disabled={busy || !report} onClick={() => void exportAs('print', true)}>
-            Print (ha tab)
+          <button type="button" className="btn btn-neutral" disabled={busy || !report} onClick={() => void exportAs('print', scope === 'tab')}>
+            Print
           </button>
           <button type="button" className="btn btn-neutral" onClick={onClose}>
             Band (Esc)
