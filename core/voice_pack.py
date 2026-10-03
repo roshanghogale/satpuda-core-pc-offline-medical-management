@@ -27,6 +27,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import urllib.request
@@ -42,6 +43,8 @@ TOP = "SatpudaVoicePack"                 # the folder inside the zip
 KEEP = (os.path.join("voice", "sarav", "learned_aliases.json"), os.path.join("voice", "vocab_cache.json"),
         os.path.join("voice", "config.json"))
 NEED_FREE_GB = 6.0                       # zip + unpacked + the model prepared on first start
+PARTS = 4                                # connections for one download (2 Oct: 1.5 MB/s on one, 2.8 on four)
+LOCAL_NAME = "satpudavoicepack"          # SatpudaVoicePack.zip, "SatpudaVoicePack (1).zip", ...
 
 _lock = threading.Lock()
 _state: dict[str, Any] = {"state": "idle", "done": 0, "total": 0, "error": "", "available": None}
@@ -94,7 +97,14 @@ def status() -> dict:
         free = shutil.disk_usage(pack_home()).free / 2**30
     except Exception:
         free = None
+    local = ""
+    if s.get("state") in ("idle", "error", "ready"):
+        try:
+            local = find_local_pack(int((s.get("available") or {}).get("size") or 0))
+        except Exception:
+            local = ""
     s.update({"installed": bool(inst), "version": (inst or {}).get("version"), "running": service_running(),
+              "local": local,
               "path": pack_home(), "free_gb": round(free, 1) if free is not None else None,
               "need_gb": NEED_FREE_GB})
     return s
@@ -144,6 +154,164 @@ def _download(url: str, dest: str, size: int) -> None:
                 _set(done=have)
 
 
+def _download_parallel(url: str, dest: str, size: int) -> None:
+    """The pack in PARTS pieces at once, each resumable; one connection when the size is unknown.
+
+    GitHub's CDN gave one connection 1.5 MB/s on the owner's line and four 2.8 MB/s
+    (2 Oct 2026): 16 minutes became 8.5. Each piece writes into its own place in the
+    file; how far each got is kept in <zip>.parts, so a broken line resumes.
+    """
+    if size <= 0:
+        return _download(url, dest, size)
+    state_path = dest + ".parts"
+    n = PARTS
+    bounds = [(i * size // n, (i + 1) * size // n - 1) for i in range(n)]
+    done = [0] * n
+    try:
+        with open(state_path, encoding="utf-8") as fh:
+            saved = json.load(fh)
+        if (isinstance(saved, list) and len(saved) == n and os.path.getsize(dest) == size
+                and all(0 <= int(d) <= e - b + 1 for d, (b, e) in zip(saved, bounds))):
+            done = [int(d) for d in saved]
+    except (OSError, ValueError):
+        pass
+    if not os.path.exists(dest) or os.path.getsize(dest) != size or not any(done):
+        with open(dest, "wb") as fh:
+            fh.truncate(size)
+        done = [0] * n
+    lock = threading.Lock()
+    errors: list = []
+    _set(state="downloading", done=sum(done), total=size)
+
+    def save() -> None:
+        with open(state_path, "w", encoding="utf-8") as fh:
+            json.dump(done, fh)
+
+    def piece(i: int) -> None:
+        start, end = bounds[i]
+        for attempt in range(4):
+            pos = start + done[i]
+            if pos > end:
+                return
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "SatpudaCore",
+                                                           "Range": f"bytes={pos}-{end}"})
+                with urllib.request.urlopen(req, timeout=60) as r:
+                    if r.status != 206:
+                        raise RuntimeError("no-ranges")
+                    with open(dest, "r+b") as out:
+                        out.seek(pos)
+                        while True:
+                            if _cancel.is_set() or errors:
+                                return
+                            b = r.read(1 << 20)
+                            if not b:
+                                break
+                            out.write(b)
+                            with lock:
+                                done[i] += len(b)
+                                _set(done=sum(done))
+                                if done[i] % (32 << 20) < len(b):
+                                    save()
+                if start + done[i] > end:
+                    return
+            except RuntimeError as exc:
+                if str(exc) == "no-ranges":
+                    errors.append(exc)
+                    return
+                if attempt == 3:
+                    errors.append(exc)
+            except Exception as exc:       # a dropped connection: try this piece again
+                if attempt == 3:
+                    errors.append(exc)
+                time.sleep(2 + 3 * attempt)
+
+    threads = [threading.Thread(target=piece, args=(i,), daemon=True) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    save()
+    if _cancel.is_set():
+        raise InterruptedError("cancelled")
+    if any(str(e) == "no-ranges" for e in errors):
+        os.remove(dest)
+        os.remove(state_path)
+        return _download(url, dest, size)
+    if errors or sum(done) != size:
+        raise RuntimeError(f"Download madhech thambla ({errors[0] if errors else 'adhura'}) -- punha Download kara, "
+                           "jitka zala titka thevla aahe")
+    os.remove(state_path)
+
+
+def _local_dirs() -> list:
+    """Where a copied SatpudaVoicePack.zip may be: this user's folders, the app's own, every pendrive."""
+    home = os.path.expanduser("~")
+    dirs = [os.path.join(home, "Downloads"), os.path.join(home, "Desktop"), os.path.join(home, "Documents"),
+            os.path.dirname(os.path.abspath(sys.executable)), pack_home()]
+    if os.name == "nt":
+        try:
+            import ctypes
+            import string
+
+            mask = ctypes.windll.kernel32.GetLogicalDrives()
+            for k, letter in enumerate(string.ascii_uppercase):
+                root = f"{letter}:\\"
+                if mask & (1 << k) and ctypes.windll.kernel32.GetDriveTypeW(root) == 2:   # removable
+                    dirs += [root, os.path.join(root, "SatpudaCore")]
+        except Exception:
+            pass
+    return dirs
+
+
+def find_local_pack(size: int = 0) -> str:
+    """A SatpudaVoicePack zip already on this PC or a pendrive: no download at all.
+
+    Copying the 1.5 GB pack on a pendrive takes a minute or two; downloading it on a
+    shop's line took 16 (2 Oct 2026). With the size from the manifest only the same
+    pack is taken; offline, any zip of that name is tried (the zip's own checksums
+    still refuse a damaged copy while it is extracted).
+    """
+    for d in _local_dirs():
+        try:
+            names = sorted(os.listdir(d))
+        except OSError:
+            continue
+        for name in names:
+            low = name.lower()
+            if not (low.startswith(LOCAL_NAME) and low.endswith(".zip")):
+                continue
+            path = os.path.join(d, name)
+            if os.path.normcase(os.path.abspath(path)) == os.path.normcase(
+                    os.path.abspath(os.path.join(pack_home(), "SatpudaVoicePack.zip"))):
+                continue                    # the download in progress is not a copy
+            try:
+                if not size or os.path.getsize(path) == size:
+                    return path
+            except OSError:
+                continue
+    return ""
+
+
+def _prepare_model(new: str) -> None:
+    """The model's float16 download made float32 now, while the screen shows it, not at first start."""
+    py = os.path.join(new, "python", "python.exe")
+    assets = os.path.join(new, "voice", "models", "indic600m", "assets")
+    if not (os.path.isfile(py) and os.path.isfile(os.path.join(assets, "encoder.skel.onnx"))):
+        return
+    env = dict(os.environ, PYTHONNOUSERSITE="1")
+    env.pop("PYTHONPATH", None)
+    env.pop("PYTHONHOME", None)
+    code = ("import sys; sys.path.insert(0, sys.argv[1]); "
+            "from voice.indic_ear import unpack_fp32; unpack_fp32(sys.argv[2])")
+    try:
+        subprocess.run([py, "-c", code, new, assets], cwd=new, env=env, timeout=1800,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass                                # the service unpacks it on its first start instead
+
+
 def _sha256(path: str) -> str:
     h = hashlib.sha256()
     done = 0
@@ -180,19 +348,31 @@ def _install_worker() -> None:
     home = pack_home()
     try:
         _set(state="checking", error="", done=0, total=0)
-        m = _get_json(MANIFEST_URL)
-        size, url, want = int(m.get("size") or 0), m["url"], str(m.get("sha256") or "").lower()
+        try:
+            m = _get_json(MANIFEST_URL)
+        except Exception:
+            m = {}                          # offline: only a copied pack can be installed
+        size, url, want = int(m.get("size") or 0), m.get("url"), str(m.get("sha256") or "").lower()
         free = shutil.disk_usage(home).free / 2**30
         if free < NEED_FREE_GB:
             raise RuntimeError(f"Disk var jaga kami: {free:.1f} GB mokli, {NEED_FREE_GB:.0f} GB lagel")
-        zip_path = os.path.join(home, "SatpudaVoicePack.zip")
-        _download(url, zip_path, size)
+        local = find_local_pack(size)
+        if local:
+            zip_path = local
+            _set(source=local)
+        elif url:
+            zip_path = os.path.join(home, "SatpudaVoicePack.zip")
+            _download_parallel(url, zip_path, size)
+        else:
+            raise RuntimeError("Internet nahi ani SatpudaVoicePack.zip sapadla nahi (Downloads / Desktop / pendrive)")
         if want:
             _set(state="verifying", done=0, total=os.path.getsize(zip_path))
             got = _sha256(zip_path)
             if got != want:
-                os.remove(zip_path)
-                raise RuntimeError("Download kharab zala (SHA-256 julat nahi) -- punha download kara")
+                if not local:
+                    os.remove(zip_path)
+                raise RuntimeError("Download kharab zala (SHA-256 julat nahi) -- punha download kara"
+                                   if not local else f"{local} ha voice pack kharab / juna aahe -- kadhun taka")
         _set(state="extracting", done=0, total=0)
         staging = os.path.join(home, "staging")
         shutil.rmtree(staging, ignore_errors=True)
@@ -208,6 +388,8 @@ def _install_worker() -> None:
         new = os.path.join(staging, TOP)
         if not os.path.isfile(os.path.join(new, "python", "pythonw.exe")):
             raise RuntimeError("Voice pack adhura aahe (python sapadla nahi)")
+        _set(state="preparing", done=0, total=0)
+        _prepare_model(new)
         cur = _current()
         if os.path.isdir(cur):
             for rel in KEEP:
@@ -227,10 +409,11 @@ def _install_worker() -> None:
             json.dump({"version": m.get("version"), "installed_at": time.strftime("%Y-%m-%d %H:%M")}, fh)
         os.replace(new, cur)
         shutil.rmtree(staging, ignore_errors=True)
-        try:
-            os.remove(zip_path)
-        except OSError:
-            pass
+        if not local:                       # a copy the shop brought is theirs to keep
+            try:
+                os.remove(zip_path)
+            except OSError:
+                pass
         _set(state="starting", done=0, total=0)
         start_service()
         _set(state="ready")

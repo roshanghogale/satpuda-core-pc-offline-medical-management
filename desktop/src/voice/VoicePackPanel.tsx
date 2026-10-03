@@ -8,6 +8,7 @@ import {
   diskWarning,
   packBusy,
   packProgress,
+  installLabel,
   packSizeText,
   packStateLine,
   refreshVoicePack,
@@ -102,7 +103,9 @@ export function VoicePackCard({ onReady }: { onReady?: () => void }) {
   return (
     <div className="vp-card">
       <div>
-        Voice ya PC var nahi — Download kara ({packSizeText(pack)}){freeText(pack)}
+        {pack.local
+          ? <>Voice ya PC var nahi — voice pack ithe sapadla: {pack.local}</>
+          : <>Voice ya PC var nahi — Download kara ({packSizeText(pack)}){freeText(pack)}</>}
       </div>
       {low ? <div className="vb-warn">{low}</div> : null}
       <button
@@ -111,8 +114,13 @@ export function VoicePackCard({ onReady }: { onReady?: () => void }) {
         disabled={!!low}
         onClick={() => void voicePackAction('install')}
       >
-        Download ({packSizeText(pack)})
+        {installLabel(pack)}
       </button>
+      {!pack.local ? (
+        <div className="vl-dim">
+          Lavkar install: SatpudaVoicePack.zip Downloads / Desktop / pendrive var theva — download lagat nahi
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -177,7 +185,7 @@ export function VoicePackPanel() {
                 disabled={!!low}
                 onClick={() => void voicePackAction('install')}
               >
-                {pack.installed ? 'Update kara' : 'Download kara'} ({packSizeText(pack)})
+                {installLabel(pack, pack.installed)}
               </button>
             ) : checked && pack.installed ? (
               <span className="vl-dim">Navin update nahi</span>

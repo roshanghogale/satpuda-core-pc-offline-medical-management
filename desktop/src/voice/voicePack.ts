@@ -14,7 +14,8 @@ import { useSyncExternalStore } from 'react'
 import { getApiBase } from '../api'
 
 export type PackState =
-  | 'idle' | 'checking' | 'downloading' | 'verifying' | 'extracting' | 'starting' | 'ready' | 'error'
+  | 'idle' | 'checking' | 'downloading' | 'verifying' | 'extracting' | 'preparing' | 'starting' | 'ready'
+  | 'error'
 
 export type VoicePack = {
   state: PackState
@@ -29,6 +30,8 @@ export type VoicePack = {
   path: string
   free_gb: number | null
   need_gb: number
+  /** A SatpudaVoicePack.zip already on this PC or a pendrive: installed from it, no download. */
+  local: string
 }
 
 export type PackAction = 'check' | 'install' | 'cancel' | 'remove' | 'start'
@@ -37,9 +40,9 @@ export type PackAction = 'check' | 'install' | 'cancel' | 'remove' | 'start'
 export type PackView = { pack: VoicePack | null; failed: string }
 
 const STATES: readonly PackState[] = [
-  'idle', 'checking', 'downloading', 'verifying', 'extracting', 'starting', 'ready', 'error',
+  'idle', 'checking', 'downloading', 'verifying', 'extracting', 'preparing', 'starting', 'ready', 'error',
 ]
-const BUSY = new Set<PackState>(['checking', 'downloading', 'verifying', 'extracting', 'starting'])
+const BUSY = new Set<PackState>(['checking', 'downloading', 'verifying', 'extracting', 'preparing', 'starting'])
 const POLL_MS = 1000
 const TIMEOUT_MS = 8000
 /** Shown until the manifest says otherwise. */
@@ -65,6 +68,7 @@ function parse(v: unknown): VoicePack {
     path: String(o.path ?? ''),
     free_gb: o.free_gb == null || !Number.isFinite(Number(o.free_gb)) ? null : Number(o.free_gb),
     need_gb: num(o.need_gb),
+    local: String(o.local ?? ''),
   }
 }
 
@@ -140,6 +144,12 @@ export function sizeText(bytes: number): string {
   return gb >= 1 ? `${Math.round(gb * 10) / 10} GB` : `${mb(bytes)} MB`
 }
 
+/** The install button: from a copy already here (a minute or two), else the download. */
+export function installLabel(p: VoicePack | null, update = false): string {
+  if (p?.local) return `${update ? 'Update' : 'Install'} kara — PC / pendrive var aahe, download nahi`
+  return `${update ? 'Update kara' : 'Download kara'} (${packSizeText(p)})`
+}
+
 /** The download's size: the manifest's, else the usual one. */
 export const packSizeText = (p: VoicePack | null) => sizeText(p?.available?.size || 0)
 
@@ -157,7 +167,8 @@ export function packStateLine(p: VoicePack): string {
     case 'downloading': return `Download hot aahe…${counted ? ` ${mb(p.done)} / ${mb(p.total)} MB` : ''}`
     case 'verifying': return 'Tapasat aahe… (download barobar aahe ka)'
     case 'extracting': return `Extract hot aahe…${counted ? ` ${p.done.toLocaleString('en-IN')} / ${p.total.toLocaleString('en-IN')} files` : ''}`
-    case 'starting': return 'Voice suru hot aahe — pahilya veli ~1 minute'
+    case 'preparing': return 'Model tayar hot aahe — ekdach, ~1 minute'
+    case 'starting': return 'Voice suru hot aahe…'
     case 'ready': return 'Voice tayar'
     case 'error': return p.error || 'Kahi tari chukla'
     default: return p.installed ? 'Voice install aahe' : 'Voice ya PC var nahi'
