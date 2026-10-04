@@ -1080,14 +1080,20 @@ def build_sales_return_payload(conn, return_id: int) -> Optional[dict]:
     cur.execute('SELECT name FROM customers WHERE id=?', (r['customer_id'],))
     cust_row = cur.fetchone()
     cur.execute('SELECT * FROM sales_return_items WHERE return_id=?', (return_id,))
+    # Every line read BEFORE the medicine lookups: those reuse no cursor of ours.
+    # _row_dict reads cur.description, and the lookup below used to run on this same
+    # cursor -- so from the second line on each line was read with the medicine
+    # query's two column names and went up as medicine 0, qty 0 (SR113 / SR114,
+    # Vaibhav, 4 Oct 2026). A return of one medicine was never affected.
+    lines = [_row_dict(cur, ir) for ir in cur.fetchall()]
+    mcur = conn.cursor()
     items = []
-    for ir in cur.fetchall():
-        item = _row_dict(cur, ir)
+    for item in lines:
         mid = _line_medicine_id(item)
         mr = None
         if mid:
-            cur.execute('SELECT name, batch_no FROM medicines WHERE id=?', (mid,))
-            mr = cur.fetchone()
+            mcur.execute('SELECT name, batch_no FROM medicines WHERE id=?', (mid,))
+            mr = mcur.fetchone()
         items.append({
             'medicine_id': mid,
             'name': mr[0] if mr else item.get('name'),
@@ -1133,14 +1139,20 @@ def build_purchase_return_payload(conn, return_id: int) -> Optional[dict]:
     cur.execute('SELECT name FROM suppliers WHERE id=?', (r['supplier_id'],))
     sr = cur.fetchone()
     cur.execute('SELECT * FROM purchase_return_items WHERE return_id=?', (return_id,))
+    # Every line read BEFORE the medicine lookups: those reuse no cursor of ours.
+    # _row_dict reads cur.description, and the lookup below used to run on this same
+    # cursor -- so from the second line on each line was read with the medicine
+    # query's two column names and went up as medicine 0, qty 0 (SR113 / SR114,
+    # Vaibhav, 4 Oct 2026). A return of one medicine was never affected.
+    lines = [_row_dict(cur, ir) for ir in cur.fetchall()]
+    mcur = conn.cursor()
     items = []
-    for ir in cur.fetchall():
-        item = _row_dict(cur, ir)
+    for item in lines:
         mid = _line_medicine_id(item)
         mr = None
         if mid:
-            cur.execute('SELECT name, batch_no FROM medicines WHERE id=?', (mid,))
-            mr = cur.fetchone()
+            mcur.execute('SELECT name, batch_no FROM medicines WHERE id=?', (mid,))
+            mr = mcur.fetchone()
         items.append({
             'medicine_id': mid,
             'name': mr[0] if mr else item.get('name'),
