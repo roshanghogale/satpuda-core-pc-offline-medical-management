@@ -573,6 +573,21 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                     _json_response(self, 200, {"ok": True, "skipped": "already_run"})
                     return
                 _CLOSE_BACKUP_DONE = True
+                # Online: no closing backup. Its data is already on the server,
+                # and backing it up means pulling the whole store down first
+                # (~40 s for a small shop), so the engine sat in Task Manager
+                # long after the window went and the installer refused to run
+                # ("Satpuda Core is still open", 5 Oct 2026). The open backup
+                # and the six-hourly one still run while the app is open.
+                # Offline keeps it: that is a copy of a file on this disk.
+                try:
+                    from core.sync_prefs import is_online_mode
+
+                    if is_online_mode():
+                        _json_response(self, 200, {"ok": True, "ran": False, "skipped": "online"})
+                        return
+                except Exception:
+                    pass
                 try:
                     from core.backup_manager import (
                         is_auto_backup_enabled,

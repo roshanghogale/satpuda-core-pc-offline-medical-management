@@ -2248,6 +2248,57 @@ begin
   Result := ProcessIsRunning('{#MyAppExeName}') or ProcessIsRunning('{#MyEngineExeName}');
 end;
 
+{ Ends the data engine the window left behind, and waits (up to 5 s) for it to go. }
+procedure StopLeftoverEngine;
+var
+  RC, I: Integer;
+begin
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM {#MyEngineExeName} /T /F', '',
+       SW_HIDE_, ewWaitUntilTerminated, RC);
+  for I := 1 to 20 do
+  begin
+    if not ProcessIsRunning('{#MyEngineExeName}') then Exit;
+    Sleep(250);
+  end;
+end;
+
+{ True once Satpuda Core is closed, False when the shopkeeper cancels.
+  With the window still open the shopkeeper closes it (the engine then stops
+  with it). With only the engine left -- it outlives the window while it takes
+  the closing backup, and a crashed window leaves it behind for good -- the
+  installer offers to end it instead of asking for a Retry that a shopkeeper
+  with no window to close can only answer by guessing (5 Oct 2026). }
+function WaitForAppClosed(const OpenMsg, EngineMsg: String): Boolean;
+var
+  Answer: Integer;
+begin
+  Result := True;
+  while AppIsRunning do
+  begin
+    if ProcessIsRunning('{#MyAppExeName}') then
+    begin
+      if MsgBox(OpenMsg, mbError, MB_RETRYCANCEL) = IDCANCEL then
+      begin
+        Result := False;
+        Exit;
+      end;
+    end
+    else
+    begin
+      Answer := MsgBox(EngineMsg, mbConfirmation, MB_YESNOCANCEL);
+      if Answer = IDCANCEL then
+      begin
+        Result := False;
+        Exit;
+      end;
+      if Answer = IDYES then
+        StopLeftoverEngine
+      else
+        Sleep(3000);
+    end;
+  end;
+end;
+
 { ======================================================================== }
 {  The maintenance page - update, repair or remove                          }
 {                                                                           }
@@ -2693,17 +2744,17 @@ begin
     Skipped entirely when silent: there would be nobody to click Retry, and the
     loop would hang an unattended install forever. }
   if not WizardSilent then
-    while AppIsRunning do
+    if not WaitForAppClosed(
+             'Satpuda Core is currently open.' + #13#10#13#10 +
+             'Please close it, then click Retry.',
+             'The Satpuda Core window is closed, but its data engine is still running' + #13#10 +
+                '(it takes the closing backup for a few seconds after the window goes).' + #13#10#13#10 +
+                'Yes - stop the engine now and carry on' + #13#10 +
+                'No - wait a few seconds and check again' + #13#10 +
+                'Cancel - stop the installation') then
     begin
-      if MsgBox('Satpuda Core is currently open.' + #13#10#13#10 +
-                'Please close it, then click Retry.' + #13#10#13#10 +
-                'If the window is already closed, wait a few seconds and click Retry - ' +
-                'the data engine keeps running for a moment after the window goes.',
-                mbError, MB_RETRYCANCEL) = IDCANCEL then
-      begin
-        Result := 'Satpuda Core was left open, so the installation was stopped. Nothing was changed.';
-        Exit;
-      end;
+      Result := 'Satpuda Core was left open, so the installation was stopped. Nothing was changed.';
+      Exit;
     end;
 
   Result := DoFetch;
@@ -3093,18 +3144,15 @@ function InitializeUninstall: Boolean;
 begin
   Result := True;
   if UninstallSilent then Exit;
-  while AppIsRunning do
-  begin
-    if MsgBox('Satpuda Core is still open.' + #13#10#13#10 +
-              'Close it completely, then click Retry to carry on removing it.' + #13#10#13#10 +
-              'If you have already closed the window, wait a few seconds and click Retry - ' +
-              'the data engine takes a moment to shut down.',
-              mbError, MB_RETRYCANCEL) = IDCANCEL then
-    begin
-      Result := False;
-      Exit;
-    end;
-  end;
+  if not WaitForAppClosed(
+           'Satpuda Core is still open.' + #13#10#13#10 +
+           'Close it completely, then click Retry to carry on removing it.',
+           'The Satpuda Core window is closed, but its data engine is still running' + #13#10 +
+                '(it takes the closing backup for a few seconds after the window goes).' + #13#10#13#10 +
+                'Yes - stop the engine now and carry on' + #13#10 +
+                'No - wait a few seconds and check again' + #13#10 +
+                'Cancel - leave Satpuda Core installed') then
+    Result := False;
 end;
 
 { Deliberately a Yes/No question and not a custom form with a real checkbox.
