@@ -632,6 +632,7 @@ def provision_trial(
     app_version: str = "",
     device_name: str = "",
     timeout: float = 60.0,
+    confirm_new: bool = False,
 ) -> dict:
     """Ask the server for a brand-new trial store. No credential of any kind.
 
@@ -656,6 +657,10 @@ def provision_trial(
         body["app_version"] = app_version
     if device_name:
         body["device_name"] = device_name
+    if confirm_new:
+        # "A shop with this name is already on the server; make a new one anyway."
+        # Without it the server answers 409 for a name it already holds.
+        body["confirm_new"] = True
     # ``timeout`` is shortened by the Offline caller: there the sign-up only
     # puts the shop on the owner's Trials page, and the till must not wait a
     # minute for something it does not need to open.

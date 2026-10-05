@@ -172,7 +172,8 @@ class TheScreenAsksTwoThings(unittest.TestCase):
             )
 
     def test_both_answers_are_sent(self):
-        self.assertIn("provisionTrial(name, setupMode)", self.whole)
+        # (confirmNew: a deliberate new shop when the name is already on the server)
+        self.assertIn("provisionTrial(name, setupMode, confirmNew)", self.whole)
 
     def test_a_pc_that_already_has_a_shop_is_sent_to_the_long_form(self):
         """An already activated shop must not be offered a new trial."""
@@ -194,7 +195,7 @@ class TheHandlerCarriesBothAnswers(unittest.TestCase):
     def test_the_mode_reaches_the_activation(self):
         seen = {}
 
-        def _run(name, sync_mode=""):
+        def _run(name, sync_mode="", confirm_new=False):
             seen["name"] = name
             seen["mode"] = sync_mode
             return {"ok": True}

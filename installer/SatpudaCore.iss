@@ -274,6 +274,8 @@ var
   GSetupPage      : TWizardPage;
   GNameEdit       : TNewEdit;
   GStoreName      : String;    { the cleaned answer, '' when nothing was asked }
+  GKeyEdit        : TNewEdit;  { "already a Satpuda shop": its SC- key, optional }
+  GScKey          : String;    { the checked key, '' when none was typed }
   GSyncMode       : String;    { 'online' or 'offline' - 'online' unless an
                                  administrator has unlocked the page }
   GModeSummary    : TNewStaticText;  { the sentence a shopkeeper reads instead }
@@ -827,6 +829,23 @@ end;
 { A Pascal string into a JSON string body. Backslash and quote are the two
   characters that would otherwise end the value early and leave the app with a
   file it cannot read. }
+{ SC- and 8 hexadecimal digits - what the server issues (utils/fy.js,
+  generateAndroidKey). A typo is caught here; a wrong but well-formed key is
+  refused by the server when the app pairs, and lands no PC anywhere. }
+function ScKeyLooksRight(const K: String): Boolean;
+var
+  I: Integer;
+begin
+  Result := (Length(K) = 11) and (Copy(K, 1, 3) = 'SC-');
+  if not Result then Exit;
+  for I := 4 to 11 do
+    if Pos(K[I], '0123456789ABCDEF') = 0 then
+    begin
+      Result := False;
+      Exit;
+    end;
+end;
+
 function JsonEscape(const S: String): String;
 var
   I: Integer;
@@ -1433,7 +1452,24 @@ begin
   GNameEdit.Width  := GSetupPage.SurfaceWidth;
   GNameEdit.Height := ScaleY(23);
   GNameEdit.Text   := GStoreName;
-  Y := Y + GNameEdit.Height + ScaleY(14);
+  Y := Y + GNameEdit.Height + ScaleY(10);
+
+  { Reinstalling a shop that is already on Satpuda. A name cannot find it (a
+    name is not proof of anything - see /api/provision/trial), so a reinstall
+    that typed the name got a SECOND, empty store of the same name (Vaibhav,
+    5 Oct 2026). The SC- key finds exactly that one shop; the app pairs with it
+    on its first launch and no trial is made. }
+  Y := LayoutLabel(GSetupPage, Lbl,
+         'Already a Satpuda shop (reinstalling)? Type its SC- key instead (admin panel, next to the shop):',
+         Y, 0, 4, False);
+  GKeyEdit := TNewEdit.Create(GSetupPage);
+  GKeyEdit.Parent := GSetupPage.Surface;
+  GKeyEdit.Left   := 0;
+  GKeyEdit.Top    := Y;
+  GKeyEdit.Width  := ScaleX(160);
+  GKeyEdit.Height := ScaleY(23);
+  GKeyEdit.Text   := GScKey;
+  Y := Y + GKeyEdit.Height + ScaleY(12);
 
   { What happens next, said once, in the words a shopkeeper would use. No
     choice attached: this is the mode, not an offer of one. }
@@ -1634,7 +1670,7 @@ var
   Lines: TArrayOfString;
   Dir, Path, Mode: String;
 begin
-  if GStoreName = '' then
+  if (GStoreName = '') and (GScKey = '') then
     Exit;
 
   if ForbidStoreChoice then
@@ -1654,8 +1690,15 @@ begin
     Log('handoff mode corrected from "' + GSyncMode + '" to "' + Mode + '"');
 
   SetArrayLength(Lines, 1);
-  Lines[0] := '{"store_name": "' + JsonEscape(GStoreName) +
-              '", "sync_mode": "' + Mode + '"}';
+  if GScKey <> '' then
+    { Join the shop that owns this key (core/trial_activation.py,
+      run_pending_provision): no trial is made, and a key is always Online. }
+    Lines[0] := '{"sc_key": "' + JsonEscape(GScKey) +
+                '", "store_name": "' + JsonEscape(GStoreName) +
+                '", "sync_mode": "online"}'
+  else
+    Lines[0] := '{"store_name": "' + JsonEscape(GStoreName) +
+                '", "sync_mode": "' + Mode + '"}';
 
   Dir := AppDataDir;
   if ForceDirectories(Dir) then
@@ -2945,6 +2988,27 @@ begin
   begin
     TryAdminUnlock;
     Result := False;
+    Exit;
+  end;
+
+  { An SC- key means "this PC joins that shop": the name is then not needed. }
+  GScKey := Uppercase(Trim(GKeyEdit.Text));
+  if GScKey <> '' then
+  begin
+    if not ScKeyLooksRight(GScKey) then
+    begin
+      MsgBox('That does not look like an SC- key.' + #13#10#13#10 +
+             'It is SC- followed by 8 letters or digits, for example SC-A1B2C3D4. ' +
+             'Leave the box empty to start a new shop instead.', mbError, MB_OK);
+      WizardForm.ActiveControl := GKeyEdit;
+      Result := False;
+      Exit;
+    end;
+    GKeyEdit.Text := GScKey;
+    GStoreName := CleanStoreName(GNameEdit.Text);
+    if StoreNameProblem(GStoreName) <> '' then
+      GStoreName := '';
+    GSyncMode := 'online';
     Exit;
   end;
 

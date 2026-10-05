@@ -215,6 +215,8 @@ export type LicenseStatusResponse = {
   provision_store_name?: string
   /** And the mode picked in the installer, so the second one does too. */
   provision_sync_mode?: string
+  /** "name_exists": the installer's shop name is already on the server. */
+  provision_code?: string
   error?: string
 }
 
@@ -265,18 +267,35 @@ export async function activateLicense(body: {
  * carries a credential, because a credential inside a downloadable installer is
  * not a credential.
  */
+/** A refusal that says why, so the screen can offer the right next step. */
+export class ActivationError extends Error {
+  code: string
+  constructor(message: string, code = '') {
+    super(message)
+    this.code = code
+  }
+}
+
 export async function provisionTrial(
   storeName: string,
   syncMode: 'online' | 'offline',
+  confirmNew = false,
 ) {
   const res = await fetch(`${API_BASE}/api/license/provision-trial`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ store_name: storeName, sync_mode: syncMode }),
+    body: JSON.stringify({
+      store_name: storeName,
+      sync_mode: syncMode,
+      // Only after the shopkeeper said "this is a NEW shop" to a name already on
+      // the server (code "name_exists").
+      ...(confirmNew ? { confirm_new: true } : {}),
+    }),
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
-    throw new Error((data as { error?: string }).error || `HTTP ${res.status}`)
+    const d = data as { error?: string; code?: string }
+    throw new ActivationError(d.error || `HTTP ${res.status}`, d.code || '')
   }
   return data as ActivateLicenseResult
 }

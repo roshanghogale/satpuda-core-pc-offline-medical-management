@@ -53,6 +53,7 @@ def get_license_status() -> dict[str, Any]:
     provision_note = ""
     provision_name = ""
     provision_mode = ""
+    provision_code = ""
     try:
         from core.trial_activation import last_provision_failure, run_pending_provision
 
@@ -71,6 +72,7 @@ def get_license_status() -> dict[str, Any]:
         provision_note = str(failure.get("error") or "")
         provision_name = str(failure.get("store_name") or "")
         provision_mode = str(failure.get("sync_mode") or "")
+        provision_code = str(failure.get("code") or "")
     except Exception as exc:
         provision_note = str(exc)
 
@@ -164,6 +166,9 @@ def get_license_status() -> dict[str, Any]:
         # And the mode he picked in the installer, so the second question is
         # already answered too.
         "provision_sync_mode": provision_mode,
+        # "name_exists": the installer's shop name is already on the server, so
+        # the screen asks for the SC- key or a deliberate new shop.
+        "provision_code": provision_code,
     }
 
 
@@ -660,4 +665,5 @@ def activate_trial(body: dict[str, Any]) -> dict[str, Any]:
     return _run(
         str(payload.get("store_name") or ""),
         sync_mode=str(payload.get("sync_mode") or ""),
+        confirm_new=payload.get("confirm_new") is True,
     )

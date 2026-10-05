@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
+  ActivationError,
   activateLicense,
   provisionTrial,
   pairWithStoreKey,
@@ -78,6 +79,9 @@ export function ActivationDialog({ onActivated }: Props) {
   const [pairKey, setPairKey] = useState('')
   const [pairKeyStore, setPairKeyStore] = useState('')
   const [trialDays, setTrialDays] = useState(3)
+  // The shop name is already on the server: almost always this very shop,
+  // reinstalled. Ask for its SC- key; a new shop only when he says so.
+  const [nameTaken, setNameTaken] = useState(false)
   const [logoSrc, setLogoSrc] = useState(brandLogoUrl())
   const [cardSrc, setCardSrc] = useState(brandCardUrl())
   const [showCard, setShowCard] = useState(true)
@@ -104,6 +108,7 @@ export function ActivationDialog({ onActivated }: Props) {
           // is a fresh PC -- nothing was created -- so the two-question form is
           // still right, with both questions already answered.
           setSimple(true)
+          if (s.provision_code === 'name_exists') setNameTaken(true)
           if (s.provision_store_name) setStoreName(s.provision_store_name)
           if (s.provision_sync_mode === 'online' || s.provision_sync_mode === 'offline') {
             setSetupMode(s.provision_sync_mode)
@@ -178,7 +183,7 @@ export function ActivationDialog({ onActivated }: Props) {
     }
   }
 
-  const submitTrial = async () => {
+  const submitTrial = async (confirmNew = false) => {
     const name = storeName.trim()
     // Checked here in the server's own words, so a name it would refuse is
     // refused now rather than after a round trip the shopkeeper watches.
@@ -189,9 +194,10 @@ export function ActivationDialog({ onActivated }: Props) {
       return
     }
     setError('')
+    setNameTaken(false)
     setBusy(true)
     try {
-      const result = await provisionTrial(name, setupMode)
+      const result = await provisionTrial(name, setupMode, confirmNew)
       setTrialDays(Number(result.trial_days) || trialDays)
       setLicenseActivation(String(result.activation_date || ''))
       setLicenseExpiry(String(result.expiry_date || ''))
@@ -217,7 +223,11 @@ export function ActivationDialog({ onActivated }: Props) {
       finish()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
-      triggerShake()
+      if (e instanceof ActivationError && e.code === 'name_exists') {
+        setNameTaken(true)
+      } else {
+        triggerShake()
+      }
     } finally {
       setBusy(false)
     }
@@ -464,14 +474,39 @@ export function ActivationDialog({ onActivated }: Props) {
               </p>
               {error ? <p className="activation-error">{error}</p> : null}
 
-              <button
-                type="button"
-                className="activation-submit"
-                disabled={busy}
-                onClick={() => void submitTrial()}
-              >
-                {busy ? 'Setting up…' : 'Start  →'}
-              </button>
+              {nameTaken ? (
+                <div className="activation-actions" style={{ flexDirection: 'column', gap: 8 }}>
+                  <button
+                    type="button"
+                    className="activation-submit"
+                    disabled={busy}
+                    onClick={() => {
+                      setError('')
+                      setNameTaken(false)
+                      setOverlay('storeKey')
+                    }}
+                  >
+                    It is my shop: connect with its SC- key  →
+                  </button>
+                  <button
+                    type="button"
+                    className="activation-ghost"
+                    disabled={busy}
+                    onClick={() => void submitTrial(true)}
+                  >
+                    {busy ? 'Setting up…' : 'No, this is a new shop: start a free trial'}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="activation-submit"
+                  disabled={busy}
+                  onClick={() => void submitTrial()}
+                >
+                  {busy ? 'Setting up…' : 'Start  →'}
+                </button>
+              )}
 
               <div className="activation-actions">
                 <button

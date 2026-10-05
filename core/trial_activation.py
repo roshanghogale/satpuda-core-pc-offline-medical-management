@@ -265,7 +265,7 @@ def normalize_sync_mode(value: str) -> str:
 # across its own call to activate_trial.
 _PROVISION_LOCK = threading.RLock()
 
-def activate_trial(store_name: str, sync_mode: str = "") -> dict[str, Any]:
+def activate_trial(store_name: str, sync_mode: str = "", confirm_new: bool = False) -> dict[str, Any]:
     """Create a trial store on the server and leave this PC running.
 
     The whole of activation, and it takes exactly the two things the screen
@@ -280,10 +280,10 @@ def activate_trial(store_name: str, sync_mode: str = "") -> dict[str, Any]:
     mode = normalize_sync_mode(sync_mode)
 
     with _PROVISION_LOCK:
-        return _activate_trial_locked(name, mode)
+        return _activate_trial_locked(name, mode, confirm_new=confirm_new)
 
 
-def _activate_trial_locked(name: str, mode: str) -> dict[str, Any]:
+def _activate_trial_locked(name: str, mode: str, confirm_new: bool = False) -> dict[str, Any]:
     """The body of activate_trial, with the single-flight lock already held.
 
     The "already connected" test has to be INSIDE the lock. Outside it, two
@@ -337,8 +337,20 @@ def _activate_trial_locked(name: str, mode: str) -> dict[str, Any]:
             # shop with no internet must not watch a splash screen for a minute
             # before the till it was promised opens.
             timeout=20.0 if mode == MODE_OFFLINE else 60.0,
+            confirm_new=confirm_new,
         )
     except Exception as exc:
+        # 409: a shop with this name is already on the server. Asked, in both
+        # modes -- a reinstalled shop must be offered its SC- key, not quietly
+        # given a second empty store (Vaibhav, 5 Oct 2026). Nothing local moved.
+        if getattr(exc, "status", None) == 409:
+            return {
+                "ok": False,
+                "code": "name_exists",
+                "error": str(getattr(exc, "message", "") or exc),
+                "store_name": name,
+                "sync_mode": mode,
+            }
         note = _friendly(exc, offline=mode == MODE_OFFLINE)
         if mode == MODE_OFFLINE:
             # An Offline shop was never promised a server. Refusing here would
@@ -798,6 +810,12 @@ def _parse_provision(raw: str) -> dict[str, str]:
         if not isinstance(data, dict):
             return {}
         name = usable_store_name(data.get("store_name") or data.get("name") or "")
+        # "Reinstalling an existing shop": its SC- key instead of a new trial. The
+        # name is optional then; the key alone says which shop. Only the shape the
+        # server issues is accepted (SC- and 8 hex digits).
+        sc_key = str(data.get("sc_key") or "").strip().upper()
+        if re.fullmatch(r"SC-[0-9A-F]{8}", sc_key):
+            return {"sc_key": sc_key, "store_name": name, "sync_mode": "online"}
         if not name:
             return {}
         return {
@@ -935,6 +953,30 @@ def run_pending_provision() -> dict[str, Any]:
             return {"ok": False, "ran": False}
         pending = pending_provision()
         name = str(pending.get("store_name") or "")
+        sc_key = str(pending.get("sc_key") or "").strip()
+        if sc_key and not already_set_up():
+            # "Reinstalling an existing shop": the installer took the shop's SC-
+            # key instead of a name, so this PC joins THAT store -- the same pairing
+            # the "I already have a shop" button does -- and no trial is made.
+            _RAN_THIS_PROCESS = True
+            from core.desktop_license_service import pair_with_store_key
+
+            try:
+                result = dict(pair_with_store_key({"android_key": sc_key, "confirm": True}) or {})
+            except Exception as exc:
+                result = {"ok": False, "error": str(exc)}
+            _consume_provision_file(
+                "paired" if result.get("ok") else f"failed: {result.get('error') or 'unknown'}",
+                pending,
+            )
+            result["ran"] = True
+            _LAST_FAILURE = {} if result.get("ok") else {
+                "error": str(result.get("error") or "") or "Could not connect to that shop.",
+                "store_name": name,
+                "sync_mode": "online",
+                "code": "sc_key_failed",
+            }
+            return result
         if not name:
             _RAN_THIS_PROCESS = True
             return {"ok": False, "ran": False}
@@ -971,5 +1013,6 @@ def run_pending_provision() -> dict[str, Any]:
                 or "The sign-up could not be completed.",
                 "store_name": str(result.get("store_name") or name),
                 "sync_mode": str(result.get("sync_mode") or mode),
+                "code": str(result.get("code") or ""),
             }
         return result
