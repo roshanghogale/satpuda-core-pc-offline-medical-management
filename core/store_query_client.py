@@ -33,11 +33,15 @@ def _get(path: str, params: Optional[dict] = None) -> Any:
         clean = {k: v for k, v in params.items() if v is not None and str(v).strip() != ""}
         if clean:
             qs = "?" + urlencode(clean)
-    url = f"{path}{qs}"
+    return _read("GET", f"{path}{qs}")
+
+
+def _read(method: str, url: str, body: Optional[dict] = None) -> Any:
+    """A store read: retried on a dropped link, re-paired once on 401/403."""
     last: Exception | None = None
     for attempt in range(_READ_ATTEMPTS):
         try:
-            res = api._request("GET", url, token=_token(), timeout=_READ_TIMEOUT)
+            res = api._request(method, url, body=body, token=_token(), timeout=_READ_TIMEOUT)
             break
         except api.ServerHttpError as exc:
             # ensure_store_session no longer probes /auth/license before every
@@ -47,7 +51,7 @@ def _get(path: str, params: Optional[dict] = None) -> Any:
                 raise
             api.invalidate_session_probe()
             res = api._request(
-                "GET", url, token=_token(force_pair=True), timeout=_READ_TIMEOUT
+                method, url, body=body, token=_token(force_pair=True), timeout=_READ_TIMEOUT
             )
             break
         except (OSError, TimeoutError) as exc:
@@ -246,6 +250,24 @@ def list_purchase_returns(*, limit: int = 2000, from_date: str = "", to_date: st
     )
 
 
+def _scoped_summary(path: str, params: dict, ids: list) -> Any:
+    """A summary of exactly the bills on screen, their ids in a POST body.
+
+    In the query string the id list of a big shop ran past the server's 16 KB
+    request-line limit and came back HTTP 431 (5 Oct 2026). A server without the
+    POST route answers 404; it gets the old GET, which is fine for a short list.
+    """
+    clean_ids = [int(i) for i in ids if i is not None]
+    body = {k: v for k, v in params.items() if v is not None}
+    body.update({"scoped": "1", "ids": clean_ids})
+    try:
+        return _read("POST", path, body)
+    except api.ServerHttpError as exc:
+        if exc.status != 404:
+            raise
+    return _get(path, {**params, "scoped": "1", "ids": ",".join(map(str, clean_ids))})
+
+
 def sales_summary(
     *,
     from_date: str = "",
@@ -259,8 +281,7 @@ def sales_summary(
         "q": q or None,
     }
     if ids is not None:
-        params["scoped"] = "1"
-        params["ids"] = ",".join(str(int(i)) for i in ids if i is not None) if ids else ""
+        return _scoped_summary("/api/store/summaries/sales", params, ids)
     return _get("/api/store/summaries/sales", params)
 
 
@@ -277,8 +298,7 @@ def purchases_summary(
         "q": q or None,
     }
     if ids is not None:
-        params["scoped"] = "1"
-        params["ids"] = ",".join(str(int(i)) for i in ids if i is not None) if ids else ""
+        return _scoped_summary("/api/store/summaries/purchases", params, ids)
     return _get("/api/store/summaries/purchases", params)
 
 
