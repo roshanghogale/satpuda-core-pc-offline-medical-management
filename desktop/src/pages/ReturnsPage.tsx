@@ -373,11 +373,18 @@ export function ReturnsPage({
     [purchaseReturnItems, editReturn],
   )
 
+  // Only the newest search may fill the list: typing "sau" sends three, and a
+  // slow answer for "s" must not land on top of the one for "sau".
+  const salesSearchSeq = useRef(0)
+  const purchaseSearchSeq = useRef(0)
+
   const searchSales = async (opts?: { autoLoadSingle?: boolean }) => {
     setError('')
+    const seq = ++salesSearchSeq.current
     try {
       const q = parseBillSearch(salesQuery)
       const res = await searchSalesReturnBills(q, salesMedQuery.trim())
+      if (seq !== salesSearchSeq.current) return
       const bills = (res.bills || []).map((b) => ({
         sale_id: b.sale_id,
         label: b.label,
@@ -824,7 +831,9 @@ export function ReturnsPage({
   const searchPurchase = async (opts?: { autoLoadSingle?: boolean }) => {
     setError('')
     try {
+      const seq = ++purchaseSearchSeq.current
       const res = await searchPurchaseReturnBills(parseBillSearch(purchaseQuery))
+      if (seq !== purchaseSearchSeq.current) return
       const bills = (res.purchases || []).map((b) => ({
         purchase_id: b.purchase_id,
         label: b.label,
@@ -843,6 +852,31 @@ export function ReturnsPage({
       setError(e instanceof Error ? e.message : String(e))
     }
   }
+
+  // Search the whole store as the name is typed, from two letters ("sau" finds
+  // Saurav and Saurabh). The box used to filter only the ~80 recent bills it had
+  // already fetched; any older bill needed the full name and Enter. A label just
+  // picked from the list is not a new search, and one letter still filters the
+  // list in hand.
+  useEffect(() => {
+    if (tab !== 'sales') return
+    const q = salesQuery.trim()
+    if (q.length === 1 || salesBills.some((b) => b.label === salesQuery)) return
+    if (!q && salesBill) return
+    const t = window.setTimeout(() => void searchSales(), 300)
+    return () => window.clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [salesQuery])
+
+  useEffect(() => {
+    if (tab !== 'purchase') return
+    const q = purchaseQuery.trim()
+    if (q.length === 1 || purchaseBills.some((b) => b.label === purchaseQuery)) return
+    if (!q && purchaseBill) return
+    const t = window.setTimeout(() => void searchPurchase(), 300)
+    return () => window.clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [purchaseQuery])
 
   useEffect(() => {
     if (tab === 'sales' && !salesBill && !parseBillSearch(salesQuery)) {
