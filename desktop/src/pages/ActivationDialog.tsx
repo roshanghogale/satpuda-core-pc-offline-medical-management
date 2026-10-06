@@ -460,9 +460,10 @@ export function ActivationDialog({ onActivated }: Props) {
               <p className="activation-hint">
                 {setupMode === 'online' ? (
                   <>
-                    Starts a {trialDays}-day free trial. Your bills and stock are
-                    kept on the Satpuda server from the first bill, and the
-                    Android app can share the same shop.
+                    Sets up your shop on the Satpuda server, open for{' '}
+                    {trialDays} days to start; Satpuda then activates it. Your
+                    bills and stock are kept on the server from the first bill,
+                    and the Android app can share the same shop.
                   </>
                 ) : (
                   <>
@@ -494,7 +495,7 @@ export function ActivationDialog({ onActivated }: Props) {
                     disabled={busy}
                     onClick={() => void submitTrial(true)}
                   >
-                    {busy ? 'Setting up…' : 'No, this is a new shop: start a free trial'}
+                    {busy ? 'Setting up…' : 'No, this is a new shop: set it up'}
                   </button>
                 </div>
               ) : (

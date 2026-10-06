@@ -1475,7 +1475,7 @@ begin
     choice attached: this is the mode, not an offer of one. }
   Y := LayoutLabel(GSetupPage, GModeSummary,
          'Your shop will be set up ONLINE, on the Satpuda server, so the Android ' +
-         'app can share it. Needs internet. Starts a free trial.', Y, 0, 14, False);
+         'app can share it. Needs internet. Open for 3 days, then Satpuda activates it.', Y, 0, 14, False);
 
   { --- the line the shop stops at ------------------------------------- }
   Sep := TBevel.Create(GSetupPage);
