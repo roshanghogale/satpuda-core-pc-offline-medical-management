@@ -507,9 +507,17 @@ def _header_col_class(name: str) -> str:
         return "col-cust"
     if "date" in hl and "bill" in hl:
         return "col-date"
-    if "medicine" in hl or "content" in hl:
+    if hl == "date":
+        return "col-date"
+    if hl == "bill no":
+        return "col-bill"
+    if "content" in hl:
+        return "col-content"
+    if "medicine" in hl:
         return "col-med"
-    if "qty" in hl or "rate" in hl or "amt" in hl:
+    if hl in ("rate", "amount") or "amt" in hl:
+        return "col-amt r"
+    if "qty" in hl:
         return "col-qty c"
     return ""
 
@@ -727,6 +735,14 @@ def build_schedule_report_html(
   <td class="col-qty c">{_esc_html(str(t_qty or 0))}</td>
 </tr></tfoot>"""
 
+    # Landscape is the flat table with every column: its widths have to add up.
+    landscape_widths = (
+        ".sr{width:3%}.col-date{width:7%}.col-bill{width:6%}.col-cust{width:11%}"
+        ".col-doc{width:11%}.col-med{width:14%}.col-content{width:14%}.col-batch{width:8%}"
+        ".col-sch{width:5%}.col-exp{width:7%}.col-qty{width:4%}.col-amt{width:5%}"
+        "td.col-bill,td.col-date,td.col-exp,td.col-amt{white-space:nowrap}"
+        if landscape else ""
+    )
     layout_label = SCHEDULE_LAYOUT_LABELS.get(layout, layout)
     if single_schedule:
         subtitle = f'Period: <b>{_esc_html(date_range)}</b> | Records: <b>{len(disp_rows)}</b>'
@@ -758,6 +774,10 @@ tfoot td{{padding:1.5mm 1mm;border:0.5pt solid #000;font-weight:bold;font-size:{
 .col-exp{{width:7%}}
 .col-sch{{width:5%}}
 .col-qty{{width:4%;max-width:10mm;padding-left:0.5mm;padding-right:0.5mm}}
+.col-bill{{width:7%}}
+.col-content{{width:16%}}
+.col-amt{{width:6%}}
+{landscape_widths}
 .sub{{font-size:7pt;color:#000;display:block;margin-top:0.5mm}}
 .muted{{color:#000}}
 </style></head><body>

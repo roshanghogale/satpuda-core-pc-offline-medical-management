@@ -1920,6 +1920,7 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                         do_print=bool(body.get("print") or body.get("do_print")),
                         print_to=str(body.get("print_to") or ""),
                         page_layout=str(body.get("page_layout") or ""),
+                        print_style=str(body.get("print_style") or ""),
                     )
                     status = 200 if result.get("ok") else 400
                     _json_response(self, status, result)

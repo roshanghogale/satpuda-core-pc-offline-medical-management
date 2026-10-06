@@ -1584,10 +1584,19 @@ def _schedule_styled_pdf_bytes(
     *,
     do_print: bool = False,
     print_to: str = "",
+    print_style: str = "",
 ) -> dict[str, Any]:
-    """Build Classic-style schedule HTML/PDF; optionally RAW-print on dot matrix."""
+    """Build Classic-style schedule HTML/PDF; optionally RAW-print on dot matrix.
+
+    print_style "standard" is the A4 report for a laser / inkjet printer, a separate
+    template (core.schedule_report_standard); "dot_matrix" (or none) is the compact one.
+    """
     import base64
     import os
+
+    style = _schedule_print_style(print_style, print_to)
+    if style == "standard":
+        return _schedule_standard_pdf_bytes(data, do_print=do_print)
 
     from core.document_output import (
         build_schedule_report_html,
@@ -1720,6 +1729,91 @@ def _schedule_styled_pdf_bytes(
     }
 
 
+def _schedule_print_style(print_style: str, print_to: str) -> str:
+    """"standard" | "dot_matrix": what the shop picked, else what the printer is."""
+    style = (print_style or "").strip().lower().replace("-", "_")
+    if style in ("standard", "laser", "printer"):
+        return "standard"
+    if style == "dot_matrix":
+        return "dot_matrix"
+    want = (print_to or "").strip().lower()
+    if want == "printer":
+        return "standard"
+    if want == "dot_matrix":
+        return "dot_matrix"
+    try:
+        from core.printer_manager import PrinterManager
+
+        return "dot_matrix" if PrinterManager.is_dot_matrix_mode() else "standard"
+    except Exception:
+        return "standard"
+
+
+def _schedule_standard_pdf_bytes(data: dict[str, Any], *, do_print: bool = False) -> dict[str, Any]:
+    """The Schedule Report as an A4 report for a standard printer -- nothing of the dot matrix."""
+    import base64
+    import os
+
+    from core.document_output import schedule_report_title
+    from core import schedule_report_standard as std
+
+    cols = [str(c) for c in (data.get("columns") or [])]
+    rows = [list(r) for r in (data.get("rows") or [])]
+    meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+    sch_label = str(meta.get("schedule_label") or data.get("title") or "Schedule")
+    date_range = str(meta.get("date_range") or "").replace("→", "to")
+    single = sch_label if sch_label not in ("All Schedules", "Non-Scheduled") and "," not in sch_label else None
+    title = schedule_report_title(sch_label, single_schedule=single)
+    try:
+        from core.pharmacy_profile_io import load_pharmacy_profile
+
+        store = load_pharmacy_profile()
+    except Exception:
+        store = {}
+    html, orientation = std.build_html(
+        headers=cols, rows=rows, title=title, schedule_label=sch_label,
+        date_range=date_range, store=store,
+    )
+    base_name = f"{data.get('filename') or 'schedule_report'}_A4"
+    pdf_path, html_path = std.save_pdf(html, base_name, orientation)
+    target = pdf_path or html_path
+    if not target or not os.path.isfile(target):
+        return {"ok": False, "error": "Could not save schedule PDF. Install Edge or Chrome."}
+
+    printed = False
+    print_error = ""
+    if do_print:
+        # Always the normal Windows printer: this style never goes to the dot matrix.
+        if pdf_path and os.name == "nt":
+            problem = print_pdf_on_printer(pdf_path, landscape=orientation == "landscape")
+            if problem:
+                print_error = problem
+            else:
+                printed = True
+        else:
+            print_error = "PDF could not be made for printing. Install Edge or Chrome."
+
+    with open(target, "rb") as fh:
+        payload = fh.read()
+    mime = "application/pdf" if target.lower().endswith(".pdf") else "text/html"
+    ext = "pdf" if mime.endswith("pdf") else "html"
+    return {
+        "ok": True,
+        "filename": f"{base_name}.{ext}",
+        "mime": mime,
+        "format": ext,
+        "content_base64": base64.b64encode(payload).decode("ascii"),
+        "row_count": len(rows),
+        "pdf_path": pdf_path or "",
+        "html_path": html_path or "",
+        "path": target,
+        "printed": printed,
+        "print_error": print_error,
+        "print_style": "standard",
+        "orientation": orientation,
+    }
+
+
 def export_to_file(
     conn,
     page: str,
@@ -1734,6 +1828,7 @@ def export_to_file(
     do_print: bool = False,
     print_to: str = "",
     page_layout: str = "",
+    print_style: str = "",
 ) -> dict[str, Any]:
     """Run export and return downloadable file bytes (PDF / XLSX / CSV), or print it.
 
@@ -1771,7 +1866,9 @@ def export_to_file(
 
     # Schedule report PDF/print → Classic styled HTML path (vertical + DM styles).
     if report == "schedule_report" and (format_key == "pdf" or do_print):
-        return _schedule_styled_pdf_bytes(data, do_print=do_print, print_to=print_to)
+        return _schedule_styled_pdf_bytes(
+            data, do_print=do_print, print_to=print_to, print_style=print_style,
+        )
 
     if do_print:
         target = (print_to or "").lower()

@@ -136,6 +136,10 @@ export function ExportDialog({
   // Print: which printer, and A4 vertical / horizontal (the Schedule register keeps its own layout)
   const [printTo, setPrintTo] = useState<'' | 'dot_matrix' | 'printer'>('')
   const [printPage, setPrintPage] = useState<'portrait' | 'landscape'>('portrait')
+  // Schedule Report: PDF / Print first ask which print style -- a proper A4
+  // report for a laser / inkjet printer, or the compact dot matrix one. Two
+  // separate templates; the choice is never taken from the other.
+  const [styleAsk, setStyleAsk] = useState<null | { format: 'pdf'; print: boolean }>(null)
   const [dateMode, setDateMode] = useState<
     'page' | 'year' | 'month' | 'custom'
   >('page')
@@ -251,8 +255,16 @@ export function ExportDialog({
 
   const doDownload = async (
     format: 'csv' | 'excel' | 'pdf',
-    opts?: { print?: boolean },
+    opts?: { print?: boolean; style?: 'standard' | 'dot_matrix' },
   ) => {
+    if (report === 'schedule_report' && format === 'pdf' && !opts?.style) {
+      setStyleAsk({ format, print: Boolean(opts?.print) })
+      return
+    }
+    const style = opts?.style
+    // The style decides the printer for the Schedule Report.
+    const target: '' | 'dot_matrix' | 'printer' =
+      style === 'standard' ? 'printer' : style === 'dot_matrix' ? 'dot_matrix' : printTo
     setBusy(true)
     setError('')
     try {
@@ -274,7 +286,8 @@ export function ExportDialog({
         schedule,
         format: format === 'excel' ? 'xlsx' : format,
         print: Boolean(opts?.print),
-        print_to: printTo,
+        print_to: target,
+        print_style: style || '',
         // the PDF file keeps its wide page; the page chosen under Print is for printing
         page_layout: report === 'schedule_report' ? pageLayout : opts?.print ? printPage : 'landscape',
       })
@@ -290,7 +303,7 @@ export function ExportDialog({
         const what = report === 'schedule_report' ? 'Schedule report' : 'Report'
         const note =
           (data.printed
-            ? `${what} sent to the ${printTo === 'printer' ? 'printer' : printTo === 'dot_matrix' ? 'dot matrix' : 'printer (Settings)'}.`
+            ? `${what} sent to the ${target === 'printer' ? 'printer' : target === 'dot_matrix' ? 'dot matrix' : 'printer (Settings)'}.`
             : data.print_error
               ? `Print failed: ${data.print_error}`
               : `${what} saved.`) + where
@@ -635,25 +648,28 @@ export function ExportDialog({
               </button>
               <fieldset className="export-fieldset" style={{ marginTop: 8 }}>
                 <legend>Print</legend>
-                <label className="muted" style={{ display: 'block', marginBottom: 4 }}>
-                  Printer
-                </label>
-                <select
-                  className="settings-input"
-                  value={printTo}
-                  onChange={(e) => setPrintTo(e.target.value as '' | 'dot_matrix' | 'printer')}
-                >
-                  <option value="">As set in Settings → Printer</option>
-                  <option value="dot_matrix">Dot matrix</option>
-                  <option value="printer">Normal printer (laser / inkjet)</option>
-                </select>
                 {report === 'schedule_report' ? (
-                  <p className="muted" style={{ marginTop: 6, fontSize: 12 }}>
-                    Page and style as chosen before: {layouts.find((l) => l.key === pageLayout)?.label || pageLayout}
-                    {' · '}
-                    {dmStyles.find((l) => l.key === dmStyle)?.label || dmStyle}
+                  <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>
+                    Print asks for the style first: Standard / Laser (A4
+                    report) or Dot Matrix.
                   </p>
                 ) : (
+                  <>
+                    <label className="muted" style={{ display: 'block', marginBottom: 4 }}>
+                      Printer
+                    </label>
+                    <select
+                      className="settings-input"
+                      value={printTo}
+                      onChange={(e) => setPrintTo(e.target.value as '' | 'dot_matrix' | 'printer')}
+                    >
+                      <option value="">As set in Settings → Printer</option>
+                      <option value="dot_matrix">Dot matrix</option>
+                      <option value="printer">Normal printer (laser / inkjet)</option>
+                    </select>
+                  </>
+                )}
+                {report === 'schedule_report' ? null : (
                   <>
                     <label className="muted" style={{ display: 'block', margin: '10px 0 4px' }}>
                       Page
@@ -720,6 +736,75 @@ export function ExportDialog({
           ) : null}
         </div>
       </div>
+      {styleAsk ? (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={(e) => {
+            e.stopPropagation()
+            setStyleAsk(null)
+          }}
+        >
+          <div
+            className="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Select Print Style"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-head">
+              <h2>Select Print Style</h2>
+              <button type="button" className="icon-btn" onClick={() => setStyleAsk(null)}>
+                ✕
+              </button>
+            </div>
+            <div className="modal-body export-options">
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ width: '100%', justifyContent: 'center' }}
+                disabled={busy}
+                onClick={() => {
+                  const ask = styleAsk
+                  setStyleAsk(null)
+                  void doDownload(ask.format, { print: ask.print, style: 'standard' })
+                }}
+              >
+                Standard / Laser Printer
+              </button>
+              <p className="muted" style={{ margin: '2px 0 10px', fontSize: 12 }}>
+                A4 report: readable font, columns sized to their content, header
+                on every page.
+              </p>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ width: '100%', justifyContent: 'center' }}
+                disabled={busy}
+                onClick={() => {
+                  const ask = styleAsk
+                  setStyleAsk(null)
+                  void doDownload(ask.format, { print: ask.print, style: 'dot_matrix' })
+                }}
+              >
+                Dot Matrix Printer
+              </button>
+              <p className="muted" style={{ margin: '2px 0 0', fontSize: 12 }}>
+                Compact register (Classic / Sign preset){ask_print_note(styleAsk.print)}.
+              </p>
+            </div>
+            <div className="modal-foot">
+              <button type="button" className="btn btn-neutral" onClick={() => setStyleAsk(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
+}
+
+function ask_print_note(print: boolean): string {
+  return print ? ', printed on the dot matrix' : ''
 }
