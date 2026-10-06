@@ -35,6 +35,13 @@ CANDIDATES: tuple[tuple[str, float], ...] = (
 PAD_MM = 1.5            # left + right padding of a cell, each
 
 NUMERIC = {"qty", "rate", "amount", "mrp", "total"}
+
+# Not on the laser register (owner, 6 Oct 2026): the money columns go, and a blank column
+# for the pharmacist's handwritten signature takes their place at the far right.
+DROPPED = {"rate", "amount"}
+SIGN_HEADER = "Pharmacist Sign"
+SIGN_MIN_MM = 32.0      # never narrower than a signature
+SIGN_WANT_MM = 52.0     # what it gets first out of the space left over
 SHORT = {"sr", "date", "bill no", "batch", "expiry", "schedule", "date / bill", "batch/expiry"}
 WRAP_CAP = {"content/drug": 34, "medicine": 30, "customer": 26, "doctor": 26}
 
@@ -46,6 +53,13 @@ class Col:
     need: float          # width in em it needs on one line (short / num), or wants (text)
     least: float         # width in em it can be squeezed to (text); == need otherwise
     full: float = 0.0    # width in em of its longest value on one line
+
+
+def _w(c: "Col", which: str, pt: float) -> float:
+    """A column's width in mm: the sign column is sized in mm, the others from their text."""
+    if c.kind == "sign":
+        return SIGN_MIN_MM
+    return _mm(getattr(c, which), pt)
 
 
 def em_width(text: str, *, bold: bool = False) -> float:
@@ -96,6 +110,9 @@ def plan_columns(headers: list[str], rows: list[list[str]]) -> list[Col]:
         longest = max([em_width(v) for v in vals] + [0.0])
         head_word = max([em_width(w, bold=True) for w in h.split()] + [1.0])
         kind = _kind(h)
+        if h == SIGN_HEADER:
+            cols.append(Col(h, "sign", 0.0, 0.0, 0.0))
+            continue
         if kind in ("num", "short"):
             # On one line: the header may break at its space ("Bill No"), the values do not.
             need = max(head_word, longest, 1.2)
@@ -114,12 +131,20 @@ def _mm(em: float, font_pt: float) -> float:
 
 def _allocate(cols: list[Col], pt: float, avail: float) -> list[float] | None:
     """Column widths in mm that fill `avail`, or None when even the squeezed table is wider."""
-    if sum(_mm(c.least, pt) for c in cols) > avail:
+    if sum(_w(c, "least", pt) for c in cols) > avail:
         return None
-    base = "need" if sum(_mm(c.need, pt) for c in cols) <= avail else "least"
-    widths = [_mm(c.need if base == "need" else c.least, pt) for c in cols]
-    # What is left over goes to the text columns (they wrap less), up to what they want first.
+    base = "need" if sum(_w(c, "need", pt) for c in cols) <= avail else "least"
+    widths = [_w(c, base, pt) for c in cols]
     spare = avail - sum(widths)
+    # The signature column first, to a comfortable width: it has the room the Rate and
+    # Amount columns used to take.
+    sign = [i for i, c in enumerate(cols) if c.kind == "sign"]
+    if spare > 0 and sign:
+        for i in sign:
+            give = min(spare, max(0.0, SIGN_WANT_MM - widths[i]))
+            widths[i] += give
+            spare -= give
+    # Then the text columns (they wrap less), up to what they want.
     text = [i for i, c in enumerate(cols) if c.kind == "text"]
     if spare > 0 and text and base == "least":
         wants = {i: _mm(cols[i].need, pt) - widths[i] for i in text}
@@ -140,7 +165,7 @@ def _allocate(cols: list[Col], pt: float, avail: float) -> list[float] | None:
                 widths[i] += give * short_of[i] / total_short
             spare = avail - sum(widths)
     if spare > 0:
-        grow = text or list(range(len(cols)))
+        grow = (text + sign) or list(range(len(cols)))
         weight = sum(widths[i] for i in grow) or 1.0
         for i in grow:
             widths[i] += spare * widths[i] / weight
@@ -218,14 +243,15 @@ def build_html(
     printed_at: datetime | None = None,
 ) -> tuple[str, str]:
     """(html, orientation). Rows are the plain export rows, columns as exported."""
-    headers = [str(h) for h in headers]
+    keep = [j for j, h in enumerate(headers) if str(h).strip().lower() not in DROPPED]
+    headers = [str(headers[j]) for j in keep] + [SIGN_HEADER]
     body = []
     for r in rows:
         cells = []
-        for j, h in enumerate(headers):
+        for j, h in zip(keep, headers):
             v = r[j] if j < len(r) else ""
             cells.append(_fmt_date(v) if h.strip().lower() == "date" else _plain(v))
-        body.append(cells)
+        body.append(cells + [""])                   # the pharmacist signs here, on paper
 
     cols = plan_columns(headers, body)
     orient, pt, widths = fit(cols, body)
@@ -233,7 +259,7 @@ def build_html(
     colgroup = "".join(f'<col style="width:{w / avail * 100:.2f}%">' for w in widths)
 
     def cls(c: Col) -> str:
-        return {"num": "num", "short": "short"}.get(c.kind, "text")
+        return {"num": "num", "short": "short", "sign": "sign"}.get(c.kind, "text")
 
     thead = "".join(f'<th class="{cls(c)}">{_esc(c.name)}</th>' for c in cols)
     trs = []

@@ -48,7 +48,7 @@ class StandardLayout(unittest.TestCase):
     def test_every_column_has_room_and_the_table_fills_the_page(self):
         html, _ = self.html()
         w = self.widths(html)
-        self.assertEqual(len(w), len(COLS) + 1)            # + Sr
+        self.assertEqual(len(w), len(COLS) - 2 + 2)        # - Rate, Amount; + Sr, Sign
         self.assertAlmostEqual(sum(w), 100.0, delta=0.1)
         # Bill No (and every short column) at least as wide as "SCB2961" at the font used.
         cols = std.plan_columns(COLS, [[str(v) for v in ROW]])
@@ -81,7 +81,29 @@ class StandardLayout(unittest.TestCase):
     def test_totals_add_up(self):
         html, _ = self.html()
         self.assertRegex(html, r'class="total".*>8</td>')
-        self.assertIn(">110.24<", html)
+        self.assertNotIn(">110.24<", html)                  # no money on the register
+
+    def test_rate_and_amount_give_way_to_the_pharmacist_sign(self):
+        html, _ = self.html(rows=[ROW] * 40)
+        head = re.search(r"<thead><tr>(.*?)</tr></thead>", html).group(1)
+        names = re.findall(r">([^<]+)</th>", head)
+        self.assertNotIn("Rate", names)
+        self.assertNotIn("Amount", names)
+        self.assertEqual(names[-1], "Pharmacist Sign")     # far right, in the repeated header
+        self.assertNotIn("13.78", html)
+        self.assertNotIn("55.12", html)
+        # Blank on every row, for the pen.
+        signs = re.findall(r'<td class="sign">([^<]*)</td>', html)
+        self.assertEqual(len(signs), 40)
+        self.assertTrue(all(s == "&nbsp;" for s in signs))
+
+    def test_the_sign_column_is_wide_enough_to_sign_in(self):
+        rows = [[str(v) for v in ROW[:10]] + [""]]
+        heads = [c for c in COLS if c not in ("Rate", "Amount")] + ["Pharmacist Sign"]
+        cols = std.plan_columns(heads, rows)
+        orient, pt, mm = std.fit(cols, rows)
+        self.assertGreaterEqual(mm[-1], 45.0)                # about 5 cm to sign in
+        self.assertGreaterEqual(min(mm[-1], 999), std.SIGN_MIN_MM)
 
 
 class TheStyleDecidesThePath(unittest.TestCase):
