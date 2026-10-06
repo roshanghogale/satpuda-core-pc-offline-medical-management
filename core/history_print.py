@@ -206,6 +206,100 @@ def _chunk_sale_ids_for_print(sale_ids: list[int], paper: str) -> list[list[int]
     return [ids[i : i + per] for i in range(0, len(ids), per)]
 
 
+def _dot_matrix_mode() -> bool:
+    try:
+        from core.printer_manager import PrinterManager
+
+        return bool(PrinterManager.is_dot_matrix_mode())
+    except Exception:
+        return False
+
+
+# One bill's job must leave the Windows queue before the next is sent.
+DOT_MATRIX_BILL_WAIT_SEC = 90.0
+
+
+def print_bills_dot_matrix_one_by_one(
+    conn,
+    sale_ids: list[int],
+    *,
+    slot: int = PRINT_ALL_SLOT,
+    db_path: str | None = None,
+) -> tuple[int, list[str]]:
+    """Print All on a dot matrix: every bill exactly as its own Print, one at a time.
+
+    Each bill goes through the single-bill dot matrix print (same slot, same saved
+    settings -- no Print All paper or layout laid over them), as its own job: init,
+    top margin, the bill, the feed to the next slip. Then the app waits for that job to
+    leave the queue and sends the printer a reset (ESC @: margin, pitch, line spacing,
+    page length) of its own, so the next bill starts from the printer's defaults and
+    sets its own margin and position again. Nothing is joined into one document.
+
+    A bill that cannot be printed stops the run: the bills after it would come out at
+    the wrong place on the paper (or not at all), so they are listed as not printed.
+    """
+    from core.bill_output import _print_bill_dot_matrix_with_slot
+    from core.printer_manager import PrinterManager
+
+    def _log(msg: str, level: str = "INFO") -> None:
+        try:
+            from core.print_log import print_log
+
+            print_log(msg, level=level)
+        except Exception:
+            pass
+
+    ids = [int(x) for x in sale_ids]
+    printer = PrinterManager.resolve_dot_matrix_printer(
+        PrinterManager.get_printer_for_slot(slot)
+    )
+    # A queue drawn through the Windows driver (GDI) is not sent ESC/P at all.
+    try:
+        send_reset = not PrinterManager.should_use_dot_matrix_gdi(printer)
+    except Exception:
+        send_reset = True
+    _log(
+        f'print_all dot_matrix one-by-one bills={len(ids)} slot={slot} '
+        f'printer="{printer}" reset={send_reset}'
+    )
+    printed = 0
+    failures: list[str] = []
+    for i, sale_id in enumerate(ids):
+        why = ""
+        try:
+            _print_bill_dot_matrix_with_slot(
+                conn, sale_id, slot, db_path=db_path, fallback_to_html=False,
+            )
+        except Exception as exc:
+            why = f"Sale {sale_id}: {exc}"
+        if not why:
+            printed += 1
+            stuck = PrinterManager.wait_for_print_queue(
+                printer, timeout=DOT_MATRIX_BILL_WAIT_SEC
+            )
+            if stuck:
+                why = f"After sale {sale_id}: {stuck}"
+            elif send_reset:
+                try:
+                    PrinterManager.reset_dot_matrix(printer)
+                    _log(f'print_all dot_matrix reset after sale_id={sale_id}')
+                except Exception as exc:
+                    why = f"Printer reset after sale {sale_id}: {exc}"
+        if why:
+            failures.append(why)
+            rest = ids[i + 1:]
+            if rest:
+                failures.append(
+                    f"Stopped: {len(rest)} bill(s) after it were not printed "
+                    f"(sale {', '.join(str(x) for x in rest[:8])}"
+                    + (", ..." if len(rest) > 8 else "")
+                    + ")."
+                )
+            _log(f'print_all dot_matrix stopped: {why}', level="ERROR")
+            break
+    return printed, failures
+
+
 def print_bills_batch(
     conn,
     sale_ids: list[int],
@@ -214,8 +308,15 @@ def print_bills_batch(
     slot: int = PRINT_ALL_SLOT,
     hwnd_owner: int = 0,
     settings_override: dict | None = None,
+    db_path: str | None = None,
 ) -> tuple[int, list[str]]:
     """Print many sales bills — same logic as Tk sales_history_actions."""
+    if sale_ids and _dot_matrix_mode():
+        # A dot matrix prints slips, one bill each: A5/A4 "bills per sheet" would
+        # be one continuous document running every bill into the next.
+        return print_bills_dot_matrix_one_by_one(
+            conn, sale_ids, slot=slot, db_path=db_path
+        )
     from core.bill_config import (
         apply_print_bill_layout,
         get_print_slot_settings,

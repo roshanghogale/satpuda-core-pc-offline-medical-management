@@ -2263,11 +2263,19 @@ def list_print_all_candidates(conn, body: dict[str, Any]) -> dict[str, Any]:
         )
         if str(body.get(key) or "").strip()
     ]
+    try:
+        from core.bill_output import _is_dot_matrix_printer_mode
+
+        dot_matrix = bool(_is_dot_matrix_printer_mode())
+    except Exception:
+        dot_matrix = False
     return {
         "ok": True,
         "bills": bills,
         "count": len(bills),
         "unapplied_filters": unapplied,
+        # The dialog shows "one bill at a time" instead of the bills-per-sheet choice.
+        "dot_matrix": dot_matrix,
     }
 
 
@@ -2308,17 +2316,41 @@ def print_all_sales(conn, body: dict[str, Any]) -> dict[str, Any]:
     if not sale_ids:
         return {"ok": False, "error": "No bills to print in the selected range."}
 
-    pages, failures = print_bills_batch(conn, sale_ids, paper=paper, slot=slot)
+    dot_matrix = False
+    db_path = None
+    try:
+        from core.bill_output import _is_dot_matrix_printer_mode
+        from core.store_manager import get_active_db_path
+        from core.sync_prefs import is_online_mode
+
+        dot_matrix = bool(_is_dot_matrix_printer_mode())
+        # The same store file a single bill's Print reads (print_sale).
+        db_path = None if is_online_mode() else get_active_db_path()
+    except Exception:
+        pass
+
+    pages, failures = print_bills_batch(
+        conn, sale_ids, paper=paper, slot=slot, db_path=db_path
+    )
     ok = not failures
-    msg = f"Printed {pages} page(s) for {len(sale_ids)} bill(s)."
-    if failures:
-        msg += f" {len(failures)} failed."
+    if dot_matrix:
+        msg = (
+            f"Printed {pages} of {len(sale_ids)} bill(s) on dot matrix, one by one "
+            "(printer reset after each bill)."
+        )
+        if failures:
+            msg += " Stopped on a problem."
+    else:
+        msg = f"Printed {pages} page(s) for {len(sale_ids)} bill(s)."
+        if failures:
+            msg += f" {len(failures)} failed."
     out = {
         "ok": ok,
         "pages": pages,
         "total": len(sale_ids),
         "failures": failures,
         "message": msg,
+        "dot_matrix": dot_matrix,
     }
     if failures:
         # An ok:False with no "error" reaches the page as a bare "HTTP 400",

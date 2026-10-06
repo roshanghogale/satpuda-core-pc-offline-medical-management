@@ -1575,6 +1575,8 @@ export function fetchPrintAllCandidates(opts: {
     error?: string
     /** Filters the picker cannot honour, named so the shop is not misled. */
     unapplied_filters?: string[]
+    /** Dot matrix printer: every bill prints on its own, one after another. */
+    dot_matrix?: boolean
   }>(`/api/sales/print-all/candidates${qs({ ...opts })}`)
 }
 

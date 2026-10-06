@@ -108,6 +108,9 @@ export function SalesHistoryPage({
   const [printAllPaper, setPrintAllPaper] = useState('A6')
   const [printAllSchedule, setPrintAllSchedule] = useState('')
   const [printAllUnapplied, setPrintAllUnapplied] = useState<string[]>([])
+  // Dot matrix: each bill is printed on its own slip, one after another, with
+  // a printer reset in between -- never two or four bills to a sheet.
+  const [printAllDotMatrix, setPrintAllDotMatrix] = useState(false)
   const [selectedRow, setSelectedRow] = useState<number | null>(null)
   const [alert, setAlert] = useState<AlertState | null>(null)
   const [ctx, setCtx] = useState<{
@@ -499,6 +502,7 @@ export function SalesHistoryPage({
         new Set(bills.filter((b) => b.printable !== false).map((b) => b.sale_id)),
       )
       setPrintAllUnapplied(res.unapplied_filters || [])
+      setPrintAllDotMatrix(Boolean(res.dot_matrix))
       setPrintAllOpen(true)
     } catch (e) {
       if (revertTo !== undefined) setPrintAllSchedule(revertTo)
@@ -1002,7 +1006,9 @@ export function SalesHistoryPage({
               <p className="muted">
                 {from} to {to} · slot 2 · {printAllPicked.size} of{' '}
                 {printAllBills.length} bill(s) selected
-                {(() => {
+                {printAllDotMatrix ? (
+                  printAllPicked.size ? ' · dot matrix: one bill at a time' : ''
+                ) : (() => {
                   // Mirrors the engine's own bills-per-sheet rule.
                   const per =
                     printAllPaper === 'A4' ? 4 : printAllPaper === 'A5' ? 2 : 1
@@ -1024,7 +1030,15 @@ export function SalesHistoryPage({
                   filters by bill and customer only.
                 </p>
               ) : null}
+              {printAllDotMatrix ? (
+                <p className="muted">
+                  Dot matrix: each bill prints on its own, exactly like Print
+                  Sales 2 (F8). After every bill the printer is reset (margin
+                  and position) before the next one starts.
+                </p>
+              ) : null}
               <div className="printall-controls">
+                {printAllDotMatrix ? null : (
                 <label>
                   Paper
                   <select
@@ -1037,6 +1051,7 @@ export function SalesHistoryPage({
                     <option value="A4">A4 — four per sheet</option>
                   </select>
                 </label>
+                )}
                 <label>
                   Schedule
                   <select

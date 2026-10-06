@@ -171,6 +171,57 @@ class PrinterManager:
         return sys.platform == 'win32'
 
     @classmethod
+    def wait_for_print_queue(
+        cls, printer_name: str, *, timeout: float = 90.0, poll: float = 0.4,
+    ) -> str:
+        """Wait until the printer's Windows queue is empty.
+
+        '' when it emptied (or the queue cannot be asked -- a print is never held up
+        over an unknown); otherwise why it stopped: a stuck job, or still busy at the
+        timeout. Print All on dot matrix waits here after each bill, so the next bill
+        is a separate job sent only once the last one has gone to the printer.
+        """
+        if not cls.is_windows() or not printer_name:
+            return ''
+        try:
+            import win32print
+            handle = win32print.OpenPrinter(printer_name)
+        except Exception:
+            return ''
+        try:
+            deadline = time.monotonic() + max(1.0, float(timeout))
+            while True:
+                try:
+                    jobs = win32print.EnumJobs(handle, 0, 64, 1) or []
+                except Exception:
+                    return ''
+                if not jobs:
+                    return ''
+                note = cls._stuck_job_note(handle)
+                if note:
+                    return f'Printer "{printer_name}" job {note}'
+                if time.monotonic() >= deadline:
+                    return (
+                        f'Printer "{printer_name}" is still busy after {int(timeout)} s '
+                        f'({len(jobs)} job(s) in the queue)'
+                    )
+                time.sleep(poll)
+        finally:
+            try:
+                win32print.ClosePrinter(handle)
+            except Exception:
+                pass
+
+    # ESC @ -- initialize: left margin, pitch, line spacing, page length, bold and the
+    # rest back to the printer's defaults. It does not move the paper.
+    DOT_MATRIX_RESET = b'\x1b@'
+
+    @classmethod
+    def reset_dot_matrix(cls, printer_name: str) -> None:
+        """Send the printer a reset of its own, between two bills."""
+        cls.print_raw_escp(cls.DOT_MATRIX_RESET, printer_name, copies=1)
+
+    @classmethod
     def is_spooler_running(cls) -> bool:
         """True when Windows Print Spooler service is running."""
         if not cls.is_windows():
