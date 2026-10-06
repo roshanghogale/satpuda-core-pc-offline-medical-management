@@ -649,6 +649,8 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                             "/api/voice/enabled",
                             "/api/reports/gst",
                             "/api/reports/gst/export",
+                            "/api/reports/gst/summary",
+                            "/api/reports/gst/hsn",
                             "/api/customers/gst",
                             "/api/voice/pack",
                             "/api/login/status",
@@ -820,6 +822,28 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                     from core import gst_reports
 
                     _json_response(self, 200, {"ok": True, "filed": gst_reports.list_filed(conn)})
+                except Exception as exc:
+                    _json_response(self, 400, {"ok": False, "error": str(exc)})
+                return
+            if path in ("/api/reports/gst/summary", "/api/reports/gst/hsn"):
+                # The one-page summary with the month's GST to pay, and the medicines
+                # without HSN (core/gst_extras.py).
+                conn = _db.get("conn")
+                if conn is None:
+                    _json_response(self, 503, {"error": "Database not open"})
+                    return
+                try:
+                    from urllib.parse import parse_qs
+
+                    from core import gst_extras
+
+                    qs = parse_qs(urlparse(self.path).query)
+                    a, b = (qs.get("from") or [""])[0], (qs.get("to") or [""])[0]
+                    if path.endswith("/summary"):
+                        out = gst_extras.one_page(conn, a, b)
+                    else:
+                        out = {"medicines": gst_extras.missing_hsn(conn, a, b)}
+                    _json_response(self, 200, {"ok": True, **out})
                 except Exception as exc:
                     _json_response(self, 400, {"ok": False, "error": str(exc)})
                 return
@@ -2419,6 +2443,18 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                     else:
                         raise ValueError("action save / compare / delete")
                     _json_response(self, 200, {"ok": True, **out})
+                except Exception as exc:
+                    _json_response(self, 400, {"ok": False, "error": str(exc)})
+                return
+            if path == "/api/reports/gst/hsn":
+                # HSN for medicines, every batch of a name (core/gst_extras.save_hsn).
+                if conn is None:
+                    _json_response(self, 503, {"error": "Database not open"})
+                    return
+                try:
+                    from core import gst_extras
+
+                    _json_response(self, 200, gst_extras.save_hsn(conn, body.get("items") or []))
                 except Exception as exc:
                     _json_response(self, 400, {"ok": False, "error": str(exc)})
                 return

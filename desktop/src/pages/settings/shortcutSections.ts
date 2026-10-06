@@ -62,7 +62,7 @@ export const SHORTCUT_SECTIONS: ShortcutSection[] = [
       ['P', 'New Purchase'],
       ['I', 'Inventory'],
       ['E / Ctrl+E', 'Export'],
-      ['G', 'GST Reports (GSTR-1, GSTR-3B, registers, Filed / Tally)'],
+      ['G', 'GST Reports (Saransh, GSTR-1, GSTR-3B, Tally Prime, CA zip)'],
     ],
   },
   {

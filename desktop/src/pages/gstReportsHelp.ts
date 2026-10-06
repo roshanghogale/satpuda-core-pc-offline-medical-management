@@ -1,6 +1,24 @@
 /** The GST Reports guide, shown by the window's "Madat" button (and kept as docs/GST_REPORTS_GUIDE.md). */
 export const GST_HELP: { title: string; lines: string[] }[] = [
   {
+    title: 'Sopa marg (3 paayrya)',
+    lines: [
+      '1. GST Reports ughda (Home → G), mahina nivda. Pahila tab "Saransh" — motha aakda "Bharaycha GST": ya mahinyat kiti GST bharayche. "Pudhe jaanara ITC": urlela credit, pudhchya mahinyat vaparla jail.',
+      '2. "HSN bhara" tab: HSN nasleli aushadhe ekdach yaadit — HSN (sadharan 3004) taka ani Save. June bills che report pan sudhartat.',
+      '3. "CA sathi sagle (zip)" daba — Excel, PDF, GSTR-1 JSON, saransh ani Tally Prime files ek zip madhe. Hi zip CA la WhatsApp / email kara.',
+    ],
+  },
+  {
+    title: 'Tally Prime madhe import',
+    lines: [
+      '"Tally Prime" button ek zip deto: 1) ledgers file, 2) vouchers file, ani kase karayche te.',
+      'Tally Prime: Import → Masters → ledgers file; mag Import → Transactions → vouchers file.',
+      'Sales (bill), Credit Note (sales return), Purchase (supplier bill), Debit Note (purchase return) vouchers — bill var chhaplelya GST pramane, paisa-paisa; round-off "Round Off" ledger madhe.',
+      'Saadhe grahak "Cash" ledger var; GSTIN asnare grahak ani suppliers tyanchya navache ledger (GSTIN sakat).',
+      'Ekach mahina dusryanda import kela tar Tally dubaar vouchers banvel — ekda ch import kara.',
+    ],
+  },
+  {
     title: '1. Suruvatila ekda (setup)',
     lines: [
       'Settings → Pharmacy → GSTIN: GST nondani asel tar dukanacha GSTIN bhara (GSTR-1 JSON ani rajya / Place of Supply sathi). Nondani nasel tar rikama theva — sagle reports tari chaltat, kuthlihi bandhi nahi.',
@@ -20,7 +38,9 @@ export const GST_HELP: { title: string; lines: string[] }[] = [
   {
     title: '3. Tabs madhe kay aahe',
     lines: [
-      'GSTR-3B + Tally: 3.1(a) karpaatra vikri ani tax, 3.1(c) 0% vikri, 3.2 dusrya rajyat vikri, 4 ITC (supplier bills madhun) − parat kelela maal, 5 0% kharedi. Khali "Tally": bills cha ekun = taxable + tax + round-off; PHARAK 0 asla pahije.',
+      'Saransh: vikri, vikri var GST, ITC, bharaycha GST ani mahina-dar ITC set-off (kayadyachya kramane: IGST credit aadhi IGST, mag CGST / SGST; CGST credit CGST ani IGST var; SGST credit SGST ani IGST var).',
+      'HSN bhara: HSN nasleli kiva chukleli aushadhe, kiti bills var, ani navin HSN takaycha box.',
+      'GSTR-3B + julvni: 3.1(a) karpaatra vikri ani tax, 3.1(c) 0% vikri, 3.2 dusrya rajyat vikri, 4 ITC (supplier bills madhun) − parat kelela maal, 5 0% kharedi. Khali "julvni": bills cha ekun = taxable + tax + round-off; PHARAK 0 asla pahije.',
       'Sales register: pratyek bill, GST rate-wise taxable / CGST / SGST — chhaplelya bill pramane paisa-paisa.',
       'B2B: GSTIN asnarya grahakanchi bills (invoice-wise). B2CS: baki saglya bills cha rate-wise ekun (returns vajaa karun). B2CL: dusrya rajyatil, ₹1 lakh peksha jaast nondani nasleli bills (retail madhe kvachit).',
       'Credit notes: B2B bills varche returns (CDNR). Saadhya grahakanche returns B2CS madhunach vajaa hotat — he GST niyam aahe.',
@@ -30,9 +50,9 @@ export const GST_HELP: { title: string; lines: string[] }[] = [
     ],
   },
   {
-    title: '4. Filed / Tally (history ani julavni)',
+    title: '4. Filed / julvni (history ani julavni)',
     lines: [
-      'Return file kelyavar (kiva CA la dilyavar) "Filed / Tally" tab → note lihun "… Filed mhanun jatan kara".',
+      'Return file kelyavar (kiva CA la dilyavar) "Filed / julvni" tab → note lihun "… Filed mhanun jatan kara".',
       'Nantar kadhihi "Aaj shi julva": file kelyanantar konta bill badalla, kadhla, ushira nondla, kiva return badalla te bill-wise disel — pudhchya return madhe durusti kara.',
       'He jatan kelele aakde store sobat rahtat (Online madhe saglya PC var disatat; Online ⇄ Offline badalla tari sobat jaatat).',
     ],
@@ -65,7 +85,7 @@ export const GST_HELP: { title: string; lines: string[] }[] = [
   {
     title: '8. Sagle reports kuthe aahet',
     lines: [
-      'Home → GST Reports (G): GSTR-3B + Tally, Sales GST register, GSTR-1 (B2B, B2CS / B2CL, Credit notes, HSN B2B / B2C, Documents), Purchase ITC register + rate-wise, Checks, Filed / Tally.',
+      'Home → GST Reports (G): GSTR-3B + julvni, Sales GST register, GSTR-1 (B2B, B2CS / B2CL, Credit notes, HSN B2B / B2C, Documents), Purchase ITC register + rate-wise, Checks, Filed / julvni.',
       'Sales History → Export (Ctrl+E): Current view, Sales Register, Monthly Summary, Daily Sales Summary, Customer Due, Doctor-wise Sales, Payment Mode, Schedule Report (Classic / Sign, ubha / aadva).',
       'Purchase History → Export (Ctrl+E): Current view, Purchase Register, Monthly Summary, Supplier Due, GST Purchase Report.',
       'Inventory → Export (Ctrl+E): Current view, Stock Statement, Near Expiry, Expired Stock, Schedule-wise Stock.',

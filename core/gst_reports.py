@@ -1187,6 +1187,12 @@ def export(conn, body: dict) -> dict:
 
     start, end = str(body.get("from") or ""), str(body.get("to") or "")
     fmt = str(body.get("format") or "xlsx").lower()
+    if fmt in ("tally", "ca_zip"):
+        # Tally Prime vouchers / everything for the CA in one zip (core/gst_extras.py).
+        from core import gst_extras
+
+        return (gst_extras.tally_zip if fmt == "tally" else gst_extras.ca_zip)(
+            conn, str(body.get("from") or ""), str(body.get("to") or ""))
     shop = (_shop(conn).get("gstin") or "GST")
     stem = f"GST_{shop}_{_iso(start)}_{_iso(end)}"
     if fmt == "json":
