@@ -555,6 +555,30 @@ def _units(cm: float) -> int:
     return int(round(cm / 2.54 * 216))
 
 
+# Continuous (tractor) paper is made in inches: the perforations are a whole number of
+# half inches apart, as the tractor holes are. A slip height typed in cm is a ruler reading,
+# and every bill moves the paper by it -- so a millimetre off is a millimetre lower on every
+# next bill, adding up. A shop with 6 x 4 inch paper (10.16 cm) and 10.5 cm saved saw the
+# 4th bill start 0.8 cm lower than the 1st. A reading within 2 mm of a half inch is that
+# half inch, exactly.
+HALF_INCH_216 = 108
+SLIP_SNAP_CM = 0.2
+
+
+def slip_units_from_cm(cm: float) -> int:
+    """Slip height in 1/216 inch: the exact half inch when the cm reading is that close."""
+    try:
+        cm = float(cm or 0)
+    except (TypeError, ValueError):
+        return 0
+    if cm <= 0:
+        return 0
+    halves = int(round(cm / 1.27))
+    if halves > 0 and abs(cm - halves * 1.27) <= SLIP_SNAP_CM:
+        return halves * HALF_INCH_216
+    return _units(cm)
+
+
 def _a6_paper(settings: dict) -> dict:
     """The shop's slip, in numbers: height, margins and printable width.
 
@@ -563,7 +587,7 @@ def _a6_paper(settings: dict) -> dict:
     """
     slip_cm = _cm_setting(settings, "dot_matrix_slip_height_cm", 0.0, 0.0, 30.0)
     return {
-        "slip": _units(slip_cm) if slip_cm > 0 else 0,
+        "slip": slip_units_from_cm(slip_cm) if slip_cm > 0 else 0,
         "top": _units(_cm_setting(settings, "dot_matrix_top_offset_cm", 1.0, 0.0, 5.0)),
         "bottom": _units(_cm_setting(settings, "dot_matrix_bottom_margin_cm", 1.0, 0.0, 5.0)),
         "width_cols": max(40, min(80, int(
@@ -640,7 +664,9 @@ def _a6_page_plan(slip_216: int, wanted_spacing: int) -> tuple[int, int]:
     for spacing in range(20, 33):
         lines = slip_216 / spacing
         err = abs(lines - round(lines))
-        rank = (round(err, 6), abs(spacing - wanted_spacing))
+        # Of the exact ones, the nearest that is not WIDER than asked for, so a slip
+        # holds at least as many lines as the shop's own spacing gave it.
+        rank = (round(err, 6), spacing > wanted_spacing, abs(spacing - wanted_spacing))
         if best is None or rank < best[0]:
             best = (rank, spacing, max(1, min(127, int(round(lines)))))
     return best[1], best[2]
@@ -697,7 +723,7 @@ def _dot_matrix_slip_units(settings: dict) -> int:
     if cm <= 0:
         return 0
     cm = max(5.0, min(30.0, cm))
-    return int(round(cm / 2.54 * 216))
+    return slip_units_from_cm(cm)
 
 
 def _dot_matrix_left_offset_cm(settings: dict) -> float:
@@ -1507,6 +1533,10 @@ def gdi_placement_for(settings: dict | None, paper: str) -> dict | None:
     slip_cm = 0.0
     if _dot_matrix_slip_units(merged):
         slip_cm = max(5.0, min(30.0, float(merged.get("dot_matrix_slip_height_cm") or 0)))
+        units = _dot_matrix_slip_units(merged)
+        if units % HALF_INCH_216 == 0:
+            # A reading that is a half inch: the exact one the RAW route moves by.
+            slip_cm = units / 216 * 2.54
     else:
         # No slip height set: still ask the driver for an A6-high page. Its own
         # default is a full sheet (A4 / 11 inch / fanfold), so every A6 bill fed

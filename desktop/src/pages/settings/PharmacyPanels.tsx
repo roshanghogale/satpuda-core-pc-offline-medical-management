@@ -245,6 +245,19 @@ function PrintSlotEditor({
   )
 }
 
+/** Continuous dot matrix paper, perforation to perforation (it is made in inches). */
+const SLIP_PRESETS: { cm: number; label: string }[] = [
+  { cm: 7.62, label: '3 inch (7.62 cm)' },
+  { cm: 8.89, label: '3.5 inch (8.89 cm)' },
+  { cm: 10.16, label: '4 inch (10.16 cm) - 6 x 4 slip' },
+  { cm: 11.43, label: '4.5 inch (11.43 cm)' },
+  { cm: 12.7, label: '5 inch (12.7 cm)' },
+  { cm: 13.97, label: '5.5 inch (13.97 cm)' },
+  { cm: 15.24, label: '6 inch (15.24 cm)' },
+  { cm: 27.94, label: '11 inch (27.94 cm)' },
+  { cm: 30.48, label: '12 inch (30.48 cm)' },
+]
+
 export function PharmacyPanel(props: Props) {
   const {
     sectionId,
@@ -976,11 +989,37 @@ export function PharmacyPanel(props: Props) {
               }
             />
           </Field>
+          <Field label="Dot matrix paper (slip height)">
+            {/* Continuous paper is made in inches. Every bill moves the paper by
+                this height, so a few mm off puts every next bill a few mm lower. */}
+            <select
+              className="settings-input"
+              value={
+                SLIP_PRESETS.find(
+                  (p) => Math.abs(p.cm - Number(bill.dot_matrix_slip_height_cm ?? 0)) < 0.005,
+                )?.cm.toString() ?? 'custom'
+              }
+              onChange={(e) => {
+                if (e.target.value === 'custom') return
+                setBill((b) => ({
+                  ...b,
+                  dot_matrix_slip_height_cm: Number(e.target.value),
+                }))
+              }}
+            >
+              {SLIP_PRESETS.map((p) => (
+                <option key={p.cm} value={p.cm.toString()}>
+                  {p.label}
+                </option>
+              ))}
+              <option value="custom">Other (type cm below)</option>
+            </select>
+          </Field>
           <Field label="Dot matrix slip height (cm)">
             <input
               className="settings-input"
               type="number"
-              step={0.1}
+              step={0.01}
               min={0}
               max={30}
               value={Number(bill.dot_matrix_slip_height_cm ?? 0)}

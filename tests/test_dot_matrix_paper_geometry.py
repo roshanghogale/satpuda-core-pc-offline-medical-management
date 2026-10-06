@@ -76,7 +76,8 @@ class TheSlipIsAFixedPage(unittest.TestCase):
         return ctx, merged, dmp._dm(merged), dmp.format_bill_text(ctx, merged).splitlines()
 
     def test_the_defaults_are_the_shop_s_paper(self):
-        self.assertEqual(DEFAULTS["dot_matrix_slip_height_cm"], 10.5)
+        # 6 x 4 inch continuous paper (10.5 crept 3 mm a bill on it).
+        self.assertEqual(DEFAULTS["dot_matrix_slip_height_cm"], 10.16)
         self.assertEqual(DEFAULTS["dot_matrix_top_offset_cm"], 1.0)
         self.assertEqual(DEFAULTS["dot_matrix_bottom_margin_cm"], 1.0)
         self.assertEqual(DEFAULTS["dot_matrix_print_width_cm"], 12.9)

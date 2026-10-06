@@ -124,7 +124,8 @@ DEFAULT_BILL_PRINT_SETTINGS = {
     # Dot matrix A6: perforation-to-perforation height of one slip (cm). When set,
     # every bill advances the paper by exactly this much, whatever its length, so
     # the next bill starts at the same place on the next slip. 0 = off (tear feed).
-    "dot_matrix_slip_height_cm": 10.5,
+    # 6 x 4 inch continuous paper: 4 inch = 10.16 cm (10.5 "A6" crept 3 mm a bill).
+    "dot_matrix_slip_height_cm": 10.16,
     # Dot matrix A6: who positions the paper between bills. "printer" sends the
     # page length and a form feed and lets the printer's own tear-off park the
     # slip and pull it back - nothing to measure, and it cannot drift.
