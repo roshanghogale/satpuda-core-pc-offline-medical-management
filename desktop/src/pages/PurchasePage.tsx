@@ -1731,6 +1731,10 @@ export function PurchasePage({
   const savePurchase = async (opts?: {
     /** The shop answered "Tari save kar" to the refusal below. */
     allowDuplicate?: boolean
+    /** The tab was editing a saved purchase and the shop said: this is a new bill. */
+    asNew?: boolean
+    /** ...or said: yes, change the saved purchase into this bill. */
+    replaceEdited?: boolean
   }): Promise<boolean> => {
     // F5 reaches this from the window listener even while the form is still
     // the blank tab waiting for the bill being edited.
@@ -1747,10 +1751,40 @@ export function PurchasePage({
     }
     setSaving(true)
     try {
+      const payload: Record<string, unknown> = tabPayload(tabRef.current)
+      if (opts?.asNew) {
+        // A new purchase: not the edit, and the supplier's due as it is today.
+        delete payload.editing_purchase_id
+        delete payload.edit_previous_due
+        delete payload.edit_previous_credit
+      }
       const res = await savePurchaseBill({
-        ...tabPayload(tabRef.current),
+        ...payload,
         ...(opts?.allowDuplicate ? { allow_duplicate: true } : {}),
+        ...(opts?.replaceEdited ? { confirm_replace_purchase: true } : {}),
       })
+      // The tab still held a saved purchase for edit, but the supplier or bill
+      // number on screen is another bill's (Shivkrupa 6 Oct 2026: VINOD bill 2199
+      // imported into the tab editing TULJAI purchase 106 replaced 106). Nothing
+      // was written; the shop picks.
+      if (res.need_confirm && res.code === 'edit_other_bill') {
+        const no = res.editing?.purchase_no || ''
+        showAlert({
+          title: 'Another bill?',
+          message: res.message || 'This tab is editing a saved purchase.',
+          kind: 'confirm',
+          confirmLabel: 'Navin purchase save kar',
+          altLabel: `Purchase ${no} badal`,
+          cancelLabel: 'Radd',
+          onConfirm: () => {
+            void savePurchase({ ...opts, asNew: true, replaceEdited: false })
+          },
+          onAlt: () => {
+            void savePurchase({ ...opts, asNew: false, replaceEdited: true })
+          },
+        })
+        return false
+      }
       // One supplier bill, one purchase. The engine refused this one BEFORE
       // writing anything (store 127 held the same bill as purchases 35 and 36,
       // one second apart, because the old check only warned afterwards), so the
@@ -1769,7 +1803,7 @@ export function PurchasePage({
             void openSavedBillWithNewLines(existingId)
           },
           onAlt: () => {
-            void savePurchase({ allowDuplicate: true })
+            void savePurchase({ ...opts, allowDuplicate: true })
           },
         })
         return false

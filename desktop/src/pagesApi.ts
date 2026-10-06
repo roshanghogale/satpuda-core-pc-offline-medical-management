@@ -1188,6 +1188,13 @@ export type PurchaseSaveResult = {
   need_confirm?: boolean
   message?: string
   existing?: ExistingSupplierBill
+  /** code "edit_other_bill": the saved purchase this tab is editing. */
+  editing?: {
+    purchase_id: number
+    purchase_no: string
+    supplier_name: string
+    bill_number: string
+  }
   purchase_no?: string
   purchase_id?: number
   supplier_id?: number

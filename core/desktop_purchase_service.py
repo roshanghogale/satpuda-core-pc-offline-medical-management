@@ -448,6 +448,16 @@ def save_purchase_bill(conn, body: dict[str, Any]) -> dict[str, Any]:
             },
         }
 
+    # A tab still holding a saved purchase for edit is not a new bill's tab. Shivkrupa
+    # (6 Oct 2026) had purchase 106 -- TULJAI MEDICAL AGENCY, bill 2512, 7 lines -- open for
+    # edit, imported VINOD MEDICALS bill 2199 into the same tab and pressed Save: the edit went
+    # through, 106 became the VINOD bill and the TULJAI purchase and its stock were gone. An
+    # edit that changes the supplier or the bill number is asked about first; nothing is
+    # written until the shop says "new purchase" or "change that purchase".
+    other = _edit_is_another_bill(conn, body, supplier_name, bill_number)
+    if other:
+        return other
+
     overall = _safe_float(body.get("overall_discount", body.get("discount_rs")))
     rounding = _safe_float(body.get("rounding"))
     cash = _safe_float(body.get("cash_paid"))
@@ -650,6 +660,67 @@ def save_purchase_bill(conn, body: dict[str, Any]) -> dict[str, Any]:
         except Exception:
             pass
         return {"ok": False, "error": f"Failed to save purchase: {exc}"}
+
+
+def _bill_key(s: Any) -> str:
+    return "".join(ch for ch in str(s or "").upper() if ch.isalnum())
+
+
+def _edit_is_another_bill(
+    conn, body: dict[str, Any], supplier_name: str, bill_number: str
+) -> Optional[dict[str, Any]]:
+    """The refusal for an edit whose supplier or bill number is not the saved purchase's.
+
+    None when this is not an edit, the shop already answered, or the saved purchase cannot be
+    read (the edit itself would then fail on the same read).
+    """
+    editing_id = _safe_int(body.get("editing_purchase_id"))
+    if editing_id <= 0 or _safe_int(body.get("autosave_purchase_id")):
+        return None
+    if body.get("confirm_replace_purchase"):
+        return None
+    try:
+        saved = load_purchase(conn, editing_id)
+    except Exception:
+        return None
+    if not saved.get("ok") or not isinstance(saved.get("form"), dict):
+        return None
+    f = saved["form"]
+    old_supplier = str(f.get("supplier_name") or "").strip()
+    old_bill = str(f.get("bill_number") or "").strip()
+    # A field the saved purchase never had (or that could not be read) is not "changed":
+    # filling in a missing bill number is an ordinary edit.
+    same_supplier = not old_supplier or _bill_key(old_supplier) == _bill_key(supplier_name)
+    same_bill = not old_bill or _bill_key(old_bill) == _bill_key(bill_number)
+    if same_supplier and same_bill:
+        return None
+    no = str(saved.get("purchase_no") or editing_id)
+    old_lines = len(f.get("items") or [])
+    changed = []
+    if not same_supplier:
+        changed.append(f"supplier {old_supplier or '-'} -> {supplier_name or '-'}")
+    if not same_bill:
+        changed.append(f"bill no. {old_bill or '-'} -> {bill_number or '-'}")
+    return {
+        "ok": False,
+        "need_confirm": True,
+        "code": "edit_other_bill",
+        "message": (
+            f"This tab is EDITING saved purchase {no} "
+            f"({old_supplier or '-'}, bill {old_bill or '-'}"
+            + (f", {f.get('purchase_date')}" if f.get("purchase_date") else "")
+            + f", {old_lines} item(s)).\n\n"
+            f"The bill on screen has a different {' and '.join(changed)}.\n\n"
+            "Nothing was saved. Save it as a NEW purchase (purchase "
+            f"{no} stays as it is), or change purchase {no} into this bill?"
+        ),
+        "editing": {
+            "purchase_id": editing_id,
+            "purchase_no": no,
+            "supplier_name": old_supplier,
+            "bill_number": old_bill,
+        },
+    }
 
 
 def _returns_on_edit(conn, purchase_id: int, items: list) -> dict[str, Any]:
