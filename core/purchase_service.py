@@ -100,6 +100,22 @@ def _allocate_purchase_number(
     if prefix_u == "APU":
         return local_no
 
+    # Offline-first: from this PC's reserved block (core/offline_first/numbers.py).
+    try:
+        from core.offline_first.runtime import is_active as _of_active
+
+        if _of_active():
+            from core.fy_serial import encode_purchase_no, fy_start_year_for_date
+            from core.offline_first.numbers import take_serial
+
+            fy = fy_start_year_for_date(purchase_date)
+            serial = take_serial(conn, "purchases", fy)
+            if serial is not None:
+                return encode_purchase_no(serial, fy)
+            return local_no
+    except Exception as exc:
+        print(f"[purchase] offline-first number: {exc}")
+
     try:
         from core.sync_prefs import is_online_mode
 

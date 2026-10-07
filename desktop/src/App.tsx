@@ -65,6 +65,7 @@ import { restartDesktopApp } from './restartApp'
 import { DesktopUiPrefsProvider } from './desktopUiPrefsContext'
 import { VoiceBar } from './voice/VoiceBar'
 import { useVoiceEnabled } from './voice/voiceEnabled'
+import { OfflineFirstAutoSwitch, OfflineFirstPill } from './components/OfflineFirst'
 
 const NAV_LABELS: Record<PageId, string> = {
   home: 'Home',
@@ -545,7 +546,9 @@ export default function App() {
           )
         })}
         <div className="mainnav-right">
-          {meta?.sync_mode ? (
+          {meta?.sync_mode === 'offline_first' ? (
+            <OfflineFirstPill />
+          ) : meta?.sync_mode ? (
             <span
               className={`mainnav-sync mainnav-sync-${
                 meta.sync_mode === 'online' ? 'online' : 'offline'
@@ -853,6 +856,7 @@ export default function App() {
       </main>
 
       <StartupSplashOverlay open={splashOpen} status={splashStatus} />
+      <OfflineFirstAutoSwitch enabled={Boolean(meta?.offline_first_auto) && !splashOpen} />
 
       <StartupAlertsDialog
         open={Boolean(startupAlerts?.length) || Boolean(startupAlertsError)}

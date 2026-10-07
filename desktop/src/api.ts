@@ -23,6 +23,8 @@ export type MetaResponse = {
   server_time: string
   server_only?: boolean
   needs_migrate?: boolean
+  /** An Online PC this version moves onto offline-first by itself (core/offline_first). */
+  offline_first_auto?: boolean
   /** A registry rebuild picked this store; no person has confirmed it. */
   store_auto_selected?: boolean
 }

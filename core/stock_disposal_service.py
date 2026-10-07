@@ -164,7 +164,8 @@ def lookup_medicine_by_name_batch(
 def _next_disposal_no(cur) -> str:
     cur.execute("SELECT COALESCE(MAX(id),0)+1 FROM stock_disposals")
     n = int(cur.fetchone()[0] or 1)
-    return f"SD{datetime.now().strftime('%Y%m%d')}{n:04d}"
+    from core.offline_first.numbers import maybe_doc_number
+    return maybe_doc_number(cur.connection, "SD") or f"SD{datetime.now().strftime('%Y%m%d')}{n:04d}"
 
 
 def _deduct_stock(cur, medicine_id: int, qty: float) -> None:

@@ -3664,7 +3664,8 @@ def _save_payment(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, A
         next_id = conn.execute(
             "SELECT COALESCE(MAX(id),0)+1 FROM supplier_payments"
         ).fetchone()[0]
-        pay_no = f"PAY{int(next_id):04d}"
+        from core.offline_first.numbers import maybe_doc_number
+        pay_no = maybe_doc_number(conn, "PAY") or f"PAY{int(next_id):04d}"
         conn.execute(
             """
             INSERT INTO supplier_payments

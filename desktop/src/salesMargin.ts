@@ -211,3 +211,25 @@ export function billDiscountLossMessages(
   if (od) msgs.push(od)
   return msgs
 }
+
+/**
+ * Round to the paisa exactly as the engine (Python round) and the Android app (Money.r2) do:
+ * the exact binary value is rounded, and an exact half paisa goes to the even paisa.
+ * `Math.round(x * 100) / 100` rounds the SCALED value half-up, so 15 x 0.693 (10.394999...)
+ * came out 10.40 on the screen where the bill saved 10.39 (shared bill vectors, L1).
+ */
+export function pyRound2(x: number): number {
+  if (!Number.isFinite(x)) return 0
+  const neg = x < 0
+  const exact = Math.abs(x).toFixed(100)
+  const dot = exact.indexOf('.')
+  const ip = exact.slice(0, dot)
+  const fp = exact.slice(dot + 1)
+  const rest = fp.slice(2)
+  let cents = Number(ip) * 100 + Number(fp.slice(0, 2))
+  const tie = rest[0] === '5' && /^0*$/.test(rest.slice(1))
+  const above = rest[0] > '5' || (rest[0] === '5' && !tie)
+  if (above || (tie && cents % 2 === 1)) cents += 1
+  const r = cents / 100
+  return neg ? -r : r
+}

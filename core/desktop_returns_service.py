@@ -1291,7 +1291,10 @@ def save_sales_return(conn, body: dict[str, Any]) -> dict[str, Any]:
     cur = conn.cursor()
     try:
         cur.execute("SELECT COALESCE(MAX(id),0)+1 FROM sales_returns")
-        return_no = f"SR{cur.fetchone()[0]}"
+        _legacy_no = f"SR{cur.fetchone()[0]}"
+        from core.offline_first.numbers import maybe_doc_number
+        # Offline-first: SR<device>-<n>, so two offline devices never make the same number.
+        return_no = maybe_doc_number(conn, "SR") or _legacy_no
         cur.execute(
             """
             INSERT INTO sales_returns
@@ -2198,7 +2201,9 @@ def save_purchase_return(conn, body: dict[str, Any]) -> dict[str, Any]:
     cur = conn.cursor()
     try:
         cur.execute("SELECT COALESCE(MAX(id),0)+1 FROM purchase_returns")
-        return_no = f"PR{cur.fetchone()[0]}"
+        _legacy_no = f"PR{cur.fetchone()[0]}"
+        from core.offline_first.numbers import maybe_doc_number
+        return_no = maybe_doc_number(conn, "PR") or _legacy_no
         cur.execute(
             """
             INSERT INTO purchase_returns

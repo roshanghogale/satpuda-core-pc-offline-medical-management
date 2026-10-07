@@ -47,8 +47,7 @@ import {
   discountLossPrompt,
   itemDiscountLoss,
   lineMargin,
-  type MarginLine,
-} from '../salesMargin'
+  type MarginLine, pyRound2 } from '../salesMargin'
 import {
   AlertDialog,
   QuickSaleDialog,
@@ -124,7 +123,7 @@ type SaleTab = {
 function combineSalesLines(existing: LineItem, line: LineItem): LineItem {
   const qty2 = existing.qty + line.qty
   const disc2 = existing.medicine_discount + line.medicine_discount
-  const base = Math.round(qty2 * existing.rate * 100) / 100
+  const base = pyRound2(qty2 * existing.rate)
   const capped = Math.min(disc2, base)
   return {
     ...existing,
@@ -132,7 +131,7 @@ function combineSalesLines(existing: LineItem, line: LineItem): LineItem {
     medicine_discount: capped,
     disc: capped,
     original_amount: base,
-    amount: Math.round((base - capped) * 100) / 100,
+    amount: pyRound2(base - capped),
   }
 }
 
@@ -1662,10 +1661,10 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
     }
     const targetMedId = selectedMedId ?? it.id
     if ((it.quick_add || !it.id) && !selectedMedId) {
-      const base = Math.round(newQty * it.rate * 100) / 100
+      const base = pyRound2(newQty * it.rate)
       const asRs =
         prefs?.item_discount_mode === 'percent'
-          ? Math.round(((base * discInput) / 100) * 100) / 100
+          ? pyRound2((base * discInput) / 100)
           : discInput
       const capped = Math.min(asRs, base)
       patchTab({
@@ -1677,7 +1676,7 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
                 medicine_discount: capped,
                 disc: capped,
                 original_amount: base,
-                amount: Math.round((base - capped) * 100) / 100,
+                amount: pyRound2(base - capped),
               }
             : m,
         ),

@@ -192,23 +192,38 @@ def _pair_for_store(remote_store: dict, store_key: str) -> str:
     return token
 
 
-def _build_docs(conn, collection: str) -> list[dict]:
-    """Build server docs (with id). Flat tables and sales/purchases use bulk SQL."""
+def _build_docs(conn, collection: str, ids=None) -> list[dict]:
+    """Build server docs (with id). Flat tables and sales/purchases use bulk SQL.
+
+    ids: only these rows (offline-first sync sends one changed record at a time with the
+    same builders the bulk push uses).
+    """
     if collection in _FLAT_COLS:
-        return _build_flat_docs(conn, collection)
+        return _build_flat_docs(conn, collection, ids=ids)
     if collection == "sales":
-        return _build_sales_docs(conn)
+        return _build_sales_docs(conn, ids=ids)
     if collection == "purchases":
-        return _build_purchases_docs(conn)
-    return _build_docs_one_by_one(conn, collection)
+        return _build_purchases_docs(conn, ids=ids)
+    return _build_docs_one_by_one(conn, collection, ids=ids)
 
 
-def _build_docs_one_by_one(conn, collection: str) -> list[dict]:
+def _id_filter(ids):
+    """(" WHERE id IN (?,..)", params) for an id list, or ("", []) for all rows."""
+    if ids is None:
+        return "", []
+    clean = [int(i) for i in ids]
+    if not clean:
+        return " WHERE 1=0", []
+    return f" WHERE id IN ({','.join('?' * len(clean))})", clean
+
+
+def _build_docs_one_by_one(conn, collection: str, ids=None) -> list[dict]:
     """Fallback per-id builders (returns and any unknown collection)."""
     from core import server_entity_sync as fb
 
     cur = conn.cursor()
-    cur.execute(f"SELECT id FROM {collection}")
+    where, params = _id_filter(ids)
+    cur.execute(f"SELECT id FROM {collection}{where}", params)
     ids = [int(r[0]) for r in cur.fetchall()]
     docs: list[dict] = []
     builders = {
@@ -255,12 +270,13 @@ def _rows_as_dicts(cur) -> list[dict]:
     return [_row_dict(cur, r) for r in cur.fetchall()]
 
 
-def _build_flat_docs(conn, collection: str) -> list[dict]:
+def _build_flat_docs(conn, collection: str, ids=None) -> list[dict]:
     """One SELECT * for flat masters/payments — avoid N+1 payload builds."""
     from core.server_entity_sync import _sync_meta_fields_from_row
 
     cur = conn.cursor()
-    cur.execute(f"SELECT * FROM {collection}")
+    where, params = _id_filter(ids)
+    cur.execute(f"SELECT * FROM {collection}{where}", params)
     rows = _rows_as_dicts(cur)
     if not rows:
         return []
@@ -384,12 +400,13 @@ def _build_flat_docs(conn, collection: str) -> list[dict]:
     return docs
 
 
-def _build_sales_docs(conn) -> list[dict]:
+def _build_sales_docs(conn, ids=None) -> list[dict]:
     """Bulk sales + items + customers — one pass instead of N+1 queries."""
     from core.server_entity_sync import _line_medicine_id, _sanitize_server_doc, _sync_meta_fields_from_row
 
     cur = conn.cursor()
-    cur.execute("SELECT * FROM sales")
+    where, params = _id_filter(ids)
+    cur.execute(f"SELECT * FROM sales{where}", params)
     sales = _rows_as_dicts(cur)
     if not sales:
         return []
@@ -502,12 +519,13 @@ def _build_sales_docs(conn) -> list[dict]:
     return docs
 
 
-def _build_purchases_docs(conn) -> list[dict]:
+def _build_purchases_docs(conn, ids=None) -> list[dict]:
     """Bulk purchases + items + suppliers."""
     from core.server_entity_sync import _line_medicine_id, _sanitize_server_doc, _sync_meta_fields_from_row
 
     cur = conn.cursor()
-    cur.execute("SELECT * FROM purchases")
+    where, params = _id_filter(ids)
+    cur.execute(f"SELECT * FROM purchases{where}", params)
     purchases = _rows_as_dicts(cur)
     if not purchases:
         return []

@@ -9,8 +9,11 @@ import os
 
 MODE_OFFLINE = 'offline'   # Local SQLite + Google Drive backup/restore
 MODE_ONLINE = 'online'     # Server-only business data (no persistent store DB)
+# Local SQLite copy kept in step with the server in the background (core/offline_first).
+# Every local code path treats it as Offline: is_offline_mode() is True, is_online_mode() False.
+MODE_OFFLINE_FIRST = 'offline_first'
 
-_VALID = frozenset({MODE_OFFLINE, MODE_ONLINE})
+_VALID = frozenset({MODE_OFFLINE, MODE_ONLINE, MODE_OFFLINE_FIRST})
 _DEFAULT = MODE_OFFLINE
 _FILENAME = 'sync_mode.txt'
 
@@ -66,7 +69,11 @@ def set_sync_mode(mode: str) -> None:
 
 
 def is_offline_mode() -> bool:
-    return get_sync_mode() == MODE_OFFLINE
+    return get_sync_mode() in (MODE_OFFLINE, MODE_OFFLINE_FIRST)
+
+
+def is_offline_first() -> bool:
+    return get_sync_mode() == MODE_OFFLINE_FIRST
 
 
 def is_online_mode() -> bool:
@@ -77,6 +84,7 @@ def mode_label(mode: str | None = None) -> str:
     m = mode or get_sync_mode()
     return {
         MODE_OFFLINE: 'Offline — local SQLite + Google Drive',
+        MODE_OFFLINE_FIRST: 'Offline-first — this PC works on its own copy and keeps it in step with the server',
         MODE_ONLINE: (
             'Online — server-only (no local store DB; '
             'migrate via Push or Drive restore→push→delete)'

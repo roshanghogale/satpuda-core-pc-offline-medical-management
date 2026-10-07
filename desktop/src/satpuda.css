@@ -2761,3 +2761,20 @@ input[readonly] {
     max-height: 28vh;
   }
 }
+
+/* Offline-first sync details (components/OfflineFirst.tsx) */
+.offline-first-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 50;
+  min-width: 300px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card-bg, var(--bg, #fff));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  font-size: 12.5px;
+  line-height: 1.6;
+  text-align: left;
+}

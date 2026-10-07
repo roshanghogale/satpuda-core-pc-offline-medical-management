@@ -198,7 +198,8 @@ def fetch_medicine_suppliers(conn, medicine_name: str) -> List[Dict[str, Any]]:
 def _next_order_no(cur) -> str:
     cur.execute("SELECT COALESCE(MAX(id),0)+1 FROM pending_orders")
     n = int(cur.fetchone()[0] or 1)
-    return f"RO{datetime.now().strftime('%Y%m%d')}{n:04d}"
+    from core.offline_first.numbers import maybe_doc_number
+    return maybe_doc_number(cur.connection, "RO") or f"RO{datetime.now().strftime('%Y%m%d')}{n:04d}"
 
 
 def _next_group_id(cur) -> str:

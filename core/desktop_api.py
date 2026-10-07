@@ -222,7 +222,21 @@ def _open_conn(db_path: str) -> sqlite3.Connection:
     # 30 s of waiting on a lock, as every other store connection has (db_utils.open_store_db):
     # the UI connection used Python's 5 s default, so a Drive backup snapshot or an upload
     # running at the moment of a save or a mode switch answered "database is locked".
-    conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30.0)
+    # Offline-first: inserts into synced tables take this PC's own id range
+    # (core/offline_first/ids.py).
+    factory = sqlite3.Connection
+    of_active = False
+    try:
+        from core.offline_first.runtime import is_active as _of_active
+
+        of_active = bool(_of_active())
+        if of_active:
+            from core.offline_first.ids import OfConnection
+
+            factory = OfConnection
+    except Exception as exc:
+        print(f"[offline-first] {exc}", flush=True)
+    conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30.0, factory=factory)
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("PRAGMA busy_timeout=30000")
@@ -246,6 +260,15 @@ def _open_conn(db_path: str) -> sqlite3.Connection:
         backfill_missing_fy_serials(conn)
     except Exception as exc:
         print(f"[fy_serial] backfill: {exc}", flush=True)
+    if of_active:
+        try:
+            from core.offline_first import schema as of_schema
+            from core.offline_first import worker as of_worker
+
+            of_schema.ensure_schema(conn)
+            of_worker.start_for(db_path)
+        except Exception as exc:
+            print(f"[offline-first] worker: {exc}", flush=True)
     return conn
 
 
@@ -488,6 +511,18 @@ def _home_quick_actions_payload() -> list[dict[str, Any]]:
     return out
 
 
+def _offline_first_auto(sync: str) -> bool:
+    if sync != "online":
+        return False
+    try:
+        from core.offline_first import AUTO_ACTIVATE
+        from core.store_link import get_local_android_key
+
+        return bool(AUTO_ACTIVATE and get_local_android_key())
+    except Exception:
+        return False
+
+
 def _meta_payload() -> dict[str, Any]:
     from core.app_prefs import load_theme
     from core.app_version import APP_NAME, APP_VERSION
@@ -527,6 +562,8 @@ def _meta_payload() -> dict[str, Any]:
         "api_port": _port,
         "server_time": datetime.now().isoformat(timespec="seconds"),
         "server_only": bool(_db.get("server_only")) or sync == "online",
+        # Offline-first (core/offline_first): an Online PC moves onto it by itself.
+        "offline_first_auto": _offline_first_auto(sync),
         "needs_migrate": bool(
             (_db.get("migrate_gate") or {}).get("needs_migrate")
             and (_db.get("migrate_gate") or {}).get("has_data")
@@ -558,8 +595,15 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 "/api/sync/status",
                 "/api/backup/close",
                 "/api/purchase/import/progress",
-            ):
+            ) and not path.startswith("/api/offline-first/"):
                 _conn_fresh_read(_db.get("conn"))
+            if path.startswith("/api/offline-first/"):
+                from core.offline_first import api as of_api
+
+                hit = of_api.handle_get(path, _db.get("conn"))
+                if hit is not None:
+                    _json_response(self, hit[0], hit[1])
+                    return
             if path == "/api/backup/close":
                 # The closing backup of the day, asked for by the app shell just
                 # before it quits. It could not live in the engine's own
@@ -1738,6 +1782,13 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
             self._handle_settings_write()
             return
         try:
+            if path.startswith("/api/offline-first/"):
+                from core.offline_first import api as of_api
+
+                hit = of_api.handle_post(path, _read_json_body(self), _db.get("conn"))
+                if hit is not None:
+                    _json_response(self, hit[0], hit[1])
+                    return
             if path in ("/api/voice/pack/install", "/api/voice/pack/cancel", "/api/voice/pack/remove",
                         "/api/voice/pack/start", "/api/voice/pack/check"):
                 from core import voice_pack
@@ -2151,6 +2202,31 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 # from the server FIRST, while the session is still online and
                 # authenticated, then flip the mode.
                 prepared = None
+                # Leaving offline-first: everything must have reached the server first; then
+                # the mode just changes. The old Offline -> Online upload is never run from
+                # here (it sends stock as totals; the server already has every movement).
+                _target = str(body.get("sync_mode") or "").strip().lower()
+                try:
+                    from core.sync_prefs import is_offline_first as _of_now
+                except Exception:
+                    _of_now = lambda: False  # noqa: E731
+                if _target in ("online", "offline") and _of_now():
+                    from core.offline_first import worker as _of_worker
+                    from core.offline_first.runtime import status as _of_status
+
+                    _st = _of_status(conn) if conn is not None else {}
+                    _left = int(_st.get("noted") or 0) + int(_st.get("waiting") or 0) + int(
+                        _st.get("stock_moves_waiting") or 0)
+                    if _left:
+                        _json_response(self, 409, {
+                            "ok": False,
+                            "code": "offline_first_unsent",
+                            "error": f"{_left} record(s) on this PC have not reached the server yet. "
+                                     "Connect to the internet and wait for 'Synced', then switch.",
+                        })
+                        return
+                    _of_worker.stop()
+                    body = dict(body, connect_existing=True, upload_local_into_joined_store=False)
                 if str(body.get("sync_mode") or "").strip().lower() == "offline":
                     try:
                         from core.sync_prefs import is_online_mode

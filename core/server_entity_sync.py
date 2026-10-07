@@ -1607,6 +1607,26 @@ def _resolve_pull_decision(conn, collection: str, doc_id: str, data: dict):
     return resolve(local, remote, collection=collection, doc_id=str(doc_id))
 
 
+_OF_APPLY = threading.local()
+
+
+class offline_first_apply:
+    """Inside this block sync_down_doc writes even though the PC is not in Online mode: the
+    offline-first worker (core/offline_first/pull.py) applies other devices' changes with it."""
+
+    def __enter__(self):
+        _OF_APPLY.on = getattr(_OF_APPLY, "on", 0) + 1
+        return self
+
+    def __exit__(self, *exc):
+        _OF_APPLY.on = max(0, getattr(_OF_APPLY, "on", 1) - 1)
+        return False
+
+
+def _offline_first_applying() -> bool:
+    return bool(getattr(_OF_APPLY, "on", 0))
+
+
 def sync_down_doc(conn, collection: str, doc_id: str, data: dict) -> str:
     """
     Apply one cloud document locally.
@@ -1616,7 +1636,7 @@ def sync_down_doc(conn, collection: str, doc_id: str, data: dict) -> str:
     """
     try:
         from core.sync_prefs import is_online_mode
-        if not is_online_mode():
+        if not is_online_mode() and not _offline_first_applying():
             return 'skipped_offline'
     except Exception:
         return 'skipped_offline'

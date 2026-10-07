@@ -75,6 +75,23 @@ def _allocate_bill_number(
     if prefix != "SCB":
         return local_no
 
+    # Offline-first: the number comes from a block this PC reserved on the server, so no
+    # other device can print it (core/offline_first/numbers.py).
+    try:
+        from core.offline_first.runtime import is_active as _of_active
+
+        if _of_active():
+            from core.fy_serial import encode_sales_bill_no, fy_start_year_for_date
+            from core.offline_first.numbers import take_serial
+
+            fy = fy_start_year_for_date(bill_date)
+            serial = take_serial(conn, "sales", fy)
+            if serial is not None:
+                return encode_sales_bill_no(serial, fy)
+            return local_no
+    except Exception as exc:
+        print(f"[billing] offline-first number: {exc}")
+
     try:
         from core.sync_prefs import is_online_mode
 
