@@ -200,6 +200,10 @@ class EventsAndNumbers(Base):
         self.assertEqual(kinds[-1], "stock_operations")
         stock = evs[-1]["stock_ops"]
         self.assertEqual(sum(o["qty_delta"] for o in stock), 8)          # 10 opening - 2 sold
+        # op ids carry the event's own random id, never just "install:j1": a fresh store file
+        # numbers its journal from 1 again, and the server drops a repeated op id as a resend
+        for o in stock:
+            self.assertTrue(o["op_uuid"].startswith(evs[-1]["event_uuid"] + ":j"), o["op_uuid"])
         sale = next(e for e in evs if e["collection"] == "sales")
         self.assertEqual(sale["doc"]["id"], sid)
         self.assertEqual(len(sale["doc"]["items"]), 1)

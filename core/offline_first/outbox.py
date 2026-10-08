@@ -123,13 +123,18 @@ def build_events(conn: sqlite3.Connection, install_id: str) -> int:
     ).fetchall()
     if journal:
         seq = _next_seq(conn)
+        # The op ids carry the event's own random id: a journal numbered from 1 again (a
+        # reinstalled PC on a fresh store file) must never repeat an op id the server already
+        # holds -- the server keeps ONE movement per op id and drops a repeat as a resend.
+        # A real resend sends this stored event as it is, with the same ids.
+        event_uuid = f"pc-{uuid.uuid4().hex}"
         ops = [
-            {"op_uuid": f"{install_id}:j{jid}", "medicine_id": int(mid), "op": "adjust", "qty_delta": int(delta)}
+            {"op_uuid": f"{event_uuid}:j{jid}", "medicine_id": int(mid), "op": "adjust", "qty_delta": int(delta)}
             for jid, mid, delta in journal
         ]
         event = {
             "seq": seq,
-            "event_uuid": f"pc-{uuid.uuid4().hex}",
+            "event_uuid": event_uuid,
             "op": "stock",
             "collection": "stock_operations",
             "stock_ops": ops,
