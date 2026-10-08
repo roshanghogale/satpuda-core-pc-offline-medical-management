@@ -27,6 +27,20 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core import autosave_bill, autosave_session, db_setup, sync_prefs  # noqa: E402
 from core import billing_service  # noqa: E402
 
+import datetime as _dt  # noqa: E402
+
+# The bills in this suite are dated 2026-09-10. The session file forgets a day's counter
+# pointer once that day is more than a week old (autosave_session._prune), so with the real
+# calendar every pointer here is dropped from 2026-09-18 on and the counter tests fail by
+# date alone. The session module's "today" is held at the suite's bill day.
+BILL_DAY = _dt.date(2026, 9, 10)
+
+
+class _BillDay(_dt.date):
+    @classmethod
+    def today(cls):
+        return cls(BILL_DAY.year, BILL_DAY.month, BILL_DAY.day)
+
 
 def _store():
     conn = sqlite3.connect(tempfile.mktemp(suffix=".db"))
@@ -98,6 +112,9 @@ class AutosaveBase(unittest.TestCase):
             autosave_session, "_store_key", lambda: "test-store"
         )
         self._store_patch.start()
+        self._day_patch = mock.patch.object(autosave_session, "date", _BillDay)
+        self._day_patch.start()
+        self.addCleanup(self._day_patch.stop)
         self._online = sync_prefs.is_online_mode
         sync_prefs.is_online_mode = lambda *a, **k: False
         self.conn = _store()
