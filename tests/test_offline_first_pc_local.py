@@ -288,5 +288,104 @@ class PullAndStock(Base):
         self.assertEqual(got, {5, 6, 7, 8})
 
 
+class NoRestoreOverTheLiveCopy(unittest.TestCase):
+    def test_drive_and_usb_restores_are_refused_in_offline_first(self):
+        from unittest import mock
+
+        from core import backup_manager
+
+        with mock.patch("core.sync_prefs.get_sync_mode", return_value="offline_first"), \
+                mock.patch.object(backup_manager, "restore_backup_from_drive") as drive:
+            ok, msg = backup_manager.restore_latest_backup_to_store("Shop", "Store_Shop")
+            self.assertFalse(ok)
+            self.assertIn("offline-first", msg)
+            drive.assert_not_called()  # refused before anything is downloaded
+            ok, msg = backup_manager.restore_local_backup_to_store("Shop", "Store_Shop", path="x.db")
+            self.assertFalse(ok)
+            self.assertIn("offline-first", msg)
+        with mock.patch("core.sync_prefs.get_sync_mode", return_value="offline"):
+            self.assertIsNone(backup_manager._offline_first_restore_refusal())
+
+
+class LeavingAndComingBack(Base):
+    def test_leaving_is_refused_while_anything_is_unsent(self):
+        self.conn.execute("INSERT INTO customers (name) VALUES ('UNSENT')")
+        self.conn.commit()
+        self.assertGreater(schema.unsent_work(self.conn), 0)
+        with self.assertRaises(RuntimeError):
+            schema.clear_bookkeeping(self.conn)
+        self.assertTrue(self.conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='of_ins_customers'").fetchone())
+
+    def test_leaving_clears_notes_and_triggers_so_a_later_switch_starts_clean(self):
+        self.conn.execute(
+            "INSERT INTO medicines (name, stock_qty, sync_status) VALUES ('M', 10, 'pending')")
+        self.conn.commit()
+        # Everything reached the server: the outbox is empty, the journal row is in an event.
+        self.conn.execute("DELETE FROM of_dirty")
+        self.conn.execute("UPDATE of_stock_journal SET event_seq=1")
+        self.conn.execute(
+            "INSERT INTO of_events (seq, event_uuid, collection, op, payload, created_at, status) "
+            "VALUES (1, 'u1', 'stock', 'move', '{}', 'now', 'acked')")
+        self.conn.commit()
+        self.assertEqual(schema.unsent_work(self.conn), 0)
+        schema.clear_bookkeeping(self.conn)
+        trig = [r[0] for r in self.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='trigger'").fetchall() if r[0].startswith("of_")]
+        self.assertEqual(trig, [])
+        for t in ("of_dirty", "of_stock_journal", "of_events", "of_meta"):
+            self.assertEqual(self.conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0], 0, t)
+        self.assertEqual(self.conn.execute(
+            "SELECT COUNT(*) FROM medicines WHERE sync_status <> 'synced'").fetchone()[0], 0)
+        # Another mode now: changes are no longer noted.
+        self.conn.execute("UPDATE medicines SET stock_qty = 4")
+        self.conn.commit()
+        self.assertEqual(schema.unsent_work(self.conn), 0)
+
+
+class OfflineModeIdsStayBelowDeviceRanges(unittest.TestCase):
+    def test_offline_mode_on_a_copy_with_device_ids_makes_ids_below_the_limit(self):
+        fd, path = tempfile.mkstemp(suffix=".db", prefix="of_legacy_")
+        os.close(fd)
+        self.addCleanup(lambda: [os.path.exists(path + x) and os.remove(path + x) for x in ("", "-wal", "-shm")])
+        c = sqlite3.connect(path)
+        db_setup.initialise(c)
+        c.execute("INSERT INTO customers (id, name) VALUES (41, 'OLD')")
+        c.execute("INSERT INTO customers (id, name) VALUES (8000000001, 'PHONE')")
+        c.commit()
+        self.assertTrue(ids.has_device_range_ids(c))
+        c.close()
+        conn = sqlite3.connect(path, factory=ids.LegacyIdConnection)
+        conn.execute("INSERT INTO customers (name) VALUES ('NEW 1')")
+        conn.executemany("INSERT INTO customers (name) VALUES (?)", [("NEW 2",), ("NEW 3",)])
+        conn.commit()
+        got = [r[0] for r in conn.execute(
+            "SELECT id FROM customers WHERE name LIKE 'NEW%' ORDER BY id").fetchall()]
+        conn.close()
+        self.assertEqual(got, [42, 43, 44])
+
+
+class ModeChangesFromSettings(unittest.TestCase):
+    def test_plain_offline_is_only_kept_by_a_pc_already_on_it(self):
+        from unittest import mock
+
+        from core import desktop_api, desktop_settings_service
+
+        want = {
+            "online": ({"offline": "offline_retired", "online": None, "offline_first": "offline_first_via_switch"},
+                       ["online"]),
+            "offline": ({"offline": None, "online": None, "offline_first": "offline_first_via_switch"},
+                        ["offline", "online"]),
+            "offline_first": ({"offline": "offline_retired", "online": None, "offline_first": None},
+                              ["offline_first", "online"]),
+        }
+        for current, (refusals, options) in want.items():
+            with mock.patch("core.sync_prefs.get_sync_mode", return_value=current):
+                for target, code in refusals.items():
+                    got = desktop_api._sync_mode_refusal(target)
+                    self.assertEqual((got or {}).get("code"), code, f"{current} -> {target}")
+                self.assertEqual([o["value"] for o in desktop_settings_service._sync_mode_options()], options)
+
+
 if __name__ == "__main__":
     unittest.main()

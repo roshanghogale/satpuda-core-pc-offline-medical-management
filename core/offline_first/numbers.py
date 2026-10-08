@@ -43,11 +43,16 @@ def remaining(conn: sqlite3.Connection, kind: str, fy_start_year: int) -> int:
     return int(row[0] or 0)
 
 
-def add_block(conn: sqlite3.Connection, kind: str, fy_start_year: int, frm: int, to: int) -> None:
+def add_block(conn: sqlite3.Connection, kind: str, fy_start_year: int, frm: int, to: int,
+              next_serial: int | None = None) -> None:
+    """A block this device holds; ``next_serial`` for one it already used part of (handed
+    back by the server on registration). A number never goes backwards."""
+    nxt = max(int(frm), int(next_serial or frm))
     conn.execute(
-        "INSERT OR IGNORE INTO of_number_blocks (kind, fy_start_year, from_serial, to_serial, next_serial) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (kind, int(fy_start_year), int(frm), int(to), int(frm)),
+        "INSERT INTO of_number_blocks (kind, fy_start_year, from_serial, to_serial, next_serial) "
+        "VALUES (?, ?, ?, ?, ?) ON CONFLICT(kind, fy_start_year, from_serial) "
+        "DO UPDATE SET next_serial=MAX(next_serial, excluded.next_serial)",
+        (kind, int(fy_start_year), int(frm), int(to), nxt),
     )
 
 

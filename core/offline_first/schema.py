@@ -209,6 +209,49 @@ def drop_triggers(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def unsent_work(conn: sqlite3.Connection) -> int:
+    """How many changes on this file have not reached the server (0 when the file was never
+    on offline-first)."""
+    if not _table_exists(conn, "of_dirty"):
+        return 0
+    n = conn.execute("SELECT COUNT(*) FROM of_dirty").fetchone()[0]
+    n += conn.execute("SELECT COUNT(*) FROM of_events WHERE status='pending'").fetchone()[0]
+    n += conn.execute("SELECT COUNT(*) FROM of_stock_journal WHERE event_seq IS NULL").fetchone()[0]
+    return int(n or 0)
+
+
+# Tables whose sync_status the other modes read to find work that never reached the server.
+_SYNC_STATUS_TABLES = ("sales", "purchases", "sales_returns", "purchase_returns", "customer_payments",
+                       "supplier_payments", "medicines", "customers", "suppliers")
+
+
+def clear_bookkeeping(conn: sqlite3.Connection) -> None:
+    """Leaving offline-first (or switching to it again on a file that was on it before), with
+    nothing unsent: the triggers go, so another mode does not note changes nobody will send,
+    and the notes, events, journal and registration are cleared, so a later switch-over starts
+    clean (an old journal row would be added to the server's stock a second time). Records
+    are marked synced: everything on this file is on the server, and the other modes would
+    otherwise treat offline-first's own records as work still to upload.
+
+    Refuses while anything is unsent."""
+    left = unsent_work(conn)
+    if left:
+        raise RuntimeError(f"{left} change(s) on this PC have not reached the server yet")
+    drop_triggers(conn)
+    for table in ("of_dirty", "of_stock_journal", "of_events", "of_versions", "of_id_counters",
+                  "of_number_blocks", "of_doc_counters", "of_meta"):
+        if _table_exists(conn, table):
+            conn.execute(f"DELETE FROM {table}")
+    if _table_exists(conn, "of_flags"):
+        conn.execute("UPDATE of_flags SET v='1' WHERE k='capture'")
+    for table in _SYNC_STATUS_TABLES:
+        if _table_exists(conn, table) and "sync_status" in _columns(conn, table):
+            conn.execute(
+                f"UPDATE {table} SET sync_status='synced' WHERE COALESCE(sync_status,'synced') <> 'synced'"
+            )
+    conn.commit()
+
+
 class capture_paused:
     """Context manager: write pulled changes without noting them as this PC's own."""
 

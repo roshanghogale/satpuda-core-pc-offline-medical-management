@@ -234,6 +234,18 @@ def _open_conn(db_path: str) -> sqlite3.Connection:
             from core.offline_first.ids import OfConnection
 
             factory = OfConnection
+        elif os.path.isfile(db_path):
+            from core.sync_prefs import is_offline_mode as _offline_now
+
+            if _offline_now():
+                from core.offline_first.ids import LegacyIdConnection, has_device_range_ids
+
+                probe = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=30.0)
+                try:
+                    if has_device_range_ids(probe):
+                        factory = LegacyIdConnection
+                finally:
+                    probe.close()
     except Exception as exc:
         print(f"[offline-first] {exc}", flush=True)
     conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30.0, factory=factory)
@@ -509,6 +521,37 @@ def _home_quick_actions_payload() -> list[dict[str, Any]]:
             }
         )
     return out
+
+
+def _sync_mode_refusal(target: str) -> Optional[dict]:
+    """A mode change this build does not make from Settings (None = allowed).
+
+    * offline-first is reached through the switch-over (/api/offline-first/activate), which
+      copies the store and registers the PC; writing the mode alone would skip both.
+    * plain Offline is not entered again once offline-first is in the build: an Offline PC
+      numbers its own bills and ids as "highest + 1", which beside offline-first devices lands
+      on numbers and ids reserved for them. A PC already Offline stays as it is.
+    """
+    from core.sync_prefs import MODE_OFFLINE, MODE_OFFLINE_FIRST, get_sync_mode
+
+    current = get_sync_mode()
+    if not target or target == current:
+        return None
+    if target == MODE_OFFLINE_FIRST:
+        return {"ok": False, "code": "offline_first_via_switch",
+                "error": "Choose Online; the PC then moves to offline-first by itself "
+                         "(it copies the store from the server first)."}
+    if target == MODE_OFFLINE:
+        try:
+            from core.offline_first import AUTO_ACTIVATE
+        except Exception:
+            AUTO_ACTIVATE = False
+        if AUTO_ACTIVATE:
+            return {"ok": False, "code": "offline_retired",
+                    "error": "This version works offline by itself (offline-first): bills are saved "
+                             "on this PC without internet and reach the server when it is back. "
+                             "Plain Offline mode is no longer needed."}
+    return None
 
 
 def _offline_first_auto(sync: str) -> bool:
@@ -2210,6 +2253,10 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                     from core.sync_prefs import is_offline_first as _of_now
                 except Exception:
                     _of_now = lambda: False  # noqa: E731
+                _refused = _sync_mode_refusal(_target)
+                if _refused:
+                    _json_response(self, 409, _refused)
+                    return
                 if _target in ("online", "offline") and _of_now():
                     from core.offline_first import worker as _of_worker
                     from core.offline_first.runtime import status as _of_status
@@ -2226,6 +2273,15 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                         })
                         return
                     _of_worker.stop()
+                    try:
+                        from core.offline_first.schema import clear_bookkeeping
+
+                        if conn is not None:
+                            clear_bookkeeping(conn)
+                    except Exception as exc:
+                        _json_response(self, 409, {"ok": False, "code": "offline_first_unsent",
+                                                   "error": str(exc)})
+                        return
                     body = dict(body, connect_existing=True, upload_local_into_joined_store=False)
                 if str(body.get("sync_mode") or "").strip().lower() == "offline":
                     try:

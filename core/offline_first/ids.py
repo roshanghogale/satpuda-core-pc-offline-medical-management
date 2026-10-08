@@ -19,6 +19,11 @@ from core.offline_first.schema import COLLECTIONS
 _RANGE_TABLES = frozenset(COLLECTIONS)
 _lock = threading.Lock()
 
+# Ids from here up belong to devices that make their own (device_no * 1e9 + n); the server's
+# own allocator and the older apps stay below it (server-live syncService.js LEGACY_ID_LIMIT).
+LEGACY_ID_LIMIT = 1_000_000_000
+_legacy_next: dict = {}
+
 # INSERT [OR x] INTO table (cols) VALUES (params)  -- one row, qmark style
 _INSERT_RX = re.compile(
     r"^\s*INSERT\s+(?:OR\s+(?:IGNORE|REPLACE|ABORT|FAIL|ROLLBACK)\s+)?INTO\s+"
@@ -28,18 +33,56 @@ _INSERT_RX = re.compile(
 
 
 def device_range(conn: sqlite3.Connection):
-    """(id_base, id_max) for this store's device, or None before registration."""
+    """(id_base, id_max) for this store's device, or None before registration.
+
+    On a ``LegacyIdConnection`` (Offline mode) with no device of its own: (0, LEGACY_ID_LIMIT - 1).
+    """
+    rows = {}
     try:
         rows = dict(conn.execute(
             "SELECT k, v FROM of_meta WHERE k IN ('id_base','id_max')"
         ).fetchall())
     except sqlite3.Error:
-        return None
+        pass
     try:
         base, top = int(rows.get("id_base") or 0), int(rows.get("id_max") or 0)
     except (TypeError, ValueError):
-        return None
-    return (base, top) if base > 0 and top > base else None
+        base, top = 0, 0
+    if base > 0 and top > base:
+        return (base, top)
+    if getattr(conn, "legacy_ids", False):
+        return (0, LEGACY_ID_LIMIT - 1)
+    return None
+
+
+def has_device_range_ids(conn: sqlite3.Connection) -> bool:
+    """True when the copy holds records some device made in its own range."""
+    for table in COLLECTIONS:
+        try:
+            if conn.execute(f"SELECT 1 FROM {table} WHERE id >= ? LIMIT 1", (LEGACY_ID_LIMIT,)).fetchone():
+                return True
+        except sqlite3.Error:
+            continue
+    return False
+
+
+def _legacy_next_id(conn: sqlite3.Connection, table: str) -> int:
+    """Offline mode on a copy holding other devices' ids: one more than the largest id below
+    LEGACY_ID_LIMIT (SQLite alone would continue after the device-range ids, inside another
+    device's range). Called under _lock."""
+    used = conn.execute(
+        f"SELECT MAX(id) FROM {table} WHERE id BETWEEN 1 AND ?", (LEGACY_ID_LIMIT - 1,)
+    ).fetchone()[0]
+    try:
+        path = conn.execute("PRAGMA database_list").fetchone()[2]
+    except Exception:
+        path = ""
+    key = (path, table)
+    nid = max((int(used) + 1) if used else 1, _legacy_next.get(key, 0))
+    if nid >= LEGACY_ID_LIMIT:
+        raise RuntimeError(f"no free id below {LEGACY_ID_LIMIT} for {table}")
+    _legacy_next[key] = nid + 1
+    return nid
 
 
 def next_id(conn: sqlite3.Connection, table: str) -> int:
@@ -48,6 +91,9 @@ def next_id(conn: sqlite3.Connection, table: str) -> int:
     if not rng:
         raise RuntimeError("offline-first: this PC is not registered with the server yet")
     base, top = rng
+    if base == 0:
+        with _lock:
+            return _legacy_next_id(conn, table)
     with _lock:
         row = conn.execute("SELECT next_id FROM of_id_counters WHERE tbl=?", (table,)).fetchone()
         have = int(row[0]) if row else base + 1
@@ -120,3 +166,11 @@ class OfConnection(sqlite3.Connection):
     def executemany(self, sql, seq_of_parameters):
         cur = self.cursor()
         return cur.executemany(sql, seq_of_parameters)
+
+
+class LegacyIdConnection(OfConnection):
+    """Offline mode on a copy that holds records made in device ranges (it was on offline-first,
+    or it was copied from a server where offline-first devices work): new records stay below
+    LEGACY_ID_LIMIT, where the server and the older apps make theirs."""
+
+    legacy_ids = True

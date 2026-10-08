@@ -32,6 +32,27 @@ def _reopen_engine_conn() -> None:
         log.warning("reopen after migrate: %s", exc)
 
 
+def _sync_mode_options() -> list[dict[str, str]]:
+    """Modes the Settings screen offers. With offline-first in this build, plain Offline is
+    kept only for a PC that is on it now (it moves on by going Online): a PC that numbers its
+    own bills and ids beside offline-first devices would take numbers and ids reserved for them."""
+    from core.sync_prefs import MODE_OFFLINE, MODE_OFFLINE_FIRST, get_sync_mode
+
+    try:
+        from core.offline_first import AUTO_ACTIVATE
+    except Exception:
+        AUTO_ACTIVATE = False
+    current = get_sync_mode()
+    out = []
+    if current == MODE_OFFLINE or not AUTO_ACTIVATE:
+        out.append({"value": "offline", "label": "Offline — local SQLite + Google Drive"})
+    if current == MODE_OFFLINE_FIRST:
+        out.append({"value": MODE_OFFLINE_FIRST,
+                    "label": "Offline-first — works without internet, syncs by itself"})
+    out.append({"value": "online", "label": "Online — server-only (no local store DB)"})
+    return out
+
+
 def _restore_refusal(result: Any) -> dict[str, Any]:
     """A failed restore for the screen; one that would discard this device's newer records
     carries code "would_lose" so the screen asks, and re-sends with confirm_loss."""
@@ -322,13 +343,7 @@ def get_options() -> dict[str, Any]:
             {"value": "medical", "label": "Medical"},
             {"value": "veterinary", "label": "Veterinary"},
         ],
-        "sync_modes": [
-            {"value": "offline", "label": "Offline — local SQLite + Google Drive"},
-            {
-                "value": "online",
-                "label": "Online — server-only (no local store DB)",
-            },
-        ],
+        "sync_modes": _sync_mode_options(),
         "export_formats": ["csv", "xlsx", "pdf"],
         "printer_types": [
             {"value": "standard", "label": "Standard (HTML/PDF)"},

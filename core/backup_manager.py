@@ -1644,6 +1644,24 @@ def restore_latest_backup_from_drive(store_name: str) -> tuple:
     return restore_backup_from_drive(store_name, file_id=None)
 
 
+def _offline_first_restore_refusal():
+    """Offline-first keeps the store on the server and on this PC, in step. Putting an old
+    backup file in place would bring back old records and old stock on this PC and send
+    nothing the server can trust, so a restore is refused while the mode is on."""
+    try:
+        from core.sync_prefs import is_offline_first
+        if is_offline_first():
+            return (
+                'This PC is on offline-first sync: the store is kept on the server and on this '
+                'PC, so an old backup cannot be put back here (it would bring back old bills and '
+                'old stock). Nothing was changed. To start this PC fresh, switch the store to '
+                'Online in Settings; it copies the store from the server again.'
+            )
+    except Exception:
+        pass
+    return None
+
+
 def restore_latest_backup_to_store(
     store_name: str, store_key: str, *, close_conn=None, file_id: str = None,
     allow_loss: bool = False,
@@ -1654,6 +1672,9 @@ def restore_latest_backup_to_store(
     Online watermarks so the poller cannot overwrite the restore, and returns
     verification counts.
     """
+    refusal = _offline_first_restore_refusal()
+    if refusal:
+        return False, refusal
     ok, result = restore_backup_from_drive(store_name, file_id=file_id)
     if not ok:
         return False, result
@@ -1965,6 +1986,9 @@ def restore_local_backup_to_store(store_name: str, store_key: str, *,
 
     path='' picks the newest usable file found on the connected drives.
     """
+    refusal = _offline_first_restore_refusal()
+    if refusal:
+        return False, refusal
     candidates = []
     if path:
         if not os.path.isfile(path):

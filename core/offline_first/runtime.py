@@ -1,6 +1,7 @@
 """Turning offline-first on for a store, and the facts other modules ask about it."""
 from __future__ import annotations
 
+import os
 import sqlite3
 from datetime import date
 from typing import Callable, Optional
@@ -87,6 +88,13 @@ def register_and_prepare(conn: sqlite3.Connection, *, head_revision: int, app_ve
             (str(prefix), int(top) + 1),
         )
     _seed_versions(conn)
+    # Numbers left in blocks this device already held (reinstalled, or switched on again).
+    for blk in reg.get("open_blocks") or []:
+        try:
+            numbers.add_block(conn, str(blk["kind"]), int(blk["fy_start_year"]), int(blk["from_serial"]),
+                              int(blk["to_serial"]), int(blk["next_serial"]))
+        except (KeyError, TypeError, ValueError):
+            continue
     fy = current_fy()
     for kind, size in numbers.BLOCK_SIZE.items():
         if numbers.remaining(conn, kind, fy) < size // 2:
@@ -106,6 +114,20 @@ def activate_from_online(progress_cb: ProgressCb = None, app_version: str = "") 
 
     _progress(progress_cb, "Checking the server…")
     head = client.head_revision()
+    path = store_db_path()
+    if path and os.path.isfile(path):
+        # A file that was on offline-first before: start its bookkeeping clean (refused while
+        # anything on it is unsent -- that work is sent by offline-first, not thrown away).
+        old = sqlite3.connect(path, timeout=30)
+        try:
+            if schema.unsent_work(old):
+                raise RuntimeError(
+                    f"{schema.unsent_work(old)} change(s) made on this PC in offline-first have not "
+                    "reached the server. Nothing was changed."
+                )
+            schema.clear_bookkeeping(old)
+        finally:
+            old.close()
     _progress(progress_cb, "Copying the store from the server… (app band karu naka)")
     result = download_store_for_offline(progress_cb=progress_cb)
     if isinstance(result, dict) and result.get("ok") is False:
