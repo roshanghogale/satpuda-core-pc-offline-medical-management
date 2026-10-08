@@ -4,4 +4,4 @@ Tag releases as v{APP_VERSION} (e.g. v1.0.5).
 """
 
 APP_NAME = "Satpuda Core"
-APP_VERSION = "1.0.8"
+APP_VERSION = "1.1.0-beta.1"

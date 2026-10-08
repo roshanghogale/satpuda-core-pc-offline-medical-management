@@ -146,12 +146,19 @@ def should_auto_check_today() -> bool:
 
 
 def parse_version(value: str) -> Tuple[int, ...]:
-    """Parse 'v1.2.3' or '1.2.3' into a comparable tuple."""
+    """Parse 'v1.2.3', '1.2.3' or a prerelease '1.2.3-beta.1' into a comparable tuple:
+    (major, minor, patch, final?, prerelease no.). A prerelease sorts BEFORE its final
+    release, so a PC on 1.1.0-beta.1 still updates to 1.1.0."""
     text = (value or "").strip().lstrip("vV")
-    parts = re.findall(r"\d+", text)
+    core_part, _, pre = text.partition("-")
+    parts = [int(p) for p in re.findall(r"\d+", core_part)]
     if not parts:
         return (0,)
-    return tuple(int(p) for p in parts)
+    parts = (parts + [0, 0, 0])[:3] if len(parts) <= 3 else parts
+    if pre.strip():
+        n = re.findall(r"\d+", pre)
+        return (*parts, 0, int(n[-1]) if n else 0)
+    return (*parts, 1, 0)
 
 
 def is_newer_version(latest: str, current: str = APP_VERSION) -> bool:
