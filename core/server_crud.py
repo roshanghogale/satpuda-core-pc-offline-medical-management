@@ -1146,6 +1146,9 @@ def upsert_return_online(collection: str, doc: dict) -> int:
     return int(d["id"])
 
 
+LAST_MEDICINE_PUSH = None
+
+
 def upsert_medicine_online(doc: dict) -> int:
     from core.online_guard import ensure_can_mutate
 
@@ -1162,7 +1165,9 @@ def upsert_medicine_online(doc: dict) -> int:
     else:
         d["id"] = int(d.get("id") or d.get("local_id"))
         d["local_id"] = d["id"]
-    upsert_docs("medicines", [d])
+    global LAST_MEDICINE_PUSH
+    # Kept for the Inventory editor: the answer carries the server's "old bills updated" note.
+    LAST_MEDICINE_PUSH = upsert_docs("medicines", [d])
     if added:
         try:
             # A new batch came in today: a back-dated bill's answer must count it.

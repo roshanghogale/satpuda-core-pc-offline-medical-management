@@ -1317,6 +1317,7 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                             schedule=(qs.get("schedule") or [""])[0],
                             low_only=str(low_raw).strip() in ("1", "true", "yes"),
                             sort=(qs.get("sort") or [""])[0],
+                            show=(qs.get("show") or [""])[0],
                         ),
                     )
                     return

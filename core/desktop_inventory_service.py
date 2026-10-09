@@ -569,11 +569,17 @@ def update_medicine(conn, body: dict[str, Any]) -> dict[str, Any]:
             })
             upsert_medicine_online(doc)
             invalidate("medicines")
+            # The server carries name / type / HSN / schedule / company into the old bill
+            # lines and says how many (core.medicine_lines).
+            from core import server_crud as _sc
+            from core.medicine_lines import note_from_push
+
             return {
                 "ok": True,
                 "medicine_id": medicine_id,
                 "is_strip": is_strip_count_type(med_type, unit),
                 "stock_qty": stock_saved,
+                "lines_note": note_from_push(getattr(_sc, "LAST_MEDICINE_PUSH", None)),
             }
     except Exception as exc:
         return {"ok": False, "error": f"Failed to update medicine: {exc}"}
@@ -620,10 +626,22 @@ def update_medicine(conn, body: dict[str, Any]) -> dict[str, Any]:
         sets.append("synced_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now')")
     params.append(medicine_id)
 
+    from core import medicine_lines
+
+    before = medicine_lines.snapshot(conn, medicine_id)
     try:
         cur.execute(
             f"UPDATE medicines SET {', '.join(sets)} WHERE id=?",
             params,
+        )
+        # Its old bills follow the new description (never the prices).
+        lines = medicine_lines.propagate_local(
+            conn,
+            medicine_id,
+            medicine_lines.changed_fields(before, {
+                "name": name, "type": med_type, "schedule": schedule,
+                "manufacturer": manufacturer, "hsn_code": hsn,
+            }),
         )
         conn.commit()
         try:
@@ -637,6 +655,7 @@ def update_medicine(conn, body: dict[str, Any]) -> dict[str, Any]:
             "medicine_id": medicine_id,
             "is_strip": is_strip_count_type(med_type, unit),
             "stock_qty": stock_saved,
+            "lines_note": medicine_lines.note(lines),
         }
     except Exception as exc:
         try:

@@ -83,6 +83,8 @@ export function InventoryPage({
   const [typeFilter, setTypeFilter] = useState('')
   const [stockStatus, setStockStatus] = useState('')
   const [expiryStatus, setExpiryStatus] = useState('')
+  /** Owner, 9 Oct 2026: see hidden, out-of-stock and expired medicines when needed. */
+  const [show, setShow] = useState('active')
   const [schedule, setSchedule] = useState('')
   // Empty means 'Best match' -- the engine's own order, which is plain A-Z
   // with an empty search box and keeps the name ranking while the shop types.
@@ -303,6 +305,7 @@ export function InventoryPage({
         expiry: expiryStatus,
         schedule,
         sort: sortBy,
+        show,
       })
       if (seq !== loadSeqRef.current) return
       setData(payload)
@@ -331,7 +334,7 @@ export function InventoryPage({
   }, [syncRefreshNonce])
 
   // The dropdowns apply themselves; the search box waits for the typing to stop.
-  useFilterEffect(() => void load(), [typeFilter, stockStatus, expiryStatus, schedule, sortBy])
+  useFilterEffect(() => void load(), [typeFilter, stockStatus, expiryStatus, schedule, sortBy, show])
   useDebouncedFilterEffect(() => void load(), [q])
 
   useEffect(() => {
@@ -513,6 +516,23 @@ export function InventoryPage({
                   {t}
                 </option>
               ))}
+            </select>
+          </Field>
+          <Field label="Show">
+            <select
+              className="settings-input"
+              value={show}
+              onChange={(e) => setShow(e.target.value)}
+              title="Hidden, out-of-stock and expired medicines"
+            >
+              {INVENTORY_VIEWS.map(([key, label]) => {
+                const n = data?.view_counts?.[key]
+                return (
+                  <option key={key} value={key}>
+                    {n == null ? label : `${label} (${n.toLocaleString('en-IN')})`}
+                  </option>
+                )
+              })}
             </select>
           </Field>
           <Field label="Stock Status">
@@ -726,7 +746,10 @@ export function InventoryPage({
           medicineId={dialog.id}
           mode={dialog.mode}
           onClose={() => setDialog(null)}
-          onSaved={() => void load()}
+          onSaved={(note) => {
+            void load()
+            if (note) setAlert({ title: 'Medicine saved', message: note, kind: 'info' })
+          }}
           onDeleted={() => void load()}
           onRequestEdit={() =>
             setDialog((d) => (d ? { ...d, mode: 'edit' } : d))
@@ -737,4 +760,9 @@ export function InventoryPage({
       <AlertDialog alert={alert} onClose={() => setAlert(null)} />
     </PageRoot>
   )
-}
+}/** Inventory views, the same five on the PC, the phone and the web. */
+const INVENTORY_VIEWS: [string, string][] = [
+  ['active', 'Active'], ['hidden', 'Hidden'], ['out_of_stock', 'Out of stock'], ['expired', 'Expired'], ['all', 'All'],
+]
+
+

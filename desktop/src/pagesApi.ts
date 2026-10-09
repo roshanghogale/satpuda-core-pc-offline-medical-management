@@ -40,6 +40,10 @@ export type TablePayload = {
    *  Online mode keeps no data on this PC, so a broken link to the store on the
    *  server used to render as a clean, working, completely empty screen. */
   server_error?: string
+  /** Inventory only: the view shown (active | hidden | out_of_stock | expired | all) and how
+   *  many medicines each view holds (null when an older store server cannot count). */
+  view?: string
+  view_counts?: Record<string, number> | null
   /** Set when the range holds more bills than the list shows (Sales History). The page
    *  used to stop at 500 rows and total those alone without saying so. */
   rows_note?: string
@@ -268,10 +272,13 @@ export function fetchInventory(
     schedule?: string
     sort?: string
     low?: boolean
+    /** active (default) | hidden | out_of_stock | expired | all */
+    show?: string
   } = {},
 ) {
   return getJson<TablePayload>(
     `/api/inventory${qs({
+      show: opts.show && opts.show !== 'active' ? opts.show : undefined,
       q: opts.q,
       type: opts.type,
       stock: opts.stock,
@@ -393,7 +400,8 @@ export function fetchInventoryMedicine(id: number) {
 }
 
 export function updateInventoryMedicine(body: Record<string, unknown>) {
-  return postJson<{ ok: boolean; error?: string; medicine_id?: number }>(
+  // lines_note: "Schedule changed: 37 old sales updated" when the edit reached old bills.
+  return postJson<{ ok: boolean; error?: string; medicine_id?: number; lines_note?: string }>(
     '/api/inventory/medicine/update',
     body,
   )

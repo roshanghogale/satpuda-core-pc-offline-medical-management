@@ -80,7 +80,15 @@ def apply_page(conn: sqlite3.Connection, changes: list[dict], *, to_revision: in
                     pass
                 applied += 1
                 continue
+            before = None
+            if col == "medicines":
+                from core import medicine_lines
+
+                before = medicine_lines.snapshot(conn, lid)
             status = sl.apply_server_doc(conn, col, doc)
+            if col == "medicines" and before:
+                # Edited on another device: this PC's purchase lines follow it too.
+                medicine_lines.after_pulled_medicine(conn, before, doc)
             if status in ("applied", "soft_deleted", "skipped", "kept_local"):
                 applied += 1
             try:

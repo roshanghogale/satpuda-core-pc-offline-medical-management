@@ -49,7 +49,8 @@ export function MedicineEditDialog({
   medicineId: number | null
   mode: Mode
   onClose: () => void
-  onSaved?: () => void
+  /** `note`: what the edit changed on old bills, to show the shop. */
+  onSaved?: (note?: string) => void
   onDeleted?: () => void
   onRequestEdit?: () => void
 }) {
@@ -263,7 +264,7 @@ export function MedicineEditDialog({
         })
         return
       }
-      onSaved?.()
+      onSaved?.(res.lines_note || '')
       onClose()
     } catch (e) {
       setAlert({

@@ -1201,8 +1201,25 @@ def list_inventory(
     low_only: bool = False,
     sort: str = "",
     limit: int = 2000,
+    show: str = "",
 ) -> dict[str, Any]:
-    """Inventory rows matching Tk Inventory columns."""
+    """Inventory rows matching Tk Inventory columns.
+
+    ``show`` picks the view (core.inventory_views): active (default, as always), hidden,
+    out_of_stock, expired or all. The answer carries ``view`` and ``view_counts``.
+    """
+    from core.inventory_views import (
+        count_local as _view_count_local,
+        count_online as _view_count_online,
+        hidden_param as _view_hidden_param,
+        hidden_sql as _view_hidden_sql,
+        normalize_view,
+        row_in_view as _row_in_view,
+        status_filters as _view_status_filters,
+    )
+
+    view = normalize_view(show)
+    stock_status, expiry_status = _view_status_filters(view, stock_status or "", expiry_status or "")
     show_location = False
     try:
         row = conn.execute(
@@ -1288,6 +1305,7 @@ def list_inventory(
                         q=q or "",
                         limit=inv_limit,
                         include_total=False,
+                        hidden=_view_hidden_param(view),
                         # Narrowed by the SERVER, the way the Offline SQL does
                         # it. Filtering these in the loop below over one page
                         # meant a shop with more batches than the page held saw
@@ -1307,7 +1325,7 @@ def list_inventory(
                 for r in ((data or {}).get("rows") or [])
                 if isinstance(r, dict)
                 and not r.get("deleted")
-                and not r.get("is_hidden")
+                and _row_in_view(view, is_hidden=bool(r.get("is_hidden")))
             ]
             # No medicine merge starts from here any more: it moved stock, deleted rows and
             # pushed whole bills again every 15 minutes with nobody choosing the row to keep.
@@ -1327,12 +1345,15 @@ def list_inventory(
             # total down, and hiding it meant the medicine simply vanished from
             # Inventory while the shortage stayed on the books with nothing on
             # screen to explain it. Always show those.
-            src_rows = [
-                r
-                for r in src_rows
-                if float(r.get("stock_qty") or r.get("stock") or 0) != 0
-                or name_totals.get(str(r.get("name") or "").strip(), 0.0) <= 0
-            ]
+            # Only in the everyday (Active) view: the Out of stock / Hidden / All views exist
+            # to SHOW those batches.
+            if view == "active":
+                src_rows = [
+                    r
+                    for r in src_rows
+                    if float(r.get("stock_qty") or r.get("stock") or 0) != 0
+                    or name_totals.get(str(r.get("name") or "").strip(), 0.0) <= 0
+                ]
             # Order the source list HERE, before src_ids is derived from it and
             # before the display rows are built, so rows, row_ids and row_styles
             # cannot drift apart. Online came back in the store server's own
@@ -1514,6 +1535,8 @@ def list_inventory(
                     "expired": row_counts.get("expired", 0),
                     "total_value": float(rem.get("stock_value") or 0),
                 },
+                "view": view,
+                "view_counts": _view_count_online(),
                 "server_error": _server_error_text(_read_failures),
             }
     except Exception as exc:
@@ -1545,8 +1568,10 @@ def list_inventory(
 
     where = ["1=1"]
     params: list[Any] = []
-    if "is_hidden" in cols:
-        where.append("COALESCE(is_hidden,0)=0")
+    if "is_hidden" in cols and _view_hidden_sql(view):
+        where.append(_view_hidden_sql(view))
+    if "deleted" in cols:
+        where.append("COALESCE(deleted,0)=0")
 
     q = (q or "").strip()
     if q:
@@ -1780,6 +1805,8 @@ def list_inventory(
             "expired": sum_exp,
             "total_value": round(sum_value, 2),
         },
+        "view": view,
+        "view_counts": _view_count_local(conn),
     }
 
 

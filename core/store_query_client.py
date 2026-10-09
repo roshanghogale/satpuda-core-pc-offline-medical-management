@@ -306,6 +306,11 @@ def inventory_summary() -> dict:
     return _get("/api/store/summaries/inventory")
 
 
+def inventory_counts() -> dict:
+    """Medicines per Inventory view: active / hidden / out_of_stock / expired / all."""
+    return _get("/api/store/inventory/counts")
+
+
 def home_summary() -> dict:
     return _get("/api/store/summaries/home")
 
