@@ -130,6 +130,26 @@ class OldBillsFollow(unittest.TestCase):
         row = self.conn.execute("SELECT hsn_code, manufacturer, type FROM purchase_items WHERE medicine_id=7").fetchone()
         self.assertEqual(row, ("300490", "ACME", "Tablet"))
 
+    def test_batch_expiry_and_gst_follow_but_never_blank_and_amounts_stay(self):
+        out = self._edit(batch="B7X", expiry="11/28")
+        self.assertTrue(out["ok"], out)
+        self.assertIn("Batch", out["lines_note"])
+        self.assertIn("Expiry", out["lines_note"])
+        exp = self.conn.execute("SELECT expiry_date FROM medicines WHERE id=7").fetchone()[0]
+        row = self.conn.execute("SELECT batch_no, expiry_date, rate FROM purchase_items WHERE medicine_id=7").fetchone()
+        self.assertEqual(row, ("B7X", exp, 30.0))
+        # GST % arriving from another device: sale and purchase lines take the rate, not the amount
+        self.conn.execute("UPDATE sales_items SET gst_percent=12")
+        before = medicine_lines.snapshot(self.conn, 7)
+        medicine_lines.after_pulled_medicine(self.conn, before, {"id": 7, "gst_percent": 5, "batch_no": ""})
+        self.assertEqual(
+            self.conn.execute("SELECT DISTINCT gst_percent, amount FROM sales_items WHERE medicine_id=7").fetchall(),
+            [(5.0, 50.0)],
+        )
+        self.assertEqual(
+            self.conn.execute("SELECT gst_pct, batch_no FROM purchase_items WHERE medicine_id=7").fetchone(), (5.0, "B7X")
+        )
+
     def test_note_wording(self):
         self.assertEqual(medicine_lines.note({"fields": ["schedule"], "sales": 37}), "Schedule changed: 37 old sales updated")
         self.assertEqual(medicine_lines.note({"fields": ["schedule"], "sales": 0, "purchases": 0}), "")

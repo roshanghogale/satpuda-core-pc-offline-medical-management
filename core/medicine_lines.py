@@ -1,9 +1,9 @@
 """A medicine's details flow into its old bills (owner, 9 Oct 2026).
 
 Changing a medicine to Schedule H1 must put its OLD sales in the schedule register, and the
-same for its HSN code, name, type and company. Never prices: rate, MRP, GST %, discount and
-amounts stay exactly as billed (printed bills, filed GST returns). Batch and expiry belong to
-the stock line and are not touched.
+same for its HSN code, name, type and company -- and (owner, 9 Oct 2026) its GST %, batch and
+expiry. Never prices: rate, MRP, discount and every amount stay exactly as billed. GST %, batch
+and expiry are never blanked on old lines by an empty new value.
 
 On this PC:
   - sales_items, sales_return_items and purchase_return_items keep no copy of these fields;
@@ -24,15 +24,38 @@ PURCHASE_LINE_FIELDS = {
     "hsn_code": "hsn_code",
     "schedule": "schedule",
     "manufacturer": "manufacturer",
+    "gst_percent": "gst_pct",
+    "batch_no": "batch_no",
+    "expiry_date": "expiry_date",
 }
-#: every descriptive field that flows (the server also carries name)
-DESCRIPTIVE = ("name", "type", "hsn_code", "schedule", "manufacturer")
+#: medicine field -> sales_items column on this PC (sale lines keep only the GST rate)
+SALE_LINE_FIELDS = {"gst_percent": "gst_percent"}
+#: every field that flows (the server also carries name)
+DESCRIPTIVE = ("name", "type", "hsn_code", "schedule", "manufacturer", "gst_percent", "batch_no", "expiry_date")
+#: never blanked on old lines by an empty new value
+_NO_BLANK = ("gst_percent", "batch_no", "expiry_date")
 
-_LABELS = {"name": "Name", "type": "Type", "hsn_code": "HSN", "schedule": "Schedule", "manufacturer": "Company"}
+_LABELS = {
+    "name": "Name", "type": "Type", "hsn_code": "HSN", "schedule": "Schedule", "manufacturer": "Company",
+    "gst_percent": "GST %", "batch_no": "Batch", "expiry_date": "Expiry",
+}
 
 
 def _norm(v: Any) -> str:
     return "" if v is None else str(v).strip()
+
+
+def _key(f: str, v: Any) -> str:
+    if f == "gst_percent":
+        try:
+            return "" if v in (None, "") else repr(float(v))
+        except (TypeError, ValueError):
+            return ""
+    if f == "expiry_date":
+        return _norm(v)[:10]
+    if f == "name":
+        return _norm(v).upper()
+    return _norm(v)
 
 
 def snapshot(conn: sqlite3.Connection, medicine_id: int) -> dict[str, Any] | None:
@@ -54,24 +77,41 @@ def changed_fields(before: dict | None, after: dict | None) -> dict[str, str]:
     for f in DESCRIPTIVE:
         if f not in after:
             continue
-        a, b = _norm(before.get(f)), _norm(after.get(f))
-        if f == "name":
-            a, b = a.upper(), b.upper()
-        if a != b:
-            out[f] = _norm(after.get(f))
+        a, b = _key(f, before.get(f)), _key(f, after.get(f))
+        if a == b or (f in _NO_BLANK and b == ""):
+            continue
+        out[f] = float(after.get(f)) if f == "gst_percent" else _norm(after.get(f))
     return out
 
 
-def propagate_local(conn: sqlite3.Connection, medicine_id: int, changes: dict[str, str]) -> dict[str, Any]:
-    """Write the changed fields into this medicine's purchase lines; count the bills it reaches."""
+def _pause_capture(conn: sqlite3.Connection):
+    """On offline-first the server makes this same change to its own copy, so it is not this
+    PC's edit of those bills: change capture is paused, or every bill of the medicine would be
+    sent up again. Returns the value to put back (None when not on offline-first)."""
+    try:
+        r = conn.execute("SELECT v FROM of_flags WHERE k='capture'").fetchone()
+    except sqlite3.Error:
+        return None
+    if r is None:
+        return None
+    conn.execute("UPDATE of_flags SET v='0' WHERE k='capture'")
+    return r[0]
+
+
+def propagate_local(conn: sqlite3.Connection, medicine_id: int, changes: dict[str, Any]) -> dict[str, Any]:
+    """Write the changed fields into this medicine's bill lines; count the bills it reaches."""
     counts: dict[str, Any] = {"sales": 0, "purchases": 0, "fields": sorted(changes)}
     if not changes:
         return counts
     mid = int(medicine_id)
-    try:
-        pcols = {r[1] for r in conn.execute("PRAGMA table_info(purchase_items)").fetchall()}
-    except sqlite3.Error:
-        pcols = set()
+
+    def cols(table: str) -> set:
+        try:
+            return {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        except sqlite3.Error:
+            return set()
+
+    pcols, sicols = cols("purchase_items"), cols("sales_items")
     sets, differs, params = [], [], []
     for f, v in changes.items():
         col = PURCHASE_LINE_FIELDS.get(f)
@@ -79,31 +119,30 @@ def propagate_local(conn: sqlite3.Connection, medicine_id: int, changes: dict[st
             sets.append(f"{col}=?")
             differs.append(f"COALESCE({col},'') <> ?")
             params.append(v)
-    if sets:
-        # On offline-first the server makes this same change to its own copy, so it is not
-        # this PC's edit of those purchases: change capture is paused, or every purchase of
-        # the medicine would be sent up again.
-        paused = None
-        try:
-            r = conn.execute("SELECT v FROM of_flags WHERE k='capture'").fetchone()
-            if r is not None:
-                paused = r[0]
-                conn.execute("UPDATE of_flags SET v='0' WHERE k='capture'")
-        except sqlite3.Error:
-            paused = None
-        rows = conn.execute(
-            f"SELECT DISTINCT purchase_id FROM purchase_items WHERE medicine_id=? AND ({' OR '.join(differs)})",
-            [mid, *params],
-        ).fetchall()
-        conn.execute(
-            f"UPDATE purchase_items SET {', '.join(sets)} WHERE medicine_id=? AND ({' OR '.join(differs)})",
-            [*params, mid, *params],
-        )
-        if paused is not None:
-            conn.execute("UPDATE of_flags SET v=? WHERE k='capture'", (paused,))
-        counts["purchases"] = len(rows)
+    restore = _pause_capture(conn)
     try:
-        scols = {r[1] for r in conn.execute("PRAGMA table_info(sales)").fetchall()}
+        if sets:
+            rows = conn.execute(
+                f"SELECT DISTINCT purchase_id FROM purchase_items WHERE medicine_id=? AND ({' OR '.join(differs)})",
+                [mid, *params],
+            ).fetchall()
+            conn.execute(
+                f"UPDATE purchase_items SET {', '.join(sets)} WHERE medicine_id=? AND ({' OR '.join(differs)})",
+                [*params, mid, *params],
+            )
+            counts["purchases"] = len(rows)
+        # Sale lines keep their GST rate: it follows too (the amount does not).
+        for f, col in SALE_LINE_FIELDS.items():
+            if f in changes and col in sicols:
+                conn.execute(
+                    f"UPDATE sales_items SET {col}=? WHERE medicine_id=? AND COALESCE({col},-1) <> ?",
+                    (changes[f], mid, changes[f]),
+                )
+    finally:
+        if restore is not None:
+            conn.execute("UPDATE of_flags SET v=? WHERE k='capture'", (restore,))
+    try:
+        scols = cols("sales")
         live = " AND COALESCE(s.deleted,0)=0" if "deleted" in scols else ""
         row = conn.execute(
             f"SELECT COUNT(DISTINCT si.sale_id) FROM sales_items si JOIN sales s ON s.id=si.sale_id "

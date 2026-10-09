@@ -639,8 +639,10 @@ def update_medicine(conn, body: dict[str, Any]) -> dict[str, Any]:
             conn,
             medicine_id,
             medicine_lines.changed_fields(before, {
-                "name": name, "type": med_type, "schedule": schedule,
-                "manufacturer": manufacturer, "hsn_code": hsn,
+                # As stored (expiry in the shop's own format), and only what this edit sends.
+                k: v for k, v in (medicine_lines.snapshot(conn, medicine_id) or {}).items()
+                if k in ("name", "type", "schedule", "manufacturer", "hsn_code", "batch_no")
+                or (k == "expiry_date" and has_expiry)
             }),
         )
         conn.commit()
