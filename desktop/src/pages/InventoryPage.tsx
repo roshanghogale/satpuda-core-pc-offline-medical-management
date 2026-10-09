@@ -6,6 +6,7 @@ import { usePageHotkeys, focusPageFilter } from '../hooks/usePageHotkeys'
 import {
   deleteExpiredMedicines,
   deleteInventoryMedicine,
+  unhideInventoryMedicine,
   deleteZeroStockMedicines,
   fetchInventory,
   fetchInventoryReorderPrefill,
@@ -391,6 +392,25 @@ export function InventoryPage({
     })
   }
 
+  /** Hidden medicines come back into the normal list (Show: Hidden / All). */
+  const unhide = async (medicineId: number, nameHint?: string) => {
+    try {
+      const res = await unhideInventoryMedicine(medicineId)
+      if (!res.ok) {
+        setAlert({ title: 'Unhide Failed', message: res.error || 'Could not unhide.', kind: 'error' })
+        return
+      }
+      setAlert({
+        title: 'Medicine back in the list',
+        message: `"${nameHint || 'This medicine'}" shows in Inventory and billing again.`,
+        kind: 'info',
+      })
+      void load()
+    } catch (e) {
+      setAlert({ title: 'Error', message: e instanceof Error ? e.message : String(e), kind: 'error' })
+    }
+  }
+
   const summary = data?.summary || {}
 
   usePageHotkeys({
@@ -729,6 +749,16 @@ export function InventoryPage({
               if (ctx) reorderSelected(ctx.medicineId)
             },
           },
+          ...(show === 'hidden' || show === 'all'
+            ? [
+                {
+                  label: 'Unhide (show in list again)',
+                  onClick: () => {
+                    if (ctx) void unhide(ctx.medicineId, ctx.name)
+                  },
+                },
+              ]
+            : []),
           { label: '', separator: true },
           {
             label: 'Delete Medicine',

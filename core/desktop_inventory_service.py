@@ -694,6 +694,58 @@ def _hide_medicine_online(medicine_id: int) -> bool:
     return True
 
 
+def unhide_medicine(conn, body: dict[str, Any]) -> dict[str, Any]:
+    """Bring a hidden medicine back into the normal Inventory list (owner, 9 Oct 2026).
+
+    "Remove zero stock", "Remove expired" and Delete only HIDE a medicine; until now nothing but
+    a new purchase brought one back. Same paths as hiding: Online writes the server's copy
+    (version taken from the server, see _hide_medicine_online); Offline / offline-first write
+    the local row and its sync stamp.
+    """
+    medicine_id = _safe_int(body.get("id") or body.get("medicine_id"))
+    if medicine_id <= 0:
+        return {"ok": False, "error": "Medicine id required."}
+    try:
+        from core.online_guard import ensure_can_mutate
+
+        ensure_can_mutate()
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "code": "online_blocked"}
+    try:
+        from core.sync_prefs import is_online_mode
+
+        if is_online_mode():
+            from core.server_crud import upsert_medicine_online, bump_meta, get_doc
+            from core.online_catalog import medicine_by_id, invalidate
+
+            existing = get_doc("medicines", medicine_id) or medicine_by_id(medicine_id) or {}
+            if not existing:
+                return {"ok": False, "error": "Medicine not found."}
+            doc = bump_meta(dict(existing))
+            doc["id"] = medicine_id
+            doc["local_id"] = medicine_id
+            doc["is_hidden"] = False
+            upsert_medicine_online(doc)
+            invalidate("medicines")
+            return {"ok": True, "unhidden": True, "medicine_id": medicine_id}
+
+        cur = conn.execute("UPDATE medicines SET is_hidden=0 WHERE id=?", (medicine_id,))
+        if not cur.rowcount:
+            return {"ok": False, "error": "Medicine not found."}
+        conn.commit()
+        from core.sync_coordinator import after_medicines_hidden
+
+        # The same stamp-and-push a hide uses; it carries is_hidden whichever way it went.
+        after_medicines_hidden(conn, [medicine_id])
+        return {"ok": True, "unhidden": True, "medicine_id": medicine_id}
+    except Exception as exc:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return {"ok": False, "error": f"Failed to unhide medicine: {exc}"}
+
+
 def delete_medicine(conn, body: dict[str, Any]) -> dict[str, Any]:
     medicine_id = _safe_int(body.get("id") or body.get("medicine_id"))
     if medicine_id <= 0:

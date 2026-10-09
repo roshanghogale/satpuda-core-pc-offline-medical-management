@@ -70,6 +70,17 @@ class Views(unittest.TestCase):
         self.assertEqual(names("expired")[0], ["DELTA"])
         self.assertEqual(names("all")[0], ["ALPHA", "BETA", "DELTA", "EPSILON", "GAMMA"])
 
+    def test_unhide_brings_a_hidden_medicine_back(self):
+        from core.desktop_inventory_service import unhide_medicine
+
+        with mock.patch("core.sync_prefs.is_online_mode", return_value=False),                 mock.patch("core.sync_coordinator.is_online_mode", return_value=False),                 mock.patch("core.online_guard.ensure_can_mutate", return_value=None):
+            out = unhide_medicine(self.conn, {"id": 3})
+            missing = unhide_medicine(self.conn, {"id": 999})
+        self.assertTrue(out["ok"], out)
+        self.assertFalse(missing["ok"])
+        self.assertEqual(self.conn.execute("SELECT is_hidden FROM medicines WHERE id=3").fetchone()[0], 0)
+        self.assertEqual(count_local(self.conn)["hidden"], 0)
+
     def test_view_names(self):
         self.assertEqual(normalize_view("Out of stock"), "out_of_stock")
         self.assertEqual(normalize_view("nonsense"), "active")

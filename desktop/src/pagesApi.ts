@@ -407,6 +407,11 @@ export function updateInventoryMedicine(body: Record<string, unknown>) {
   )
 }
 
+/** Bring a hidden medicine back into the normal Inventory list. */
+export function unhideInventoryMedicine(id: number) {
+  return postJson<{ ok: boolean; error?: string }>('/api/inventory/medicine/unhide', { id })
+}
+
 export function deleteInventoryMedicine(id: number) {
   return postJson<{ ok: boolean; error?: string }>(
     '/api/inventory/medicine/delete',

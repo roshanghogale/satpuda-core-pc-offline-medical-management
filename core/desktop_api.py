@@ -1919,6 +1919,7 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 "/api/purchase/history/delete",
                 "/api/inventory/medicine/update",
                 "/api/inventory/medicine/delete",
+                "/api/inventory/medicine/unhide",
             ):
                 from core import desktop_purchase_service as purchase_svc
                 from core import desktop_inventory_service as inv_svc
@@ -1981,6 +1982,8 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                     result = inv_svc.update_medicine(conn, body)
                 elif path == "/api/inventory/medicine/delete":
                     result = inv_svc.delete_medicine(conn, body)
+                elif path == "/api/inventory/medicine/unhide":
+                    result = inv_svc.unhide_medicine(conn, body)
                 else:
                     result = purchase_svc.save_purchase_bill(conn, body)
                 status = 200
