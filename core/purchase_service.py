@@ -434,12 +434,21 @@ def recalculate_supplier_due(conn, supplier_id: int, *, commit: bool = True) -> 
         "ORDER BY purchase_date ASC, id ASC",
         (supplier_id,))
     bills = [(int(r[0]), float(r[1] or 0), float(r[2] or 0)) for r in cur.fetchall()]
+    # The same fields the server's cascade writes (server-live partyDueCascade.js
+    # cascadeSupplierAfterLedgerChange). Only account_cleared was written, so a supplier
+    # payment taken in Offline / offline-first left the purchase "Due" in Purchase History.
+    # Only purchases whose figures move are written.
     for bill_id, remaining, cleared in cascade_purchases_fifo(
         bills, total_payments, total_returns,
     ):
+        rem = round(float(remaining or 0), 2)
+        c = int(bool(cleared))
         cur.execute(
-            "UPDATE purchases SET account_cleared=? WHERE id=?",
-            (cleared, bill_id),
+            "UPDATE purchases SET due_amount=?, due=?, total_due=?, bill_cleared=?, account_cleared=? "
+            "WHERE id=? AND (ABS(COALESCE(due_amount,0)-?) > 0.009 OR ABS(COALESCE(due,0)-?) > 0.009 "
+            "OR ABS(COALESCE(total_due,0)-?) > 0.009 OR COALESCE(bill_cleared,0) <> ? "
+            "OR COALESCE(account_cleared,0) <> ?)",
+            (rem, rem, rem, c, c, bill_id, rem, rem, rem, c, c),
         )
 
     if commit:

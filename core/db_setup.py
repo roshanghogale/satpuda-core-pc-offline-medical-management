@@ -305,6 +305,7 @@ def initialise(conn: sqlite3.Connection):
     migrate_schema(conn)
 
     _run_one_time_migration(conn)
+    _run_bill_dues_follow_payments(conn)
 
     try:
         from core.pharmacy_profile_io import ensure_pharmacy_profile_table
@@ -1105,6 +1106,44 @@ def _migrate_location_format(cur):
             cur.executemany("UPDATE medicines SET location='' WHERE id=?", clear_ids)
     except Exception as e:
         print(f"location migration: {e}")
+
+
+def _run_bill_dues_follow_payments(conn):
+    """Once per store file (12 Oct 2026): every bill takes its share of the payments already
+    made. Until now a customer / supplier payment taken on this PC updated the party's total
+    but not each bill's due_amount / bill_cleared, so Sales / Purchase History kept showing
+    paid bills as Due or Partial (recalculate_customer_due / recalculate_supplier_due now write
+    them, oldest bill first, as the server does). Only bills whose figures move are written."""
+    try:
+        row = conn.execute(
+            "SELECT value FROM settings WHERE name='bill_dues_follow_payments_v1'"
+        ).fetchone()
+        if row and row[0] == '1':
+            return
+        from core.customer_service import recalculate_customer_due
+        from core.purchase_service import recalculate_supplier_due
+
+        cids = [int(r[0]) for r in conn.execute(
+            "SELECT DISTINCT customer_id FROM sales WHERE customer_id IS NOT NULL AND customer_id <> 0"
+        ).fetchall()]
+        sids = [int(r[0]) for r in conn.execute(
+            "SELECT DISTINCT supplier_id FROM purchases WHERE supplier_id IS NOT NULL AND supplier_id <> 0"
+        ).fetchall()]
+        for cid in cids:
+            recalculate_customer_due(conn, cid, commit=False, sync=False)
+        for sid in sids:
+            recalculate_supplier_due(conn, sid, commit=False)
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (name, value) VALUES ('bill_dues_follow_payments_v1', '1')"
+        )
+        conn.commit()
+        print(f"[MIGRATION] Bill dues follow payments: {len(cids)} customer(s), {len(sids)} supplier(s).")
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        print(f"bill dues follow payments migration: {e}")
 
 
 # ── One-time data migration (Phase 11) ───────────────────────────────────────

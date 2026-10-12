@@ -900,3 +900,13 @@
 .vb-enroll-ok { font-size: 15px; font-weight: 700; color: #30a46c; }
 .vb-enroll-foot { display: flex; justify-content: flex-end; }
 .vb-enroll-msg.vb-warn { color: #e5484d; }
+
+/* Sales / Purchase History: a Due or Partial badge takes a payment (core/history_pay.py). */
+.settings-table td.ri-status-actionable .ri-status-badge {
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+.settings-table td.ri-status-actionable:hover .ri-status-badge {
+  filter: brightness(1.1);
+  box-shadow: 0 0 0 2px var(--ri-color, currentColor);
+}

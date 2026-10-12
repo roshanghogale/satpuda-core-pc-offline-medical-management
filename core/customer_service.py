@@ -287,10 +287,20 @@ def recalculate_customer_due(conn, customer_id, *, commit: bool = True, sync: bo
         (customer_id,),
     )
     bills = [(int(r[0]), float(r[1] or 0), float(r[2] or 0)) for r in cur.fetchall()]
+    # The same four fields the server's cascade writes (server-live partyDueCascade.js
+    # cascadeCustomerAfterLedgerChange). This wrote total_due / account_cleared only, so a
+    # payment taken in Offline or offline-first left each bill's due_amount and bill_cleared
+    # as billed: Sales History still said "Partial Payment" until the server's figures came
+    # back by sync (and never without internet). Only bills whose figures move are written,
+    # so a payment does not re-send every bill of the customer.
     for bid, remaining, cleared in cascade_sales_fifo(bills, total_standalone, total_returns):
+        rem = round(float(remaining or 0), 2)
+        bill_cleared = 1 if rem <= 0.01 else 0
         cur.execute(
-            "UPDATE sales SET total_due=?, account_cleared=? WHERE id=?",
-            (remaining, cleared, bid),
+            "UPDATE sales SET total_due=?, due_amount=?, account_cleared=?, bill_cleared=? "
+            "WHERE id=? AND (ABS(COALESCE(total_due,0)-?) > 0.009 OR ABS(COALESCE(due_amount,0)-?) > 0.009 "
+            "OR COALESCE(account_cleared,0) <> ? OR COALESCE(bill_cleared,0) <> ?)",
+            (rem, rem, int(bool(cleared)), bill_cleared, bid, rem, rem, int(bool(cleared)), bill_cleared),
         )
 
     if commit:

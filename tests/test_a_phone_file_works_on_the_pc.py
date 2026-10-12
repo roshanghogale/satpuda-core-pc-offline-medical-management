@@ -49,6 +49,13 @@ CHANGED_BY_THE_PHONE = {
     ("medicines", 1, "stock_qty"): 85,          # 90 - 5
     ("customers", 2, "total_due"): 50.0,        # 70 - 20
     ("sales", 2, "total_due"): 50.0,            # her running due on her last bill
+    # The PC's one-time repair (db_setup._run_bill_dues_follow_payments, 12 Oct 2026): a bill's
+    # own due follows the payments made against the party, oldest bill first, as the server's
+    # cascade has it. The PC file held these as billed.
+    ("sales", 2, "due_amount"): 50.0,
+    ("purchases", 1, "due"): 144.0,             # 300 less the supplier payment and the return
+    ("purchases", 1, "total_due"): 144.0,
+    ("purchases", 1, "due_amount"): 144.0,
 }
 
 # Desktop-only columns the phone's Room tables do not have: a PC file restored on the phone

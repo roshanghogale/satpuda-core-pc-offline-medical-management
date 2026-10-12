@@ -15,6 +15,8 @@ export function useSyncRefreshPoller(opts: {
   enabled: boolean
   page: PageId
   online: boolean
+  /** Offline-first: the background sync pulls other devices' changes in. */
+  offlineFirst?: boolean
   onStatusLine?: (line: string) => void
   /** Called every poll with the online-catalog read failure ("" when fine). */
   onCatalogError?: (message: string) => void
@@ -22,6 +24,7 @@ export function useSyncRefreshPoller(opts: {
   onStoreLinkError?: (message: string) => void
 }) {
   const { enabled, page, online } = opts
+  const offlineFirst = Boolean(opts.offlineFirst)
   // Held in refs, not read from the closure: these arrive as inline arrows, so
   // naming them in the effect's dependency list tore down and rebuilt the
   // 10-second interval on every render of the shell.
@@ -76,7 +79,9 @@ export function useSyncRefreshPoller(opts: {
         onStatusLineRef.current?.(s.status_line || '')
         onCatalogErrorRef.current?.(s.catalog_error || '')
         onStoreLinkErrorRef.current?.(s.store_link_error || '')
-        if (!online) return
+        // Online: the server's hints. Offline-first: what the background sync pulled in from
+        // other devices (core/offline_first/worker.py notes it). Plain Offline: nothing comes in.
+        if (!online && !offlineFirst) return
         const cols = (s.refresh_collections || []).filter(Boolean)
         if (!cols.length) return
         // 'all' still remounts, but empty/no-op polls no longer emit it from sync_engine.
@@ -105,7 +110,7 @@ export function useSyncRefreshPoller(opts: {
     window.addEventListener(DATA_CHANGED_EVENT, onDataChanged)
 
     void poll()
-    const intervalMs = online ? POLL_MS : 15000
+    const intervalMs = online || offlineFirst ? POLL_MS : 15000
     const timer = window.setInterval(poll, intervalMs)
     return () => {
       cancelled = true
@@ -117,7 +122,7 @@ export function useSyncRefreshPoller(opts: {
         debounceRef.current = null
       }
     }
-  }, [enabled, online])
+  }, [enabled, online, offlineFirst])
 
   return syncRefreshNonce
 }

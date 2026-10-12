@@ -2,6 +2,7 @@
 
 import { getApiBase } from './api'
 import type { AlertNavigatePayload } from './settingsApi'
+import { dispatchDataChanged } from './syncRefresh'
 
 export type RowStyle = {
   status?: string
@@ -835,7 +836,15 @@ export function calcSalesBill(body: Record<string, unknown>) {
 }
 
 export function saveSalesBill(body: Record<string, unknown>) {
-  return postJson<SalesSaveResult>('/api/sales/save', body, true)
+  // A saved bill changes history, stock, dues and the home figures: tell the open pages now.
+  // Online the server's hint used to be the only trigger, and Offline / offline-first has none,
+  // so Sales History showed a new bill only after something else reloaded it.
+  return postJson<SalesSaveResult>('/api/sales/save', body, true).then((res) => {
+    if ((res as { ok?: boolean })?.ok !== false) {
+      dispatchDataChanged(['sales', 'medicines', 'customers', 'customer_payments'])
+    }
+    return res
+  })
 }
 
 export function fetchRecentSales(limit = 5) {

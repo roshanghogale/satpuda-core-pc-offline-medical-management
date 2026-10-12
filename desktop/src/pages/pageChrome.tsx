@@ -654,6 +654,7 @@ export function DataTable({
   onRowDoubleClick,
   onRowClick,
   selectedRowIndex,
+  onStatusClick,
 }: {
   columns: string[]
   rows: unknown[][]
@@ -668,6 +669,9 @@ export function DataTable({
   onRowDoubleClick?: (rowIndex: number) => void
   onRowClick?: (rowIndex: number) => void
   selectedRowIndex?: number | null
+  /** The row's status badge was clicked (e.g. Due / Partial -> take a payment). Return
+   *  true when the page acted on it; the badge then shows as a button for that row. */
+  onStatusClick?: (rowIndex: number, style: RowStyle | undefined) => boolean | void
 }) {
   const nums = Array.isArray(numericCols)
     ? new Set(numericCols)
@@ -828,7 +832,21 @@ export function DataTable({
                         formatCell(row[j])
                       const badgeOnRow = Boolean(style.full_row)
                       return (
-                        <td key={j} className={`ri-status-cell${colClass(col, j) ? ` ${colClass(col, j)}` : ''}`}>
+                        <td
+                          key={j}
+                          className={`ri-status-cell${colClass(col, j) ? ` ${colClass(col, j)}` : ''}${
+                            onStatusClick && /due|partial/i.test(String(style.status || '')) ? ' ri-status-actionable' : ''
+                          }`}
+                          title={
+                            onStatusClick && /due|partial/i.test(String(style.status || ''))
+                              ? 'Click to take a payment for this bill'
+                              : undefined
+                          }
+                          onClick={(e) => {
+                            if (!onStatusClick) return
+                            if (onStatusClick(i, style)) e.stopPropagation()
+                          }}
+                        >
                           <span
                             className={`ri-status-badge${badgeOnRow ? ' on-row' : ''}`}
                             style={
@@ -863,6 +881,13 @@ export function DataTable({
                       <td
                         key={j}
                         className={cls ? `${cls}${nums.has(j) ? ' mono' : ''}` : undefined}
+                        onClick={
+                          isStatus && onStatusClick
+                            ? (e) => {
+                                if (onStatusClick(i, style)) e.stopPropagation()
+                              }
+                            : undefined
+                        }
                       >
                         {useMarquee ? (
                           <OverflowMarquee text={cellText} />

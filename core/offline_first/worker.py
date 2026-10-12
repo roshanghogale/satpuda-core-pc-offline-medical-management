@@ -75,6 +75,22 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _note_pulled(changes: list[dict]) -> None:
+    """Tell the open screens what arrived (core.sync_status -> the shell's refresh poller), so
+    a bill made on another device shows in Sales History without a manual refresh."""
+    try:
+        from core.sync_status import note_collection_change
+
+        cols = {str(c.get("collection") or "") for c in changes} - {""}
+        for col in cols:
+            note_collection_change(col)
+        if cols & {"sales", "purchases", "sales_returns", "purchase_returns", "stock_operations",
+                   "stock_disposals"}:
+            note_collection_change("medicines")  # their stock was set from the server too
+    except Exception:
+        pass
+
+
 class SyncCycle:
     """One store file. ``run_once`` does one full push + pull; the Worker calls it in a loop."""
 
@@ -147,6 +163,7 @@ class SyncCycle:
                 meta_set(conn, "last_pull_at", _now())
             self.refresh.clear()
             got += len(changes)
+            _note_pulled(changes)
             if not page.get("has_more"):
                 break
         if self.refresh or time.time() - self.last_full_stock > FULL_STOCK_EVERY:

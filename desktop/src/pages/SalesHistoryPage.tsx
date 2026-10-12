@@ -20,6 +20,7 @@ import {
   type TablePayload,
 } from '../pagesApi'
 import { ExportDialog } from './ExportDialog'
+import { PayDueDialog } from '../components/PayDueDialog'
 import { BillPreviewDialog } from './BillPreviewDialog'
 import { RowContextMenu } from './MedicineEditDialog'
 import { AlertDialog, type AlertState } from './SalesDialogs'
@@ -113,6 +114,9 @@ export function SalesHistoryPage({
   const [printAllDotMatrix, setPrintAllDotMatrix] = useState(false)
   const [selectedRow, setSelectedRow] = useState<number | null>(null)
   const [alert, setAlert] = useState<AlertState | null>(null)
+  // Pay a due from the list: a Due / Partial badge, or the row menu (core/history_pay.py).
+  const [payBillId, setPayBillId] = useState<number | null>(null)
+  const [payMsg, setPayMsg] = useState('')
   const [ctx, setCtx] = useState<{
     x: number
     y: number
@@ -233,10 +237,20 @@ export function SalesHistoryPage({
 
   // Coming back to the page after the scope was changed in Settings: re-seed
   // from the new scope rather than showing the old one's range for ever.
+  // Coming back to the page at all: show what was saved meanwhile (a bill saved or autosaved
+  // on the Sales page, a payment). The page stays mounted, so without this a new bill waited
+  // for some other event to reload the list.
+  const shownOnceRef = useRef(false)
   useEffect(() => {
     if (!active) return
-    if (seededScopeRef.current === null) return
-    if (String(data?.history_scope || '') === seededScopeRef.current) return
+    if (!shownOnceRef.current) {
+      shownOnceRef.current = true // the mount effect has just loaded
+      return
+    }
+    if (seededScopeRef.current === null || String(data?.history_scope || '') === seededScopeRef.current) {
+      void loadRef.current()
+      return
+    }
     seededScopeRef.current = null
     // Let the explicit load below be the only request: without this the from/to
     // change also trips the live-filter effect, and online that is a second
@@ -876,6 +890,7 @@ export function SalesHistoryPage({
       </SectionFrame>
 
       <StatusLine error={error} loading={loading && !data} />
+      {payMsg ? <Note>{payMsg}</Note> : null}
 
       <SectionFrame title="Sales History — Bills List" className="list-table-panel">
         {/* More bills in the range than the list holds: say so, never total a slice quietly. */}
@@ -893,6 +908,17 @@ export function SalesHistoryPage({
           }}
           onRowClick={(i) => setSelectedRow(i)}
           selectedRowIndex={selectedRow}
+          onStatusClick={(rowIndex, style) => {
+            const statusIdx = (data?.columns || []).findIndex((c) => c.toLowerCase() === 'status')
+            const text = String(style?.status || data?.rows?.[rowIndex]?.[statusIdx] || '')
+            if (!/due|partial/i.test(text)) return false
+            const id = idAt(rowIndex)
+            if (!id) return false
+            setSelectedRow(rowIndex)
+            setPayMsg('')
+            setPayBillId(id)
+            return true
+          }}
           onRowContextMenu={(rowIndex, e) => {
             const id = idAt(rowIndex)
             if (!id) return
@@ -922,6 +948,16 @@ export function SalesHistoryPage({
           />
         </SectionFrame>
       ) : null}
+
+      <PayDueDialog
+        kind="sale"
+        billId={payBillId}
+        onClose={() => setPayBillId(null)}
+        onPaid={(m) => {
+          setPayMsg(m)
+          void loadRef.current()
+        }}
+      />
 
       <ExportDialog
         page="sales_history"
@@ -953,6 +989,15 @@ export function SalesHistoryPage({
             label: 'Save PDF (A6)',
             onClick: () => {
               if (ctx) void saveBillPdfAction(ctx.saleId)
+            },
+          },
+          {
+            label: 'Receive payment for this bill',
+            onClick: () => {
+              if (ctx) {
+                setPayMsg('')
+                setPayBillId(ctx.saleId)
+              }
             },
           },
           {

@@ -1291,6 +1291,7 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 "/api/customers/lookup",
                 "/api/suppliers/lookup",
                 "/api/sync/blocked",
+                "/api/history/bill-due",
             ):
                 from urllib.parse import parse_qs
 
@@ -1614,6 +1615,16 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                         },
                     )
                     return
+                if path == "/api/history/bill-due":
+                    # Pay a due from Sales / Purchase History (core/history_pay.py).
+                    from core.history_pay import bill_due_info
+
+                    try:
+                        _json_response(self, 200, bill_due_info(
+                            conn, (qs.get("kind") or [""])[0], int((qs.get("id") or ["0"])[0] or 0)))
+                    except ValueError as exc:
+                        _json_response(self, 400, {"ok": False, "error": str(exc)})
+                    return
                 if path == "/api/sales/form":
                     if (qs.get("hint_only") or [""])[0] in ("1", "true"):
                         # The Invoice No box follows the Bill Date: a back-dated
@@ -1833,6 +1844,14 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 if hit is not None:
                     _json_response(self, hit[0], hit[1])
                     return
+            if path == "/api/history/pay-bill":
+                from core.history_pay import pay_bill
+
+                try:
+                    _json_response(self, 200, pay_bill(_db.get("conn"), _read_json_body(self)))
+                except ValueError as exc:
+                    _json_response(self, 400, {"ok": False, "error": str(exc)})
+                return
             if path in ("/api/voice/pack/install", "/api/voice/pack/cancel", "/api/voice/pack/remove",
                         "/api/voice/pack/start", "/api/voice/pack/check"):
                 from core import voice_pack

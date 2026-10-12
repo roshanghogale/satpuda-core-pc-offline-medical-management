@@ -410,6 +410,7 @@ export default function App() {
       !migrateBlocked,
     page,
     online: meta?.sync_mode === 'online',
+    offlineFirst: meta?.sync_mode === 'offline_first',
     onCatalogError: setCatalogError,
     onStoreLinkError: setStoreLinkError,
   })

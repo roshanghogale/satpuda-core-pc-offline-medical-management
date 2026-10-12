@@ -2981,7 +2981,8 @@ def _list_purchase_history_range(
                COALESCE(s.name,''), COALESCE(s.phone,''),
                COALESCE(p.final_amount, p.total_amount, 0),
                COALESCE(p.{paid_col},0),
-               {cash_sql}, {online_sql}
+               {cash_sql}, {online_sql},
+               p.due_amount, COALESCE(p.bill_cleared,0)
         FROM purchases p
         LEFT JOIN suppliers s ON p.supplier_id=s.id
         WHERE {' AND '.join(where)}
@@ -3019,14 +3020,24 @@ def _list_purchase_history_range(
         final_amt = _safe_float(r[6])
         paid = _safe_float(r[7])
         entry_due = max(0.0, round(final_amt - paid, 2))
+        # What is still owed after supplier payments: the purchase's own due_amount /
+        # bill_cleared, kept by recalculate_supplier_due (oldest bill first, as the server).
+        # The status used the entry figures only, so a purchase paid later from Payments
+        # stayed "Due" here for ever in Offline / offline-first.
+        if len(r) > 11 and int(r[11] or 0):
+            remaining = 0.0
+        elif len(r) > 10 and r[10] is not None:
+            remaining = max(0.0, min(entry_due, round(_safe_float(r[10]), 2)))
+        else:
+            remaining = entry_due
         due_f = (due or "").strip().lower()
-        if due_f in ("due", "due only") and entry_due <= 0.01:
+        if due_f in ("due", "due only") and remaining <= 0.01:
             continue
-        if due_f in ("paid", "cleared", "paid / cleared", "paid/cleared") and entry_due > 0.01:
+        if due_f in ("paid", "cleared", "paid / cleared", "paid/cleared") and remaining > 0.01:
             continue
-        if entry_due <= 0.01:
+        if remaining <= 0.01:
             ri = "cleared"
-        elif paid > 0:
+        elif paid > 0 or remaining < entry_due - 0.01:
             ri = "partial"
         else:
             ri = "due"
@@ -3044,7 +3055,8 @@ def _list_purchase_history_range(
                 paid,
                 _safe_float(r[8]),
                 _safe_float(r[9]),
-                entry_due,
+                # What is still due after supplier payments, as the Online list shows it.
+                remaining,
                 _status_cell(style) or ("✓ Cleared" if ri == "cleared" else "⚠ Due"),
             ]
         )
