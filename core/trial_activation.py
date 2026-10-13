@@ -402,7 +402,7 @@ def _activate_trial_locked(name: str, mode: str, confirm_new: bool = False) -> d
         "store_name": remote.get("store_name") or name,
         "android_key": android_key,
         "device_id": dev,
-        "paired_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        "paired_at": _dt.datetime.utcnow().isoformat() + "Z",   # as server_api writes it
     }
     if session["token"]:
         # The endpoint already signed a token for the store it created, so the
