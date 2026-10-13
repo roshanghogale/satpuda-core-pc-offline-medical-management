@@ -432,7 +432,7 @@ export function SettingsPage({
   /** Online -> Offline: the store's copy comes down FIRST, as a background job whose
    *  progress shows ("Merging sales 1,250/4,237"), and only a finished copy switches the
    *  mode. A big shop's copy takes minutes; done inside the switch it looked stuck, the app
-   *  was closed half way, and the next start was "Local data found" (Vaibhav, 3 Oct 2026). */
+   *  was closed half way, and the next start was "Local data found" (a large shop, 3 Oct 2026). */
   async function prepareOfflineCopy(): Promise<boolean> {
     setSaving(true)
     try {

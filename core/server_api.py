@@ -889,11 +889,17 @@ _PAIR_REFUSED: dict = {}          # store_key -> (not before, refusals in a row,
 
 
 def _paired_within(session: dict, seconds: float) -> bool:
+    # Pairing here writes "...Z"; the installer's activation wrote "...+00:00". The
+    # second came back zone-aware, and taking it from the naive utcnow() threw on the
+    # first re-pair, 7 days after install, on every server call (Satpuda Medical
+    # a shop, 2026-10-13). Both are read as UTC now.
     at = str(session.get("paired_at") or "").rstrip("Z")
     try:
         when = _dt.datetime.fromisoformat(at)
     except ValueError:
         return False
+    if when.tzinfo is not None:
+        when = when.astimezone(_dt.timezone.utc).replace(tzinfo=None)
     return (_dt.datetime.utcnow() - when).total_seconds() < seconds
 
 

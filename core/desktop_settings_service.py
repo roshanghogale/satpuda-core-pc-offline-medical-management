@@ -5374,7 +5374,7 @@ def system_action(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, A
                 # Pushing / removing closes every store connection first, the engine's
                 # own included. A push that failed left it closed, and every screen
                 # then said "Database not open" until a restart -- the shop could not
-                # even press Delete Local (Vaibhav, 3 Oct 2026). Open it again, either way.
+                # even press Delete Local (a large shop, 3 Oct 2026). Open it again, either way.
                 _reopen_engine_conn()
 
         return _begin_heavy(

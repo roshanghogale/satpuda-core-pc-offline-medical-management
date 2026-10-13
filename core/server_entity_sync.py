@@ -1084,7 +1084,7 @@ def build_sales_return_payload(conn, return_id: int) -> Optional[dict]:
     # _row_dict reads cur.description, and the lookup below used to run on this same
     # cursor -- so from the second line on each line was read with the medicine
     # query's two column names and went up as medicine 0, qty 0 (SR113 / SR114,
-    # Vaibhav, 4 Oct 2026). A return of one medicine was never affected.
+    # a large shop, 4 Oct 2026). A return of one medicine was never affected.
     lines = [_row_dict(cur, ir) for ir in cur.fetchall()]
     mcur = conn.cursor()
     items = []
@@ -1143,7 +1143,7 @@ def build_purchase_return_payload(conn, return_id: int) -> Optional[dict]:
     # _row_dict reads cur.description, and the lookup below used to run on this same
     # cursor -- so from the second line on each line was read with the medicine
     # query's two column names and went up as medicine 0, qty 0 (SR113 / SR114,
-    # Vaibhav, 4 Oct 2026). A return of one medicine was never affected.
+    # a large shop, 4 Oct 2026). A return of one medicine was never affected.
     lines = [_row_dict(cur, ir) for ir in cur.fetchall()]
     mcur = conn.cursor()
     items = []

@@ -448,10 +448,10 @@ def save_purchase_bill(conn, body: dict[str, Any]) -> dict[str, Any]:
             },
         }
 
-    # A tab still holding a saved purchase for edit is not a new bill's tab. Shivkrupa
-    # (6 Oct 2026) had purchase 106 -- TULJAI MEDICAL AGENCY, bill 2512, 7 lines -- open for
-    # edit, imported VINOD MEDICALS bill 2199 into the same tab and pressed Save: the edit went
-    # through, 106 became the VINOD bill and the TULJAI purchase and its stock were gone. An
+    # A tab still holding a saved purchase for edit is not a new bill's tab. a shop
+    # (6 Oct 2026) had purchase 106 -- SUPPLIER T, bill 2512, 7 lines -- open for
+    # edit, imported SUPPLIER V MEDICALS bill 2199 into the same tab and pressed Save: the edit went
+    # through, 106 became the SUPPLIER V bill and the SUPPLIER T purchase and its stock were gone. An
     # edit that changes the supplier or the bill number is asked about first; nothing is
     # written until the shop says "new purchase" or "change that purchase".
     other = _edit_is_another_bill(conn, body, supplier_name, bill_number)

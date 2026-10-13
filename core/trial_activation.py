@@ -342,7 +342,7 @@ def _activate_trial_locked(name: str, mode: str, confirm_new: bool = False) -> d
     except Exception as exc:
         # 409: a shop with this name is already on the server. Asked, in both
         # modes -- a reinstalled shop must be offered its SC- key, not quietly
-        # given a second empty store (Vaibhav, 5 Oct 2026). Nothing local moved.
+        # given a second empty store (a large shop, 5 Oct 2026). Nothing local moved.
         if getattr(exc, "status", None) == 409:
             return {
                 "ok": False,
@@ -402,7 +402,7 @@ def _activate_trial_locked(name: str, mode: str, confirm_new: bool = False) -> d
         "store_name": remote.get("store_name") or name,
         "android_key": android_key,
         "device_id": dev,
-        "paired_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        "paired_at": _dt.datetime.utcnow().isoformat() + "Z",   # as server_api writes it
     }
     if session["token"]:
         # The endpoint already signed a token for the store it created, so the

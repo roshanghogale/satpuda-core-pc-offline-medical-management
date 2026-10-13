@@ -1764,8 +1764,8 @@ export function PurchasePage({
         ...(opts?.replaceEdited ? { confirm_replace_purchase: true } : {}),
       })
       // The tab still held a saved purchase for edit, but the supplier or bill
-      // number on screen is another bill's (Shivkrupa 6 Oct 2026: VINOD bill 2199
-      // imported into the tab editing TULJAI purchase 106 replaced 106). Nothing
+      // number on screen is another bill's (a shop 6 Oct 2026: SUPPLIER V bill 2199
+      // imported into the tab editing SUPPLIER T purchase 106 replaced 106). Nothing
       // was written; the shop picks.
       if (res.need_confirm && res.code === 'edit_other_bill') {
         const no = res.editing?.purchase_no || ''
