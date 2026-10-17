@@ -21,6 +21,7 @@ import {
   SaveBar,
   SaveBtn,
 } from './SettingsChrome'
+import { ListEditor } from './ListEditor'
 import '../../styles/prefs-settings.css'
 
 type Opts = SettingsBundle['options']
@@ -495,11 +496,6 @@ export function LayoutListsPanel({
 }) {
   const pages = opts.column_pages || []
   const [exportPage, setExportPage] = useState(pages[0]?.key || '')
-  // What is typed in the Medicine Types box while it has focus. The saved list
-  // drops empty lines on every keystroke, so a box showing only that list ate
-  // the Enter that starts a new type at the end; the draft keeps the typing,
-  // the list underneath is the same as before.
-  const [medTypesDraft, setMedTypesDraft] = useState<string | null>(null)
 
   const exportPageKey = exportPage || pages[0]?.key || ''
   // The export report's OWN columns. Using the screen list here meant an
@@ -715,42 +711,20 @@ export function LayoutListsPanel({
   }
 
   if (sectionId === 'med_types') {
+    const types = ((layoutLists.med_types as string[] | undefined) || [])
     return (
       <>
         <PanelTitle>Medicine Types</PanelTitle>
         <Frame title="Medicine types">
           <Note>
-            One type per line; empty lines are dropped. Medicine Units shows one
-            row for each type in this list.
+            The types a medicine can have, in the order the lists show them. Medicine
+            Units and the alert thresholds have one row for each type here.
           </Note>
-          <label className="settings-field stacked prefs-list-field">
-            <span>Medicine types (one per line)</span>
-            <textarea
-              className="settings-input settings-textarea prefs-list-box"
-              rows={18}
-              spellCheck={false}
-              value={
-                medTypesDraft ??
-                ((layoutLists.med_types as string[] | undefined)?.join('\n') ||
-                  '')
-              }
-              onChange={(e) => {
-                setMedTypesDraft(e.target.value)
-                setLayoutLists((l) => ({
-                  ...l,
-                  med_types: e.target.value
-                    .split('\n')
-                    .map((x) => x.trim())
-                    .filter(Boolean),
-                }))
-              }}
-              onBlur={() => setMedTypesDraft(null)}
-            />
-            <span className="prefs-list-count">
-              {((layoutLists.med_types as string[] | undefined) || []).length}{' '}
-              types
-            </span>
-          </label>
+          <ListEditor
+            items={types}
+            noun="type"
+            onChange={(next) => setLayoutLists((l) => ({ ...l, med_types: next }))}
+          />
         </Frame>
         {saveBtn}
       </>
@@ -823,32 +797,23 @@ export function LayoutListsPanel({
   }
 
   if (sectionId === 'schedules') {
+    const all = ((layoutLists.schedules as string[] | undefined) || [])
+    // A blank entry stands for "no schedule"; it is a tick box here, not an empty line.
+    const blank = all.some((x) => !String(x).trim())
+    const named = all.filter((x) => String(x).trim())
+    const save = (next: string[], withBlank: boolean) =>
+      setLayoutLists((l) => ({ ...l, schedules: withBlank ? ['', ...next] : next }))
     return (
       <>
         <PanelTitle>Schedules</PanelTitle>
         <Frame title="Schedules">
-          <Note>
-            The schedules a medicine can have (H, H1, X, …), one per line. A
-            blank line stands for &quot;no schedule&quot;.
-          </Note>
-          <label className="settings-field stacked prefs-list-field short">
-            <span>Schedules (one per line; blank line = empty schedule)</span>
-            <textarea
-              className="settings-input settings-textarea prefs-list-box"
-              rows={12}
-              spellCheck={false}
-              value={
-                (layoutLists.schedules as string[] | undefined)?.join('\n') ||
-                ''
-              }
-              onChange={(e) =>
-                setLayoutLists((l) => ({
-                  ...l,
-                  schedules: e.target.value.split('\n'),
-                }))
-              }
-            />
-          </label>
+          <Note>The schedules a medicine can have (H, H1, X, …), in the order the lists show them.</Note>
+          <ListEditor items={named} noun="schedule" upper onChange={(next) => save(next, blank)} />
+          <Check
+            label='Offer "no schedule" (blank) first in the list'
+            checked={blank}
+            onChange={(v) => save(named, v)}
+          />
         </Frame>
         {saveBtn}
       </>

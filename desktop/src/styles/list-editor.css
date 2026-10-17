@@ -1,0 +1,101 @@
+/* ListEditor (pages/settings/ListEditor.tsx): medicine types, schedules. */
+.le {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.le-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.le .le-bar .le-add {
+  flex: 0 0 260px;
+  width: 260px;
+}
+.le .le-bar .le-find {
+  flex: 0 0 200px;
+  width: 200px;
+}
+.le .le-bar .settings-action-btn {
+  flex: 0 0 auto;
+}
+.le-count {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.le-msg {
+  font-size: 12px;
+  color: var(--accent-dark);
+}
+.le-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 6px 10px;
+}
+.le-card {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 24px 24px 24px;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.le-card:hover {
+  border-color: var(--accent-soft-border);
+  background: var(--accent-soft);
+}
+.le-card.le-dup {
+  border-color: var(--danger, #b91c1c);
+}
+.le-no {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.le .le-card .le-name {
+  min-width: 0;
+  width: 100%;
+  height: 24px;
+  border: 1px solid transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-primary);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 3px 4px;
+  border-radius: 4px;
+}
+.le .le-card .le-name:focus {
+  border-color: var(--accent);
+  background: var(--surface);
+  outline: none;
+}
+.le-btn {
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+.le-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.le-btn.le-del {
+  color: var(--danger, #b91c1c);
+  border-color: color-mix(in srgb, var(--danger, #b91c1c) 45%, var(--border));
+}
+.le-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 8px 2px;
+}

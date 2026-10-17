@@ -929,31 +929,6 @@ export function SalesHistoryPage({
 
       <StatusLine error={error} loading={loading && !data} />
 
-      {/* Above the list now (design rule 10): the figures first, then the bills. */}
-      {showSummary ? (
-        <SummaryStrip
-          title="Sales Summary"
-          items={[
-            { label: 'Bills', value: summary.bills ?? 0, tone: 'accent' },
-            { label: 'Total Sales', value: money(summary.total) },
-            { label: 'Discount', value: money(summary.discount) },
-            { label: 'Amount Paid', value: money(summary.paid) },
-            { label: 'Bill Due', value: money(summary.due), tone: toneIf(summary.due, 'danger') },
-            {
-              label: 'Customer Due',
-              value: money(summary.customer_due),
-              tone: toneIf(summary.customer_due, 'danger'),
-            },
-            { label: 'Profit', value: money(summary.profit), tone: toneIf(summary.profit, 'success') },
-            { label: 'Returns', value: money(summary.returns) },
-            { label: 'Today Revenue', value: money(summary.today_revenue) },
-            { label: 'Today Cash', value: money(summary.today_cash) },
-            { label: 'Today Online', value: money(summary.today_online) },
-            { label: 'Month Revenue', value: money(summary.month_revenue) },
-          ]}
-        />
-      ) : null}
-
       <Panel
         title="Sales History — Bills List"
         className="filter-panel list-table-panel"
@@ -992,6 +967,31 @@ export function SalesHistoryPage({
           }}
         />
       </Panel>
+
+      {/* Under the list, where the shop looks for them (owner, 18 Oct 2026). */}
+      {showSummary ? (
+        <SummaryStrip
+          title="Sales Summary"
+          items={[
+            { label: 'Bills', value: summary.bills ?? 0, tone: 'accent' },
+            { label: 'Total Sales', value: money(summary.total) },
+            { label: 'Discount', value: money(summary.discount) },
+            { label: 'Amount Paid', value: money(summary.paid) },
+            { label: 'Bill Due', value: money(summary.due), tone: toneIf(summary.due, 'danger') },
+            {
+              label: 'Customer Due',
+              value: money(summary.customer_due),
+              tone: toneIf(summary.customer_due, 'danger'),
+            },
+            { label: 'Profit', value: money(summary.profit), tone: toneIf(summary.profit, 'success') },
+            { label: 'Returns', value: money(summary.returns) },
+            { label: 'Today Revenue', value: money(summary.today_revenue) },
+            { label: 'Today Cash', value: money(summary.today_cash) },
+            { label: 'Today Online', value: money(summary.today_online) },
+            { label: 'Month Revenue', value: money(summary.month_revenue) },
+          ]}
+        />
+      ) : null}
 
       <ExportDialog
         page="sales_history"

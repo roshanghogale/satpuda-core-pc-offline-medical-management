@@ -336,9 +336,8 @@ export function AlertPrefsPanel({
                 ) : null}
               </tbody>
             </table>
-            <Note>Also editable in Layout &amp; Lists → Thresholds; both edit the same values.</Note>
           </Frame>
-          <Frame title="Customer dues">
+          <Frame title="Customer dues and reorder">
             <Field label="Customer due: minimum amount (Rs)">
               <input
                 className="settings-input prefs-num"
@@ -364,6 +363,19 @@ export function AlertPrefsPanel({
               />
             </Field>
             <Note>Only customers with an unpaid bill at least this old. 0 = any age.</Note>
+            <Field label="Default reorder qty">
+              <input
+                className="settings-input prefs-num"
+                type="number"
+                min={0}
+                step={1}
+                value={thr.reorder_default_qty}
+                onChange={(e) =>
+                  setThr((t) => (t ? { ...t, reorder_default_qty: e.target.value } : t))
+                }
+              />
+            </Field>
+            <Note>The quantity a medicine starts with when it is added to a reorder.</Note>
           </Frame>
           <SaveBar
             label="Save thresholds"
