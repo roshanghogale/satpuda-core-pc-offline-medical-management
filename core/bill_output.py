@@ -193,6 +193,7 @@ def _load_sale_data(
         head = None
     if head:
         _add_customer_gstin(conn, ctx, head[0], head[1])
+    attach_bill_returns(conn, ctx, sale_id)
     if print_slot:
         settings = get_print_slot_settings(load_bill_print_settings(), print_slot)
     else:
@@ -202,6 +203,42 @@ def _load_sale_data(
     from core.fy_serial import display_sales_bill_no
 
     return display_sales_bill_no(bill_info[0]), ctx, settings
+
+
+def bill_return_rows(returns: list) -> list:
+    """Returns settled in a bill (core/return_credit.returns_in_bill) as printed rows: each a
+    Return row, then the medicines that came back."""
+    from core.bill_config import BillReturnRow
+
+    rows = []
+    for r in returns or []:
+        rows.append(BillReturnRow(
+            kind="return", return_no=str(r.get("return_no") or ""),
+            return_date=str(r.get("return_date") or ""),
+            amount=float(r.get("amount") or 0), refund=float(r.get("refund") or 0),
+        ))
+        for it in r.get("items") or []:
+            rows.append(BillReturnRow(
+                kind="medicine", return_no=str(r.get("return_no") or ""),
+                name=str(it.get("name") or ""), qty=float(it.get("qty") or 0),
+                amount=float(it.get("amount") or 0),
+            ))
+    return rows
+
+
+def attach_bill_returns(conn, ctx, sale_id) -> None:
+    """The returns settled in this sale go on the bill as their own rows (owner, 17 Oct 2026):
+    a separate list, never items, so the GST and the Amount sums stay the bill's."""
+    try:
+        from core.return_credit import returns_in_bill, returns_total
+
+        rets = returns_in_bill(conn, "customer", int(sale_id))
+    except Exception as exc:
+        print(f"[bill_output] returns in bill: {exc}")
+        return
+    if rets:
+        ctx.returns = bill_return_rows(rets)
+        ctx.returns_total = returns_total(rets)
 
 
 def _load_sale_data_online(
@@ -377,16 +414,24 @@ def _carry_forward_contexts(ctx, per_items: int):
     """Split one sale into carry-forward pages; non-final pages mark Continued..."""
     from dataclasses import replace
 
-    chunks = _chunk_bill_items(ctx.items, per_items)
+    # Returns settled in the bill take table rows after the items, so they count toward a
+    # page's rows too; only the items count toward its subtotal.
+    items = list(ctx.items or [])
+    rets = list(getattr(ctx, "returns", None) or [])
+    chunks = _chunk_bill_items(items + rets, per_items)
     if len(chunks) <= 1:
         return [ctx]
     out = []
     last = len(chunks) - 1
     for i, chunk in enumerate(chunks):
-        page_sub = round(sum(float(getattr(it, "amount", 0) or 0) for it in chunk), 2)
+        start = i * per_items
+        page_items = items[start:start + len(chunk)]
+        page_rets = chunk[len(page_items):]
+        page_sub = round(sum(float(getattr(it, "amount", 0) or 0) for it in page_items), 2)
         out.append(replace(
             ctx,
-            items=chunk,
+            items=page_items,
+            returns=page_rets,
             item_sr_offset=i * per_items,
             is_continued=(i < last),
             page_subtotal=page_sub,

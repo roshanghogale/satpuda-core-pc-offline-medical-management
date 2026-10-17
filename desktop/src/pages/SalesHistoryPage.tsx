@@ -26,6 +26,7 @@ import { BillPreviewDialog } from './BillPreviewDialog'
 import { RowContextMenu } from './MedicineEditDialog'
 import { AlertDialog, type AlertState } from './SalesDialogs'
 import { ModernCombo } from './ModernCombo'
+import { ReturnTableRows } from './billReturns'
 import { useLayoutRowCount } from '../layoutRows'
 import { useDashboardSection } from '../dashboardSections'
 import {
@@ -1335,6 +1336,12 @@ export function SalesHistoryPage({
                 {viewBill.bill_date} · Dr {viewBill.doctor || '—'} · Paid{' '}
                 {money(viewBill.amount_paid)} · Due {money(viewBill.due_amount)}
               </p>
+              {Number(viewBill.returns_total) > 0 ? (
+                <p className="note" data-returns-total="1">
+                  Total {money(viewBill.total_amount)} · Return total − {money(viewBill.returns_total)} · Net to
+                  pay {money(viewBill.net_total)}
+                </p>
+              ) : null}
               <div className="settings-table-wrap">
                 <table className="settings-table">
                   <thead>
@@ -1356,6 +1363,10 @@ export function SalesHistoryPage({
                         <td>{money(it.amount)}</td>
                       </tr>
                     ))}
+                    <ReturnTableRows
+                      returns={viewBill.returns_in_bill || []}
+                      cols={['name', 'batch', 'qty', 'rate', 'amount']}
+                    />
                   </tbody>
                 </table>
               </div>

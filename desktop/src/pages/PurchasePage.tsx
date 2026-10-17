@@ -44,6 +44,8 @@ import {
   type AlertState,
 } from './SalesDialogs'
 import { ModernCombo } from './ModernCombo'
+import { fetchOpenReturns, type BillReturn, type OpenReturn } from '../pagesApi'
+import { ReturnTableRows, ReturnsPickDialog, returnsForScreen } from './billReturns'
 import { belowReturnedProblem, samePurchaseLine } from './billLineRules'
 import { useLayoutRowCount } from '../layoutRows'
 import { registerVoicePage, type VoiceHandler } from '../voice/voiceBus'
@@ -122,6 +124,29 @@ type PurchaseTab = {
   importInvoiceSummary: Record<string, unknown> | null
   dirty: boolean
   reorderOrderId: number | null
+  /** A NEW purchase: returns to this supplier not settled yet (returnsFor = the supplier's
+   *  id), and the ticked ones -- the agency settles them inside this bill. */
+  openReturns?: OpenReturn[]
+  useReturns?: number[]
+  returnsFor?: number | null
+  /** A saved purchase opened for edit: the returns already settled in it (read only). */
+  billReturns?: BillReturn[]
+}
+
+/** The purchase returns this tab settles on save: a new purchase, the supplier they were
+ *  offered for. */
+function tabReturnIds(tab: PurchaseTab): number[] {
+  if (tab.editingPurchaseId || !tab.returnsFor || tab.returnsFor !== tab.supplierId) return []
+  const open = new Set((tab.openReturns || []).map((r) => r.return_id))
+  return (tab.useReturns || []).filter((id) => open.has(id))
+}
+
+function tabReturnsLeft(tab: PurchaseTab): number {
+  const ids = tabReturnIds(tab)
+  const sum = (tab.openReturns || [])
+    .filter((r) => ids.includes(r.return_id))
+    .reduce((s, r) => s + (Number(r.left) || 0), 0)
+  return Math.round(sum * 100) / 100
 }
 
 function money(n: number) {
@@ -290,6 +315,8 @@ function tabPayload(tab: PurchaseTab) {
     import_bill_mode: tab.importBillMode || undefined,
     import_invoice_summary: tab.importInvoiceSummary || undefined,
     reorder_order_id: tab.reorderOrderId || undefined,
+    apply_returns: tabReturnIds(tab).length ? tabReturnIds(tab) : undefined,
+    returns_total: tabReturnsLeft(tab) || undefined,
     items: tab.items.map((it) => ({
       medicine_id: it.medicine_id || null,
       name: it.name,
@@ -795,6 +822,36 @@ export function PurchasePage({
   const onPickSupplier = (name: string) => {
     void applySupplierBalance(name, { force: true })
   }
+
+  // ── Return credit: purchase returns to this supplier not settled yet ──
+  const [returnsAsk, setReturnsAsk] = useState(false)
+  const returnsAskedRef = useRef('')
+  const returnsSupplierId = tab?.supplierId ?? null
+  const returnsEditing = tab?.editingPurchaseId ?? null
+  useEffect(() => {
+    const cur = tabRef.current
+    if (!returnsSupplierId || returnsEditing || !cur) return
+    const key = `${cur.id}:${returnsSupplierId}`
+    if (returnsAskedRef.current === key) return
+    if (cur.returnsFor === returnsSupplierId && cur.openReturns) return
+    returnsAskedRef.current = key
+    void (async () => {
+      try {
+        const r = await fetchOpenReturns('supplier', returnsSupplierId, cur.supplier, cur.autosavePurchaseId)
+        const now = tabRef.current
+        if (!now || now.editingPurchaseId || now.supplierId !== returnsSupplierId) return
+        const list = r.ok && r.supported !== false ? r.returns || [] : []
+        patchTab(
+          { openReturns: list, useReturns: list.map((x) => x.return_id), returnsFor: returnsSupplierId },
+          { quiet: true },
+        )
+        if (list.length) setReturnsAsk(true)
+      } catch {
+        /* no popup; the purchase saves as before */
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [returnsSupplierId, returnsEditing, activeTab])
 
   const onSupplierTyped = (name: string) => {
     void applySupplierBalance(name, { force: false })
@@ -1622,6 +1679,7 @@ export function PurchasePage({
       autosavePurchaseId: loaded.autosave_purchase_id ?? null,
       returnedByMed: loaded.returned_by_medicine || {},
       returnsNote: loaded.returns_note || '',
+      billReturns: loaded.returns_in_bill || [],
       editPrevDue: loaded.edit_payment_snapshot?.previous_due ?? f.previous_due,
       editPrevCredit:
         loaded.edit_payment_snapshot?.previous_credit ?? f.previous_credit,
@@ -2339,6 +2397,23 @@ export function PurchasePage({
   const paid =
     Number(summary.amount_paid) ||
     (Number(tab.cash) || 0) + (Number(tab.online) || 0)
+  // Purchase returns ticked in the popup: what they settle inside this purchase.
+  const retIds = tabReturnIds(tab)
+  const savedReturns = tab.editingPurchaseId ? tab.billReturns || [] : []
+  const retUsed = savedReturns.length
+    ? Math.round(savedReturns.reduce((s, r) => s + (Number(r.amount) || 0), 0) * 100) / 100
+    : !retIds.length
+    ? 0
+    : typeof summary.returns_total === 'number'
+      ? summary.returns_total
+      : Math.round(Math.min(tabReturnsLeft(tab), Math.max(0, finalAmount - paid)) * 100) / 100
+  const screenReturns = savedReturns.length
+    ? savedReturns
+    : returnsForScreen(tab.openReturns || [], retIds, retUsed)
+  const openReturnCount =
+    !tab.editingPurchaseId && tab.returnsFor && tab.returnsFor === tab.supplierId
+      ? (tab.openReturns || []).length
+      : 0
 
   // ── Voice (test build): "recent purchase bills", "GST slab dakhav", "navin purchase tab" ──
   // Opens the same windows the buttons / F-keys open. Nothing here saves.
@@ -2992,7 +3067,17 @@ export function PurchasePage({
         table
         className="bill-items-panel"
         headRight={
-          <span className="count">
+          <span className="count ret-credit-note">
+            {openReturnCount > 0 ? (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                title="Returns to this supplier not settled yet"
+                onClick={() => setReturnsAsk(true)}
+              >
+                Returns {retIds.length}/{openReturnCount}
+              </button>
+            ) : null}
             {tab.items.length} item{tab.items.length === 1 ? '' : 's'}
           </span>
         }
@@ -3174,10 +3259,46 @@ export function PurchasePage({
                   )
                 })
               )}
+              {tab.items.length ? (
+                <ReturnTableRows
+                  returns={screenReturns}
+                  cols={[
+                    ...(showCol.medicine ? ['name'] : []),
+                    ...(showCol.type ? ['type'] : []),
+                    ...(showCol.batch ? ['batch'] : []),
+                    ...(showCol.expiry ? ['expiry'] : []),
+                    ...(showCol.qty ? ['qty'] : []),
+                    ...(showCol.hsn ? ['hsn'] : []),
+                    ...(showCol.schedule ? ['schedule'] : []),
+                    ...(showCol.free ? ['free'] : []),
+                    ...(showCol.mrp ? ['mrp'] : []),
+                    ...(showCol.rate ? ['rate'] : []),
+                    ...(showCol.disc ? ['disc'] : []),
+                    ...(showCol.gstPct ? ['gstPct'] : []),
+                    ...(showCol.taxable ? ['taxable'] : []),
+                    ...(showCol.gstAmt ? ['gstAmt'] : []),
+                    ...(showCol.amount ? ['amount'] : []),
+                    'del',
+                  ]}
+                />
+              ) : null}
             </tbody>
           </table>
         </CappedTableWrap>
       </Panel>
+      <ReturnsPickDialog
+        open={returnsAsk && openReturnCount > 0}
+        party={tab.supplier}
+        word="purchase"
+        returns={tab.openReturns || []}
+        picked={tab.useReturns || []}
+        onChange={(ids) => patchTab({ useReturns: ids })}
+        onUse={() => setReturnsAsk(false)}
+        onSkip={() => {
+          patchTab({ useReturns: [] })
+          setReturnsAsk(false)
+        }}
+      />
 
       <Panel
         title="Purchase Summary"
@@ -3328,16 +3449,31 @@ export function PurchasePage({
               <strong className="mono">{money(totalAmount)}</strong>
             </div>
             <div className="tot-row">
-              <span>Final (incl. delivery)</span>
+              <span>{retUsed > 0 ? 'Total (incl. delivery)' : 'Final (incl. delivery)'}</span>
               <strong className="mono">{money(finalAmount)}</strong>
             </div>
+            {retUsed > 0 ? (
+              <>
+                <div className="tot-row" data-returns-total="1">
+                  <span>Return total</span>
+                  <strong className="mono">− {money(retUsed)}</strong>
+                </div>
+                <div className="tot-row accent">
+                  <span>Net to pay</span>
+                  <strong className="mono">{money(finalAmount - retUsed)}</strong>
+                </div>
+              </>
+            ) : null}
             <div className="tot-row">
               <span>Previous Due</span>
               <strong className="mono">{money(tab.prevDue)}</strong>
             </div>
             <div className="tot-row">
               <span>Previous Credit</span>
-              <strong className="mono">{money(tab.prevCredit)}</strong>
+              {/* The returns settled above are this credit; it is not counted twice. */}
+              <strong className="mono">
+                {money(Math.max(0, tab.prevCredit - (tab.editingPurchaseId ? 0 : retUsed)))}
+              </strong>
             </div>
             <div className="tot-row">
               <span>Need to Pay</span>

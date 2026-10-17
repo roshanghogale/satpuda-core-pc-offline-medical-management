@@ -1119,6 +1119,10 @@ def build_sales_return_payload(conn, return_id: int) -> Optional[dict]:
         'created_at': r.get('created_at'),
         'item_count': len(items),
         'items': items,
+        # Returns as party credit: always sent ([] / None when none). The server keeps its
+        # stored settle mode for None, and its stored bills only when the key is missing.
+        'settle_mode': _settle_mode(r.get('settle_mode')),
+        'allocations': clean_allocations(r.get('allocations')),
     }
     payload.update(_sync_meta_fields_from_row(r))
     return payload
@@ -1178,6 +1182,10 @@ def build_purchase_return_payload(conn, return_id: int) -> Optional[dict]:
         'created_at': r.get('created_at'),
         'item_count': len(items),
         'items': items,
+        # Returns as party credit: always sent ([] / None when none). The server keeps its
+        # stored settle mode for None, and its stored bills only when the key is missing.
+        'settle_mode': _settle_mode(r.get('settle_mode')),
+        'allocations': clean_allocations(r.get('allocations')),
     }
     payload.update(_sync_meta_fields_from_row(r))
     return payload
@@ -1644,6 +1652,38 @@ def _pulled_allocations(conn, table: str, doc_id: str, data: dict) -> tuple[str,
     except Exception:
         row = None
     return ', allocations', [row[0] if row else None]
+
+
+def _settle_mode(raw: Any) -> Optional[str]:
+    """A return's settle mode ('ledger' | 'cash' | 'online'), or None when unknown."""
+    m = str(raw or '').strip().lower()
+    return m if m in ('ledger', 'cash', 'online') else None
+
+
+def _pulled_return_credit(conn, table: str, doc_id: str, data: dict) -> tuple[str, list]:
+    """(", settle_mode, allocations", [values]) for a pulled return, as _pulled_allocations
+    does for payments: INSERT OR REPLACE would wipe them, and a document without the key (an
+    older server) or with an unknown settle mode keeps what this PC holds."""
+    cols = _table_columns(conn, table)
+    names = [c for c in ('settle_mode', 'allocations') if c in cols]
+    if not names:
+        return '', []
+    try:
+        row = conn.execute(
+            f'SELECT {", ".join(names)} FROM {table} WHERE id=?', (int(doc_id),)
+        ).fetchone()
+    except Exception:
+        row = None
+    local = dict(zip(names, row)) if row else {}
+    vals = []
+    for c in names:
+        if c == 'settle_mode':
+            vals.append(_settle_mode(data.get('settle_mode')) or local.get('settle_mode'))
+        elif 'allocations' in data:
+            vals.append(allocations_json(data.get('allocations')))
+        else:
+            vals.append(local.get('allocations'))
+    return ''.join(f', {c}' for c in names), vals
 
 
 def sync_down_doc(conn, collection: str, doc_id: str, data: dict) -> str:
@@ -2168,11 +2208,14 @@ def sync_down_doc(conn, collection: str, doc_id: str, data: dict) -> str:
                 _restore_sales_return_stock(cur, return_id)
                 _hide_medicines_at_zero(cur, old_med_ids)
                 cur.execute('DELETE FROM sales_return_items WHERE return_id=?', (return_id,))
-                cur.execute('''
+                # INSERT OR REPLACE writes a whole new row: how the return was settled and
+                # the bills its credit was used in go in too, or every pull wipes them.
+                credit_cols, credit_vals = _pulled_return_credit(conn, 'sales_returns', doc_id, data)
+                cur.execute(f'''
                     INSERT OR REPLACE INTO sales_returns
                     (id, return_no, sale_id, customer_id, return_date,
-                     refund_amount, discount, reason, created_at)
-                    VALUES (?,?,?,?,?,?,?,?,?)
+                     refund_amount, discount, reason, created_at{credit_cols})
+                    VALUES (?,?,?,?,?,?,?,?,?{',?' * len(credit_vals)})
                 ''', (
                     return_id,
                     data.get('return_no', ''),
@@ -2183,6 +2226,7 @@ def sync_down_doc(conn, collection: str, doc_id: str, data: dict) -> str:
                     float(data.get('discount') or 0),
                     data.get('reason'),
                     data.get('created_at'),
+                    *credit_vals,
                 ))
                 new_med_ids = []
                 for item in data.get('items') or []:
@@ -2212,11 +2256,14 @@ def sync_down_doc(conn, collection: str, doc_id: str, data: dict) -> str:
                 _restore_purchase_return_stock(cur, return_id)
                 _unhide_medicines_in_stock(cur, old_med_ids)
                 cur.execute('DELETE FROM purchase_return_items WHERE return_id=?', (return_id,))
-                cur.execute('''
+                # INSERT OR REPLACE writes a whole new row: how the return was settled and
+                # the bills its credit was used in go in too, or every pull wipes them.
+                credit_cols, credit_vals = _pulled_return_credit(conn, 'purchase_returns', doc_id, data)
+                cur.execute(f'''
                     INSERT OR REPLACE INTO purchase_returns
                     (id, return_no, purchase_id, supplier_id, return_date,
-                     refund_amount, discount, reason, created_at)
-                    VALUES (?,?,?,?,?,?,?,?,?)
+                     refund_amount, discount, reason, created_at{credit_cols})
+                    VALUES (?,?,?,?,?,?,?,?,?{',?' * len(credit_vals)})
                 ''', (
                     return_id,
                     data.get('return_no', ''),
@@ -2227,6 +2274,7 @@ def sync_down_doc(conn, collection: str, doc_id: str, data: dict) -> str:
                     float(data.get('discount') or 0),
                     data.get('reason'),
                     data.get('created_at'),
+                    *credit_vals,
                 ))
                 new_med_ids = []
                 for item in data.get('items') or []:

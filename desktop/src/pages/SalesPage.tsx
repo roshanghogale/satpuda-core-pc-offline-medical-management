@@ -34,6 +34,7 @@ import {
   type SalesRuntimePrefs,
 } from '../pagesApi'
 import { fetchRegulars, saveRegulars, type RegularItem } from '../pagesApi'
+import { fetchOpenReturns, type BillReturn, type OpenReturn } from '../pagesApi'
 import { mutateContact } from '../settingsApi'
 import { VILLAGES_CHANGED_EVENT, dispatchPaymentsChanged } from '../syncRefresh'
 import { useLayoutRowCount } from '../layoutRows'
@@ -58,6 +59,7 @@ import {
 } from './SalesDialogs'
 import { TwoStepMedicinePicker } from './TwoStepMedicinePicker'
 import { RegularManagerDialog, RegularOfferDialog } from './RegularMedicinesDialog'
+import { ReturnTableRows, ReturnsPickDialog, returnsForScreen } from './billReturns'
 import { belowReturnedProblem } from './billLineRules'
 import { ModernCombo } from './ModernCombo'
 import { RowContextMenu } from './MedicineEditDialog'
@@ -116,6 +118,30 @@ type SaleTab = {
   /** A saved bill opened for edit: qty already returned per medicine id. */
   returnedByMed?: Record<string, number>
   returnsNote?: string
+  /** A NEW bill: the customer's returns whose credit is not used yet (returnsFor = that
+   *  customer's id), and the ticked ones -- settled in this bill as Return rows. */
+  openReturns?: OpenReturn[]
+  useReturns?: number[]
+  returnsFor?: number | null
+  /** A saved bill opened for edit: the returns already settled in it (shown, read only). */
+  billReturns?: BillReturn[]
+}
+
+/** The returns this tab settles on save: only on a new bill, only for the customer they
+ *  were offered for. */
+function tabReturnIds(tab: SaleTab): number[] {
+  if (tab.editingSaleId || !tab.returnsFor || tab.returnsFor !== tab.customerId) return []
+  const open = new Set((tab.openReturns || []).map((r) => r.return_id))
+  return (tab.useReturns || []).filter((id) => open.has(id))
+}
+
+/** What the ticked returns still have, together (the most they can settle). */
+function tabReturnsLeft(tab: SaleTab): number {
+  const ids = tabReturnIds(tab)
+  const sum = (tab.openReturns || [])
+    .filter((r) => ids.includes(r.return_id))
+    .reduce((s, r) => s + (Number(r.left) || 0), 0)
+  return Math.round(sum * 100) / 100
 }
 
 /** Two lines of one medicine (same id = same batch) as one: the qty added,
@@ -309,6 +335,7 @@ function tabPayload(tab: SaleTab) {
     autosave_sale_id: tab.autosaveSaleId || undefined,
     autosave_token: tab.autosaveToken || undefined,
     edit_previous_due: tab.editPrevDue ?? tab.prevDue,
+    apply_returns: tabReturnIds(tab).length ? tabReturnIds(tab) : undefined,
     items: tab.items.map((it) => ({
       id: it.id || null,
       quick_add: it.quick_add || false,
@@ -859,6 +886,10 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
             previous_credit: tab.prevCredit,
             customer_id: tab.customerId || undefined,
             customer_name: tab.customer || undefined,
+            returns_total: tabReturnsLeft(tab) || undefined,
+            returns_settled: tab.editingSaleId
+              ? (tab.billReturns || []).reduce((s, r) => s + (Number(r.amount) || 0), 0) || undefined
+              : undefined,
           })
           // Ignore an older reply that arrives after a newer one -- it would
           // paint the totals from the edit before last.
@@ -906,6 +937,8 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
     tab?.prevDue,
     tab?.prevCredit,
     tab?.customerId,
+    tab?.useReturns,
+    tab?.openReturns,
     patchTab,
     tab,
   ])
@@ -1263,9 +1296,67 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
     }
   }
 
+  // ── Return credit: returns of this customer not used yet, settled in this bill ──
+  const [returnsAsk, setReturnsAsk] = useState(false)
+  /** The regular-medicines offer waits while the returns popup is open. */
+  const regularAfterReturnsRef = useRef<{ id: number | null; name: string } | null>(null)
+  /** Asked once per tab and customer: the pick and the customer-change effect both ask, and
+   *  both get the one answer (true = the popup is up). */
+  const returnsAskedRef = useRef<{ key: string; asked: Promise<boolean> } | null>(null)
+
+  /** A NEW bill's customer has return credit not used yet: list it, every return ticked. */
+  const offerReturns = (customerId: number | null, name: string): Promise<boolean> => {
+    const cur = tabRef.current
+    if (!customerId || !cur || cur.editingSaleId) return Promise.resolve(false)
+    const key = `${cur.id}:${customerId}`
+    if (returnsAskedRef.current?.key === key) return returnsAskedRef.current.asked
+    if (cur.returnsFor === customerId && cur.openReturns) return Promise.resolve(false)
+    const asked = (async () => {
+      try {
+        const r = await fetchOpenReturns('customer', customerId, name, cur.autosaveSaleId)
+        const now = tabRef.current
+        if (!now || now.editingSaleId || now.customerId !== customerId) return false
+        const list = r.ok && r.supported !== false ? r.returns || [] : []
+        patchTab(
+          { openReturns: list, useReturns: list.map((x) => x.return_id), returnsFor: customerId },
+          { quiet: true },
+        )
+        if (!list.length) return false
+        setReturnsAsk(true)
+        return true
+      } catch {
+        return false
+      }
+    })()
+    returnsAskedRef.current = { key, asked }
+    return asked
+  }
+
+  // A customer typed in (not picked from the list) is asked about too.
+  const returnsCustomerId = tab?.customerId ?? null
+  const returnsEditing = tab?.editingSaleId ?? null
+  useEffect(() => {
+    if (!returnsCustomerId || returnsEditing) return
+    void offerReturns(returnsCustomerId, tabRef.current?.customer || '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [returnsCustomerId, returnsEditing, activeTab])
+
+  const closeReturnsAsk = (keep: boolean) => {
+    if (!keep) patchTab({ useReturns: [] })
+    setReturnsAsk(false)
+    const next = regularAfterReturnsRef.current
+    regularAfterReturnsRef.current = null
+    if (next) void offerRegulars(next.id, next.name)
+  }
+
   const onPickCustomer = (name: string) => {
-    void applyCustomerBalance(name, { force: true, replaceContact: true }).then((id) => {
-      void offerRegulars(id ?? tabRef.current.customerId ?? null, name)
+    void applyCustomerBalance(name, { force: true, replaceContact: true }).then(async (id) => {
+      const cid = id ?? tabRef.current.customerId ?? null
+      if (await offerReturns(cid, name)) {
+        regularAfterReturnsRef.current = { id: cid, name }
+        return
+      }
+      void offerRegulars(cid, name)
     })
     // A medicine voice held back for want of a customer goes on now.
     voicePicked('customer', name)
@@ -1423,6 +1514,7 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
       autosaveToken: null,
       returnedByMed: loaded.returned_by_medicine || {},
       returnsNote: loaded.returns_note || '',
+      billReturns: loaded.returns_in_bill || [],
       editPrevDue: loaded.edit_payment_snapshot?.previous_due ?? f.previous_due,
       billNoHint: loaded.bill_no || '',
       title: loaded.bill_no || tab.title,
@@ -3021,6 +3113,32 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
     calc?.payment.total_due ??
     Math.max(0, tab.prevDue - (tab.prevCredit || 0) + billDue)
   const creditApplied = calc?.payment.credit_applied ?? 0
+  // Returns ticked in the popup: what they settle (the engine's figure; until it answers,
+  // the same rule here), shown as Return rows and as Return total / Net to pay.
+  const retIds = tabReturnIds(tab)
+  const savedReturns = tab.editingSaleId ? tab.billReturns || [] : []
+  const retUsed = savedReturns.length
+    ? Math.round(savedReturns.reduce((s, r) => s + (Number(r.amount) || 0), 0) * 100) / 100
+    : !retIds.length
+    ? 0
+    : typeof calc?.returns_total === 'number'
+      ? calc.returns_total
+      : Math.round(
+          Math.min(
+            tabReturnsLeft(tab),
+            Math.max(0, total - (dueMode ? 0 : (Number(tab.cash) || 0) + (Number(tab.online) || 0))),
+          ) * 100,
+        ) / 100
+  const screenReturns = savedReturns.length
+    ? savedReturns
+    : returnsForScreen(tab.openReturns || [], retIds, retUsed)
+  const netToPay = Math.round((total - retUsed) * 100) / 100
+  // A saved bill's previous credit already has its returns taken off (core/return_credit.py).
+  const creditLeft = Math.max(0, tab.prevCredit - (tab.editingSaleId ? 0 : retUsed))
+  const openReturnCount =
+    !tab.editingSaleId && tab.returnsFor && tab.returnsFor === tab.customerId
+      ? (tab.openReturns || []).length
+      : 0
 
   const gstPcts = tab.items
     .map((it) => Number(it.gst_percent) || 0)
@@ -3235,6 +3353,16 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
             },
           },
         ]}
+      />
+      <ReturnsPickDialog
+        open={returnsAsk && openReturnCount > 0}
+        party={tab.customer}
+        word="bill"
+        returns={tab.openReturns || []}
+        picked={tab.useReturns || []}
+        onChange={(ids) => patchTab({ useReturns: ids })}
+        onUse={() => closeReturnsAsk(true)}
+        onSkip={() => closeReturnsAsk(false)}
       />
       <RegularOfferDialog
         open={!!regularOffer}
@@ -3463,8 +3591,9 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
               className="due-val mono"
               type="text"
               value={
-                tab.prevCredit > 0
-                  ? `Credit: ${money(tab.prevCredit)}`
+                // The return credit settled in this bill is not shown again as credit.
+                creditLeft > 0.009
+                  ? `Credit: ${money(creditLeft)}`
                   : money(tab.prevDue)
               }
               readOnly
@@ -3652,7 +3781,17 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
         table
         className="bill-items-panel"
         headRight={
-          <span className="count">
+          <span className="count ret-credit-note">
+            {openReturnCount > 0 ? (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                title="Returns of this customer whose credit is not used yet"
+                onClick={() => setReturnsAsk(true)}
+              >
+                Returns {retIds.length}/{openReturnCount}
+              </button>
+            ) : null}
             {tab.items.length} item{tab.items.length === 1 ? '' : 's'}
             {prefs?.autosave_enabled ? ' · autosave on' : ' · autosave off'}
           </span>
@@ -3822,6 +3961,26 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
                   </tr>
                 ))
               )}
+              {tab.items.length ? (
+                <ReturnTableRows
+                  returns={screenReturns}
+                  cols={[
+                    ...(showCol.medicine ? ['name'] : []),
+                    ...(showCol.batch ? ['batch'] : []),
+                    ...(showCol.expiry ? ['expiry'] : []),
+                    ...(showCol.qty ? ['qty'] : []),
+                    ...(showCol.type ? ['type'] : []),
+                    ...(showCol.rate ? ['rate'] : []),
+                    ...(showCol.mrp ? ['mrp'] : []),
+                    ...(showCol.disc ? ['disc'] : []),
+                    ...(showCol.margin ? ['margin'] : []),
+                    ...(showCol.amount ? ['amount'] : []),
+                    ...(showCol.schedule ? ['schedule'] : []),
+                    ...(showCol.location ? ['location'] : []),
+                    'del',
+                  ]}
+                />
+              ) : null}
             </tbody>
           </table>
         </CappedTableWrap>
@@ -3950,9 +4109,21 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
                 </div>
               ) : null}
               <div className="totals-row divider emph amt">
-                <span className="label">Total Amount</span>
+                <span className="label">{retUsed > 0 ? 'Total' : 'Total Amount'}</span>
                 <span className="value">{money(total)}</span>
               </div>
+              {retUsed > 0 ? (
+                <>
+                  <div className="totals-row" data-returns-total="1">
+                    <span className="label">Return total</span>
+                    <span className="value">− {money(retUsed)}</span>
+                  </div>
+                  <div className="totals-row emph amt">
+                    <span className="label">Net to pay</span>
+                    <span className="value">{money(netToPay)}</span>
+                  </div>
+                </>
+              ) : null}
               {creditApplied > 0 ? (
                 <div className="totals-row">
                   <span className="label">Credit Used</span>

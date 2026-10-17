@@ -229,6 +229,21 @@ class BillItem:
 
 
 @dataclass
+class BillReturnRow:
+    """One printed row of a return settled in this bill (core/return_credit.py), after the
+    items: kind "return" is the "Return SR1-7 17-10-2026" row (amount = what this bill used
+    of it, refund = the whole return), kind "medicine" a medicine that came back. Never one
+    of ctx.items, so the GST and the Amount sums are the bill's own."""
+    kind: str = "return"
+    return_no: str = ""
+    return_date: str = ""
+    name: str = ""
+    qty: float = 0.0
+    amount: float = 0.0
+    refund: float = 0.0
+
+
+@dataclass
 class BillContext:
     store_name: str = ""
     address: str = ""
@@ -285,6 +300,10 @@ class BillContext:
     extra_meta_rows: List[tuple] = field(default_factory=list)
     left_panel_lines: List[tuple] = field(default_factory=list)
     footer_strip_line: str = ""
+    # Returns settled in this bill: their rows (this page's, on a carry-forward page) and
+    # the whole bill's Return total; Net to pay = grand_total - returns_total.
+    returns: List[BillReturnRow] = field(default_factory=list)
+    returns_total: float = 0.0
 
 
 def load_bill_print_settings() -> Dict[str, Any]:

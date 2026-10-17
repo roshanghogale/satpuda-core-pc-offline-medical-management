@@ -2778,3 +2778,24 @@ input[readonly] {
   line-height: 1.6;
   text-align: left;
 }
+/* Returns settled in a bill (pages/billReturns.tsx): a Return row, then its medicines.
+   Shown, never edited: they are the return's, not lines of this bill. */
+.sat-table tbody tr.ret-head td,
+.settings-table tbody tr.ret-head td {
+  font-style: italic;
+  font-weight: 600;
+  color: var(--accent-dark);
+  border-top: 1px dashed var(--accent-soft-border);
+  background: var(--accent-soft);
+}
+.sat-table tbody tr.ret-line td,
+.settings-table tbody tr.ret-line td {
+  font-size: 0.95em;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--accent-soft) 45%, var(--surface));
+}
+.ret-pick-list { width: 100%; border-collapse: collapse; }
+.ret-pick-list td { padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.ret-pick-list td.num { text-align: right; white-space: nowrap; }
+.ret-pick-list .sub { color: var(--text-muted); font-size: 11px; }
+.ret-credit-note { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

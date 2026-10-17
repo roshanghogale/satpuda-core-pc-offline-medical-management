@@ -76,6 +76,15 @@ def _ensure_return_tables(conn) -> None:
             conn.execute("ALTER TABLE purchase_return_items ADD COLUMN stock_units REAL")
     except Exception:
         pass
+    # Returns as party credit: how it was settled, and the bills its credit was used in.
+    for table in ("sales_returns", "purchase_returns"):
+        try:
+            cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            for col in ("settle_mode", "allocations"):
+                if col not in cols:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
+        except Exception:
+            pass
     conn.commit()
 
 
@@ -1295,12 +1304,14 @@ def save_sales_return(conn, body: dict[str, Any]) -> dict[str, Any]:
         from core.offline_first.numbers import maybe_doc_number
         # Offline-first: SR<device>-<n>, so two offline devices never make the same number.
         return_no = maybe_doc_number(conn, "SR") or _legacy_no
+        # settle_mode: 'ledger' keeps the refund as the customer's credit, offered when the
+        # next bill is made; 'cash' / 'online' hand it back (the negative payment below).
         cur.execute(
             """
             INSERT INTO sales_returns
                 (return_no, sale_id, customer_id, return_date,
-                 refund_amount, discount, reason)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                 refund_amount, discount, reason, settle_mode)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 return_no,
@@ -1310,6 +1321,7 @@ def save_sales_return(conn, body: dict[str, Any]) -> dict[str, Any]:
                 refund,
                 disc,
                 reason,
+                settle,
             ),
         )
         return_id = int(cur.lastrowid)
@@ -2204,12 +2216,16 @@ def save_purchase_return(conn, body: dict[str, Any]) -> dict[str, Any]:
         _legacy_no = f"PR{cur.fetchone()[0]}"
         from core.offline_first.numbers import maybe_doc_number
         return_no = maybe_doc_number(conn, "PR") or _legacy_no
+        # A purchase return is the supplier's credit, settled inside a later purchase
+        # ('ledger'). An edit (replace_purchase_return) keeps the purchases it was used in.
+        from core.bill_clearing import allocations_json
+
         cur.execute(
             """
             INSERT INTO purchase_returns
                 (return_no, purchase_id, supplier_id, return_date,
-                 refund_amount, discount, reason)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                 refund_amount, discount, reason, settle_mode, allocations)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 return_no,
@@ -2219,6 +2235,8 @@ def save_purchase_return(conn, body: dict[str, Any]) -> dict[str, Any]:
                 refund,
                 disc,
                 reason,
+                "ledger",
+                allocations_json(body.get("_allocations")),
             ),
         )
         return_id = int(cur.lastrowid)
@@ -2414,6 +2432,14 @@ def replace_purchase_return(conn, body: dict[str, Any]) -> dict[str, Any]:
     reason = body.get("reason")
     if reason is None:
         reason = old.get("reason") or ""
+    # The purchases this return's credit was settled in stay with the corrected return.
+    try:
+        _row = conn.execute(
+            "SELECT allocations FROM purchase_returns WHERE id=?", (return_id,)
+        ).fetchone()
+        old_allocations = _row[0] if _row else None
+    except Exception:
+        old_allocations = None
 
     taken_back = delete_purchase_return(conn, {"id": return_id})
     if not taken_back.get("ok"):
@@ -2436,6 +2462,7 @@ def replace_purchase_return(conn, body: dict[str, Any]) -> dict[str, Any]:
             else old_discount,
             "reason": str(reason),
             "_replace_checked": True,
+            "_allocations": old_allocations,
         },
     )
     if saved.get("ok"):
@@ -2452,6 +2479,7 @@ def replace_purchase_return(conn, body: dict[str, Any]) -> dict[str, Any]:
             "discount": old_discount,
             "reason": old.get("reason") or "",
             "_replace_checked": True,
+            "_allocations": old_allocations,
         },
     )
     if restored.get("ok"):

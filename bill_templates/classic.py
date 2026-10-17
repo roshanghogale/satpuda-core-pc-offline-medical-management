@@ -16,7 +16,9 @@ from core.bill_page_config import (
     print_toolbar_html,
 )
 from core.bill_print_settings import load_bill_print_settings
-from core.bill_render_utils import esc, fmt_expiry_mm_yy, bill_due_display, total_due_display
+from core.bill_render_utils import (
+    esc, fmt_expiry_mm_yy, bill_due_display, return_row_label, total_due_display,
+)
 
 
 def _density_class(count: int) -> str:
@@ -95,6 +97,22 @@ def _gross_total_row(ctx, settings) -> str:
     return f'<tr><td>{esc(label)}</td><td class="r">{gross:.2f}</td></tr>'
 
 
+def _returns_total(ctx) -> float:
+    """The Return total of this bill, 0 on a carry-forward page (it is on the last page)."""
+    if getattr(ctx, "is_continued", False):
+        return 0.0
+    return round(float(getattr(ctx, "returns_total", 0) or 0), 2)
+
+
+def returns_totals_figures(ctx) -> list[tuple[str, float]]:
+    """("Return total", R) and ("Net to pay", Total - R) after the Total row, when returns
+    were settled in this bill."""
+    used = _returns_total(ctx)
+    if used <= 0:
+        return []
+    return [("Return total", -used), ("Net to pay", round(float(ctx.grand_total or 0) - used, 2))]
+
+
 def _sum_table_row_count(ctx, settings) -> int:
     rows = 1 if gross_total_to_show(ctx, settings) else 0
     if settings.get("show_discount", True) and float(getattr(ctx, "discount", 0) or 0) > 0:
@@ -103,6 +121,8 @@ def _sum_table_row_count(ctx, settings) -> int:
         rows += 1
     if settings.get("show_total", True):
         rows += 1
+    if _returns_total(ctx) > 0:
+        rows += 2  # Return total, Net to pay
     if settings.get("show_customer_due", False):
         prev = float(getattr(ctx, "previous_due", 0) or 0)
         bill_due = _bill_due_display(ctx)
@@ -201,10 +221,45 @@ def _item_rows(ctx, settings) -> str:
             cls = "med-name" if key == "name" else align
             rows += f'<td class="{cls}">{cells[key]}</td>'
         rows += "</tr>"
+    rows += _return_rows(ctx, cols)
     rows += '<tr class="fill-row">'
     for _key, _label, align, _width in cols:
         rows += f'<td class="{align}"></td>'
     rows += "</tr>"
+    return rows
+
+
+def _return_rows(ctx, cols) -> str:
+    """Returns settled in this bill, after the items: a Return row (minus what this bill used
+    of it), then the medicines that came back (name, qty, minus amount). Not items: the GST
+    and the Amount sums are the bill's own."""
+    rows = ""
+    keys = [key for key, _label, _align, _width in cols]
+    before_amount = [k for k in keys if k != "amount"]
+    for row in getattr(ctx, "returns", None) or []:
+        amount = f"-{float(row.amount or 0):.2f}"
+        if row.kind == "return":
+            # The label runs across every column up to the Amount.
+            span = len(before_amount) or 1
+            rows += (f'<tr class="ret-head"><td class="l ret-text" colspan="{span}">'
+                     f"<i>{esc(return_row_label(row))}</i></td>")
+            if "amount" in keys:
+                rows += f'<td class="r">{amount}</td>'
+            rows += "</tr>"
+            continue
+        qty = float(row.qty or 0)
+        cells = {
+            "name": f"<i>{esc(str(row.name or '').upper())}</i>",
+            "qty": str(int(qty)) if qty == int(qty) else f"{qty:g}",
+            "amount": amount,
+        }
+        if "name" not in keys:
+            cells[keys[0]] = cells["name"]
+        rows += '<tr class="ret-line">'
+        for key, _label, align, _width in cols:
+            cls = "med-name ret-text" if key == "name" else align
+            rows += f'<td class="{cls}">{cells.get(key, "")}</td>'
+        rows += "</tr>"
     return rows
 
 
@@ -394,6 +449,9 @@ def _bottom_zone_markup(ctx, settings, layout: dict, *, upright: bool = False) -
             totals_rows += (
                 f'<tr class="total"><td>{esc(total_label)}</td><td class="r">{ctx.grand_total:.2f}</td></tr>'
             )
+    for label, amount in returns_totals_figures(ctx):
+        cls = ' class="total"' if label == "Net to pay" else ""
+        totals_rows += f'<tr{cls}><td>{esc(label)}</td><td class="r">{amount:.2f}</td></tr>'
     if not continued:
         totals_rows += _due_totals_rows(ctx, settings)
 
@@ -788,7 +846,7 @@ def render_classic_html(ctx: BillContext, settings: Dict[str, Any] | None = None
     grid_border = round(max(0.65, border * 0.9), 2)
     logo_tr_top = max(0.0, min(25.0, float(settings.get("logo_top_right_margin_top", 1.2) or 1.2)))
     logo_tr_right = max(0.0, min(25.0, float(settings.get("logo_top_right_margin_right", 1.5) or 1.5)))
-    density = _density_class(len(ctx.items))
+    density = _density_class(len(ctx.items) + len(getattr(ctx, "returns", None) or []))
     batch_body = settings.get("_batch_body_override")
     if batch_body:
         body_content = batch_body
@@ -1283,6 +1341,9 @@ def render_classic_html(ctx: BillContext, settings: Dict[str, Any] | None = None
   .medicine-table th:last-child,
   .medicine-table td:last-child {{ border-right: 0; }}
   .medicine-table .med-name {{ font-weight: 900; }}
+  .medicine-table tr.ret-head td {{ border-top: 1px dashed #000 !important; font-weight: 700; }}
+  .medicine-table tr.ret-head .ret-text,
+  .medicine-table tr.ret-line .ret-text {{ font-weight: 600; }}
   .medicine-table .fill-row td {{
     height: 100%;
     padding: 0;

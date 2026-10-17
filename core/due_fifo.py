@@ -246,7 +246,8 @@ def fifo_sales_remaining_by_bill(
             "id": rid,
             "date": str(ret.get("return_date") or ret.get("date") or ""),
             "amount": float(ret.get("refund_amount") or ret.get("amount") or 0),
-            "allocations": [],
+            # the bills this return was settled in (Return rows) are paid first
+            "allocations": ret.get("allocations") or [],
         })
 
     # core/bill_clearing.py: payments pay the bills they were given first, the rest of

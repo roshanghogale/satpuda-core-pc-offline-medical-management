@@ -136,6 +136,9 @@ export type SalesCalcResult = {
   rounding: number
   is_due: boolean
   warnings: string[]
+  /** What the ticked returns settle in this bill (Return total), and total less that. */
+  returns_total?: number
+  net_total?: number
   gst_label: string
 }
 
@@ -908,6 +911,8 @@ export type LoadedSale = {
   returned_by_medicine?: Record<string, number>
   returns_note?: string
   returns_unread?: boolean
+  /** Returns settled inside this bill / purchase (Return rows, read only). */
+  returns_in_bill?: BillReturn[]
   form?: {
     customer_name: string
     customer_id?: number | null
@@ -950,10 +955,53 @@ export function fetchBillPreview(saleId: number) {
   )
 }
 
+/** A return whose credit is not used yet, offered when billing that party. */
+export type OpenReturn = {
+  return_id: number
+  return_no: string
+  return_date: string
+  bill_no: string
+  amount: number
+  left: number
+  items: { name: string; qty: number; amount: number }[]
+}
+
+/** A return settled inside a bill: a Return row, then the medicines that came back. */
+export type BillReturn = {
+  return_id: number
+  return_no: string
+  return_date: string
+  bill_no?: string
+  refund: number
+  /** what this bill used of it */
+  amount: number
+  items: { name: string; batch_no?: string; qty: number; rate?: number; amount: number }[]
+}
+
+/** billId: the tab's autosaved bill, which is already in the ledger -- left out. */
+export function fetchOpenReturns(
+  kind: 'customer' | 'supplier',
+  partyId?: number | null,
+  party?: string,
+  billId?: number | null,
+) {
+  return getJson<{ ok: boolean; supported?: boolean; party_id?: number; returns?: OpenReturn[]; error?: string }>(
+    `/api/returns/open-credit${qs({
+      kind,
+      party_id: partyId || undefined,
+      party: party || undefined,
+      bill_id: billId && billId > 0 ? billId : undefined,
+    })}`,
+  )
+}
+
 export type BillDetails = {
   ok: boolean
   error?: string
   sale_id?: number
+  returns_in_bill?: BillReturn[]
+  returns_total?: number
+  net_total?: number
   bill_no?: string
   bill_date?: string
   customer?: string
@@ -1268,6 +1316,8 @@ export type LoadedPurchase = {
   returned_by_medicine?: Record<string, number>
   returns_note?: string
   returns_unread?: boolean
+  /** Returns settled inside this bill / purchase (Return rows, read only). */
+  returns_in_bill?: BillReturn[]
   form?: {
     supplier_name: string
     supplier_id?: number | null

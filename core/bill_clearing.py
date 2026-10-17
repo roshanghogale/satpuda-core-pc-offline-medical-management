@@ -247,6 +247,7 @@ def party_ledgers(
     party_ids: Iterable[int],
     *,
     leave_out_payment: int | None = None,
+    leave_out_bill: int | None = None,
 ) -> dict[int, dict]:
     """party id -> {"bills", "credits", "result"} for each of these parties.
 
@@ -257,6 +258,8 @@ def party_ledgers(
     result:  clear_bills(bills, credits).
     leave_out_payment: a payment id left out (the one being edited), so the bill picker and
              the save check see what each bill owes without it.
+    leave_out_bill: a bill left out (an autosaved bill being finished), so its party's return
+             credit reads as it did before that bill.
     """
     from core.due_fifo import PURCHASE_ENTRY_PAID_SQL
 
@@ -283,8 +286,9 @@ def party_ledgers(
             f"WHERE customer_id IN ({marks}) AND COALESCE(deleted,0)=0",
             ids,
         ).fetchall()
+        ralloc = "allocations" if _has_column(conn, "sales_returns", "allocations") else "NULL"
         rets = conn.execute(
-            "SELECT customer_id, id, return_date, COALESCE(refund_amount,0) FROM sales_returns "
+            f"SELECT customer_id, id, return_date, COALESCE(refund_amount,0), {ralloc} FROM sales_returns "
             f"WHERE customer_id IN ({marks}) AND COALESCE(deleted,0)=0",
             ids,
         ).fetchall()
@@ -310,9 +314,10 @@ def party_ledgers(
         # As recalculate_supplier_due always counted them: a return booked to the supplier,
         # or against one of the supplier's (live) purchases.
         rets = []
-        for own, via_bill, ret_id, d, amount in conn.execute(
+        ralloc = "pr.allocations" if _has_column(conn, "purchase_returns", "allocations") else "NULL"
+        for own, via_bill, ret_id, d, amount, ret_alloc in conn.execute(
             "SELECT pr.supplier_id, CASE WHEN COALESCE(p.deleted,0)=0 THEN p.supplier_id END, "
-            "pr.id, pr.return_date, COALESCE(pr.refund_amount,0) "
+            f"pr.id, pr.return_date, COALESCE(pr.refund_amount,0), {ralloc} "
             "FROM purchase_returns pr LEFT JOIN purchases p ON pr.purchase_id=p.id "
             "WHERE COALESCE(pr.deleted,0)=0 AND ("
             f"pr.supplier_id IN ({marks}) OR (p.id IS NOT NULL AND p.supplier_id IN ({marks}) "
@@ -320,7 +325,7 @@ def party_ledgers(
             ids + ids,
         ).fetchall():
             for pid in {int(own or 0), int(via_bill or 0)}:
-                rets.append((pid, ret_id, d, amount))
+                rets.append((pid, ret_id, d, amount, ret_alloc))
     for pid, pay_id, d, amount, allocations in pays:
         if leave_out_payment is not None and int(pay_id) == int(leave_out_payment):
             continue
@@ -328,11 +333,15 @@ def party_ledgers(
             out[int(pid)]["credits"].append(
                 {"kind": "payment", "id": int(pay_id), "date": str(d or ""), "amount": float(amount or 0),
                  "allocations": clean_allocations(allocations)})
-    for pid, ret_id, d, amount in rets:
+    for pid, ret_id, d, amount, allocations in rets:
+        # A return's credit first pays the bills it was settled in (Return rows on that bill).
         if int(pid or 0) in out:
             out[int(pid)]["credits"].append(
                 {"kind": "return", "id": int(ret_id), "date": str(d or ""), "amount": float(amount or 0),
-                 "allocations": []})
+                 "allocations": clean_allocations(allocations)})
+    if leave_out_bill is not None:
+        for led in out.values():
+            led["bills"] = [b for b in led["bills"] if b["id"] != int(leave_out_bill)]
     for pid, led in out.items():
         led["result"] = clear_bills(led["bills"], led["credits"], overpay_joins=(k == "customer"))
     return out

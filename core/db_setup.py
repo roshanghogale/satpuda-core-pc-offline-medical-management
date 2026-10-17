@@ -357,6 +357,7 @@ def _migrate_all(cur, conn):
     _migrate_bill_credit_overpay_only(conn)
     _migrate_customer_payments(cur)
     _migrate_payment_allocations(cur)
+    _migrate_return_credit(cur)
     _migrate_suppliers(cur)
     _migrate_purchase_items_entry_paid(cur)
     _migrate_purchase_payment_split(cur)
@@ -1070,6 +1071,18 @@ def _migrate_payment_allocations(cur):
             _alter_if_missing(cur, table, 'allocations', 'TEXT')
         except Exception as e:
             print(f"{table}.allocations migration: {e}")
+
+
+def _migrate_return_credit(cur):
+    """Returns as party credit (owner, 17 Oct 2026): settle_mode 'ledger' (kept as credit, the
+    default) | 'cash' | 'online' (handed back), and allocations -- the bills the credit was used
+    in, the same JSON as a payment's (core/bill_clearing.py pays them first)."""
+    for table in ('sales_returns', 'purchase_returns'):
+        try:
+            _alter_if_missing(cur, table, 'settle_mode', 'TEXT')
+            _alter_if_missing(cur, table, 'allocations', 'TEXT')
+        except Exception as e:
+            print(f"{table} return credit migration: {e}")
 
 
 def _migrate_location_format(cur):

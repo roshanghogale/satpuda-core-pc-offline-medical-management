@@ -7,7 +7,9 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from core.bill_gst import gst_strip_figures
-from core.bill_render_utils import bill_due_display, fmt_expiry_mm_yy, total_due_display
+from core.bill_render_utils import (
+    bill_due_display, fmt_expiry_mm_yy, return_row_label, returns_total_of, total_due_display,
+)
 
 _BILL_WRAP_KEYS = frozenset({"name", "batch"})
 _BILL_FIRST_LINE_ONLY = frozenset({"sr", "expiry", "qty", "mrp", "amount"})
@@ -964,14 +966,36 @@ def _build_table(ctx, settings: dict) -> list[str]:
         cells = _item_cells(item, sr_offset + idx + 1, settings)
         row = [cells[key] for key, _h, _a, _w in cols]
         item_rows.extend(_bill_row_physical_lines(row, cols))
+    item_rows.extend(_return_table_rows(ctx, cols))
 
-    min_rows = _table_pad_rows(settings, len(ctx.items or []))
+    min_rows = _table_pad_rows(
+        settings, len(ctx.items or []) + len(getattr(ctx, "returns", None) or [])
+    )
     while len(item_rows) < min_rows:
         item_rows.append([""] * len(cols))
 
     for row in item_rows:
         out.append(_table_row_dynamic(row, widths, aligns, settings))
     out.append(_table_sep_dynamic(widths, settings))
+    return out
+
+
+def _return_table_rows(ctx, cols) -> list[list[str]]:
+    """Returns settled in this bill, after the items: the Return row (minus what this bill used
+    of it), then the medicines that came back. Not items, so no GST or Amount sum takes them."""
+    keys = [key for key, _h, _a, _w in cols]
+    text_key = "name" if "name" in keys else keys[0]
+    out: list[list[str]] = []
+    for row in getattr(ctx, "returns", None) or []:
+        cells = {key: "" for key in keys}
+        cells["amount"] = f"-{float(row.amount or 0):.2f}"
+        if row.kind == "return":
+            cells[text_key] = _ascii_safe(return_row_label(row))
+        else:
+            qty = float(row.qty or 0)
+            cells[text_key] = "> " + _ascii_safe(row.name).upper()
+            cells["qty"] = str(int(qty)) if qty == int(qty) else f"{qty:g}"
+        out.extend(_bill_row_physical_lines([cells[key] for key in keys], cols))
     return out
 
 
@@ -1090,6 +1114,13 @@ def _totals_lines(ctx, settings: dict) -> list[str]:
         lines.append(_amt_row("Rounding", float(ctx.rounding)))
     if _setting(settings, "show_total", True):
         lines.append(_amt_row(total_l, float(ctx.grand_total or 0)))
+    # Returns settled in this bill: Return total, then what is left to pay.
+    returned = returns_total_of(ctx)
+    if returned > 0:
+        # "Return total" where it fits, "Returns" on the narrow slip (never cut to "Return tota").
+        ret_l = "Return total" if foot_right_w - len(f"{-returned:.2f}") > len("Return total") else "Returns"
+        lines.append(_amt_row(ret_l, -returned))
+        lines.append(_amt_row("Net to pay", round(float(ctx.grand_total or 0) - returned, 2)))
     # A credit customer wants to see the running due on the slip itself; a cash
     # customer's slip must not grow a due line that says 0.
     if _setting(settings, "show_customer_due", False) or _setting(settings, "dot_matrix_due_lines", True):

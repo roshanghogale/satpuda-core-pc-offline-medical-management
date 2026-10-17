@@ -794,9 +794,34 @@ def calc_sale(conn, body: dict[str, Any]) -> dict[str, Any]:
             except Exception:
                 pass
 
-    pay = calc_payment_result(
-        summary["total_amount"], cash, online, prev_due, prev_credit
-    )
+    # Returns ticked in the popup settle what the counter payment leaves unpaid (the save
+    # does the same, core/return_credit.py). The bill's own figures are then those of
+    # total - returns, and their credit is not "Credit Used" a second time.
+    returns_used = 0.0
+    if _safe_float(body.get("returns_total")) > 0:
+        returns_used = round(min(
+            _safe_float(body.get("returns_total")),
+            max(0.0, round(_safe_float(summary["total_amount"]) - cash - online, 2)),
+        ), 2)
+    # A saved bill opened for edit: the returns already settled in it come off its total;
+    # its previous credit was stored with them taken off already.
+    settled = round(min(_safe_float(body.get("returns_settled")),
+                        max(0.0, _safe_float(summary["total_amount"]))), 2)
+    if settled > 0:
+        returns_used = settled
+        pay = calc_payment_result(
+            round(_safe_float(summary["total_amount"]) - settled, 2), cash, online,
+            prev_due, prev_credit,
+        )
+    elif returns_used > 0:
+        pay = calc_payment_result(
+            round(_safe_float(summary["total_amount"]) - returns_used, 2), cash, online,
+            prev_due, round(max(0.0, prev_credit - returns_used), 2),
+        )
+    else:
+        pay = calc_payment_result(
+            summary["total_amount"], cash, online, prev_due, prev_credit
+        )
 
     warnings: list[str] = []
     if margin_loss_warning_enabled() and medicines:
@@ -818,6 +843,8 @@ def calc_sale(conn, body: dict[str, Any]) -> dict[str, Any]:
         "is_due": is_due,
         "warnings": warnings,
         "gst_label": "Included in MRP",
+        "returns_total": returns_used,
+        "net_total": round(_safe_float(summary["total_amount"]) - returns_used, 2),
     }
 
 
@@ -1037,7 +1064,9 @@ def save_sale(conn, body: dict[str, Any]) -> dict[str, Any]:
 
     disc_pct_pre = _safe_float(body.get("discount_pct"))
     disc_rs_pre = _safe_float(body.get("discount_rs"))
+    paid_in_full = False
     if not is_due and (cash + online) <= 0 and bool(body.get("pay_full")):
+        paid_in_full = True
         # The counter finished the bill with Enter and never split the payment,
         # so the whole amount was taken in cash. The figure has to be worked out
         # HERE rather than sent from the screen: the screen's total comes from a
@@ -1124,6 +1153,27 @@ def save_sale(conn, body: dict[str, Any]) -> dict[str, Any]:
             editing_id = _safe_int(body.get("editing_sale_id"))
             autosave_id = _safe_int(body.get("autosave_sale_id"))
             merged_flag = False
+            # Returns of this customer ticked in the popup (a new bill only): checked now,
+            # before the bill exists -- once it is saved the clearing rule spends their open
+            # credit on it oldest-first and they no longer read as open. Paid in full means
+            # the net: the returns pay the rest.
+            returns_plan: list = []
+            if not (editing_id > 0 and not autosave_id) and body.get("apply_returns"):
+                from core.sync_prefs import is_online_mode as _online_returns
+
+                if not _online_returns():
+                    from core.return_credit import plan_returns, plan_total
+
+                    try:
+                        returns_plan = plan_returns(
+                            conn, "customer", customer_id, body.get("apply_returns"),
+                            # an autosaved bill is already in the ledger: as it was before it
+                            leave_out_bill=autosave_id if autosave_id > 0 else None,
+                        )
+                    except ValueError as exc:
+                        return {"ok": False, "error": str(exc), "code": "returns_changed"}
+                    if returns_plan and paid_in_full:
+                        cash = round(max(0.0, cash - plan_total(returns_plan)), 2)
 
             if editing_id > 0 and not autosave_id:
                 from core.billing_service import update_existing_bill
@@ -1287,6 +1337,12 @@ def save_sale(conn, body: dict[str, Any]) -> dict[str, Any]:
                         sync=True,
                     )
 
+            if returns_plan and int(sale_id or 0) > 0:
+                # The ticked returns pay what the counter did not: Return rows on the bill.
+                from core.return_credit import settle_sale
+
+                settle_sale(conn, customer_id, returns_plan, int(sale_id))
+
         try:
             from core.sync_prefs import is_online_mode
 
@@ -1428,6 +1484,15 @@ def _returns_on_edit(conn, sale_id: int, medicines: list) -> dict[str, Any]:
     return edit_returns_info(conn, "sale", int(sale_id), medicines, id_key="id")
 
 
+def _returns_in_sale(conn, sale_id: int) -> list:
+    try:
+        from core.return_credit import returns_in_bill
+
+        return returns_in_bill(conn, "customer", int(sale_id))
+    except Exception:
+        return []
+
+
 def load_sale(conn, sale_id: int) -> dict[str, Any]:
     """JSON form of load_sale_into_billing_page for Tauri edit/F10/F11."""
     from core.billing_service import load_sale_medicines
@@ -1517,6 +1582,8 @@ def load_sale(conn, sale_id: int) -> dict[str, Any]:
         "editing_sale_id": None if is_autosave else int(sid),
         "autosave_sale_id": int(sid) if is_autosave else None,
         **({} if is_autosave else _returns_on_edit(conn, int(sid), medicines)),
+        # Returns settled in this bill: shown as Return rows while it is open (read only).
+        "returns_in_bill": [] if is_autosave else _returns_in_sale(conn, int(sid)),
         "form": {
             "customer_name": customer_name or "",
             "customer_id": int(customer_id) if customer_id else None,
@@ -2583,9 +2650,20 @@ def get_bill_details(conn, sale_id: int) -> dict[str, Any]:
         }
         for r in cur.fetchall()
     ]
+    # Returns settled in this bill (core/return_credit.py): Return rows after the items.
+    try:
+        from core.return_credit import returns_in_bill, returns_total
+
+        rets = returns_in_bill(conn, "customer", sid)
+    except Exception:
+        rets = []
+    rets_total = returns_total(rets) if rets else 0.0
     return {
         "ok": True,
         "sale_id": sid,
+        "returns_in_bill": rets,
+        "returns_total": rets_total,
+        "net_total": round(float(row[5] or 0) - rets_total, 2),
         "bill_no": row[0],
         "bill_date": row[1],
         "customer": row[2],

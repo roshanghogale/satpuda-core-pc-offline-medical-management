@@ -810,6 +810,7 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                             "/api/returns/disposal/submit",
                             "/api/returns/bulk/prefill",
                             "/api/returns/bulk/save",
+                            "/api/returns/open-credit",
                             "/api/license/activate",
                             "/api/license/provision-trial",
                             "/api/license/pair-key",
@@ -1010,6 +1011,34 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                     _json_response(self, 503, {"error": "Database not open"})
                     return
                 _json_response(self, 200, get_payments(conn, kind))
+                return
+            if path == "/api/returns/open-credit":
+                # Returns of a customer / supplier whose credit is not used yet, offered
+                # when a new sale / purchase is made for them (core/return_credit.py).
+                from core.return_credit import open_returns_for_party
+                from urllib.parse import parse_qs
+
+                qs = parse_qs(urlparse(self.path).query)
+                conn = _db.get("conn")
+                if conn is None:
+                    _json_response(self, 503, {"error": "Database not open"})
+                    return
+                def _qint(key: str) -> int:
+                    try:
+                        return int((qs.get(key) or ["0"])[0] or 0)
+                    except ValueError:
+                        return 0
+
+                try:
+                    _json_response(self, 200, open_returns_for_party(
+                        conn,
+                        (qs.get("kind") or ["customer"])[0],
+                        party=(qs.get("party") or [""])[0],
+                        party_id=_qint("party_id"),
+                        bill_id=_qint("bill_id"),
+                    ))
+                except Exception as exc:
+                    _json_response(self, 400, {"ok": False, "error": str(exc)})
                 return
             if path == "/api/settings/payments/open-bills":
                 # "Which bills does this pay?" on the Payment screen (core/bill_clearing.py).

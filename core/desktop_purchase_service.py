@@ -318,6 +318,14 @@ def calc_purchase(conn, body: dict[str, Any]) -> dict[str, Any]:
         except Exception:
             pass
 
+    # Purchase returns ticked in the popup settle what this purchase leaves unpaid (the save
+    # does the same, core/return_credit.py): Total, Return total, Net to pay.
+    if _safe_float(body.get("returns_total")) > 0:
+        final = _safe_float(calc.get("final_amount", calc.get("total_amount")))
+        used = round(min(_safe_float(body.get("returns_total")),
+                         max(0.0, round(final - amount_paid, 2))), 2)
+        calc["returns_total"] = used
+        calc["net_after_returns"] = round(final - used, 2)
     out_items = calc.get("items") or items
     _add_line_figures(out_items)
     return {
@@ -548,6 +556,22 @@ def save_purchase_bill(conn, body: dict[str, Any]) -> dict[str, Any]:
             conn, supplier_name, address, phone, gstin, dl
         )
         autosave_id = _safe_int(body.get("autosave_purchase_id"))
+        # Returns to this supplier ticked in the popup (a new purchase only), checked before
+        # the purchase exists: the agency settles them inside this bill (core/return_credit.py).
+        returns_plan: list = []
+        if not (editing_id > 0 and not autosave_id) and body.get("apply_returns"):
+            from core.sync_prefs import is_online_mode as _online_returns
+
+            if not _online_returns():
+                from core.return_credit import plan_returns
+
+                try:
+                    returns_plan = plan_returns(
+                        conn, "supplier", supplier_id, body.get("apply_returns"),
+                        leave_out_bill=autosave_id if autosave_id > 0 else None,
+                    )
+                except ValueError as exc:
+                    return {"ok": False, "error": str(exc), "code": "returns_changed"}
 
         if editing_id > 0 and not autosave_id:
             # Online the edit hands back the number the store holds. Read from the engine's
@@ -608,6 +632,14 @@ def save_purchase_bill(conn, body: dict[str, Any]) -> dict[str, Any]:
                 # Prefer encoded no for subsequent lookups
                 pass
 
+        returns_used = 0.0
+        if returns_plan and int(purchase_id or 0) > 0:
+            from core.return_credit import settle_purchase
+
+            returns_used = settle_purchase(
+                conn, supplier_id, returns_plan, int(purchase_id)
+            )["total"]
+
         reorder_order_id = _safe_int(body.get("reorder_order_id"))
         if reorder_order_id > 0:
             try:
@@ -651,6 +683,7 @@ def save_purchase_bill(conn, body: dict[str, Any]) -> dict[str, Any]:
             "supplier_due": due,
             "supplier_credit": credit,
             "calc": calc,
+            "returns_used": returns_used,
             # Things that look mistyped. The purchase is saved regardless.
             "warnings": warnings,
         }
@@ -721,6 +754,15 @@ def _edit_is_another_bill(
             "bill_number": old_bill,
         },
     }
+
+
+def _returns_in_purchase(conn, purchase_id: int) -> list:
+    try:
+        from core.return_credit import returns_in_bill
+
+        return returns_in_bill(conn, "supplier", int(purchase_id))
+    except Exception:
+        return []
 
 
 def _returns_on_edit(conn, purchase_id: int, items: list) -> dict[str, Any]:
@@ -880,6 +922,8 @@ def load_purchase(conn, purchase_id: int) -> dict[str, Any]:
         "editing_purchase_id": None if is_autosave else int(purchase_id),
         "autosave_purchase_id": int(purchase_id) if is_autosave else None,
         **({} if is_autosave else _returns_on_edit(conn, int(purchase_id), items)),
+        # Purchase returns settled inside this purchase: shown as Return rows (read only).
+        "returns_in_bill": [] if is_autosave else _returns_in_purchase(conn, int(purchase_id)),
         "form": {
             "supplier_name": (sup[0] if sup else "") or "",
             "supplier_id": int(sup[5]) if sup else None,
