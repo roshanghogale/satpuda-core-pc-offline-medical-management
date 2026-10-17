@@ -117,6 +117,9 @@ export function SalesHistoryPage({
     }
   })
   const [printAllSchedule, setPrintAllSchedule] = useState('')
+  // Due / Paid / Credit inside the dialog; it opens on the page's Due Status
+  // (owner, 17 Oct 2026: "only due bills" in Print All).
+  const [printAllDue, setPrintAllDue] = useState('')
   const [printAllUnapplied, setPrintAllUnapplied] = useState<string[]>([])
   // Dot matrix: each bill is printed on its own slip, one after another, with
   // a printer reset in between -- never two or four bills to a sheet.
@@ -484,7 +487,14 @@ export function SalesHistoryPage({
     })
   }
 
-  const openPrintAll = async (sched = '', revertTo?: string) => {
+  const openPrintAll = async (
+    sched = '',
+    revertTo?: string,
+    dueSel?: string,
+    dueRevert?: string,
+  ) => {
+    const dueNow = dueSel === undefined ? due : dueSel
+    if (dueSel === undefined) setPrintAllDue(due)
     if (!from || !to) {
       setAlert({
         title: 'Print All Bills',
@@ -505,12 +515,13 @@ export function SalesHistoryPage({
         customer,
         medicine,
         batch,
-        due,
+        due: dueNow,
       })
       if (!res.ok) {
         // Put the Schedule select back: leaving it changed over a list that did
         // not change is the screen telling the shop something untrue.
         if (revertTo !== undefined) setPrintAllSchedule(revertTo)
+        if (dueRevert !== undefined) setPrintAllDue(dueRevert)
         setAlert({
           title: 'Print All',
           message: res.error || 'Could not load bills.',
@@ -529,6 +540,7 @@ export function SalesHistoryPage({
       setPrintAllOpen(true)
     } catch (e) {
       if (revertTo !== undefined) setPrintAllSchedule(revertTo)
+      if (dueRevert !== undefined) setPrintAllDue(dueRevert)
       setAlert({
         title: 'Print All',
         message: e instanceof Error ? e.message : String(e),
@@ -1130,6 +1142,25 @@ export function SalesHistoryPage({
                 </label>
                 )}
                 <label>
+                  Bills
+                  <select
+                    className="settings-input"
+                    value={printAllDue}
+                    disabled={printAllBusy}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      setPrintAllDue(v)
+                      void openPrintAll(printAllSchedule, undefined, v, printAllDue)
+                    }}
+                  >
+                    {DUE_OPTIONS.map((o) => (
+                      <option key={o.value || 'all'} value={o.value}>
+                        {o.value ? o.label : 'All bills'}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
                   Schedule
                   <select
                     className="settings-input"
@@ -1143,7 +1174,7 @@ export function SalesHistoryPage({
                       // emptied the whole selection online; and "Non-Scheduled"
                       // is a real choice meaning "no code on any line", which no
                       // token comparison can ever satisfy.
-                      void openPrintAll(s, printAllSchedule)
+                      void openPrintAll(s, printAllSchedule, printAllDue)
                     }}
                   >
                     <option value="">All schedules</option>

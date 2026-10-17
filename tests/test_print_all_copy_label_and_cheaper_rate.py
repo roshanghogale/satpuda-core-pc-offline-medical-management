@@ -126,6 +126,13 @@ class PrintAllSendsIt(unittest.TestCase):
         for text in ("No copy label", "Customer Copy", "Store Copy"):
             self.assertIn(text, page)
 
+    def test_the_dialog_has_its_own_due_choice(self):
+        with open(os.path.join(_REPO, "desktop", "src", "pages", "SalesHistoryPage.tsx"), encoding="utf-8") as fh:
+            page = fh.read()
+        self.assertIn("value={printAllDue}", page)
+        self.assertIn("due: dueNow", page)
+        self.assertIn("'All bills'", page)
+
 
 class CheaperBefore(unittest.TestCase):
     ROWS = [

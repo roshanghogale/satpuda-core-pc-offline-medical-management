@@ -2255,14 +2255,36 @@ def list_print_all_candidates(conn, body: dict[str, Any]) -> dict[str, Any]:
         # "0 bills" and "could not ask" are different answers, and the shop was
         # only ever shown the first one.
         return {"ok": False, "error": str(exc)}
-    # Medicine, Batch and Due narrow by LINE, which this query does not read --
-    # say so rather than quietly offering more bills than the list shows.
-    unapplied = [
-        label for key, label in (
-            ("medicine", "Medicine"), ("batch", "Batch"), ("due", "Due status"),
-        )
-        if str(body.get(key) or "").strip()
-    ]
+    # Due status, Medicine and Batch are not in the bill query above. They used to be
+    # named "not applied" -- so "Due Only" printed every bill. Now the Sales History
+    # list itself is asked with the same filters and only its bills are kept: one rule
+    # for what is "due" on the screen and on paper, Online (FIFO dues) and Offline
+    # alike (owner, 17 Oct 2026).
+    unapplied: list[str] = []
+    due = str(body.get("due") or "").strip()
+    medicine = str(body.get("medicine") or "").strip()
+    batch = str(body.get("batch") or "").strip()
+    if due or medicine or batch:
+        from core import desktop_pages_service as pages
+
+        try:
+            hist = pages.list_sales_history(
+                conn,
+                q=str(body.get("q") or "").strip(),
+                from_date=from_iso,
+                to_date=to_iso,
+                medicine=medicine,
+                batch=batch,
+                customer=str(body.get("customer") or "").strip(),
+                due=due,
+                schedule=str(body.get("schedule") or "").strip(),
+            )
+        except Exception as exc:
+            return {"ok": False, "error": f"Could not apply the Due / Medicine / Batch filter: {exc}"}
+        if hist.get("server_error"):
+            return {"ok": False, "error": f"Could not apply the Due / Medicine / Batch filter: {hist['server_error']}"}
+        keep = {int(x) for x in (hist.get("row_ids") or []) if str(x).lstrip("-").isdigit()}
+        bills = [b for b in bills if int(b.get("sale_id") or 0) in keep]
     try:
         from core.bill_output import _is_dot_matrix_printer_mode
 
