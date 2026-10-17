@@ -60,6 +60,9 @@ export type DesktopUiPrefs = {
   theme_pack?: string
   /** Scroll long table cell text (marquee). Default off. */
   table_text_marquee?: boolean
+  /** Doctor Margin Report: the last Doctor Commission (%) and display style. */
+  doctor_margin_pct?: number
+  doctor_margin_style?: 'detailed' | 'summary'
 }
 
 async function getJson<T>(path: string): Promise<T> {

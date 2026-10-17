@@ -744,6 +744,9 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                             "/api/reports/gst/export",
                             "/api/reports/gst/summary",
                             "/api/reports/gst/hsn",
+                            "/api/reports/doctor-margin",
+                            "/api/reports/doctor-margin/options",
+                            "/api/reports/doctor-margin/export",
                             "/api/customers/gst",
                             "/api/voice/pack",
                             "/api/login/status",
@@ -1233,6 +1236,17 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 from core.desktop_export_service import list_schedules_for_export
 
                 _json_response(self, 200, list_schedules_for_export())
+                return
+
+            if path == "/api/reports/doctor-margin/options":
+                # Doctor Margin Report (Sales History -> Export): doctors and medicine types.
+                conn = _db.get("conn")
+                if conn is None:
+                    _json_response(self, 503, {"error": "Database not open"})
+                    return
+                from core.doctor_margin_report import report_options
+
+                _json_response(self, 200, report_options(conn))
                 return
 
             if path == "/api/startup/alerts":
@@ -2139,6 +2153,26 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                     _json_response(self, 400, result)
                     return
                 _json_response(self, 200, result)
+                return
+            if path in ("/api/reports/doctor-margin", "/api/reports/doctor-margin/export"):
+                # Doctor Margin Report (core/doctor_margin_report.py): the preview, or a file
+                # (xlsx / csv / pdf) / print. Body {from, to, doctor, types, mode, pct, style,
+                # format, print_to}.
+                from core.doctor_margin_report import ReportError, build_report, export_report
+
+                body = _read_json_body(self)
+                conn = _db.get("conn")
+                if conn is None:
+                    _json_response(self, 503, {"error": "Database not open"})
+                    return
+                try:
+                    if path.endswith("/export"):
+                        result = export_report(conn, body)
+                        _json_response(self, 200 if result.get("ok") else 400, result)
+                    else:
+                        _json_response(self, 200, build_report(conn, body))
+                except ReportError as exc:
+                    _json_response(self, 400, {"ok": False, "error": str(exc)})
                 return
             if path == "/api/startup/alerts/snooze":
                 from core.desktop_startup_service import snooze_startup_alerts

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { getApiBase } from '../api'
 import { exportRowsCsv } from './pageChrome'
 import { todayLocal } from '../localDate'
+import { DoctorMarginDialog } from './DoctorMarginDialog'
 
 export type ExportPage = 'inventory' | 'sales_history' | 'purchase_history'
 
@@ -24,6 +25,9 @@ type Props = {
 }
 
 type Step = 'report' | 'schedule' | 'format'
+
+/** Sales History only: opens its own dialog (DoctorMarginDialog), not the format step. */
+const DOCTOR_MARGIN: Option = { key: 'doctor_margin', label: 'Doctor Margin Report' }
 
 async function fetchOptions(page: string): Promise<Option[]> {
   const res = await fetch(
@@ -138,14 +142,19 @@ export function ExportDialog({
   )
   const [schFrom, setSchFrom] = useState(from || '')
   const [schTo, setSchTo] = useState(to || todayIso())
+  const [doctorMarginOpen, setDoctorMarginOpen] = useState(false)
 
   useEffect(() => {
     if (!open) return
     setStep('report')
     setError('')
+    setDoctorMarginOpen(false)
     setBusy(true)
     void fetchOptions(page)
       .then((opts) => {
+        if (page === 'sales_history' && !opts.some((o) => o.key === DOCTOR_MARGIN.key)) {
+          opts = [...opts, DOCTOR_MARGIN]
+        }
         setOptions(opts)
         setReport(opts[0]?.key || 'current_view')
       })
@@ -193,6 +202,18 @@ export function ExportDialog({
 
   if (!open) return null
 
+  if (doctorMarginOpen) {
+    return (
+      <DoctorMarginDialog
+        open
+        from={from}
+        to={to}
+        onBack={() => setDoctorMarginOpen(false)}
+        onClose={onClose}
+      />
+    )
+  }
+
   const titles: Record<ExportPage, string> = {
     inventory: 'Export Inventory Reports',
     sales_history: 'Export Sales Reports',
@@ -207,6 +228,10 @@ export function ExportDialog({
         : 'Export Format'
 
   const goNextFromReport = () => {
+    if (report === DOCTOR_MARGIN.key) {
+      setDoctorMarginOpen(true)
+      return
+    }
     if (report === 'schedule_report') {
       setStep('schedule')
       return

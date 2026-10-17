@@ -16,7 +16,18 @@ _DEFAULTS: dict[str, Any] = {
     "theme_pack": "modern",
     # Scroll long table cell text (marquee); off by default
     "table_text_marquee": False,
+    # Doctor Margin Report (Sales History -> Export): the last commission % and style
+    "doctor_margin_pct": 10.0,
+    "doctor_margin_style": "detailed",
 }
+
+
+def normalize_doctor_margin_pct(raw: Any) -> float:
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return 10.0
+    return v if 0 <= v <= 100 else 10.0
 
 
 def normalize_theme_pack(raw: Any) -> str:
@@ -48,6 +59,9 @@ def load_desktop_ui_prefs() -> dict[str, Any]:
     data["show_nav_shortcut_keys"] = bool(data.get("show_nav_shortcut_keys", True))
     data["theme_pack"] = normalize_theme_pack(data.get("theme_pack"))
     data["table_text_marquee"] = bool(data.get("table_text_marquee", False))
+    data["doctor_margin_pct"] = normalize_doctor_margin_pct(data.get("doctor_margin_pct"))
+    if data.get("doctor_margin_style") not in ("detailed", "summary"):
+        data["doctor_margin_style"] = "detailed"
     return data
 
 
@@ -59,6 +73,10 @@ def save_desktop_ui_prefs(updates: dict[str, Any]) -> dict[str, Any]:
         data["theme_pack"] = normalize_theme_pack(updates.get("theme_pack"))
     if "table_text_marquee" in updates:
         data["table_text_marquee"] = bool(updates["table_text_marquee"])
+    if "doctor_margin_pct" in updates:
+        data["doctor_margin_pct"] = normalize_doctor_margin_pct(updates.get("doctor_margin_pct"))
+    if updates.get("doctor_margin_style") in ("detailed", "summary"):
+        data["doctor_margin_style"] = updates["doctor_margin_style"]
     path = _prefs_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
