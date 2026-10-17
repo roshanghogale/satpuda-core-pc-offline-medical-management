@@ -30,6 +30,7 @@ DEFAULT_BILL_PRINT_SETTINGS = {
     "show_doctor": True,
     "show_terms": True,
     "show_signature": True,
+    "print_signature_image": True,
     "show_store_name": True,
     "show_store_address": True,
     "show_store_email": True,
@@ -199,6 +200,7 @@ BILL_PRINT_FIELD_OPTIONS = [
         ("show_total", "Total row"),
         ("show_recovery_wish", "Recovery wish line"),
         ("show_signature", "Signature block"),
+        ("print_signature_image", "Signature picture (when uploaded)"),
     ]),
 ]
 
@@ -232,6 +234,7 @@ class BillContext:
     fssai: str = ""
     show_fssai_on_bill: bool = False
     logo_src: str = ""
+    signature_src: str = ""
     bill_no: str = ""
     bill_date: str = ""
     bill_date_landscape: str = ""

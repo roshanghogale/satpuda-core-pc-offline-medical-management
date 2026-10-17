@@ -226,6 +226,16 @@ def _signature(ctx, settings) -> str:
     if not settings.get("show_signature", True):
         return ""
     sign_caption = (settings.get("signature_caption") or "SIGN OF Q.P.").strip()
+    # The uploaded signature sits in the gap left for a hand signature, between
+    # "For SHOP" and the caption (owner, 17 Oct 2026).
+    sig_src = str(getattr(ctx, "signature_src", "") or "")
+    if sig_src.startswith("data:image/") and settings.get("print_signature_image", True):
+        return f"""
+        <div class="sign-stack">
+        <div class="for-shop for-shop-signed">For {esc(ctx.store_name.upper())}</div>
+        <div class="sign-img-wrap"><img class="sign-img" src="{sig_src}" alt=""></div>
+        <div class="sign-label">{esc(sign_caption)}</div>
+        </div>"""
     return f"""
         <div class="for-shop">For {esc(ctx.store_name.upper())}</div>
         <div class="sign-label">{esc(sign_caption)}</div>"""
@@ -1412,6 +1422,47 @@ def render_classic_html(ctx: BillContext, settings: Dict[str, Any] | None = None
   }}
   .sign-label {{
     font-size: {8.8 * font_scale:.2f}pt;
+  }}
+  .for-shop.for-shop-signed {{
+    margin-bottom: 0;
+  }}
+  /* The picture takes the gap a hand signature would, and shrinks when the box is
+     shorter (A4 copies), so the caption under it is never pushed out. */
+  .signature-cell:has(.sign-stack) {{
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }}
+  .sign-stack {{
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }}
+  .sign-img-wrap {{
+    flex: 0 1 {layout["for_shop_mb"]};
+    height: {layout["for_shop_mb"]};
+    min-height: 0;
+    position: relative;
+    overflow: visible;
+  }}
+  /* Always signature-sized; where the box is short (A4 copies) the picture runs
+     over the words above and below it, as a hand signature would. */
+  .sign-img {{
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    height: {layout["for_shop_mb"]};
+    width: auto;
+    max-width: 92%;
+    object-fit: contain;
+  }}
+  .sign-stack .for-shop,
+  .sign-stack .sign-label {{
+    position: relative;
+    z-index: 1;
   }}
   .upi-qr-wrap {{
     display: flex;

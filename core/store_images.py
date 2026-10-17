@@ -48,10 +48,14 @@ log = logging.getLogger(__name__)
 
 BILL_LOGO = "bill_logo"
 HOME_BANNER = "home_banner"
+# The pharmacist's signature, printed in the bill's signature box (owner, 17 Oct
+# 2026). A transparent PNG; it travels with the store like the logo.
+BILL_SIGNATURE = "bill_signature"
 
 _KV_NAMES = {
     BILL_LOGO: "bill_logo_image",
     HOME_BANNER: "home_banner_image",
+    BILL_SIGNATURE: "bill_signature_image",
 }
 
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
@@ -70,6 +74,7 @@ _MIME_BY_EXT = {
 _LEGACY_BASENAMES = {
     BILL_LOGO: ("pharmacy_logo", "bill_logo"),
     HOME_BANNER: (),
+    BILL_SIGNATURE: (),
 }
 
 # What we are willing to carry with the store. A logo is a letterhead, not a
@@ -77,7 +82,7 @@ _LEGACY_BASENAMES = {
 # stays on this machine and the shop is told so instead of the sync quietly
 # dragging megabytes around on every settings pull.
 _MAX_SHARED_BYTES = 1_100_000
-_SHRINK_TO_WIDTH = {BILL_LOGO: 600, HOME_BANNER: 1600}
+_SHRINK_TO_WIDTH = {BILL_LOGO: 600, HOME_BANNER: 1600, BILL_SIGNATURE: 600}
 
 _SERVER_TTL = 120.0
 _lock = threading.Lock()
