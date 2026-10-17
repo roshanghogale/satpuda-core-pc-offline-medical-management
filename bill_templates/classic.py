@@ -75,8 +75,28 @@ def _parse_layout_mm(value) -> float:
         return 12.0
 
 
+def gross_total_to_show(ctx, settings) -> float:
+    """The bill's total BEFORE the bill discount -- the sum of the Amount column -- when
+    the shop asks for it ("Gross Total row", owner 17 Oct 2026). 0 when it is off, on a
+    carry-forward page, or when it would only repeat the Total."""
+    if not settings.get("show_gross_total", False) or getattr(ctx, "is_continued", False):
+        return 0.0
+    gross = float(getattr(ctx, "sub_total", 0) or 0)
+    if gross <= 0 or abs(gross - float(ctx.grand_total or 0)) < 0.01:
+        return 0.0
+    return round(gross, 2)
+
+
+def _gross_total_row(ctx, settings) -> str:
+    gross = gross_total_to_show(ctx, settings)
+    if not gross:
+        return ""
+    label = (settings.get("gross_total_label") or "Gross Total").strip()
+    return f'<tr><td>{esc(label)}</td><td class="r">{gross:.2f}</td></tr>'
+
+
 def _sum_table_row_count(ctx, settings) -> int:
-    rows = 0
+    rows = 1 if gross_total_to_show(ctx, settings) else 0
     if settings.get("show_discount", True) and float(getattr(ctx, "discount", 0) or 0) > 0:
         rows += 1
     if _show_gst_details(settings) and ctx.gst_enabled and float(ctx.gst_amount or 0) > 0:
@@ -100,11 +120,40 @@ def _bottom_row1_mm(ctx, settings, layout: dict, *, upright: bool = False) -> fl
     """Grow totals band when Prev/Bill/Total Due rows are shown."""
     base = _parse_layout_mm(layout.get("bottom_row1", "12mm"))
     rows = _sum_table_row_count(ctx, settings)
-    per_row = 3.0 if upright else 3.1
+    if not upright:
+        # The rotated copies' rows are as tall as their type: 9 pt (9.8 pt Total) with
+        # 1 mm of padding, or the dense 7.4 / 8.2 pt from four rows on. The old flat
+        # 3.1 mm a row was short of that, so on A4 the Total row ran out of its box.
+        # The signature box under it gives way now, so ask for what the rows take.
+        fs = _rotated_font_scale(settings, layout)
+        pt_mm = 0.3528
+        if rows >= 4:
+            row_h, total_h = 7.4 * fs * pt_mm * 1.05 + 0.3, 8.2 * fs * pt_mm * 1.05 + 0.3
+        else:
+            row_h, total_h = 9.0 * fs * pt_mm + 1.0, 9.8 * fs * pt_mm + 1.0
+        needed = (rows - 1) * row_h + total_h + 0.6
+        return max(base, round(needed, 2))
+    per_row = 3.0
     needed = rows * per_row + 1.4
-    if upright and rows >= 4:
+    if rows >= 4:
         needed += 1.5
     return max(base, needed)
+
+
+def _rotated_font_scale(settings, layout: dict) -> float:
+    """The font scale render_classic_html uses for A5 landscape / A4 copies."""
+    pct = float(settings.get("font_size_pct", 100) or 100)
+    if str(layout.get("paper_size") or "").upper() == "A5":
+        fs = max(0.75, min(1.1, pct / 100 * 0.92))
+    else:
+        fs = max(0.8, min(1.2, pct / 100))
+    try:
+        from core.bill_config import get_bill_content_scale
+
+        fs *= float(get_bill_content_scale(settings) or 1.0)
+    except Exception:
+        pass
+    return fs
 
 
 def _medicine_columns(settings):
@@ -329,7 +378,7 @@ def _bottom_zone_markup(ctx, settings, layout: dict, *, upright: bool = False) -
         if _show_gst_details(settings) and ctx.gst_enabled and ctx.gst_amount > 0 and not continued
         else ""
     )
-    totals_rows = ""
+    totals_rows = "" if continued else _gross_total_row(ctx, settings)
     if less_value > 0:
         totals_rows += f'<tr><td>{esc(disc_label)}</td><td class="r">{less_value:.2f}</td></tr>'
     totals_rows += gst_total_row
@@ -349,6 +398,7 @@ def _bottom_zone_markup(ctx, settings, layout: dict, *, upright: bool = False) -
         totals_rows += _due_totals_rows(ctx, settings)
 
     row_sizes = _bottom_zone_rows(ctx, settings, layout, upright=upright)
+    sum_class = "sum-table sum-dense" if _sum_table_row_count(ctx, settings) >= 4 else "sum-table"
     upi = _has_upi_qr(ctx)
     zone_class = "bottom-zone bottom-zone-has-upi" if upi else "bottom-zone"
 
@@ -366,7 +416,7 @@ def _bottom_zone_markup(ctx, settings, layout: dict, *, upright: bool = False) -
       <div class="{zone_class}" style="grid-template-rows: {row_sizes};">
         {gst_row}
         <div class="totals-cell">
-          <table class="sum-table">
+          <table class="{sum_class}">
             {totals_rows}
           </table>
         </div>
@@ -381,7 +431,7 @@ def _bottom_zone_markup(ctx, settings, layout: dict, *, upright: bool = False) -
       <div class="{zone_class}" style="grid-template-rows: {row_sizes};">
         {gst_strip}
         <div class="totals-cell">
-          <table class="sum-table">
+          <table class="{sum_class}">
             {totals_rows}
           </table>
         </div>
@@ -440,7 +490,7 @@ def _compact_supplier_bottom(ctx, settings, layout: dict, *, upright: bool = Fal
     """Minimal footer for A6 supplier return/reorder — totals only."""
     total_label = (settings.get("total_label") or "Total").strip()
     disc_label = (settings.get("discount_label") or "DISC").strip()
-    rows = ""
+    rows = _gross_total_row(ctx, settings)
     if float(ctx.discount or 0) > 0 and settings.get("show_discount", True):
         rows += f'<tr><td>{esc(disc_label)}</td><td class="r">{ctx.discount:.2f}</td></tr>'
     rows += (
@@ -1302,6 +1352,18 @@ def render_classic_html(ctx: BillContext, settings: Dict[str, Any] | None = None
     font-size: {9.8 * font_scale:.2f}pt;
     font-weight: 900;
   }}
+  /* Four or more total rows (Gross Total, Prev/Bill/Total Due) in the rotated
+     copies' short box: smaller rows, or Total is the one cut off. */
+  .rotated-invoice .sum-table.sum-dense {{
+    font-size: {7.4 * font_scale:.2f}pt;
+  }}
+  .rotated-invoice .sum-table.sum-dense td {{
+    padding: 0.15mm 1.1mm;
+    line-height: 1.05;
+  }}
+  .rotated-invoice .sum-table.sum-dense .total td {{
+    font-size: {8.2 * font_scale:.2f}pt;
+  }}
   .terms-cell {{
     grid-column: 1 / 2;
     grid-row: 2 / 3;
@@ -1417,8 +1479,22 @@ def render_classic_html(ctx: BillContext, settings: Dict[str, Any] | None = None
     font-weight: 900;
     line-height: 1.15;
   }}
+  /* "For SHOP" at the top, the caption at the bottom, the gap between them whatever
+     the box allows -- so a short box (A4 copies, extra total rows) shrinks the gap
+     instead of cutting the caption off the bill. */
+  .signature-cell {{
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }}
   .for-shop {{
-    margin-bottom: {layout["for_shop_mb"]};
+    margin-bottom: 0;
+    flex: 0 0 auto;
+  }}
+  .signature-cell .sign-label {{
+    margin-top: auto;
+    flex: 0 0 auto;
   }}
   .sign-label {{
     font-size: {8.8 * font_scale:.2f}pt;
@@ -1428,12 +1504,6 @@ def render_classic_html(ctx: BillContext, settings: Dict[str, Any] | None = None
   }}
   /* The picture takes the gap a hand signature would, and shrinks when the box is
      shorter (A4 copies), so the caption under it is never pushed out. */
-  .signature-cell:has(.sign-stack) {{
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    overflow: hidden;
-  }}
   .sign-stack {{
     flex: 1 1 auto;
     display: flex;
@@ -1441,8 +1511,7 @@ def render_classic_html(ctx: BillContext, settings: Dict[str, Any] | None = None
     min-height: 0;
   }}
   .sign-img-wrap {{
-    flex: 0 1 {layout["for_shop_mb"]};
-    height: {layout["for_shop_mb"]};
+    flex: 1 1 auto;
     min-height: 0;
     position: relative;
     overflow: visible;

@@ -1074,6 +1074,14 @@ def _totals_lines(ctx, settings: dict) -> list[str]:
         lines.append(_amt_row("Continued...", page_amt))
         return lines
 
+    try:
+        from bill_templates.classic import gross_total_to_show
+
+        gross = gross_total_to_show(ctx, settings)
+    except Exception:
+        gross = 0.0
+    if gross:
+        lines.append(_amt_row(_label(settings, "gross_total_label", "Gross Total"), gross))
     if _setting(settings, "show_discount", True) and float(ctx.discount or 0) > 0:
         lines.append(_amt_row(disc_l, float(ctx.discount)))
     if _show_gst_details(settings) and ctx.gst_enabled and float(ctx.gst_amount or 0) > 0:

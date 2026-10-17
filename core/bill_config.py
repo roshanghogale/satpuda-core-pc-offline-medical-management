@@ -31,6 +31,7 @@ DEFAULT_BILL_PRINT_SETTINGS = {
     "show_terms": True,
     "show_signature": True,
     "print_signature_image": True,
+    "show_gross_total": False,
     "show_store_name": True,
     "show_store_address": True,
     "show_store_email": True,
@@ -195,6 +196,7 @@ BILL_PRINT_FIELD_OPTIONS = [
     ]),
     ("Totals and footer", [
         ("show_gst_strip", "GST summary strip"),
+        ("show_gross_total", "Gross Total row (before discount)"),
         ("show_discount", "Discount (LESS) row"),
         ("show_gst", "GST amount row"),
         ("show_total", "Total row"),
