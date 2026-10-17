@@ -240,6 +240,17 @@ function PrintSlotEditor({
             onChange={(e) => onShortcut(e.target.value)}
           />
         </Field>
+        <Field label="Footer style">
+          <select
+            className="settings-input"
+            value={String(slot.signature_position ?? '')}
+            onChange={(e) => onPatchSlot({ signature_position: e.target.value })}
+          >
+            <option value="">Same as Bill Template</option>
+            <option value="center">New — signature in the middle</option>
+            <option value="right">Old — signature on the right</option>
+          </select>
+        </Field>
       </div>
       <Note>
         Max bill copies for {paper}: {maxC} (A6: 1 · A5: 1–2 · A4: 1–4).
@@ -805,6 +816,24 @@ export function PharmacyPanel(props: Props) {
           <Note>
             GST Vertical Rotated (Classic) matches the standard pharmacy GST
             receipt.
+          </Note>
+        </Frame>
+        <Frame title="Bill footer style">
+          <Field label="Signature box">
+            <select
+              className="settings-input"
+              value={String(bill.signature_position || 'center')}
+              onChange={(e) =>
+                setBill((b) => ({ ...b, signature_position: e.target.value }))
+              }
+            >
+              <option value="center">New — in the middle, between the message and Total</option>
+              <option value="right">Old — on the right under Total, with "For SHOP NAME"</option>
+            </select>
+          </Field>
+          <Note>
+            Standard bills and dot matrix slips alike. Each print button (Sales Print
+            Buttons) can use its own style.
           </Note>
         </Frame>
         <SaveBar
