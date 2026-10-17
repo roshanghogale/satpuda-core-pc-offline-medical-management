@@ -210,6 +210,19 @@ class ASaleSettlesTheTickedReturns(_Shop):
         details = sales_svc.get_bill_details(self.conn, sid)
         self.assertEqual((details["returns_total"], details["net_total"]), (10.0, 30.0))
 
+    def test_two_returns_settle_in_one_bill(self):
+        # owner, 18 Oct 2026: "multiple returns select karata yayla have"
+        ret2 = self.give_back(self.s1, 1)
+        self.assertEqual(self.open_left(), {self.ret["return_no"]: 10.0, ret2["return_no"]: 10.0})
+        s2 = self.sell([_item(self.tab, "PAIN TAB", 2, 20.0)],
+                       apply_returns=[self.ret["return_id"], ret2["return_id"]])
+        sid = s2["sale_id"]
+        total, paid, due, _prev = self.sale_row(sid)
+        self.assertEqual((total, paid, due), (40.0, 20.0, 0.0))
+        rets = return_credit.returns_in_bill(self.conn, "customer", sid)
+        self.assertEqual([r["return_no"] for r in rets], [self.ret["return_no"], ret2["return_no"]])
+        self.assertEqual(self.open_left(), {})
+
     def test_a_bill_on_due_takes_only_what_it_leaves_unpaid(self):
         s2 = self.sell([_item(self.syrup, "COUGH SYRUP", 1, 6.0)], payment_mode="Due", pay_full=False,
                        apply_returns=[self.ret["return_id"]])
@@ -429,7 +442,7 @@ class TheBillShowsTheReturns(_Shop):
         base, _s, _h = self.ctx(plain["sale_id"])
         ctx, _settings, html = self.ctx(s2["sale_id"])
         self.assertEqual(ctx.returns_total, 10.0)
-        self.assertEqual([r.kind for r in ctx.returns], ["return", "medicine"])
+        self.assertEqual([r.kind for r in ctx.returns], ["return", "medicine", "total"])
         self.assertEqual(len(ctx.items), 1)  # the return is never an item
         # GST and the Amount sum are the bill's own
         self.assertEqual((ctx.sub_total, ctx.gst_amount, ctx.taxable_amount, ctx.grand_total),
@@ -442,6 +455,15 @@ class TheBillShowsTheReturns(_Shop):
         self.assertIn("Net to pay", html)
         self.assertIn("30.00", html)
         self.assertNotIn("used in this bill", html)
+        # owner, 18 Oct 2026: the Return row is centred, without the customer's name, and
+        # the medicine that came back is a row like an item (batch, expiry, MRP)
+        head = html.split('class="ret-head"')[1].split("</tr>")[0]
+        self.assertIn('class="c ret-text"', head)
+        self.assertNotIn("TEST CUSTOMER", head)
+        line = html.split('class="ret-line"')[1].split("</tr>")[0]
+        self.assertIn("COUGH SYRUP", line)
+        self.assertIn("B1", line)
+        self.assertIn("-10.00", line)
 
     def test_part_of_a_return_says_how_much_of_it(self):
         s2 = self.sell([_item(self.syrup, "COUGH SYRUP", 1, 6.0)], payment_mode="Due", pay_full=False,
@@ -458,7 +480,8 @@ class TheBillShowsTheReturns(_Shop):
         merged = dmp._settings_for_ctx(shop_settings(paper_size="A5"), ctx)
         text = dmp.printed_text(dmp.format_bill_text(ctx, merged))
         self.assertIn(f"Return {self.ret['return_no']}", text)
-        self.assertIn("> COUGH SYRUP", text)
+        line = [ln for ln in text.splitlines() if "COUGH SYRUP" in ln]
+        self.assertTrue(line and "-10.00" in line[0] and "B1" in line[0], text)
         self.assertIn("-10.00", text)
         self.assertIn("Return total", text)
         net = [line for line in text.splitlines() if "Net to pay" in line]
@@ -473,7 +496,7 @@ class TheBillShowsTheReturns(_Shop):
         pages = bill_output._carry_forward_contexts(ctx, 3)
         self.assertEqual(len(pages), 2)
         self.assertEqual((len(pages[0].items), len(pages[0].returns)), (2, 1))
-        self.assertEqual((len(pages[1].items), len(pages[1].returns)), (0, 1))
+        self.assertEqual((len(pages[1].items), len(pages[1].returns)), (0, 2))  # medicine, total
         self.assertTrue(pages[0].is_continued)
         self.assertEqual(pages[0].page_subtotal, 50.0)
         self.assertEqual(pages[1].returns_total, 10.0)

@@ -49,7 +49,7 @@ def _has_column(conn: sqlite3.Connection, table: str, col: str) -> bool:
 
 def _return_rows(conn: sqlite3.Connection, kind: str, ids: list[int]) -> dict[int, dict]:
     """id -> {return_id, return_no, return_date, bill_no, refund, settle_mode, allocations,
-    items: [{name, batch_no, qty, rate, amount}]} for these returns (deleted ones left out)."""
+    items: [{name, batch_no, expiry, mrp, qty, rate, amount}]} for these returns (deleted ones left out)."""
     table, items_t, bill_t, key = _tables(kind)
     ids = sorted({int(i) for i in ids if i})
     if not ids:
@@ -72,8 +72,9 @@ def _return_rows(conn: sqlite3.Connection, kind: str, ids: list[int]) -> dict[in
             "settle_mode": str(mode or "ledger").strip().lower() or "ledger",
             "allocations": clean_allocations(allocations), "items": [],
         }
-    for rid, name, batch, qty, rate, amount in conn.execute(
-        f"SELECT ri.return_id, COALESCE(m.name,''), COALESCE(m.batch_no,''), COALESCE(ri.qty,0), "
+    for rid, name, batch, expiry, mrp, qty, rate, amount in conn.execute(
+        f"SELECT ri.return_id, COALESCE(m.name,''), COALESCE(m.batch_no,''), COALESCE(m.expiry_date,''), "
+        f"COALESCE(m.mrp,0), COALESCE(ri.qty,0), "
         f"COALESCE(ri.rate,0), COALESCE(ri.amount,0) FROM {items_t} ri "
         f"LEFT JOIN medicines m ON m.id = ri.medicine_id "
         f"WHERE ri.return_id IN ({marks}) ORDER BY ri.return_id, ri.id",
@@ -83,6 +84,7 @@ def _return_rows(conn: sqlite3.Connection, kind: str, ids: list[int]) -> dict[in
         if hit is not None:
             q = float(qty or 0)
             hit["items"].append({"name": str(name), "batch_no": str(batch),
+                                 "expiry": str(expiry or ""), "mrp": float(mrp or 0),
                                  "qty": int(q) if q == int(q) else q,
                                  "rate": float(rate or 0), "amount": r2(amount)})
     return out

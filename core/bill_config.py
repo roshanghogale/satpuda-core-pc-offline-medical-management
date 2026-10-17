@@ -241,6 +241,12 @@ class BillReturnRow:
     qty: float = 0.0
     amount: float = 0.0
     refund: float = 0.0
+    # kind "medicine" is shown like an item (owner, 18 Oct 2026): batch, expiry, MRP, and its
+    # number within the return; kind "total" closes each return under its medicines.
+    batch: str = ""
+    expiry: str = ""
+    mrp: float = 0.0
+    sr: int = 0
 
 
 @dataclass

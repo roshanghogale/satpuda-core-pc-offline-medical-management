@@ -8,7 +8,7 @@ from typing import Any
 
 from core.bill_gst import gst_strip_figures
 from core.bill_render_utils import (
-    bill_due_display, fmt_expiry_mm_yy, return_row_label, returns_total_of, total_due_display,
+    bill_due_display, fmt_expiry_mm_yy, return_row_label, return_total_label, returns_total_of, total_due_display,
 )
 
 _BILL_WRAP_KEYS = frozenset({"name", "batch"})
@@ -990,10 +990,22 @@ def _return_table_rows(ctx, cols) -> list[list[str]]:
         cells = {key: "" for key in keys}
         cells["amount"] = f"-{float(row.amount or 0):.2f}"
         if row.kind == "return":
-            cells[text_key] = _ascii_safe(return_row_label(row))
+            # The return's number and date centred over the table (owner, 18 Oct 2026).
+            cells["amount"] = ""
+            cells[text_key] = "*** " + _ascii_safe(return_row_label(row)) + " ***"
+        elif row.kind == "total":
+            cells[text_key] = _ascii_safe(return_total_label(row))
         else:
             qty = float(row.qty or 0)
-            cells[text_key] = "> " + _ascii_safe(row.name).upper()
+            cells[text_key] = _ascii_safe(row.name).upper()
+            if "sr" in cells:
+                cells["sr"] = str(row.sr or "")
+            if "batch" in cells:
+                cells["batch"] = _ascii_safe(row.batch)
+            if "expiry" in cells and row.expiry:
+                cells["expiry"] = fmt_expiry_mm_yy(row.expiry)
+            if "mrp" in cells and float(row.mrp or 0):
+                cells["mrp"] = f"{float(row.mrp):.2f}"
             cells["qty"] = str(int(qty)) if qty == int(qty) else f"{qty:g}"
         out.extend(_bill_row_physical_lines([cells[key] for key in keys], cols))
     return out

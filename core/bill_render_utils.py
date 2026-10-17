@@ -35,10 +35,15 @@ def fmt_return_date(raw: Any) -> str:
 
 
 def return_row_label(row) -> str:
-    """ "Return SR1-7 17-10-2026" for a return settled in a bill (core.bill_config.BillReturnRow),
-    and "(Rs 5.00 of Rs 10.00 used in this bill)" -- with the rupee sign -- when part of it went
-    to other bills."""
-    text = f"Return {row.return_no} {fmt_return_date(row.return_date)}".strip()
+    """ "Return SR1-7 17-10-2026", the centred row that opens a return settled in a bill
+    (core.bill_config.BillReturnRow). The customer is the bill's own, so no name."""
+    return f"Return {row.return_no} {fmt_return_date(row.return_date)}".strip()
+
+
+def return_total_label(row) -> str:
+    """The row closing a return under its medicines: "Return total", and "(Rs 5.00 of Rs 10.00
+    used in this bill)" -- with the rupee sign -- when part of it went to other bills."""
+    text = "Return total"
     if float(row.refund or 0) > float(row.amount or 0) + 0.009:
         rs = "₹"
         text += f" ({rs}{float(row.amount):.2f} of {rs}{float(row.refund):.2f} used in this bill)"

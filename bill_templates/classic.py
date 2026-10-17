@@ -17,7 +17,7 @@ from core.bill_page_config import (
 )
 from core.bill_print_settings import load_bill_print_settings
 from core.bill_render_utils import (
-    esc, fmt_expiry_mm_yy, bill_due_display, return_row_label, total_due_display,
+    esc, fmt_expiry_mm_yy, bill_due_display, return_row_label, return_total_label, total_due_display,
 )
 
 
@@ -230,27 +230,35 @@ def _item_rows(ctx, settings) -> str:
 
 
 def _return_rows(ctx, cols) -> str:
-    """Returns settled in this bill, after the items: a Return row (minus what this bill used
-    of it), then the medicines that came back (name, qty, minus amount). Not items: the GST
-    and the Amount sums are the bill's own."""
+    """Returns settled in this bill, after the items (owner, 18 Oct 2026): a centred
+    "Return SR1-7 17-10-2026" row across the table, the medicines that came back one per row
+    like the items (batch, expiry, qty, MRP, minus amount), then the return's total. Not items:
+    the GST and the Amount sums are the bill's own."""
     rows = ""
     keys = [key for key, _label, _align, _width in cols]
     before_amount = [k for k in keys if k != "amount"]
     for row in getattr(ctx, "returns", None) or []:
         amount = f"-{float(row.amount or 0):.2f}"
         if row.kind == "return":
-            # The label runs across every column up to the Amount.
+            rows += (f'<tr class="ret-head"><td class="c ret-text" colspan="{len(keys) or 1}">'
+                     f"<b>{esc(return_row_label(row))}</b></td></tr>")
+            continue
+        if row.kind == "total":
             span = len(before_amount) or 1
-            rows += (f'<tr class="ret-head"><td class="l ret-text" colspan="{span}">'
-                     f"<i>{esc(return_row_label(row))}</i></td>")
+            rows += (f'<tr class="ret-total"><td class="r ret-text" colspan="{span}">'
+                     f"<b>{esc(return_total_label(row))}</b></td>")
             if "amount" in keys:
-                rows += f'<td class="r">{amount}</td>'
+                rows += f'<td class="r"><b>{amount}</b></td>'
             rows += "</tr>"
             continue
         qty = float(row.qty or 0)
         cells = {
+            "sr": str(row.sr or ""),
             "name": f"<i>{esc(str(row.name or '').upper())}</i>",
+            "batch": f"<i>{esc(row.batch)}</i>",
+            "expiry": f"<i>{esc(fmt_expiry_mm_yy(row.expiry) if row.expiry else '')}</i>",
             "qty": str(int(qty)) if qty == int(qty) else f"{qty:g}",
+            "mrp": f"<i>{float(row.mrp or 0):.2f}</i>" if float(row.mrp or 0) else "",
             "amount": amount,
         }
         if "name" not in keys:
@@ -1341,9 +1349,10 @@ def render_classic_html(ctx: BillContext, settings: Dict[str, Any] | None = None
   .medicine-table th:last-child,
   .medicine-table td:last-child {{ border-right: 0; }}
   .medicine-table .med-name {{ font-weight: 900; }}
-  .medicine-table tr.ret-head td {{ border-top: 1px dashed #000 !important; font-weight: 700; }}
-  .medicine-table tr.ret-head .ret-text,
+  .medicine-table tr.ret-head td {{ border-top: 1px solid #000 !important; border-bottom: 1px solid #000 !important;
+    text-align: center; font-weight: 700; letter-spacing: 0.02em; }}
   .medicine-table tr.ret-line .ret-text {{ font-weight: 600; }}
+  .medicine-table tr.ret-total td {{ border-top: 1px solid #000 !important; font-weight: 700; }}
   .medicine-table .fill-row td {{
     height: 100%;
     padding: 0;

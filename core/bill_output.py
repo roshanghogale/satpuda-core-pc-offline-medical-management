@@ -212,17 +212,21 @@ def bill_return_rows(returns: list) -> list:
 
     rows = []
     for r in returns or []:
+        rno = str(r.get("return_no") or "")
+        used = float(r.get("amount") or 0)
+        refund = float(r.get("refund") or 0)
         rows.append(BillReturnRow(
-            kind="return", return_no=str(r.get("return_no") or ""),
-            return_date=str(r.get("return_date") or ""),
-            amount=float(r.get("amount") or 0), refund=float(r.get("refund") or 0),
+            kind="return", return_no=rno, return_date=str(r.get("return_date") or ""),
+            amount=used, refund=refund,
         ))
-        for it in r.get("items") or []:
+        for n, it in enumerate(r.get("items") or [], start=1):
             rows.append(BillReturnRow(
-                kind="medicine", return_no=str(r.get("return_no") or ""),
+                kind="medicine", return_no=rno, sr=n,
                 name=str(it.get("name") or ""), qty=float(it.get("qty") or 0),
-                amount=float(it.get("amount") or 0),
+                amount=float(it.get("amount") or 0), batch=str(it.get("batch_no") or ""),
+                expiry=str(it.get("expiry") or ""), mrp=float(it.get("mrp") or 0),
             ))
+        rows.append(BillReturnRow(kind="total", return_no=rno, amount=used, refund=refund))
     return rows
 
 
