@@ -551,6 +551,7 @@ def push_to_server(kind: str, ext: str, raw: bytes) -> tuple[bool, str]:
     entry = _cache_key(_KV_NAMES[kind])
     with _lock:
         _server_cache[entry] = (time.time(), uri)
+        _kv_list_cache.clear()
     return True, ""
 
 
@@ -577,6 +578,7 @@ def clear_on_server(kind: str) -> bool:
     entry = _cache_key(name)
     with _lock:
         _server_cache[entry] = (time.time(), "")
+        _kv_list_cache.clear()
     return True
 
 
@@ -609,30 +611,58 @@ def fetch_from_server(kind: str) -> str:
         hit = _server_cache.get(key)
         if hit and (now - hit[0]) < _SERVER_TTL:
             return hit[1]
+    rows = _kv_rows_cached()
+    if rows is None:
+        return ""
+    found = ""
+    for row in rows:
+        if str(row.get("name") or "") != name:
+            continue
+        value = row.get("value")
+        if isinstance(value, (dict, list)):
+            value = json.dumps(value)
+        found = str(value or "")
+        break
+    with _lock:
+        _server_cache[key] = (time.time(), found)
+    return found
+
+
+# Every bill print asks for the logo AND (since 17 Oct 2026) the signature. Each used to
+# fetch the whole settings list on its own with a 30 s timeout, and a failure was not
+# remembered -- so with the server slow or down, every bill save waited up to a minute
+# for two pictures. One fetch now serves both, gives up after 8 s, and a failure is
+# remembered for a minute so the next bills do not wait again.
+_KV_FETCH_TIMEOUT = 8
+_KV_FAIL_TTL = 60.0
+_kv_list_cache: dict[str, tuple[float, list | None]] = {}
+
+
+def _kv_rows_cached() -> list | None:
+    """The store's settings rows, or None when the server could not be asked."""
+    store = _store_key()
+    now = time.time()
+    with _lock:
+        hit = _kv_list_cache.get(store)
+        if hit is not None:
+            ttl = _SERVER_TTL if hit[1] is not None else _KV_FAIL_TTL
+            if now - hit[0] < ttl:
+                return hit[1]
+    rows: list | None
     try:
         from core import server_api as api
         from core.server_live import _token as live_token
 
         res = api._request(
-            "GET", "/api/sync/settings/kv", token=live_token(), timeout=30
+            "GET", "/api/sync/settings/kv", token=live_token(), timeout=_KV_FETCH_TIMEOUT
         )
-        if not isinstance(res, dict) or not res.get("ok"):
-            return ""
-        found = ""
-        for row in _kv_rows(res.get("data")):
-            if str(row.get("name") or "") != name:
-                continue
-            value = row.get("value")
-            if isinstance(value, (dict, list)):
-                value = json.dumps(value)
-            found = str(value or "")
-            break
+        rows = _kv_rows(res.get("data")) if isinstance(res, dict) and res.get("ok") else None
     except Exception as exc:
-        log.debug("store image fetch (%s): %s", kind, exc)
-        return ""
+        log.debug("store image kv fetch: %s", exc)
+        rows = None
     with _lock:
-        _server_cache[key] = (time.time(), found)
-    return found
+        _kv_list_cache[store] = (time.time(), rows)
+    return rows
 
 
 def _adopt(kind: str, ext: str, raw: bytes) -> str:
@@ -794,8 +824,10 @@ def forget(kind: str, *, clear_server: bool = True) -> None:
     entry = _cache_key(_KV_NAMES.get(kind, ""))
     with _lock:
         _server_cache.pop(entry, None)
+        _kv_list_cache.clear()
 
 
 def _reset_server_cache() -> None:
     with _lock:
         _server_cache.clear()
+        _kv_list_cache.clear()
