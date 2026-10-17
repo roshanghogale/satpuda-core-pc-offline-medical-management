@@ -140,6 +140,7 @@ def _build_bill_context(profile, bill_info, items, pay_mode, cursor):
         fssai=fssai_number,
         show_fssai_on_bill=show_fssai_on_bill,
         logo_src=logo_src,
+        signature_src=_signature_to_base64(),
         bill_no=bill_no,
         bill_date=bill_date,
         bill_date_landscape=bill_date,
@@ -173,6 +174,16 @@ def _build_bill_context(profile, bill_info, items, pay_mode, cursor):
     return ctx
 
 
+
+
+def _signature_to_base64():
+    """The pharmacist's signature picture as a data: URI, or '' (none uploaded)."""
+    try:
+        from core.store_images import BILL_SIGNATURE, resolve_data_uri
+
+        return resolve_data_uri(BILL_SIGNATURE)
+    except Exception:
+        return ''
 
 
 def _logo_to_base64(logo_path):

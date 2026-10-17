@@ -197,7 +197,7 @@ SUPPLIER_DOC_PAPER_MM = (148.0, 105.0)
 
 
 def _store_fields_from_profile(profile) -> dict:
-    from core.bill_context import _logo_to_base64
+    from core.bill_context import _logo_to_base64, _signature_to_base64
 
     if not profile:
         return {
@@ -225,6 +225,7 @@ def _store_fields_from_profile(profile) -> dict:
         "fssai": (profile[10] or "").strip() if len(profile) > 10 else "",
         "show_fssai_on_bill": bool(profile[11]) if len(profile) > 11 else False,
         "blessing_line": "SHREE GANESHAY NAMAH",
+        "signature_src": _signature_to_base64(),
     }
 
 

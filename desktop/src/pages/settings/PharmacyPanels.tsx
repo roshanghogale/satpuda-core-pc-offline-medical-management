@@ -1,6 +1,6 @@
 /** Pharmacy Profile — mirrors ui/settings/settings_tabs/pharmacy_tab.py */
 
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   imageFileToBase64,
   pharmacyAction,
@@ -353,6 +353,65 @@ export function PharmacyPanel(props: Props) {
     setProfile((p) => ({ ...p, logo_path: '' }))
   }
 
+  // The pharmacist's signature picture for the bill's signature box (owner,
+  // 17 Oct 2026). Saved at once and carried with the store like the logo.
+  const sigInputRef = useRef<HTMLInputElement>(null)
+  const [sigUri, setSigUri] = useState('')
+  const [sigMsg, setSigMsg] = useState('')
+  useEffect(() => {
+    if (IS_DEMO) return
+    let live = true
+    pharmacyAction({ action: 'get_signature' })
+      .then((res) => {
+        if (live && res.ok !== false) setSigUri(String(res.data_uri || ''))
+      })
+      .catch(() => {})
+    return () => {
+      live = false
+    }
+  }, [])
+
+  async function uploadSignatureFile(file: File) {
+    setBusy(true)
+    setSigMsg('')
+    try {
+      const data = await imageFileToBase64(file)
+      const res = await pharmacyAction({
+        action: 'upload_signature',
+        filename: file.name,
+        data_base64: data,
+      })
+      if (res.ok === false) {
+        setSigMsg(String(res.error || 'Could not use that picture.'))
+        return
+      }
+      setSigUri(String(res.data_uri || ''))
+      setSigMsg(String(res.message || 'Signature saved.'))
+    } catch (e) {
+      setSigMsg(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function removeSignature() {
+    setBusy(true)
+    setSigMsg('')
+    try {
+      const res = await pharmacyAction({ action: 'remove_signature' })
+      if (res.ok === false) {
+        setSigMsg(String(res.error || 'Could not remove the signature.'))
+        return
+      }
+      setSigUri('')
+      setSigMsg(String(res.message || 'Signature removed.'))
+    } catch (e) {
+      setSigMsg(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   function saveProfile() {
     setProfileErr('')
     const pwd = String(login.password ?? '')
@@ -587,6 +646,68 @@ export function PharmacyPanel(props: Props) {
             </div>
           </Field>
           <LogoPreview path={logoPath} stamp={logoStamp} />
+
+          <Field label="Bill Signature">
+            <div className="settings-inline-row">
+              <span className="settings-note" style={{ flex: 1, margin: 0 }}>
+                {sigUri ? 'Signature uploaded' : 'No signature — the box stays empty for a hand signature'}
+              </span>
+              <button
+                type="button"
+                className="settings-action-btn"
+                disabled={busy}
+                onClick={() => sigInputRef.current?.click()}
+              >
+                {sigUri ? 'Change Signature' : 'Upload Signature'}
+              </button>
+              {sigUri ? (
+                <button
+                  type="button"
+                  className="settings-link-btn"
+                  disabled={busy}
+                  onClick={() => void removeSignature()}
+                >
+                  Remove
+                </button>
+              ) : null}
+              <input
+                ref={sigInputRef}
+                type="file"
+                accept="image/png,image/webp,image/gif,image/jpeg,image/bmp"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  e.target.value = ''
+                  if (f) void uploadSignatureFile(f)
+                }}
+              />
+            </div>
+          </Field>
+          <Note>
+            Use a PNG with a transparent background. It prints in the signature
+            box (between "For {String(profile.name || 'shop')}" and the caption)
+            on every standard bill, not on dot matrix slips. Turn it off for a
+            while with "Signature picture" under Show on Printed Bill.
+          </Note>
+          {sigUri ? (
+            <div className="settings-logo-preview">
+              <img
+                src={sigUri}
+                alt="Bill signature"
+                style={{
+                  maxHeight: 70,
+                  maxWidth: 260,
+                  display: 'block',
+                  marginBottom: 6,
+                  // a checkerboard shows whether the background is transparent
+                  backgroundImage:
+                    'repeating-conic-gradient(#ddd 0% 25%, #fff 0% 50%)',
+                  backgroundSize: '12px 12px',
+                }}
+              />
+            </div>
+          ) : null}
+          {sigMsg ? <Note>{sigMsg}</Note> : null}
         </Frame>
 
         <SaveBtn

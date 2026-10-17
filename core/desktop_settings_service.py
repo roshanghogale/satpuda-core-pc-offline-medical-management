@@ -676,6 +676,46 @@ def save_uploaded_bill_logo(
         return {"ok": False, "error": str(exc), "path": ""}
 
 
+def signature_action(action: str, data: dict[str, Any]) -> dict[str, Any]:
+    """The pharmacist's signature picture for the bill's signature box (owner, 17 Oct 2026).
+
+    Kept like the logo (core.store_images): per store in AppData and carried with the store,
+    so every PC of the shop prints it. Upload and Remove take effect at once -- there is no
+    profile row to point at it. A transparent PNG prints cleanly over the box; a picture with
+    a white background still prints, as a white patch.
+    """
+    from core.store_images import BILL_SIGNATURE, forget, resolve_data_uri, save_image
+
+    if action == "get_signature":
+        uri = resolve_data_uri(BILL_SIGNATURE)
+        return {"ok": True, "data_uri": uri, "has_signature": bool(uri)}
+    if action == "remove_signature":
+        try:
+            forget(BILL_SIGNATURE)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "data_uri": "", "has_signature": False,
+                "message": "Signature removed. Bills print the empty signature box again."}
+    try:
+        ext, raw = _decode_uploaded_image(
+            str(data.get("filename") or ""), str(data.get("data_base64") or "")
+        )
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    try:
+        saved = save_image(BILL_SIGNATURE, ext, raw)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    message = "Signature saved. It prints in the signature box of every bill."
+    if ext.lower() not in (".png", ".webp", ".gif"):
+        message += " This picture has no transparent background, so its white shows on the bill."
+    if saved.get("note"):
+        message = f"{message} {saved['note']}"
+    return {"ok": True, "data_uri": resolve_data_uri(BILL_SIGNATURE),
+            "has_signature": True, "shared_with_store": bool(saved.get("shared")),
+            "message": message}
+
+
 def browse_home_banner() -> dict[str, Any]:
     """Open a local file picker and copy the image into config (same as Tk).
 
@@ -4751,6 +4791,8 @@ def pharmacy_action(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str,
             or "(not found — add SumatraPDF64.exe to tools folder)",
         }
 
+    if action in ("upload_signature", "remove_signature", "get_signature"):
+        return signature_action(action, data)
     if action == "upload_logo":
         # conn so the new picture also becomes the one the profile POINTS at.
         # Without it the row kept naming the old file, that file still existed,
