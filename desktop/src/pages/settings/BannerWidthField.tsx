@@ -20,6 +20,7 @@ import {
   previewBannerPct,
 } from '../../homeBanner'
 import { Field, Note } from './SettingsChrome'
+import '../../styles/interactive-settings.css'
 
 export function BannerWidthField({
   appearance,
@@ -104,7 +105,7 @@ export function BannerWidthField({
   return (
     <>
       <Field label={`Banner width (% of the space on Home, ${BANNER_PCT_MIN}–${BANNER_PCT_MAX})`}>
-        <span className="settings-inline-row">
+        <span className="iset-banner-input">
           <input
             className="settings-input"
             type="text"
@@ -112,7 +113,6 @@ export function BannerWidthField({
             autoComplete="off"
             spellCheck={false}
             aria-invalid={input.kind !== 'ok'}
-            style={{ width: 80 }}
             value={text}
             onChange={(e) => onChange(e.target.value)}
             onBlur={commit}
@@ -123,11 +123,7 @@ export function BannerWidthField({
           <span>%</span>
         </span>
       </Field>
-      {problem ? (
-        <Note>
-          <strong>{problem}</strong>
-        </Note>
-      ) : null}
+      {problem ? <p className="iset-callout warn">{problem}</p> : null}
       <Note>
         Home draws the banner <strong>{drawnPx} px</strong> wide
         {drawnTall ? <> and about {drawnTall} px tall</> : null} — {shownPct}% of
@@ -147,25 +143,13 @@ export function BannerWidthField({
       {imgOk ? (
         <div
           aria-hidden="true"
+          className="iset-banner-preview"
           title="Preview: the dashed box is the space the banner has on Home"
-          style={{
-            maxWidth: 420,
-            border: '1px dashed var(--border)',
-            borderRadius: 6,
-            padding: 4,
-            margin: '4px 0 8px',
-            background: 'var(--surface-sunken)',
-          }}
         >
           <img
             src={src}
             alt=""
-            style={{
-              display: 'block',
-              width: `${shownPct}%`,
-              height: 'auto',
-              margin: '0 auto',
-            }}
+            style={{ width: `${shownPct}%` }}
             onLoad={(e) => {
               const im = e.currentTarget
               if (im.naturalWidth > 0) setAspect(im.naturalHeight / im.naturalWidth)

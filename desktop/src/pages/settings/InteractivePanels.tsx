@@ -41,12 +41,14 @@ import {
   Check,
   Field,
   Frame,
+  Help,
   Note,
   PanelTitle,
   SaveBar,
   SaveBtn,
 } from './SettingsChrome'
 import { CappedTableWrap } from '../pageChrome'
+import '../../styles/interactive-settings.css'
 import {
   ReorderMultiTabEditor,
   fetchReorderBulkTabs,
@@ -125,6 +127,50 @@ function pathLabel(rack: string, section?: string, box?: string) {
   if (box != null && section != null) return `${rack} / ${section} / ${box}`
   if (section != null) return `${rack} / ${section}`
   return rack
+}
+
+/* ─── Layout pieces (styles/interactive-settings.css) ──────────────────── */
+
+/** A box in a filter / tool bar: the label sits above it. */
+function BarField({
+  label,
+  className = '',
+  children,
+}: {
+  label: string
+  className?: string
+  children: React.ReactNode
+}) {
+  return (
+    <label className={`iset-field ${className}`.trim()}>
+      <span>{label}</span>
+      {children}
+    </label>
+  )
+}
+
+/** A table's empty state, in words. */
+function EmptyRow({ cols, children }: { cols: number; children: React.ReactNode }) {
+  return (
+    <tr>
+      <td className="iset-empty" colSpan={cols}>
+        {children}
+      </td>
+    </tr>
+  )
+}
+
+/** What the last action said, kept in sight at the bottom of a panel without a Save. */
+function StatusBar({ msg, err }: { msg?: string; err?: string }) {
+  if (!msg && !err) return null
+  return <div className={`iset-statusbar${err ? ' err' : ''}`}>{err || msg}</div>
+}
+
+/** "No customers yet." / "No customer matches "ram"." / "No customer has a voice number." */
+function noneText(one: string, many: string, search: string, numbered: boolean) {
+  if (numbered) return `No ${one} has a voice number yet.`
+  if (search.trim()) return `No ${one} matches “${search.trim()}”.`
+  return `No ${many} yet. Add one above.`
 }
 
 /* ─── Contacts ─────────────────────────────────────────────────────────── */
@@ -400,81 +446,88 @@ export function ContactsPanel({
     return numbered ? onlyNumbered(rows, voiceNo, 'village', (v) => v) : rows
   }, [contacts.villages, search, numbered, voiceNo])
 
+  const cancelBtn =
+    editId != null ? (
+      <button
+        type="button"
+        className="settings-action-btn iset-secondary"
+        onClick={clearEdit}
+      >
+        Cancel
+      </button>
+    ) : null
+
+  const searchBox = (
+    <BarField label="Search" className="grow">
+      <input
+        className="settings-input"
+        data-nav-order={1}
+        data-nav-chain={CONTACTS_NAV}
+        data-page-filter="primary"
+        value={search}
+        placeholder="Filter…"
+        onChange={(e) => setSearch(e.target.value)}
+      />
+    </BarField>
+  )
+
   return (
     <>
-      {err ? <p className="error">{err}</p> : null}
-      {msg ? <Note>{msg}</Note> : null}
-
       {sectionId === 'doctors' && (
         <Frame title={`Doctors (${contacts.doctors.length})`}>
-          <Field label="Search">
-            <input
-              className="settings-input"
-              data-nav-order={1}
-              data-nav-chain={CONTACTS_NAV}
-              data-page-filter="primary"
-              value={search}
-              placeholder="Filter…"
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </Field>
-          <div className="settings-form-row">
-            <Field label="Name">
-              <input
-                className="settings-input"
-                data-nav-order={2}
-                data-nav-chain={CONTACTS_NAV}
-                value={doctor.name}
-                onChange={(e) =>
-                  setDoctor((d) => ({ ...d, name: e.target.value }))
-                }
+          <div className={`iset-form-card${editId != null ? ' editing' : ''}`}>
+            <h4>{editId != null ? 'Edit doctor' : 'Add a doctor'}</h4>
+            <div className="settings-form-row">
+              <Field label="Name">
+                <input
+                  className="settings-input"
+                  data-nav-order={2}
+                  data-nav-chain={CONTACTS_NAV}
+                  value={doctor.name}
+                  onChange={(e) =>
+                    setDoctor((d) => ({ ...d, name: e.target.value }))
+                  }
+                />
+              </Field>
+              <Field label="Reg No">
+                <input
+                  className="settings-input"
+                  data-nav-order={3}
+                  data-nav-chain={CONTACTS_NAV}
+                  placeholder="e.g. MMC/2021/67890"
+                  value={doctor.reg_no}
+                  onChange={(e) =>
+                    setDoctor((d) => ({ ...d, reg_no: e.target.value }))
+                  }
+                />
+              </Field>
+              <Field label="Phone">
+                <input
+                  className="settings-input"
+                  data-nav-order={4}
+                  data-nav-chain={CONTACTS_NAV}
+                  data-nav-enter="contacts-save-doctor"
+                  value={doctor.phone}
+                  onChange={(e) =>
+                    setDoctor((d) => ({ ...d, phone: e.target.value }))
+                  }
+                />
+              </Field>
+            </div>
+            <div className="iset-row">
+              <SaveBtn
+                label={editId != null ? 'Save Doctor' : 'Add Doctor'}
+                navOrder={5}
+                navChain={CONTACTS_NAV}
+                navAction="contacts-save-doctor"
+                onClick={() => {
+                  void saveDoctor()
+                }}
               />
-            </Field>
-            <Field label="Reg No">
-              <input
-                className="settings-input"
-                data-nav-order={3}
-                data-nav-chain={CONTACTS_NAV}
-                placeholder="e.g. MMC/2021/67890"
-                value={doctor.reg_no}
-                onChange={(e) =>
-                  setDoctor((d) => ({ ...d, reg_no: e.target.value }))
-                }
-              />
-            </Field>
-            <Field label="Phone">
-              <input
-                className="settings-input"
-                data-nav-order={4}
-                data-nav-chain={CONTACTS_NAV}
-                data-nav-enter="contacts-save-doctor"
-                value={doctor.phone}
-                onChange={(e) =>
-                  setDoctor((d) => ({ ...d, phone: e.target.value }))
-                }
-              />
-            </Field>
+              {cancelBtn}
+            </div>
           </div>
-          <div className="settings-inline-actions">
-            <SaveBtn
-              label={editId != null ? 'Save Doctor' : 'Add Doctor'}
-              navOrder={5}
-              navChain={CONTACTS_NAV}
-              navAction="contacts-save-doctor"
-              onClick={() => {
-                void saveDoctor()
-              }}
-            />
-            {editId != null ? (
-              <button
-                type="button"
-                className="settings-link-btn"
-                onClick={clearEdit}
-              >
-                Cancel
-              </button>
-            ) : null}
-          </div>
+          <div className="iset-bar">{searchBox}</div>
           <VoiceNoBar sc={voiceNo} kind="doctor" only={voiceOnly} onOnly={setVoiceOnly} />
           <div ref={tableWrapRef}>
           <CappedTableWrap
@@ -488,12 +541,15 @@ export function ContactsPanel({
                   <th>Name</th>
                   <th>Reg No</th>
                   <th>Phone</th>
-                  <th />
+                  <th className="act">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {doctors.map((d) => (
-                  <tr key={d.id}>
+                  <tr
+                    key={d.id}
+                    className={editId === d.id ? 'iset-active-row' : undefined}
+                  >
                     {showVoiceNo ? (
                       <td>
                         <VoiceNoSelect sc={voiceNo} kind="doctor" name={d.name} />
@@ -502,10 +558,10 @@ export function ContactsPanel({
                     <td>{d.name}</td>
                     <td>{d.reg_no}</td>
                     <td>{d.phone}</td>
-                    <td>
+                    <td className="act">
                       <button
                         type="button"
-                        className="settings-link-btn"
+                        className="iset-btn"
                         onClick={() => {
                           setEditId(d.id)
                           setDoctor({
@@ -516,10 +572,10 @@ export function ContactsPanel({
                         }}
                       >
                         Edit
-                      </button>{' '}
+                      </button>
                       <button
                         type="button"
-                        className="settings-link-btn"
+                        className="iset-btn danger"
                         onClick={() =>
                           run(
                             contactPayload('doctor', 'delete', { id: d.id }),
@@ -532,9 +588,9 @@ export function ContactsPanel({
                   </tr>
                 ))}
                 {!doctors.length ? (
-                  <tr>
-                    <td colSpan={showVoiceNo ? 5 : 4}>No doctors</td>
-                  </tr>
+                  <EmptyRow cols={showVoiceNo ? 5 : 4}>
+                    {noneText('doctor', 'doctors', search, numbered)}
+                  </EmptyRow>
                 ) : null}
               </tbody>
             </table>
@@ -545,169 +601,159 @@ export function ContactsPanel({
 
       {sectionId === 'customers' && (
         <Frame title={`Customers (${contacts.customers.length})`}>
-          <Field label="Search">
-            <input
-              className="settings-input"
-              data-nav-order={1}
-              data-nav-chain={CONTACTS_NAV}
-              data-page-filter="primary"
-              value={search}
-              placeholder="Filter…"
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </Field>
-          <div className="settings-inline-actions">
-            <SaveBtn
-              label="Recalculate All Dues"
-              onClick={() => {
-                if (
-                  !window.confirm(
-                    'Recalculate dues for all customers? This may take a moment.',
-                  )
-                ) {
-                  return
-                }
-                void run(contactPayload('customer', 'recalculate'))
-              }}
-            />
-            <button
-              type="button"
-              className="settings-action-btn"
-              onClick={() =>
-                void systemAction({
-                  action: 'export_contacts',
-                  kind: 'current_view',
-                  format: 'csv',
-                  headers: ['Name', 'Phone', 'Address', 'Due'],
-                  rows: customers.map((c) => [
-                    c.name,
-                    c.phone,
-                    c.address || '',
-                    String(c.total_due ?? 0),
-                  ]),
-                }).then((res) => {
-                  if (res.ok === false && res.error) setErr(String(res.error))
-                  else setMsg(String(res.message || res.path || 'Exported.'))
-                })
-              }
-            >
-              Export current view
-            </button>
-            <button
-              type="button"
-              className="settings-action-btn"
-              onClick={() =>
-                void systemAction({
-                  action: 'export_contacts',
-                  kind: 'customer_list',
-                  format: 'csv',
-                }).then((res) => {
-                  if (res.ok === false && res.error) setErr(String(res.error))
-                  else setMsg(String(res.message || res.path || 'Exported.'))
-                })
-              }
-            >
-              Customer list (all)
-            </button>
-            <button
-              type="button"
-              className="settings-action-btn"
-              onClick={() =>
-                void systemAction({
-                  action: 'export_contacts',
-                  kind: 'customer_due',
-                  format: 'csv',
-                }).then((res) => {
-                  if (res.ok === false && res.error) setErr(String(res.error))
-                  else setMsg(String(res.message || res.path || 'Exported.'))
-                })
-              }
-            >
-              Customer due list
-            </button>
-          </div>
-          <div className="settings-form-row">
-            <Field label="Name">
-              <input
-                className="settings-input"
-                data-nav-order={2}
-                data-nav-chain={CONTACTS_NAV}
-                value={customer.name}
-                onChange={(e) =>
-                  setCustomer((c) => ({ ...c, name: e.target.value }))
-                }
-              />
-            </Field>
-            <Field label="Phone">
-              <input
-                className="settings-input"
-                data-nav-order={3}
-                data-nav-chain={CONTACTS_NAV}
-                value={customer.phone}
-                onChange={(e) =>
-                  setCustomer((c) => ({ ...c, phone: e.target.value }))
-                }
-              />
-            </Field>
-            <Field label="Address (Village)">
-              <ModernCombo
-                className="settings-input"
-                value={customer.address}
-                placeholder="Village / address"
-                minChars={0}
-                filterLocal
-                listLabel="Villages"
-                emptyText="New village — Enter to save"
-                enterPicksHighlight={false}
-                navOrder={4}
-                navChain={CONTACTS_NAV}
-                items={(contacts.villages || []).map((v) => ({
-                  id: v,
-                  label: v,
-                }))}
-                onChange={(v) =>
-                  setCustomer((c) => ({ ...c, address: v }))
-                }
-                onPick={(it) => {
-                  setCustomer((c) => ({ ...c, address: it.label }))
-                  void rememberVillage(it.label)
-                }}
-                onEnter={(picked) => {
-                  const addr = (
-                    picked?.label || customerRef.current.address
-                  ).trim()
-                  if (addr) {
-                    setCustomer((c) => ({ ...c, address: addr }))
-                    void rememberVillage(addr)
+          <div className={`iset-form-card${editId != null ? ' editing' : ''}`}>
+            <h4>{editId != null ? 'Edit customer' : 'Add a customer'}</h4>
+            <div className="settings-form-row">
+              <Field label="Name">
+                <input
+                  className="settings-input"
+                  data-nav-order={2}
+                  data-nav-chain={CONTACTS_NAV}
+                  value={customer.name}
+                  onChange={(e) =>
+                    setCustomer((c) => ({ ...c, name: e.target.value }))
                   }
+                />
+              </Field>
+              <Field label="Phone">
+                <input
+                  className="settings-input"
+                  data-nav-order={3}
+                  data-nav-chain={CONTACTS_NAV}
+                  value={customer.phone}
+                  onChange={(e) =>
+                    setCustomer((c) => ({ ...c, phone: e.target.value }))
+                  }
+                />
+              </Field>
+              <Field label="Address (Village)">
+                <ModernCombo
+                  className="settings-input"
+                  value={customer.address}
+                  placeholder="Village / address"
+                  minChars={0}
+                  filterLocal
+                  listLabel="Villages"
+                  emptyText="New village — Enter to save"
+                  enterPicksHighlight={false}
+                  navOrder={4}
+                  navChain={CONTACTS_NAV}
+                  items={(contacts.villages || []).map((v) => ({
+                    id: v,
+                    label: v,
+                  }))}
+                  onChange={(v) =>
+                    setCustomer((c) => ({ ...c, address: v }))
+                  }
+                  onPick={(it) => {
+                    setCustomer((c) => ({ ...c, address: it.label }))
+                    void rememberVillage(it.label)
+                  }}
+                  onEnter={(picked) => {
+                    const addr = (
+                      picked?.label || customerRef.current.address
+                    ).trim()
+                    if (addr) {
+                      setCustomer((c) => ({ ...c, address: addr }))
+                      void rememberVillage(addr)
+                    }
+                    void saveCustomer()
+                  }}
+                  onBlur={() => {
+                    void rememberVillage(customerRef.current.address)
+                  }}
+                />
+              </Field>
+            </div>
+            {editId != null ? <CustomerGstRow customerId={editId} customerName={customer.name} /> : null}
+            <div className="iset-row">
+              <SaveBtn
+                label={editId != null ? 'Save Customer' : 'Add Customer'}
+                navOrder={5}
+                navChain={CONTACTS_NAV}
+                navAction="contacts-save-customer"
+                onClick={() => {
                   void saveCustomer()
                 }}
-                onBlur={() => {
-                  void rememberVillage(customerRef.current.address)
-                }}
               />
-            </Field>
+              {cancelBtn}
+            </div>
           </div>
-          {editId != null ? <CustomerGstRow customerId={editId} customerName={customer.name} /> : null}
-          <div className="settings-inline-actions">
-            <SaveBtn
-              label={editId != null ? 'Save Customer' : 'Add Customer'}
-              navOrder={5}
-              navChain={CONTACTS_NAV}
-              navAction="contacts-save-customer"
-              onClick={() => {
-                void saveCustomer()
-              }}
-            />
-            {editId != null ? (
+          <div className="iset-bar">
+            {searchBox}
+            <div className="iset-bar-actions">
               <button
                 type="button"
-                className="settings-link-btn"
-                onClick={clearEdit}
+                className="settings-action-btn iset-secondary"
+                onClick={() =>
+                  void systemAction({
+                    action: 'export_contacts',
+                    kind: 'current_view',
+                    format: 'csv',
+                    headers: ['Name', 'Phone', 'Address', 'Due'],
+                    rows: customers.map((c) => [
+                      c.name,
+                      c.phone,
+                      c.address || '',
+                      String(c.total_due ?? 0),
+                    ]),
+                  }).then((res) => {
+                    if (res.ok === false && res.error) setErr(String(res.error))
+                    else setMsg(String(res.message || res.path || 'Exported.'))
+                  })
+                }
               >
-                Cancel
+                Export current view
               </button>
-            ) : null}
+              <button
+                type="button"
+                className="settings-action-btn iset-secondary"
+                onClick={() =>
+                  void systemAction({
+                    action: 'export_contacts',
+                    kind: 'customer_list',
+                    format: 'csv',
+                  }).then((res) => {
+                    if (res.ok === false && res.error) setErr(String(res.error))
+                    else setMsg(String(res.message || res.path || 'Exported.'))
+                  })
+                }
+              >
+                Customer list (all)
+              </button>
+              <button
+                type="button"
+                className="settings-action-btn iset-secondary"
+                onClick={() =>
+                  void systemAction({
+                    action: 'export_contacts',
+                    kind: 'customer_due',
+                    format: 'csv',
+                  }).then((res) => {
+                    if (res.ok === false && res.error) setErr(String(res.error))
+                    else setMsg(String(res.message || res.path || 'Exported.'))
+                  })
+                }
+              >
+                Customer due list
+              </button>
+              <button
+                type="button"
+                className="settings-action-btn iset-secondary"
+                onClick={() => {
+                  if (
+                    !window.confirm(
+                      'Recalculate dues for all customers? This may take a moment.',
+                    )
+                  ) {
+                    return
+                  }
+                  void run(contactPayload('customer', 'recalculate'))
+                }}
+              >
+                Recalculate All Dues
+              </button>
+            </div>
           </div>
           <VoiceNoBar sc={voiceNo} kind="customer" only={voiceOnly} onOnly={setVoiceOnly} />
           <div ref={tableWrapRef}>
@@ -722,13 +768,16 @@ export function ContactsPanel({
                   <th>Name</th>
                   <th>Phone</th>
                   <th>Address</th>
-                  <th>Due</th>
-                  <th />
+                  <th className="num">Due</th>
+                  <th className="act">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {customers.map((d) => (
-                  <tr key={d.id}>
+                  <tr
+                    key={d.id}
+                    className={editId === d.id ? 'iset-active-row' : undefined}
+                  >
                     {showVoiceNo ? (
                       <td>
                         <VoiceNoSelect sc={voiceNo} kind="customer" name={d.name} />
@@ -737,11 +786,11 @@ export function ContactsPanel({
                     <td>{d.name}</td>
                     <td>{d.phone}</td>
                     <td>{d.address || ''}</td>
-                    <td>{money(d.total_due)}</td>
-                    <td>
+                    <td className="num">{money(d.total_due)}</td>
+                    <td className="act">
                       <button
                         type="button"
-                        className="settings-link-btn"
+                        className="iset-btn"
                         onClick={() => {
                           setEditId(d.id)
                           setCustomer({
@@ -752,10 +801,10 @@ export function ContactsPanel({
                         }}
                       >
                         Edit
-                      </button>{' '}
+                      </button>
                       <button
                         type="button"
-                        className="settings-link-btn"
+                        className="iset-btn danger"
                         onClick={() =>
                           run(
                             contactPayload('customer', 'delete', { id: d.id }),
@@ -768,9 +817,9 @@ export function ContactsPanel({
                   </tr>
                 ))}
                 {!customers.length ? (
-                  <tr>
-                    <td colSpan={showVoiceNo ? 6 : 5}>No customers</td>
-                  </tr>
+                  <EmptyRow cols={showVoiceNo ? 6 : 5}>
+                    {noneText('customer', 'customers', search, numbered)}
+                  </EmptyRow>
                 ) : null}
               </tbody>
             </table>
@@ -780,167 +829,181 @@ export function ContactsPanel({
       )}
 
       {sectionId === 'villages' && (
-        <Frame title="Villages">
-          <Field label="Search">
-            <input
-              className="settings-input"
-              data-nav-order={1}
-              data-nav-chain={CONTACTS_NAV}
-              data-page-filter="primary"
-              value={search}
-              placeholder="Filter…"
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </Field>
-          <Note>Default: {contacts.default_village || '(none)'}</Note>
-          <Field label="New village">
-            <input
-              className="settings-input"
-              data-nav-order={2}
-              data-nav-chain={CONTACTS_NAV}
-              data-nav-enter="contacts-save-village"
-              value={village}
-              onChange={(e) => setVillage(e.target.value)}
-            />
-          </Field>
-          <SaveBtn
-            label="Add Village"
-            navOrder={3}
-            navChain={CONTACTS_NAV}
-            navAction="contacts-save-village"
-            onClick={() => {
-              void saveVillage()
-            }}
-          />
+        <Frame title={`Villages (${contacts.villages.length})`}>
+          <div className="iset-form-card">
+            <h4>Add a village</h4>
+            <div className="iset-bar" style={{ margin: 0 }}>
+              <BarField label="New village" className="grow">
+                <input
+                  className="settings-input"
+                  data-nav-order={2}
+                  data-nav-chain={CONTACTS_NAV}
+                  data-nav-enter="contacts-save-village"
+                  value={village}
+                  onChange={(e) => setVillage(e.target.value)}
+                />
+              </BarField>
+              <SaveBtn
+                label="Add Village"
+                navOrder={3}
+                navChain={CONTACTS_NAV}
+                navAction="contacts-save-village"
+                onClick={() => {
+                  void saveVillage()
+                }}
+              />
+            </div>
+          </div>
+          <div className="iset-bar">
+            {searchBox}
+            <div className="iset-bar-actions">
+              <span className="iset-hint">
+                Default: <strong>{contacts.default_village || '(none)'}</strong>
+              </span>
+            </div>
+          </div>
           <VoiceNoBar sc={voiceNo} kind="village" only={voiceOnly} onOnly={setVoiceOnly} />
-          <ul className="settings-plain-list">
-            {villages.map((v) => (
-              <li key={v}>
-                {showVoiceNo ? (
-                  <>
-                    <VoiceNoSelect sc={voiceNo} kind="village" name={v} />{' '}
-                  </>
+          <div className="iset-table-wrap">
+            <table className="settings-table">
+              <thead>
+                <tr>
+                  {showVoiceNo ? <th style={{ width: 70 }}>Voice no.</th> : null}
+                  <th>Village</th>
+                  <th className="act">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {villages.map((v) => (
+                  <tr key={v}>
+                    {showVoiceNo ? (
+                      <td>
+                        <VoiceNoSelect sc={voiceNo} kind="village" name={v} />
+                      </td>
+                    ) : null}
+                    <td>
+                      {v}
+                      {contacts.default_village === v ? (
+                        <span className="iset-badge">default</span>
+                      ) : null}
+                    </td>
+                    <td className="act">
+                      <button
+                        type="button"
+                        className="iset-btn"
+                        onClick={() =>
+                          run(
+                            contactPayload('village', 'set_default_village', {
+                              fields: { name: v },
+                            }),
+                          )
+                        }
+                      >
+                        Set default
+                      </button>
+                      <button
+                        type="button"
+                        className="iset-btn danger"
+                        onClick={() =>
+                          run(
+                            contactPayload('village', 'remove', {
+                              fields: { name: v },
+                            }),
+                          )
+                        }
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {!villages.length ? (
+                  <EmptyRow cols={showVoiceNo ? 3 : 2}>
+                    {noneText('village', 'villages', search, numbered)}
+                  </EmptyRow>
                 ) : null}
-                {v}
-                {contacts.default_village === v ? ' (default)' : ''}{' '}
-                <button
-                  type="button"
-                  className="settings-link-btn"
-                  onClick={() =>
-                    run(
-                      contactPayload('village', 'set_default_village', {
-                        fields: { name: v },
-                      }),
-                    )
-                  }
-                >
-                  Set default
-                </button>{' '}
-                <button
-                  type="button"
-                  className="settings-link-btn"
-                  onClick={() =>
-                    run(
-                      contactPayload('village', 'remove', {
-                        fields: { name: v },
-                      }),
-                    )
-                  }
-                >
-                  Remove
-                </button>
-              </li>
-            ))}
-            {!villages.length ? <li>No villages</li> : null}
-          </ul>
+              </tbody>
+            </table>
+          </div>
         </Frame>
       )}
 
       {sectionId === 'suppliers' && (
         <Frame title={`Suppliers (${contacts.suppliers.length})`}>
-          <Field label="Search">
-            <input
-              className="settings-input"
-              data-nav-order={1}
-              data-nav-chain={CONTACTS_NAV}
-              data-page-filter="primary"
-              value={search}
-              placeholder="Filter…"
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </Field>
-          <SaveBtn
-            label="Recalculate All Dues"
-            onClick={() =>
-              run(contactPayload('supplier', 'recalculate'))
-            }
-          />
-          <div className="settings-form-row">
-            <Field label="Name">
-              <input
-                className="settings-input"
-                data-nav-order={2}
-                data-nav-chain={CONTACTS_NAV}
-                value={supplier.name}
-                onChange={(e) =>
-                  setSupplier((s) => ({ ...s, name: e.target.value }))
-                }
+          <div className={`iset-form-card${editId != null ? ' editing' : ''}`}>
+            <h4>{editId != null ? 'Edit supplier' : 'Add a supplier'}</h4>
+            <div className="settings-form-row">
+              <Field label="Name">
+                <input
+                  className="settings-input"
+                  data-nav-order={2}
+                  data-nav-chain={CONTACTS_NAV}
+                  value={supplier.name}
+                  onChange={(e) =>
+                    setSupplier((s) => ({ ...s, name: e.target.value }))
+                  }
+                />
+              </Field>
+              <Field label="Phone">
+                <input
+                  className="settings-input"
+                  data-nav-order={3}
+                  data-nav-chain={CONTACTS_NAV}
+                  value={supplier.phone}
+                  onChange={(e) =>
+                    setSupplier((s) => ({ ...s, phone: e.target.value }))
+                  }
+                />
+              </Field>
+              <Field label="GSTIN">
+                <input
+                  className="settings-input"
+                  data-nav-order={4}
+                  data-nav-chain={CONTACTS_NAV}
+                  value={supplier.gstin}
+                  onChange={(e) =>
+                    setSupplier((s) => ({ ...s, gstin: e.target.value }))
+                  }
+                />
+              </Field>
+              <Field label="Address">
+                <input
+                  className="settings-input"
+                  data-nav-order={5}
+                  data-nav-chain={CONTACTS_NAV}
+                  data-nav-enter="contacts-save-supplier"
+                  value={supplier.address}
+                  onChange={(e) =>
+                    setSupplier((s) => ({ ...s, address: e.target.value }))
+                  }
+                />
+              </Field>
+            </div>
+            <div className="iset-row">
+              <SaveBtn
+                label={editId != null ? 'Save Supplier' : 'Add Supplier'}
+                navOrder={6}
+                navChain={CONTACTS_NAV}
+                navAction="contacts-save-supplier"
+                onClick={() => {
+                  void saveSupplier()
+                }}
               />
-            </Field>
-            <Field label="Phone">
-              <input
-                className="settings-input"
-                data-nav-order={3}
-                data-nav-chain={CONTACTS_NAV}
-                value={supplier.phone}
-                onChange={(e) =>
-                  setSupplier((s) => ({ ...s, phone: e.target.value }))
-                }
-              />
-            </Field>
-            <Field label="GSTIN">
-              <input
-                className="settings-input"
-                data-nav-order={4}
-                data-nav-chain={CONTACTS_NAV}
-                value={supplier.gstin}
-                onChange={(e) =>
-                  setSupplier((s) => ({ ...s, gstin: e.target.value }))
-                }
-              />
-            </Field>
-            <Field label="Address">
-              <input
-                className="settings-input"
-                data-nav-order={5}
-                data-nav-chain={CONTACTS_NAV}
-                data-nav-enter="contacts-save-supplier"
-                value={supplier.address}
-                onChange={(e) =>
-                  setSupplier((s) => ({ ...s, address: e.target.value }))
-                }
-              />
-            </Field>
+              {cancelBtn}
+            </div>
           </div>
-          <div className="settings-inline-actions">
-            <SaveBtn
-              label={editId != null ? 'Save Supplier' : 'Add Supplier'}
-              navOrder={6}
-              navChain={CONTACTS_NAV}
-              navAction="contacts-save-supplier"
-              onClick={() => {
-                void saveSupplier()
-              }}
-            />
-            {editId != null ? (
+          <div className="iset-bar">
+            {searchBox}
+            <div className="iset-bar-actions">
               <button
                 type="button"
-                className="settings-link-btn"
-                onClick={clearEdit}
+                className="settings-action-btn iset-secondary"
+                onClick={() =>
+                  run(contactPayload('supplier', 'recalculate'))
+                }
               >
-                Cancel
+                Recalculate All Dues
               </button>
-            ) : null}
+            </div>
           </div>
           <VoiceNoBar sc={voiceNo} kind="supplier" only={voiceOnly} onOnly={setVoiceOnly} />
           <div ref={tableWrapRef}>
@@ -956,13 +1019,16 @@ export function ContactsPanel({
                   <th>Phone</th>
                   <th>GSTIN</th>
                   <th>Address</th>
-                  <th>Due</th>
-                  <th />
+                  <th className="num">Due</th>
+                  <th className="act">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {suppliers.map((d) => (
-                  <tr key={d.id}>
+                  <tr
+                    key={d.id}
+                    className={editId === d.id ? 'iset-active-row' : undefined}
+                  >
                     {showVoiceNo ? (
                       <td>
                         <VoiceNoSelect sc={voiceNo} kind="supplier" name={d.name} />
@@ -972,11 +1038,11 @@ export function ContactsPanel({
                     <td>{d.phone}</td>
                     <td>{d.gstin}</td>
                     <td>{d.address || ''}</td>
-                    <td>{money(d.total_due)}</td>
-                    <td>
+                    <td className="num">{money(d.total_due)}</td>
+                    <td className="act">
                       <button
                         type="button"
-                        className="settings-link-btn"
+                        className="iset-btn"
                         onClick={() => {
                           setEditId(d.id)
                           setSupplier({
@@ -988,10 +1054,10 @@ export function ContactsPanel({
                         }}
                       >
                         Edit
-                      </button>{' '}
+                      </button>
                       <button
                         type="button"
-                        className="settings-link-btn"
+                        className="iset-btn danger"
                         onClick={() =>
                           run(
                             contactPayload('supplier', 'delete', { id: d.id }),
@@ -1004,9 +1070,9 @@ export function ContactsPanel({
                   </tr>
                 ))}
                 {!suppliers.length ? (
-                  <tr>
-                    <td colSpan={showVoiceNo ? 7 : 6}>No suppliers</td>
-                  </tr>
+                  <EmptyRow cols={showVoiceNo ? 7 : 6}>
+                    {noneText('supplier', 'suppliers', search, numbered)}
+                  </EmptyRow>
                 ) : null}
               </tbody>
             </table>
@@ -1014,6 +1080,7 @@ export function ContactsPanel({
           </div>
         </Frame>
       )}
+      <StatusBar msg={msg} err={err} />
     </>
   )
 }
@@ -1124,6 +1191,29 @@ const ALERT_SPECS: Record<
 }
 
 const ALERT_ROWS_SHOWN = 1000
+
+/** Each list's empty state, in words. */
+const ALERT_EMPTY: Record<string, string> = {
+  low: 'No medicine is below its low-stock level.',
+  out: 'Nothing is out of stock.',
+  expired: 'No expired batch is in stock.',
+  near: 'No batch is close to its expiry.',
+  dues: 'No customer owes more than the minimum due.',
+}
+
+/** Columns that hold numbers: right-aligned, tabular figures. */
+const ALERT_NUM_HEADERS = new Set([
+  'Current Stock',
+  'Selling Rate',
+  'Purchase Rate',
+  'Quantity Expired',
+  'Remaining Days',
+  'Available Qty',
+  'Total Amount',
+  'Paid Amount',
+  'Due Amount',
+  'Due Days',
+])
 
 type ExportHow = 'csv' | 'xlsx' | 'pdf' | 'dm_a4' | 'dm_a5' | 'printer'
 const EXPORT_HOW: { key: ExportHow; label: string }[] = [
@@ -1240,10 +1330,12 @@ function AlertsExportDialog({
             {which === 'all' ? ` · ${sections.map((s) => `${s.title}: ${s.rows.length}`).join(' · ')}` : ''}
           </Note>
           {error ? <p className="settings-error">{error}</p> : null}
-          <div className="settings-inline-actions">
+          <div className="iset-row">
             <SaveBtn label={how.startsWith('dm_') || how === 'printer' ? 'Print' : 'Save file'}
               saving={busy} onClick={() => void go()} />
-            <SaveBtn label="Cancel" onClick={onClose} />
+            <button type="button" className="settings-action-btn iset-secondary" onClick={onClose}>
+              Cancel
+            </button>
           </div>
         </div>
       </div>
@@ -1498,6 +1590,15 @@ export function AlertsPanel({
   }
   useEffect(() => registerVoicePage('alerts', () => voiceHandlerRef.current), [])
 
+  const emptyText =
+    search.trim() || period
+      ? `Nothing in ${spec.title} matches${search.trim() ? ` “${search.trim()}”` : ''}${
+          period ? ` in ${periodLabel(period)}` : ''
+        }.`
+      : ALERT_EMPTY[nestedId] || 'Nothing to show.'
+  const hasRowActions = Boolean(spec.actionLabel || spec.dismissRow)
+  const hasBulkRemove = Boolean(spec.dismissAllExpired || spec.dismissAllOos)
+
   return (
     <>
       <PanelTitle>
@@ -1506,24 +1607,26 @@ export function AlertsPanel({
       <Note>
         Central dashboard for stock, expiry, and customer due alerts. Select a
         row for Reorder/Return actions. F5 refreshes.
-        {spec.periodOf === 'expiry'
-          ? ' Month / Year shows every batch whose expiry falls in it, batch-wise.'
-          : spec.periodOf === 'purchase'
-            ? ' Month / Year shows the medicines last bought in it.'
-            : ''}
       </Note>
-      <div className="settings-inline-actions">
-        <Field label="Search">
+      {spec.periodOf ? (
+        <Help title="What Month / Year shows">
+          {spec.periodOf === 'expiry'
+            ? 'Month / Year shows every batch whose expiry falls in it, batch-wise.'
+            : 'Month / Year shows the medicines last bought in it.'}
+        </Help>
+      ) : null}
+      <div className="iset-bar">
+        <BarField label="Search" className="grow">
           <input
             className="settings-input"
             value={search}
             placeholder="Filter table…"
             onChange={(e) => setSearch(e.target.value)}
           />
-        </Field>
+        </BarField>
         {spec.periodOf ? (
           <>
-            <Field label="Month">
+            <BarField label="Month" className="mid">
               <input
                 type="month"
                 className="settings-input"
@@ -1533,8 +1636,8 @@ export function AlertsPanel({
                   if (e.target.value) setYear('')
                 }}
               />
-            </Field>
-            <Field label="Year">
+            </BarField>
+            <BarField label="Year" className="short">
               <select
                 className="settings-input"
                 value={year}
@@ -1550,33 +1653,55 @@ export function AlertsPanel({
                   </option>
                 ))}
               </select>
-            </Field>
+            </BarField>
             {period ? (
-              <SaveBtn
-                label="Clear Month / Year"
+              <button
+                type="button"
+                className="settings-action-btn iset-secondary"
                 onClick={() => {
                   setMonth('')
                   setYear('')
                 }}
-              />
+              >
+                Clear Month / Year
+              </button>
             ) : null}
           </>
         ) : null}
-        <SaveBtn label="Refresh (F5)" onClick={() => onRefresh()} />
-        <SaveBtn label="Export / Print" onClick={() => setExportOpen(true)} />
-        <SaveBtn
-          label="Reorder by Supplier"
-          saving={busy}
-          onClick={() => void bulkReorder()}
-        />
-        <SaveBtn
-          label="Return by Purchase"
-          saving={busy}
-          onClick={() => void bulkReturn()}
-        />
+        <div className="iset-bar-actions">
+          <SaveBtn label="Refresh (F5)" onClick={() => onRefresh()} />
+          <button
+            type="button"
+            className="settings-action-btn iset-secondary"
+            onClick={() => setExportOpen(true)}
+          >
+            Export / Print
+          </button>
+          <button
+            type="button"
+            className="settings-action-btn iset-secondary"
+            disabled={busy}
+            onClick={() => void bulkReorder()}
+          >
+            Reorder by Supplier
+          </button>
+          <button
+            type="button"
+            className="settings-action-btn iset-secondary"
+            disabled={busy}
+            onClick={() => void bulkReturn()}
+          >
+            Return by Purchase
+          </button>
+        </div>
       </div>
-      {(spec.actionLabel || spec.dismissRow || spec.dismissAllExpired || spec.dismissAllOos) && (
-        <div className="settings-inline-actions">
+      {hasRowActions || hasBulkRemove ? (
+        <div className="iset-alert-actions">
+          {hasRowActions ? (
+            <span className="iset-row-label">
+              {selectedRow ? `Selected: ${String(selectedRow[0] ?? '')}` : 'Select a row:'}
+            </span>
+          ) : null}
           {spec.actionLabel ? (
             <SaveBtn
               label={spec.actionLabel}
@@ -1584,54 +1709,44 @@ export function AlertsPanel({
               onClick={() => void rowAction()}
             />
           ) : null}
-          {spec.bulkReturn && spec.actionLabel === 'Return' ? (
-            <SaveBtn
-              label="Return by Purchase"
-              saving={busy}
-              onClick={() => void bulkReturn()}
-            />
-          ) : null}
-          {spec.bulkReorder && spec.actionLabel === 'Reorder' ? (
-            <SaveBtn
-              label="Reorder by Supplier"
-              saving={busy}
-              onClick={() => void bulkReorder()}
-            />
-          ) : null}
           {spec.dismissRow ? (
             <button
               type="button"
-              className="settings-link-btn"
+              className="settings-action-btn iset-secondary"
               disabled={busy}
               onClick={() => void dismissRow()}
             >
               Remove from List
             </button>
           ) : null}
-          {spec.dismissAllExpired ? (
-            <button
-              type="button"
-              className="settings-link-btn danger-text"
-              disabled={busy}
-              onClick={() => void dismissAllExpired()}
-            >
-              Remove All Expired
-            </button>
-          ) : null}
-          {spec.dismissAllOos ? (
-            <button
-              type="button"
-              className="settings-link-btn danger-text"
-              disabled={busy}
-              onClick={() => void dismissAllOos()}
-            >
-              Remove All Out of Stock
-            </button>
+          {hasBulkRemove ? (
+            <span className="iset-push">
+              {spec.dismissAllExpired ? (
+                <button
+                  type="button"
+                  className="settings-action-btn iset-danger"
+                  disabled={busy}
+                  onClick={() => void dismissAllExpired()}
+                >
+                  Remove All Expired
+                </button>
+              ) : null}
+              {spec.dismissAllOos ? (
+                <button
+                  type="button"
+                  className="settings-action-btn iset-danger"
+                  disabled={busy}
+                  onClick={() => void dismissAllOos()}
+                >
+                  Remove All Out of Stock
+                </button>
+              ) : null}
+            </span>
           ) : null}
         </div>
-      )}
-      {err ? <p className="settings-error">{err}</p> : null}
-      {msg ? <p className="settings-msg">{msg}</p> : null}
+      ) : null}
+      {err ? <p className="iset-callout warn">{err}</p> : null}
+      {msg ? <p className="iset-callout">{msg}</p> : null}
       {exportOpen ? (
         <AlertsExportDialog
           alerts={alerts}
@@ -1642,12 +1757,14 @@ export function AlertsPanel({
           onDone={(m) => setMsg(m)}
         />
       ) : null}
-      <div className="settings-table-wrap">
+      <div className="iset-table-wrap capped">
         <table className="settings-table">
           <thead>
             <tr>
               {spec.headers.map((h) => (
-                <th key={h}>{h}</th>
+                <th key={h} className={ALERT_NUM_HEADERS.has(h) ? 'num' : undefined}>
+                  {h}
+                </th>
               ))}
             </tr>
           </thead>
@@ -1655,26 +1772,26 @@ export function AlertsPanel({
             {rows.slice(0, ALERT_ROWS_SHOWN).map((r, i) => (
               <tr
                 key={i}
-                className={selectedIdx === i ? 'row-selected' : ''}
+                className={`iset-clickable${selectedIdx === i ? ' row-selected' : ''}`}
                 onClick={() => setSelectedIdx(i)}
                 onDoubleClick={() => {
                   setSelectedIdx(i)
                   void rowAction(r)
                 }}
               >
-                {spec.headers.map((_, j) => (
-                  <td key={j}>{String(r[j] ?? '')}</td>
+                {spec.headers.map((h, j) => (
+                  <td key={j} className={ALERT_NUM_HEADERS.has(h) ? 'num' : undefined}>
+                    {String(r[j] ?? '')}
+                  </td>
                 ))}
               </tr>
             ))}
             {!rows.length ? (
-              <tr>
-                <td colSpan={spec.headers.length}>No rows</td>
-              </tr>
+              <EmptyRow cols={spec.headers.length}>{emptyText}</EmptyRow>
             ) : null}
             {rows.length > ALERT_ROWS_SHOWN ? (
               <tr>
-                <td colSpan={spec.headers.length}>
+                <td className="iset-more" colSpan={spec.headers.length}>
                   First {ALERT_ROWS_SHOWN} of {rows.length} shown — Export CSV has every row.
                 </td>
               </tr>
@@ -2060,228 +2177,328 @@ export function PaymentPanel({
     }
   }
 
+  const histCols = kind === 'customer' ? 11 : 9
+
   return (
     <>
       <PanelTitle>
         {kind === 'supplier' ? 'Supplier Payment' : 'Customer Payment'}
       </PanelTitle>
-      <Note>F5 / Ctrl+G saves payment (button below)</Note>
-      {err ? <p className="error">{err}</p> : null}
-      {msg ? <Note>{msg}</Note> : null}
-      {editHint ? <Note>{editHint}</Note> : null}
-      <Field label={kind === 'supplier' ? 'Supplier' : 'Customer'}>
-        <ModernCombo
-          className="settings-input"
-          value={party}
-          placeholder={
-            kind === 'supplier' ? 'Search supplier…' : 'Search customer…'
-          }
-          minChars={0}
-          filterLocal
-          maxVisible={30}
-          listLabel={kind === 'supplier' ? 'Suppliers' : 'Customers'}
-          emptyText="No matching party"
-          items={partyItems}
-          voiceField={kind}
-          onChange={(v) => {
-            setParty(v)
-            // Typing has moved off whatever was clicked, so the id that told two
-            // same-named parties apart no longer describes this text.
-            setPartyId(null)
-            setTicks({})
-          }}
-          onPick={(it) => {
-            setParty(it.label)
-            const id = Number(it.id)
-            setPartyId(id)
-            // another party's bills are not this one's
-            setTicks({})
-            setAmountTyped(false)
-            const p = data.parties.find((x) => x.id === id)
-            if (p && kind === 'supplier' && p.due > 0) {
-              setAmount(p.due.toFixed(2))
-            }
-          }}
-        />
-      </Field>
-      <Note>Outstanding due: ₹{money(selectedDue)}</Note>
-      {party.trim() ? (
-        <Field label="Which bills does this pay?">
-          <select
-            className="settings-input"
-            value={billMode}
-            onChange={(e) => setBillMode(e.target.value === 'choose' ? 'choose' : 'oldest')}
-          >
-            <option value="oldest">Oldest bills first</option>
-            <option value="choose">Choose bills</option>
-          </select>
-        </Field>
-      ) : null}
-      {billMode === 'choose' && party.trim() ? (
-        !billsSupported ? (
-          <Note>Online, a payment clears the oldest bills first; bills can be chosen in Offline / offline-first.</Note>
-        ) : (
-          <>
-            {billsErr ? <p className="error">{billsErr}</p> : null}
-            <div className="settings-table-wrap" style={{ maxHeight: 260, overflow: 'auto' }}>
-              <table className="settings-table">
-                <thead>
-                  <tr>
-                    <th />
-                    <th>{kind === 'supplier' ? 'Purchase / Bill No' : 'Bill No'}</th>
-                    <th>Date</th>
-                    <th>Bill total</th>
-                    <th>Owes now</th>
-                    <th>Pay on it</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {openBills.map((b) => {
-                    const on = ticks[b.bill_id] != null
-                    return (
-                      <tr key={b.bill_id} className={on ? 'row-selected' : undefined}>
-                        <td>
-                          <input
-                            type="checkbox"
-                            checked={on}
-                            aria-label={`Pay ${shortNo(b.bill_no)}`}
-                            onChange={(e) => tickBill(b, e.target.checked)}
-                          />
-                        </td>
-                        <td>{shortNo(b.bill_no) || `#${b.bill_id}`}</td>
-                        <td>{b.date}</td>
-                        <td className="num">{money(b.total)}</td>
-                        <td className="num">{money(b.owes)}</td>
-                        <td>
-                          <input
-                            className="settings-input"
-                            style={{ width: 100 }}
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            disabled={!on}
-                            value={on ? ticks[b.bill_id] : ''}
-                            onChange={(e) => setTickAmount(b, e.target.value)}
-                          />
-                        </td>
-                      </tr>
-                    )
-                  })}
-                  {!openBills.length ? (
-                    <tr>
-                      <td colSpan={6}>No bill of this party owes anything.</td>
-                    </tr>
-                  ) : null}
-                </tbody>
-              </table>
+      <div className="iset-form-frame">
+        <Frame title={editingId ? `Edit payment #${editingId}` : 'New payment'}>
+          <Note>F5 / Ctrl+G saves payment (button below)</Note>
+          {editHint ? <p className="iset-callout">{editHint}</p> : null}
+          <div className="iset-pay-top">
+            <BarField label={kind === 'supplier' ? 'Supplier' : 'Customer'}>
+              <ModernCombo
+                className="settings-input"
+                value={party}
+                placeholder={
+                  kind === 'supplier' ? 'Search supplier…' : 'Search customer…'
+                }
+                minChars={0}
+                filterLocal
+                maxVisible={30}
+                listLabel={kind === 'supplier' ? 'Suppliers' : 'Customers'}
+                emptyText="No matching party"
+                items={partyItems}
+                voiceField={kind}
+                onChange={(v) => {
+                  setParty(v)
+                  // Typing has moved off whatever was clicked, so the id that told two
+                  // same-named parties apart no longer describes this text.
+                  setPartyId(null)
+                  setTicks({})
+                }}
+                onPick={(it) => {
+                  setParty(it.label)
+                  const id = Number(it.id)
+                  setPartyId(id)
+                  // another party's bills are not this one's
+                  setTicks({})
+                  setAmountTyped(false)
+                  const p = data.parties.find((x) => x.id === id)
+                  if (p && kind === 'supplier' && p.due > 0) {
+                    setAmount(p.due.toFixed(2))
+                  }
+                }}
+              />
+            </BarField>
+            <div className={`iset-pay-due${selectedDue > 0.009 ? ' owes' : ''}`}>
+              <span>Outstanding due</span>
+              <strong>₹{money(selectedDue)}</strong>
             </div>
-            {tickedTotal > 0.009 && payAmount > tickedTotal + 0.009 ? (
-              <Note>
-                Ticked ₹{money(tickedTotal)} · ₹{money(payAmount - tickedTotal)} more goes to the oldest bills
-              </Note>
+            {party.trim() ? (
+              <BarField label="Which bills does this pay?">
+                <select
+                  className="settings-input"
+                  value={billMode}
+                  onChange={(e) => setBillMode(e.target.value === 'choose' ? 'choose' : 'oldest')}
+                >
+                  <option value="oldest">Oldest bills first</option>
+                  <option value="choose">Choose bills</option>
+                </select>
+              </BarField>
+            ) : (
+              <span className="iset-hint">
+                Pick the {kind === 'supplier' ? 'supplier' : 'customer'} to see what is owed.
+              </span>
+            )}
+          </div>
+          {billMode === 'choose' && party.trim() ? (
+            !billsSupported ? (
+              <Note>Online, a payment clears the oldest bills first; bills can be chosen in Offline / offline-first.</Note>
+            ) : (
+              <>
+                {billsErr ? <p className="iset-callout warn">{billsErr}</p> : null}
+                <div className="iset-table-wrap">
+                  <table className="settings-table">
+                    <thead>
+                      <tr>
+                        <th style={{ width: 28 }} />
+                        <th>{kind === 'supplier' ? 'Purchase / Bill No' : 'Bill No'}</th>
+                        <th>Date</th>
+                        <th className="num">Bill total</th>
+                        <th className="num">Owes now</th>
+                        <th className="num">Pay on it</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {openBills.map((b) => {
+                        const on = ticks[b.bill_id] != null
+                        return (
+                          <tr key={b.bill_id} className={on ? 'row-selected' : undefined}>
+                            <td>
+                              <input
+                                type="checkbox"
+                                checked={on}
+                                aria-label={`Pay ${shortNo(b.bill_no)}`}
+                                onChange={(e) => tickBill(b, e.target.checked)}
+                              />
+                            </td>
+                            <td>{shortNo(b.bill_no) || `#${b.bill_id}`}</td>
+                            <td>{b.date}</td>
+                            <td className="num">{money(b.total)}</td>
+                            <td className="num">{money(b.owes)}</td>
+                            <td className="num">
+                              <input
+                                className="settings-input iset-cell-input"
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                disabled={!on}
+                                value={on ? ticks[b.bill_id] : ''}
+                                onChange={(e) => setTickAmount(b, e.target.value)}
+                              />
+                            </td>
+                          </tr>
+                        )
+                      })}
+                      {!openBills.length ? (
+                        <EmptyRow cols={6}>No bill of this party owes anything.</EmptyRow>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+                {tickedTotal > 0.009 && payAmount > tickedTotal + 0.009 ? (
+                  <Note>
+                    Ticked ₹{money(tickedTotal)} · ₹{money(payAmount - tickedTotal)} more goes to the oldest bills
+                  </Note>
+                ) : null}
+                {tickedTotal > 0.009 && payAmount < tickedTotal - 0.009 ? (
+                  <p className="iset-callout warn">
+                    The bills you ticked need ₹{money(tickedTotal)}; the amount is ₹{money(payAmount)}.
+                  </p>
+                ) : null}
+              </>
+            )
+          ) : null}
+          <div className="iset-pay-fields">
+            {kind === 'supplier' ? (
+              <>
+                <BarField label="Amount" className="amount">
+                  <input
+                    className="settings-input"
+                    inputMode="decimal"
+                    value={amount}
+                    onChange={(e) => {
+                      setAmount(e.target.value)
+                      setAmountTyped(true)
+                    }}
+                  />
+                </BarField>
+                <BarField label="Mode">
+                  <select
+                    className="settings-input"
+                    value={mode}
+                    onChange={(e) => setMode(e.target.value)}
+                  >
+                    {paymentModes.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                </BarField>
+              </>
+            ) : (
+              <>
+                <BarField label="Cash" className="amount">
+                  <input
+                    className="settings-input"
+                    inputMode="decimal"
+                    value={cash}
+                    onChange={(e) => {
+                      setCash(e.target.value)
+                      setAmountTyped(true)
+                    }}
+                  />
+                </BarField>
+                <BarField label="Online" className="amount">
+                  <input
+                    className="settings-input"
+                    inputMode="decimal"
+                    value={online}
+                    onChange={(e) => {
+                      setOnline(e.target.value)
+                      setAmountTyped(true)
+                    }}
+                  />
+                </BarField>
+              </>
+            )}
+            <BarField label="Date">
+              <input
+                className="settings-input"
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+              />
+            </BarField>
+            <BarField label="Reference">
+              <input
+                className="settings-input"
+                value={reference}
+                onChange={(e) => setReference(e.target.value)}
+              />
+            </BarField>
+            {kind === 'customer' ? (
+              <BarField label="Note">
+                <input
+                  className="settings-input"
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                />
+              </BarField>
             ) : null}
-            {tickedTotal > 0.009 && payAmount < tickedTotal - 0.009 ? (
-              <p className="error">
-                The bills you ticked need ₹{money(tickedTotal)}; the amount is ₹{money(payAmount)}.
-              </p>
+          </div>
+          <div className="settings-savebar">
+            <SaveBtn
+              label={editingId ? 'Update Payment' : 'Save Payment'}
+              onClick={save}
+            />
+            {editingId ? (
+              <button
+                type="button"
+                className="settings-action-btn iset-secondary"
+                onClick={clearForm}
+              >
+                Cancel edit
+              </button>
             ) : null}
-          </>
-        )
-      ) : null}
-      {kind === 'supplier' ? (
-        <>
-          <Field label="Amount">
-            <input
-              className="settings-input"
-              value={amount}
-              onChange={(e) => {
-                setAmount(e.target.value)
-                setAmountTyped(true)
-              }}
-            />
-          </Field>
-          <Field label="Mode">
-            <select
-              className="settings-input"
-              value={mode}
-              onChange={(e) => setMode(e.target.value)}
-            >
-              {paymentModes.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
-          </Field>
-        </>
-      ) : (
-        <>
-          <Field label="Cash">
-            <input
-              className="settings-input"
-              value={cash}
-              onChange={(e) => {
-                setCash(e.target.value)
-                setAmountTyped(true)
-              }}
-            />
-          </Field>
-          <Field label="Online">
-            <input
-              className="settings-input"
-              value={online}
-              onChange={(e) => {
-                setOnline(e.target.value)
-                setAmountTyped(true)
-              }}
-            />
-          </Field>
-        </>
-      )}
-      <Field label="Date">
-        <input
-          className="settings-input"
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-        />
-      </Field>
-      <Field label="Reference">
-        <input
-          className="settings-input"
-          value={reference}
-          onChange={(e) => setReference(e.target.value)}
-        />
-      </Field>
-      {kind === 'customer' ? (
-        <Field label="Note">
-          <input
-            className="settings-input"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-          />
-        </Field>
-      ) : null}
-      <div className="settings-inline-actions">
-        <SaveBtn
-          label={editingId ? 'Update Payment' : 'Save Payment'}
-          onClick={save}
-        />
-        {editingId ? (
-          <button type="button" className="settings-link-btn" onClick={clearForm}>
-            Cancel edit
-          </button>
-        ) : null}
+            {err ? (
+              <span className="settings-savebar-msg err">{err}</span>
+            ) : msg ? (
+              <span className="settings-savebar-msg ok">{msg}</span>
+            ) : null}
+          </div>
+        </Frame>
       </div>
+      <Frame title={`Payment history (${data.history.length})`}>
+        <div className="iset-table-wrap capped">
+          <table className="settings-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Party</th>
+                <th className="num">Amount</th>
+                {kind === 'customer' ? (
+                  <>
+                    <th className="num">Cash</th>
+                    <th className="num">Online</th>
+                  </>
+                ) : null}
+                <th>Mode</th>
+                <th>Ref</th>
+                <th className="num">Due Before</th>
+                <th className="num">Due After</th>
+                <th title="✓ = chosen for this payment; the rest went to the oldest bills">Bills cleared</th>
+                <th className="act">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.history.map((r) => (
+                <tr
+                  key={String(r.id)}
+                  className={
+                    editingId != null && Number(r.id) === editingId
+                      ? 'row-selected'
+                      : undefined
+                  }
+                >
+                  <td>{String(r.date ?? '')}</td>
+                  <td>{String(r.party ?? '')}</td>
+                  <td className="num">{money(r.amount)}</td>
+                  {kind === 'customer' ? (
+                    <>
+                      <td className="num">{money(r.cash)}</td>
+                      <td className="num">{money(r.online)}</td>
+                    </>
+                  ) : null}
+                  <td>{String(r.mode ?? '')}</td>
+                  <td>{String(r.reference ?? '')}</td>
+                  <td className="num">
+                    {r.due_before != null ? money(r.due_before) : '—'}
+                  </td>
+                  <td className="num">{r.due_after != null ? money(r.due_after) : '—'}</td>
+                  <td className="wrap" style={{ minWidth: 160 }}>{clearedText(r)}</td>
+                  <td className="act">
+                    <button
+                      type="button"
+                      className="iset-btn"
+                      onClick={() => loadHistoryRow(r)}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="iset-btn danger"
+                      onClick={() => remove(r)}
+                    >
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {!data.history.length ? (
+                <EmptyRow cols={histCols}>
+                  No {kind === 'supplier' ? 'supplier' : 'customer'} payments yet.
+                  Saved payments show here.
+                </EmptyRow>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </Frame>
       <Frame title="Payment report — which bills each payment cleared">
-        <div className="settings-inline-actions" style={{ flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <Field label="From">
+        <div className="iset-bar" style={{ margin: 0 }}>
+          <BarField label="From" className="date">
             <input className="settings-input" type="date" value={repFrom} onChange={(e) => setRepFrom(e.target.value)} />
-          </Field>
-          <Field label="To">
+          </BarField>
+          <BarField label="To" className="date">
             <input className="settings-input" type="date" value={repTo} onChange={(e) => setRepTo(e.target.value)} />
-          </Field>
-          <Field label={kind === 'supplier' ? 'Suppliers' : 'Customers'}>
+          </BarField>
+          <BarField label={kind === 'supplier' ? 'Suppliers' : 'Customers'} className="grow">
             <select
               className="settings-input"
               value={repParty}
@@ -2290,84 +2507,27 @@ export function PaymentPanel({
               <option value="all">All</option>
               <option value="this">Only {party.trim() || (kind === 'supplier' ? 'the supplier above' : 'the customer above')}</option>
             </select>
-          </Field>
-          <SaveBtn label="Export CSV" saving={repBusy} onClick={() => void exportReport('csv')} />
-          <SaveBtn label="Save PDF" saving={repBusy} onClick={() => void exportReport('pdf')} />
+          </BarField>
+          <div className="iset-bar-actions">
+            <button
+              type="button"
+              className="settings-action-btn iset-secondary"
+              disabled={repBusy}
+              onClick={() => void exportReport('csv')}
+            >
+              Export CSV
+            </button>
+            <button
+              type="button"
+              className="settings-action-btn iset-secondary"
+              disabled={repBusy}
+              onClick={() => void exportReport('pdf')}
+            >
+              Save PDF
+            </button>
+          </div>
         </div>
       </Frame>
-      <div className="settings-table-wrap">
-        <table className="settings-table">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Party</th>
-              <th>Amount</th>
-              {kind === 'customer' ? (
-                <>
-                  <th>Cash</th>
-                  <th>Online</th>
-                </>
-              ) : null}
-              <th>Mode</th>
-              <th>Ref</th>
-              <th>Due Before</th>
-              <th>Due After</th>
-              <th title="✓ = chosen for this payment; the rest went to the oldest bills">Bills cleared</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.history.map((r) => (
-              <tr
-                key={String(r.id)}
-                className={
-                  editingId != null && Number(r.id) === editingId
-                    ? 'row-selected'
-                    : undefined
-                }
-              >
-                <td>{String(r.date ?? '')}</td>
-                <td>{String(r.party ?? '')}</td>
-                <td>{money(r.amount)}</td>
-                {kind === 'customer' ? (
-                  <>
-                    <td>{money(r.cash)}</td>
-                    <td>{money(r.online)}</td>
-                  </>
-                ) : null}
-                <td>{String(r.mode ?? '')}</td>
-                <td>{String(r.reference ?? '')}</td>
-                <td>
-                  {r.due_before != null ? money(r.due_before) : '—'}
-                </td>
-                <td>{r.due_after != null ? money(r.due_after) : '—'}</td>
-                <td style={{ whiteSpace: 'normal', minWidth: 160 }}>{clearedText(r)}</td>
-                <td>
-                  <button
-                    type="button"
-                    className="settings-link-btn"
-                    onClick={() => loadHistoryRow(r)}
-                  >
-                    Edit
-                  </button>{' '}
-                  <button
-                    type="button"
-                    className="settings-link-btn"
-                    onClick={() => remove(r)}
-                  >
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {!data.history.length ? (
-              <tr>
-                <td colSpan={kind === 'customer' ? 11 : 9}>No payments yet</td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
     </>
   )
 }
@@ -2506,65 +2666,73 @@ export function LedgerPanel({
       <PanelTitle>
         {kind === 'supplier' ? 'Supplier Ledger' : 'Customer Ledger'}
       </PanelTitle>
-      {err ? <p className="error">{err}</p> : null}
-      <Field label="Party">
-        <ModernCombo
-          className="settings-input"
-          value={party}
-          placeholder={
-            kind === 'supplier' ? 'Search supplier…' : 'Search customer…'
-          }
-          minChars={0}
-          filterLocal
-          maxVisible={30}
-          listLabel={kind === 'supplier' ? 'Suppliers' : 'Customers'}
-          emptyText="No matching party"
-          items={partyItems}
-          onChange={setParty}
-          onPick={(it) => setParty(it.label)}
-          // Enter still runs the statement, as it did on the <select>. The name
-          // has to come from the pick rather than from `party`: the pick has not
-          // reached state yet when this fires, so reading it would search for
-          // whatever the field held one keystroke ago.
-          onEnter={(picked) => void load(picked?.label ?? party)}
-        />
-      </Field>
-      <Field label="From">
-        <input
-          className="settings-input"
-          type="date"
-          value={from}
-          onChange={(e) => setFrom(e.target.value)}
-          onKeyDown={onFilterEnter}
-        />
-      </Field>
-      <Field label="To">
-        <input
-          className="settings-input"
-          type="date"
-          value={to}
-          onChange={(e) => setTo(e.target.value)}
-          onKeyDown={onFilterEnter}
-        />
-      </Field>
-      <div className="settings-inline-actions">
-        <SaveBtn label="View Statement" onClick={() => load(party)} />
-        <SaveBtn
-          label="Reset"
-          onClick={() => {
-            setParty('')
-            setFrom('')
-            setTo(todayLocal())
-            setData(null)
-            setErr('')
-            void load('')
-          }}
-        />
-        <SaveBtn
-          label="Export CSV"
-          onClick={exportCsv}
-          disabled={!data?.rows?.length}
-        />
+      {err ? <p className="iset-callout warn">{err}</p> : null}
+      <div className="iset-bar">
+        <BarField label="Party" className="grow">
+          <ModernCombo
+            className="settings-input"
+            value={party}
+            placeholder={
+              kind === 'supplier' ? 'Search supplier…' : 'Search customer…'
+            }
+            minChars={0}
+            filterLocal
+            maxVisible={30}
+            listLabel={kind === 'supplier' ? 'Suppliers' : 'Customers'}
+            emptyText="No matching party"
+            items={partyItems}
+            onChange={setParty}
+            onPick={(it) => setParty(it.label)}
+            // Enter still runs the statement, as it did on the <select>. The name
+            // has to come from the pick rather than from `party`: the pick has not
+            // reached state yet when this fires, so reading it would search for
+            // whatever the field held one keystroke ago.
+            onEnter={(picked) => void load(picked?.label ?? party)}
+          />
+        </BarField>
+        <BarField label="From" className="date">
+          <input
+            className="settings-input"
+            type="date"
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+            onKeyDown={onFilterEnter}
+          />
+        </BarField>
+        <BarField label="To" className="date">
+          <input
+            className="settings-input"
+            type="date"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            onKeyDown={onFilterEnter}
+          />
+        </BarField>
+        <div className="iset-bar-actions">
+          <SaveBtn label="View Statement" onClick={() => load(party)} />
+          <button
+            type="button"
+            className="settings-action-btn iset-secondary"
+            onClick={() => {
+              setParty('')
+              setFrom('')
+              setTo(todayLocal())
+              setData(null)
+              setErr('')
+              void load('')
+            }}
+          >
+            Reset
+          </button>
+          <button
+            type="button"
+            className="settings-action-btn iset-secondary"
+            onClick={exportCsv}
+            disabled={!data?.rows?.length}
+          >
+            Export CSV
+          </button>
+        </div>
       </div>
       {data ? (
         <>
@@ -2572,57 +2740,68 @@ export function LedgerPanel({
               summary threw while React was rendering, which unmounts the whole
               tree -- nav bar included -- and leaves a white window that only a
               restart recovers. A ledger with no totals should show zeroes. */}
-          <Note>
-            Opening ₹{money(data.summary?.opening)} · Debits ₹
-            {money(data.summary?.debits)} · Credits ₹
-            {money(data.summary?.credits)} · Closing ₹
-            {money(data.summary?.closing)}
-          </Note>
+          <div className="iset-summary">
+            <div className="iset-stat">
+              <span>Opening</span>
+              <strong>₹{money(data.summary?.opening)}</strong>
+            </div>
+            <div className="iset-stat">
+              <span>Debits</span>
+              <strong>₹{money(data.summary?.debits)}</strong>
+            </div>
+            <div className="iset-stat">
+              <span>Credits</span>
+              <strong>₹{money(data.summary?.credits)}</strong>
+            </div>
+            <div className={`iset-stat${Number(data.summary?.closing || 0) > 0.009 ? ' due' : ''}`}>
+              <span>Closing</span>
+              <strong>₹{money(data.summary?.closing)}</strong>
+            </div>
+            <div className="iset-stat">
+              <span>Entries</span>
+              <strong>{data.rows.length}</strong>
+            </div>
+          </div>
           <div
             ref={ledgerTableRef}
-            className="settings-table-wrap"
+            className="iset-table-wrap capped"
             tabIndex={-1}
             data-ledger-focus="table"
           >
             <table className="settings-table">
               <thead>
                 <tr>
-                  <th>Date</th>
+                  <th style={{ width: 110 }}>Date</th>
                   <th>Particulars</th>
-                  <th>Debit</th>
-                  <th>Credit</th>
-                  <th>Balance</th>
+                  <th className="num">Debit</th>
+                  <th className="num">Credit</th>
+                  <th className="num">Balance</th>
                 </tr>
               </thead>
               <tbody>
                 {data.rows.map((r, i) => (
                   <tr key={i}>
                     <td>{r.date}</td>
-                    <td>{r.particulars}</td>
-                    <td>{money(r.debit)}</td>
-                    <td>{money(r.credit)}</td>
-                    <td>{money(r.balance)}</td>
+                    <td className="wrap">{r.particulars}</td>
+                    <td className="num">{money(r.debit)}</td>
+                    <td className="num">{money(r.credit)}</td>
+                    <td className="num">{money(r.balance)}</td>
                   </tr>
                 ))}
-                <tr>
-                  <td colSpan={2}>
-                    <strong>Summary</strong>
-                  </td>
-                  <td>
-                    <strong>{money(data.summary.debits)}</strong>
-                  </td>
-                  <td>
-                    <strong>{money(data.summary.credits)}</strong>
-                  </td>
-                  <td>
-                    <strong>{money(data.summary.closing)}</strong>
-                  </td>
-                </tr>
-                {!data.rows.length ? (
-                  <tr>
-                    <td colSpan={5}>No ledger rows</td>
+                {data.rows.length ? (
+                  <tr className="iset-total">
+                    <td colSpan={2}>Summary</td>
+                    <td className="num">{money(data.summary?.debits)}</td>
+                    <td className="num">{money(data.summary?.credits)}</td>
+                    <td className="num">{money(data.summary?.closing)}</td>
                   </tr>
-                ) : null}
+                ) : (
+                  <EmptyRow cols={5}>
+                    {party.trim()
+                      ? `No entries for ${party.trim()} in these dates.`
+                      : 'No entries in these dates. Pick a party and press View Statement.'}
+                  </EmptyRow>
+                )}
               </tbody>
             </table>
           </div>
@@ -2855,52 +3034,56 @@ function ReorderBySupplierEditor({
       </Field>
       {supplierId ? (
         <>
-          <Field label="Medicine">
-            <select
-              className="settings-input"
-              value={pickMed}
-              onChange={(e) => setPickMed(e.target.value)}
-            >
-              <option value="">— Select —</option>
-              {medicines.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <div className="settings-inline-actions">
-            <Field label="Pack">
-              <input
-                className="settings-input"
-                value={pickPack}
-                onChange={(e) => setPickPack(e.target.value)}
+          <div className="iset-form-card">
+            <h4>Add a medicine</h4>
+            <div className="iset-bar" style={{ margin: 0 }}>
+              <BarField label="Medicine" className="grow">
+                <select
+                  className="settings-input"
+                  value={pickMed}
+                  onChange={(e) => setPickMed(e.target.value)}
+                >
+                  <option value="">— Select —</option>
+                  {medicines.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </BarField>
+              <BarField label="Pack" className="short">
+                <input
+                  className="settings-input"
+                  value={pickPack}
+                  onChange={(e) => setPickPack(e.target.value)}
+                />
+              </BarField>
+              <BarField label="Qty" className="short">
+                <input
+                  className="settings-input"
+                  type="number"
+                  style={{ textAlign: 'right' }}
+                  value={pickQty}
+                  onChange={(e) => setPickQty(e.target.value)}
+                />
+              </BarField>
+              <SaveBtn
+                label="Add line"
+                disabled={busy}
+                onClick={() => void addLine()}
               />
-            </Field>
-            <Field label="Qty">
-              <input
-                className="settings-input"
-                type="number"
-                value={pickQty}
-                onChange={(e) => setPickQty(e.target.value)}
-              />
-            </Field>
-            <SaveBtn
-              label="Add line"
-              disabled={busy}
-              onClick={() => void addLine()}
-            />
+            </div>
           </div>
-          <div className="settings-table-wrap">
+          <div className="iset-table-wrap">
             <table className="settings-table">
               <thead>
                 <tr>
                   <th>Medicine</th>
                   <th>Pack</th>
-                  <th>Qty</th>
-                  <th>Rate</th>
-                  <th>Stock</th>
-                  <th></th>
+                  <th className="num">Qty</th>
+                  <th className="num">Rate</th>
+                  <th className="num">Stock</th>
+                  <th className="act" />
                 </tr>
               </thead>
               <tbody>
@@ -2908,63 +3091,68 @@ function ReorderBySupplierEditor({
                   <tr key={`${ln.medicine_name}-${i}`}>
                     <td>{ln.medicine_name}</td>
                     <td>{ln.pack_size}</td>
-                    <td>
+                    <td className="num">
                       <input
-                        className="settings-input"
+                        className="settings-input iset-cell-input"
                         type="number"
+                        aria-label={`${ln.medicine_name} qty`}
                         value={ln.quantity}
                         onChange={(e) =>
                           updateLine(i, 'quantity', e.target.value)
                         }
                       />
                     </td>
-                    <td>
+                    <td className="num">
                       <input
-                        className="settings-input"
+                        className="settings-input iset-cell-input"
                         type="number"
+                        aria-label={`${ln.medicine_name} rate`}
                         value={ln.unit_price}
                         onChange={(e) =>
                           updateLine(i, 'unit_price', e.target.value)
                         }
                       />
                     </td>
-                    <td>{ln.current_stock ?? '—'}</td>
-                    <td>
-                      <SaveBtn label="Remove" onClick={() => removeLine(i)} />
+                    <td className="num">{ln.current_stock ?? '—'}</td>
+                    <td className="act">
+                      <button
+                        type="button"
+                        className="iset-btn danger"
+                        onClick={() => removeLine(i)}
+                      >
+                        Remove
+                      </button>
                     </td>
                   </tr>
                 ))}
                 {!lines.length ? (
-                  <tr>
-                    <td colSpan={6}>No lines yet</td>
-                  </tr>
+                  <EmptyRow cols={6}>No medicines in this order yet. Add one above.</EmptyRow>
                 ) : null}
               </tbody>
             </table>
           </div>
-          <Field label="Phone">
-            <input
-              className="settings-input"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-            />
-          </Field>
-          <Field label="Notes">
-            <input
-              className="settings-input"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-            />
-          </Field>
-          <label className="settings-check">
-            <input
-              type="checkbox"
-              checked={offline}
-              onChange={(e) => setOffline(e.target.checked)}
-            />
-            Offline order (no supplier record)
-          </label>
-          <div className="settings-inline-actions">
+          <div className="settings-form-row">
+            <Field label="Phone">
+              <input
+                className="settings-input"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+              />
+            </Field>
+            <Field label="Notes">
+              <input
+                className="settings-input"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+              />
+            </Field>
+          </div>
+          <Check
+            label="Offline order (no supplier record)"
+            checked={offline}
+            onChange={setOffline}
+          />
+          <div className="iset-row">
             <SaveBtn
               label="Save draft"
               saving={busy}
@@ -3178,20 +3366,30 @@ export function ReorderPanel({
   return (
     <>
       <PanelTitle>Reorder</PanelTitle>
-      {err ? <p className="error">{err}</p> : null}
-      {msg ? <Note>{msg}</Note> : null}
+      {err ? <p className="iset-callout warn">{err}</p> : null}
+      {msg ? <p className="iset-callout">{msg}</p> : null}
 
       {mode === 'pending' && (
-        <Frame title="Pending Orders">
-          <SaveBtn label="Refresh" onClick={() => void refreshList()} />
-          <div className="settings-table-wrap">
+        <Frame title={`Pending Orders (${(reorder.groups || []).length})`}>
+          <div className="iset-bar">
+            <div className="iset-bar-actions">
+              <button
+                type="button"
+                className="settings-action-btn iset-secondary"
+                onClick={() => void refreshList()}
+              >
+                Refresh
+              </button>
+            </div>
+          </div>
+          <div className="iset-table-wrap">
             <table className="settings-table">
               <thead>
                 <tr>
                   <th>Group / Supplier</th>
                   <th>Status</th>
                   <th>Items</th>
-                  <th>Actions</th>
+                  <th className="act">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -3209,8 +3407,12 @@ export function ReorderPanel({
                           `Group ${i + 1}`,
                       )}
                     </td>
-                    <td>{String(g.status || '')}</td>
                     <td>
+                      <span className={`iset-badge${received ? ' ok' : ''}`}>
+                        {String(g.status || '—')}
+                      </span>
+                    </td>
+                    <td className="wrap">
                       {String(
                         g.medicines_preview ||
                           g.item_count ||
@@ -3218,37 +3420,47 @@ export function ReorderPanel({
                           '',
                       )}
                     </td>
-                    <td>
-                      <div className="settings-inline-actions">
-                        <SaveBtn
-                          label="Edit"
-                          disabled={busy || received}
-                          onClick={() => void editGroup(groupId)}
-                        />
-                        <SaveBtn
-                          label="Open Purchase"
-                          disabled={busy || received}
-                          onClick={() => void openPurchaseForGroup(g)}
-                        />
-                        <SaveBtn
-                          label="Mark Received"
-                          disabled={busy || received}
-                          onClick={() => void markGroupReceived(groupId)}
-                        />
-                        <SaveBtn
-                          label="Cancel"
-                          disabled={busy || received}
-                          onClick={() => void cancelGroup(groupId)}
-                        />
-                      </div>
+                    <td className="act">
+                      <button
+                        type="button"
+                        className="iset-btn"
+                        disabled={busy || received}
+                        onClick={() => void editGroup(groupId)}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        className="iset-btn primary"
+                        disabled={busy || received}
+                        onClick={() => void openPurchaseForGroup(g)}
+                      >
+                        Open Purchase
+                      </button>
+                      <button
+                        type="button"
+                        className="iset-btn"
+                        disabled={busy || received}
+                        onClick={() => void markGroupReceived(groupId)}
+                      >
+                        Mark Received
+                      </button>
+                      <button
+                        type="button"
+                        className="iset-btn danger"
+                        disabled={busy || received}
+                        onClick={() => void cancelGroup(groupId)}
+                      >
+                        Cancel
+                      </button>
                     </td>
                   </tr>
                   )
                 })}
                 {!reorder.groups?.length ? (
-                  <tr>
-                    <td colSpan={4}>No pending reorder groups</td>
-                  </tr>
+                  <EmptyRow cols={4}>
+                    No pending orders. Make one under New Order or Load by Supplier.
+                  </EmptyRow>
                 ) : null}
               </tbody>
             </table>
@@ -3263,17 +3475,20 @@ export function ReorderPanel({
               Create draft reorder groups grouped by preferred supplier, or use
               multi-supplier tabs with bulk load (same as classic Reorder page).
             </Note>
-            <div className="settings-inline-actions">
+            <div className="iset-row">
               <SaveBtn
                 label="Create supplier-grouped drafts"
                 saving={busy}
                 onClick={() => void createGrouped()}
               />
-              <SaveBtn
-                label="Bulk load tabs"
-                saving={busy}
+              <button
+                type="button"
+                className="settings-action-btn iset-secondary"
+                disabled={busy}
                 onClick={() => void bulkLoadTabs()}
-              />
+              >
+                Bulk load tabs
+              </button>
             </div>
           </Frame>
           {multiTabs ? (
@@ -3321,35 +3536,39 @@ export function ReorderPanel({
       )}
 
       {mode === 'defaults' && (
-        <Frame title="Reorder Defaults">
-          <Note>
-            Default order quantity used when creating reorder drafts. You can
-            also edit under Layout &amp; Lists → Thresholds.
-          </Note>
-          <Field label="Default reorder qty">
-            <input
-              className="settings-input"
-              value={defaultQty}
-              onChange={(e) => setDefaultQty(e.target.value)}
-            />
-          </Field>
-          <div className="settings-inline-actions">
-            <SaveBtn
-              label="Save Default Qty"
-              saving={busy}
-              onClick={() => void saveDefaults()}
-            />
+        <>
+          <Frame title="Reorder Defaults">
+            <Note>
+              Default order quantity used when creating reorder drafts. You can
+              also edit under Layout &amp; Lists → Thresholds.
+            </Note>
+            <Field label="Default reorder qty">
+              <input
+                className="settings-input"
+                inputMode="numeric"
+                style={{ maxWidth: 110, textAlign: 'right' }}
+                value={defaultQty}
+                onChange={(e) => setDefaultQty(e.target.value)}
+              />
+            </Field>
             {onOpenDefaults ? (
-              <button
-                type="button"
-                className="settings-link-btn"
-                onClick={onOpenDefaults}
-              >
-                Open Layout → Thresholds
-              </button>
+              <div className="iset-row">
+                <button
+                  type="button"
+                  className="settings-action-btn iset-secondary"
+                  onClick={onOpenDefaults}
+                >
+                  Open Layout → Thresholds
+                </button>
+              </div>
             ) : null}
-          </div>
-        </Frame>
+          </Frame>
+          <SaveBar
+            label="Save Default Qty"
+            saving={busy}
+            onClick={() => void saveDefaults()}
+          />
+        </>
       )}
 
       {multiTabs && mode === 'pending' ? (
@@ -3427,35 +3646,40 @@ export function ShelfPanel({
   // Tk uses a persistent split: tree | medicines. Sidebar section is navigational only.
   void sectionId
 
+  const isSel = (type: SelLoc['type'], id: number) =>
+    selected?.type === type && selected.id === id
+
   return (
     <>
       <PanelTitle>Shelf Management</PanelTitle>
-      {err ? <p className="error">{err}</p> : null}
-      {shelf.error ? <p className="error">{shelf.error}</p> : null}
-      <Check
-        label="Show location on medicine lists"
-        checked={Boolean(shelf.show_location)}
-        onChange={(v) =>
-          void run({ action: 'set_show_location', show_location: v })
-        }
-      />
+      {err ? <p className="iset-callout warn">{err}</p> : null}
+      {shelf.error ? <p className="iset-callout warn">{shelf.error}</p> : null}
+      <div className="iset-bar">
+        <Check
+          label="Show location on medicine lists"
+          checked={Boolean(shelf.show_location)}
+          onChange={(v) =>
+            void run({ action: 'set_show_location', show_location: v })
+          }
+        />
+      </div>
 
-      <div className="settings-split">
-        <div className="settings-split-pane">
+      <div className="iset-split">
+        <div>
             <Frame title="Shelf Structure">
-              <Field label="Name">
-                <input
-                  className="settings-input"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                />
-              </Field>
-              <div className="settings-inline-actions">
+              <div className="iset-shelf-add">
+                <BarField label="Name">
+                  <input
+                    className="settings-input"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                  />
+                </BarField>
                 <SaveBtn
                   label="+ Rack"
                   onClick={() => run({ action: 'add_rack', name })}
                 />
-                <Field label="Under rack">
+                <BarField label="Under rack">
                   <select
                     className="settings-input"
                     value={rackId}
@@ -3470,7 +3694,7 @@ export function ShelfPanel({
                       </option>
                     ))}
                   </select>
-                </Field>
+                </BarField>
                 <SaveBtn
                   label="+ Section"
                   disabled={!rackId}
@@ -3478,7 +3702,7 @@ export function ShelfPanel({
                     run({ action: 'add_section', rack_id: rackId, name })
                   }
                 />
-                <Field label="Under section">
+                <BarField label="Under section">
                   <select
                     className="settings-input"
                     value={secId}
@@ -3493,7 +3717,7 @@ export function ShelfPanel({
                       </option>
                     ))}
                   </select>
-                </Field>
+                </BarField>
                 <SaveBtn
                   label="+ Box"
                   disabled={!secId}
@@ -3503,163 +3727,170 @@ export function ShelfPanel({
                 />
               </div>
 
-              <ul className="settings-tree">
+              <h4 className="iset-subhead">Racks</h4>
+              <ul className="iset-tree">
                 {shelf.racks.map((r) => (
                   <li key={r.id}>
-                    <button
-                      type="button"
-                      className="settings-link-btn"
-                      onClick={() => {
-                        const location = locKey(r.name)
-                        setSelected({
-                          type: 'rack',
-                          id: r.id,
-                          location,
-                          path: pathLabel(r.name),
-                          rackId: r.id,
-                        })
-                        setRenameBuf(r.name)
-                        setRackId(r.id)
-                      }}
-                    >
-                      <strong>Rack {r.name}</strong>
-                    </button>{' '}
-                    <button
-                      type="button"
-                      className="settings-link-btn"
-                      onClick={() => {
-                        const n = window.prompt('Rename rack', r.name)
-                        if (n)
-                          void run({
-                            action: 'rename_rack',
+                    <div className={`iset-tree-node${isSel('rack', r.id) ? ' selected' : ''}`}>
+                      <button
+                        type="button"
+                        className="iset-tree-name"
+                        onClick={() => {
+                          const location = locKey(r.name)
+                          setSelected({
+                            type: 'rack',
                             id: r.id,
-                            name: n,
+                            location,
+                            path: pathLabel(r.name),
+                            rackId: r.id,
                           })
-                      }}
-                    >
-                      Rename
-                    </button>{' '}
-                    <button
-                      type="button"
-                      className="settings-link-btn"
-                      onClick={() => {
-                        if (window.confirm(`Delete rack ${r.name}?`))
-                          void run({ action: 'delete_rack', id: r.id })
-                      }}
-                    >
-                      Delete
-                    </button>
+                          setRenameBuf(r.name)
+                          setRackId(r.id)
+                        }}
+                      >
+                        <strong>Rack {r.name}</strong>
+                      </button>
+                      <button
+                        type="button"
+                        className="iset-btn"
+                        onClick={() => {
+                          const n = window.prompt('Rename rack', r.name)
+                          if (n)
+                            void run({
+                              action: 'rename_rack',
+                              id: r.id,
+                              name: n,
+                            })
+                        }}
+                      >
+                        Rename
+                      </button>
+                      <button
+                        type="button"
+                        className="iset-btn danger"
+                        onClick={() => {
+                          if (window.confirm(`Delete rack ${r.name}?`))
+                            void run({ action: 'delete_rack', id: r.id })
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
                     <ul>
                       {r.sections.map((s) => (
                         <li key={s.id}>
-                          <button
-                            type="button"
-                            className="settings-link-btn"
-                            onClick={() => {
-                              const location = locKey(r.name, s.name)
-                              setSelected({
-                                type: 'section',
-                                id: s.id,
-                                location,
-                                path: pathLabel(r.name, s.name),
-                                rackId: r.id,
-                                sectionId: s.id,
-                              })
-                              setRenameBuf(s.name)
-                              setRackId(r.id)
-                              setSecId(s.id)
-                            }}
-                          >
-                            Section {s.name}
-                          </button>{' '}
-                          <button
-                            type="button"
-                            className="settings-link-btn"
-                            onClick={() => {
-                              const n = window.prompt('Rename section', s.name)
-                              if (n)
-                                void run({
-                                  action: 'rename_section',
+                          <div className={`iset-tree-node${isSel('section', s.id) ? ' selected' : ''}`}>
+                            <button
+                              type="button"
+                              className="iset-tree-name"
+                              onClick={() => {
+                                const location = locKey(r.name, s.name)
+                                setSelected({
+                                  type: 'section',
                                   id: s.id,
-                                  name: n,
+                                  location,
+                                  path: pathLabel(r.name, s.name),
+                                  rackId: r.id,
+                                  sectionId: s.id,
                                 })
-                            }}
-                          >
-                            Rename
-                          </button>{' '}
-                          <button
-                            type="button"
-                            className="settings-link-btn"
-                            onClick={() => {
-                              if (window.confirm(`Delete section ${s.name}?`))
-                                void run({
-                                  action: 'delete_section',
-                                  id: s.id,
-                                })
-                            }}
-                          >
-                            Delete
-                          </button>
+                                setRenameBuf(s.name)
+                                setRackId(r.id)
+                                setSecId(s.id)
+                              }}
+                            >
+                              Section {s.name}
+                            </button>
+                            <button
+                              type="button"
+                              className="iset-btn"
+                              onClick={() => {
+                                const n = window.prompt('Rename section', s.name)
+                                if (n)
+                                  void run({
+                                    action: 'rename_section',
+                                    id: s.id,
+                                    name: n,
+                                  })
+                              }}
+                            >
+                              Rename
+                            </button>
+                            <button
+                              type="button"
+                              className="iset-btn danger"
+                              onClick={() => {
+                                if (window.confirm(`Delete section ${s.name}?`))
+                                  void run({
+                                    action: 'delete_section',
+                                    id: s.id,
+                                  })
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </div>
                           <ul>
                             {s.boxes.map((b) => (
                               <li key={b.id}>
-                                <button
-                                  type="button"
-                                  className="settings-link-btn"
-                                  onClick={() => {
-                                    const location = locKey(
-                                      r.name,
-                                      s.name,
-                                      b.name,
-                                    )
-                                    setSelected({
-                                      type: 'box',
-                                      id: b.id,
-                                      location,
-                                      path: pathLabel(r.name, s.name, b.name),
-                                      rackId: r.id,
-                                      sectionId: s.id,
-                                    })
-                                    setRenameBuf(b.name)
-                                    setRackId(r.id)
-                                    setSecId(s.id)
-                                  }}
-                                >
-                                  Box {b.name}
-                                </button>{' '}
-                                <button
-                                  type="button"
-                                  className="settings-link-btn"
-                                  onClick={() => {
-                                    const n = window.prompt(
-                                      'Rename box',
-                                      b.name,
-                                    )
-                                    if (n)
-                                      void run({
-                                        action: 'rename_box',
+                                <div className={`iset-tree-node${isSel('box', b.id) ? ' selected' : ''}`}>
+                                  <button
+                                    type="button"
+                                    className="iset-tree-name"
+                                    onClick={() => {
+                                      const location = locKey(
+                                        r.name,
+                                        s.name,
+                                        b.name,
+                                      )
+                                      setSelected({
+                                        type: 'box',
                                         id: b.id,
-                                        name: n,
+                                        location,
+                                        path: pathLabel(r.name, s.name, b.name),
+                                        rackId: r.id,
+                                        sectionId: s.id,
                                       })
-                                  }}
-                                >
-                                  Rename
-                                </button>{' '}
-                                <button
-                                  type="button"
-                                  className="settings-link-btn"
-                                  onClick={() => {
-                                    if (
-                                      window.confirm(`Delete box ${b.name}?`)
-                                    )
-                                      void run({
-                                        action: 'delete_box',
-                                        id: b.id,
-                                      })
-                                  }}
-                                >
-                                  Delete
-                                </button>
+                                      setRenameBuf(b.name)
+                                      setRackId(r.id)
+                                      setSecId(s.id)
+                                    }}
+                                  >
+                                    Box {b.name}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="iset-btn"
+                                    onClick={() => {
+                                      const n = window.prompt(
+                                        'Rename box',
+                                        b.name,
+                                      )
+                                      if (n)
+                                        void run({
+                                          action: 'rename_box',
+                                          id: b.id,
+                                          name: n,
+                                        })
+                                    }}
+                                  >
+                                    Rename
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="iset-btn danger"
+                                    onClick={() => {
+                                      if (
+                                        window.confirm(`Delete box ${b.name}?`)
+                                      )
+                                        void run({
+                                          action: 'delete_box',
+                                          id: b.id,
+                                        })
+                                    }}
+                                  >
+                                    Delete
+                                  </button>
+                                </div>
                               </li>
                             ))}
                           </ul>
@@ -3668,7 +3899,9 @@ export function ShelfPanel({
                     </ul>
                   </li>
                 ))}
-                {!shelf.racks.length ? <li>No racks yet</li> : null}
+                {!shelf.racks.length ? (
+                  <li className="iset-tree-empty">No racks yet. Type a name and press + Rack.</li>
+                ) : null}
               </ul>
               {selected ? (
                 <Note>
@@ -3681,7 +3914,7 @@ export function ShelfPanel({
             </Frame>
           </div>
 
-          <div className="settings-split-pane">
+          <div>
             <Frame
               title={
                 selected
@@ -3693,15 +3926,15 @@ export function ShelfPanel({
                 <Note>Select a location on the left.</Note>
               ) : (
                 <>
-                  <h4>Assigned</h4>
-                  <div className="settings-table-wrap">
+                  <h4 className="iset-subhead">Assigned ({assignedAt.length})</h4>
+                  <div className="iset-table-wrap">
                     <table className="settings-table">
                       <thead>
                         <tr>
                           <th>Medicine</th>
                           <th>Batch</th>
                           <th>Location</th>
-                          <th />
+                          <th className="act" />
                         </tr>
                       </thead>
                       <tbody>
@@ -3710,10 +3943,10 @@ export function ShelfPanel({
                             <td>{m.name}</td>
                             <td>{m.batch}</td>
                             <td>{m.location}</td>
-                            <td>
+                            <td className="act">
                               <button
                                 type="button"
-                                className="settings-link-btn"
+                                className="iset-btn"
                                 onClick={() =>
                                   void run({
                                     action: 'unassign',
@@ -3727,22 +3960,24 @@ export function ShelfPanel({
                           </tr>
                         ))}
                         {!assignedAt.length ? (
-                          <tr>
-                            <td colSpan={4}>None assigned here</td>
-                          </tr>
+                          <EmptyRow cols={4}>
+                            No medicine is assigned here yet. Assign one from the list below.
+                          </EmptyRow>
                         ) : null}
                       </tbody>
                     </table>
                   </div>
-                  <h4>Unassigned</h4>
-                  <div className="settings-table-wrap">
+                  <h4 className="iset-subhead">
+                    Unassigned ({(shelf.unassigned || []).length})
+                  </h4>
+                  <div className="iset-table-wrap">
                     <table className="settings-table">
                       <thead>
                         <tr>
                           <th>Medicine</th>
                           <th>Batch</th>
-                          <th>Stock</th>
-                          <th />
+                          <th className="num">Stock</th>
+                          <th className="act" />
                         </tr>
                       </thead>
                       <tbody>
@@ -3750,11 +3985,11 @@ export function ShelfPanel({
                           <tr key={m.id}>
                             <td>{m.name}</td>
                             <td>{m.batch}</td>
-                            <td>{m.stock}</td>
-                            <td>
+                            <td className="num">{m.stock}</td>
+                            <td className="act">
                               <button
                                 type="button"
-                                className="settings-link-btn"
+                                className="iset-btn primary"
                                 onClick={() =>
                                   void run({
                                     action: 'assign',
@@ -3769,9 +4004,7 @@ export function ShelfPanel({
                           </tr>
                         ))}
                         {!shelf.unassigned?.length ? (
-                          <tr>
-                            <td colSpan={4}>No unassigned medicines</td>
-                          </tr>
+                          <EmptyRow cols={4}>Every medicine has a location.</EmptyRow>
                         ) : null}
                       </tbody>
                     </table>
@@ -3945,24 +4178,26 @@ export function ShortcutsPanel() {
         Every key this app answers, page by page. Press Escape to leave a field
         so number and letter keys work.
       </Note>
-      {SHORTCUT_SECTIONS.map((sec) => (
-        <Frame key={sec.title} title={sec.title}>
-          <div className="settings-table-wrap">
-            <table className="settings-table">
-              <tbody>
-                {sec.rows.map(([key, desc], i) => (
-                  <tr key={`${sec.title}-${i}`}>
-                    <td style={{ fontWeight: 600, width: '22%' }}>
-                      {key || '—'}
-                    </td>
-                    <td>{desc}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Frame>
-      ))}
+      <div className="iset-shortcuts">
+        {SHORTCUT_SECTIONS.map((sec) => (
+          <Frame key={sec.title} title={sec.title}>
+            <div className="iset-table-wrap plain">
+              <table className="settings-table">
+                <tbody>
+                  {sec.rows.map(([key, desc], i) => (
+                    <tr key={`${sec.title}-${i}`}>
+                      <td style={{ width: '34%' }}>
+                        {key ? <span className="iset-key">{key}</span> : '—'}
+                      </td>
+                      <td className="wrap">{desc}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Frame>
+        ))}
+      </div>
     </>
   )
 }

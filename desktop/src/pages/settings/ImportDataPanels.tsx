@@ -12,8 +12,10 @@ import {
   Check,
   Field,
   Frame,
+  Help,
   Note,
   PanelTitle,
+  SaveBar,
   SaveBtn,
 } from './SettingsChrome'
 import {
@@ -21,6 +23,41 @@ import {
   type FileImportBill,
 } from '../FileImportReviewDialog'
 import { IS_DEMO } from '../../demoMode'
+import '../../styles/interactive-settings.css'
+
+/** A box with its label above it (rows of boxes, tool bars). */
+function StackField({
+  label,
+  className = '',
+  children,
+}: {
+  label: string
+  className?: string
+  children: React.ReactNode
+}) {
+  return (
+    <label className={`iset-field ${className}`.trim()}>
+      <span>{label}</span>
+      {children}
+    </label>
+  )
+}
+
+/** What the last action said, kept in sight at the bottom of the panel. */
+function StatusBar({ msg, err, busy }: { msg?: string; err?: string; busy?: boolean }) {
+  if (!msg && !err) return null
+  if (err) return <div className="iset-statusbar err">{err}</div>
+  const text = String(msg)
+  // The server sync check is a small fixed-width table.
+  if (text.includes('Collection')) {
+    return (
+      <div className="iset-statusbar">
+        <pre className="mobile-preview">{text}</pre>
+      </div>
+    )
+  }
+  return <div className="iset-statusbar">{busy ? `Working… ${text}` : text}</div>
+}
 
 type Opts = SettingsBundle['options']
 
@@ -533,13 +570,13 @@ export function ImportPanel({
               />
             )}
           </Field>
-          <Note>
+          <Help>
             File / image purchase bill import runs in Purchase (Shift+F2) using
             the same Python parsers as classic. Photo reading is included in the
             build — only enable/disable and fallback schedule are saved here.
-          </Note>
+          </Help>
         </Frame>
-        <SaveBtn
+        <SaveBar
           label="Save Import Prefs"
           saving={saving}
           onClick={onSaveImport}
@@ -553,24 +590,24 @@ export function ImportPanel({
       <>
         <PanelTitle>Web Entry</PanelTitle>
         <Frame title="Web purchase entry">
-          <button
-            type="button"
-            className="settings-action-btn"
-            disabled={busy}
-            onClick={() => runImport('start_web')}
-          >
-            Start Web Entry Server
-          </button>
+          <Note>Starts the local web purchase entry page and shows its URL.</Note>
+          <div className="iset-row">
+            <button
+              type="button"
+              className="settings-action-btn"
+              disabled={busy}
+              onClick={() => runImport('start_web')}
+            >
+              Start Web Entry Server
+            </button>
+          </div>
           {webUrl ? (
-            <Note>
+            <p className="iset-callout">
               Open in browser: <strong>{webUrl}</strong>
-            </Note>
-          ) : (
-            <Note>Starts the local web purchase entry page and shows its URL.</Note>
-          )}
-          {msg ? <p className="settings-note">{msg}</p> : null}
-          {err ? <p className="error">{err}</p> : null}
+            </p>
+          ) : null}
         </Frame>
+        <StatusBar msg={msg} err={err} />
       </>
     )
   }
@@ -592,22 +629,21 @@ export function ImportPanel({
             style={{ display: 'none' }}
             onChange={(e) => onLoadJsonFile(e.target.files?.[0] ?? null)}
           />
+          <Help title="JSON format guide">
+            Each bill: supplier (name, address, phone, gstin, dl_numbers),
+            purchase_date (YYYY-MM-DD), bill_number, amount_paid / cash_paid /
+            online_paid, overall_discount, items[]. Each item: medicine_name,
+            type, batch_no, expiry_date (MM/YY), qty, rate, gst_percent,
+            item_discount, mrp, schedule, etc. purchase_no is auto-generated.
+          </Help>
           <textarea
-            className="settings-input"
+            className="settings-input iset-textarea"
             rows={8}
             value={fileJson}
             onChange={(e) => setFileJson(e.target.value)}
             placeholder='{"bills":[{"supplier":{"name":"..."},"purchase_date":"2026-01-01","bill_number":"INV-1","items":[...]}]}'
           />
-          <div className="settings-inline-actions">
-            <button
-              type="button"
-              className="settings-action-btn"
-              disabled={busy}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              Load from file
-            </button>
+          <div className="iset-row">
             <button
               type="button"
               className="settings-action-btn"
@@ -620,7 +656,15 @@ export function ImportPanel({
             </button>
             <button
               type="button"
-              className="settings-action-btn"
+              className="settings-action-btn iset-secondary"
+              disabled={busy}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              Load from file
+            </button>
+            <button
+              type="button"
+              className="settings-action-btn iset-secondary"
               disabled={busy}
               onClick={() => {
                 setFileJson('')
@@ -632,7 +676,7 @@ export function ImportPanel({
             </button>
             <button
               type="button"
-              className="settings-action-btn"
+              className="settings-action-btn iset-secondary iset-push"
               disabled={busy}
               onClick={() => runImport('status')}
             >
@@ -640,18 +684,8 @@ export function ImportPanel({
             </button>
           </div>
           {fileStatus ? <Note>{fileStatus}</Note> : null}
-          {msg ? <p className="settings-note">{msg}</p> : null}
-          {err ? <p className="error">{err}</p> : null}
         </Frame>
-        <Frame title="JSON format guide">
-          <Note>
-            Each bill: supplier (name, address, phone, gstin, dl_numbers),
-            purchase_date (YYYY-MM-DD), bill_number, amount_paid / cash_paid /
-            online_paid, overall_discount, items[]. Each item: medicine_name,
-            type, batch_no, expiry_date (MM/YY), qty, rate, gst_percent,
-            item_discount, mrp, schedule, etc. purchase_no is auto-generated.
-          </Note>
-        </Frame>
+        <StatusBar msg={msg} err={err} />
         <FileImportReviewDialog
           open={fileReviewOpen}
           index={fileIndex}
@@ -675,11 +709,13 @@ export function ImportPanel({
         <Frame title="Receive from Android (WiFi)">
           <Note>
             Start the receiver, then on the phone open Satpuda &rarr; Settings
-            &rarr; Mobile Import and type this PC&apos;s address. The QR below
-            carries the same address for a scanner app. Or paste / load JSON
-            exported from the Satpuda Android app.
+            &rarr; Mobile Import and type this PC&apos;s address.
           </Note>
-          <div className="settings-inline-actions">
+          <Help>
+            The QR below carries the same address for a scanner app. Or paste /
+            load JSON exported from the Satpuda Android app.
+          </Help>
+          <div className="iset-row">
             <button
               type="button"
               className="settings-action-btn"
@@ -690,7 +726,7 @@ export function ImportPanel({
             </button>
             <button
               type="button"
-              className="settings-action-btn"
+              className="settings-action-btn iset-secondary"
               disabled={busy}
               onClick={() => runImport('mobile_status')}
             >
@@ -698,7 +734,7 @@ export function ImportPanel({
             </button>
             <button
               type="button"
-              className="settings-action-btn"
+              className="settings-action-btn iset-secondary iset-push"
               disabled={busy}
               onClick={() => runImport('stop_mobile')}
             >
@@ -745,21 +781,13 @@ export function ImportPanel({
         </Frame>
         <Frame title="JSON payload">
           <textarea
-            className="settings-input"
+            className="settings-input iset-textarea"
             rows={8}
             value={mobileJson}
             onChange={(e) => setMobileJson(e.target.value)}
             placeholder='Paste {"export_type":"medicines", ...} here'
           />
-          <div className="settings-inline-actions">
-            <button
-              type="button"
-              className="settings-action-btn"
-              disabled={busy}
-              onClick={() => runImport('parse_mobile', { json: mobileJson })}
-            >
-              Parse preview
-            </button>
+          <div className="iset-row">
             <button
               type="button"
               className="settings-action-btn"
@@ -770,13 +798,20 @@ export function ImportPanel({
             >
               Import
             </button>
+            <button
+              type="button"
+              className="settings-action-btn iset-secondary"
+              disabled={busy}
+              onClick={() => runImport('parse_mobile', { json: mobileJson })}
+            >
+              Parse preview
+            </button>
           </div>
           {mobilePreview ? (
             <pre className="settings-note mobile-preview">{mobilePreview}</pre>
           ) : null}
-          {msg ? <p className="settings-note">{msg}</p> : null}
-          {err ? <p className="error">{err}</p> : null}
         </Frame>
+        <StatusBar msg={msg} err={err} />
       </>
     )
   }
@@ -787,18 +822,19 @@ export function ImportPanel({
         <PanelTitle>Opening Stock</PanelTitle>
         <Frame title="Add the stock already on the shelf (no supplier, no bill)">
           <Note>
+            Fill the medicine in, press Add to list, and repeat. Nothing is
+            written until you press Add to Inventory.
+          </Note>
+          <Help>
             For the medicine a shop already had when it started on Satpuda: type
             or paste the rows here and they go straight into Inventory. No
             supplier is created, no purchase bill is invented and no payment is
             recorded. This is the same form as the Satpuda Loader app on the
             phone, and it writes through the same import, so a shelf can be
             typed on either one - phone rows arrive by QR / Import from mobile.
-          </Note>
-          <Note>
-            Fill the medicine in, press Add to list, and repeat. Nothing is
-            written until you press Add to Inventory. A medicine already on the
-            shelf with the same name and batch is updated, not added twice.
-          </Note>
+            A medicine already on the shelf with the same name and batch is
+            updated, not added twice.
+          </Help>
           <datalist id="opening-med-types">
             {OPENING_TYPE_SUGGESTIONS.map((t) => (
               <option key={t} value={t} />
@@ -1024,7 +1060,7 @@ export function ImportPanel({
               />
             </label>
           </div>
-          <div className="settings-inline-actions">
+          <div className="iset-row">
             <button
               type="button"
               className="settings-action-btn"
@@ -1033,7 +1069,7 @@ export function ImportPanel({
             >
               Add to list
             </button>
-            <span className="muted">
+            <span className="iset-hint">
               {openingList.length
                 ? openingList.length + ' medicine(s) waiting'
                 : 'Nothing in the list yet'}
@@ -1041,7 +1077,7 @@ export function ImportPanel({
             {openingList.length ? (
               <button
                 type="button"
-                className="settings-action-btn"
+                className="settings-action-btn iset-danger iset-push"
                 onClick={() => setOpeningList([])}
               >
                 Clear list
@@ -1049,7 +1085,7 @@ export function ImportPanel({
             ) : null}
           </div>
           {openingList.length ? (
-            <div className="settings-table-wrap">
+            <div className="iset-table-wrap">
               <table className="settings-table">
                 <thead>
                   <tr>
@@ -1057,14 +1093,14 @@ export function ImportPanel({
                     <th>Type</th>
                     <th>Batch</th>
                     <th>Expiry</th>
-                    <th>Qty</th>
+                    <th className="num">Qty</th>
                     <th>Pack</th>
-                    <th>Extra</th>
-                    <th>MRP</th>
-                    <th>Rate</th>
-                    <th>GST%</th>
+                    <th className="num">Extra</th>
+                    <th className="num">MRP</th>
+                    <th className="num">Rate</th>
+                    <th className="num">GST%</th>
                     <th>Supplier</th>
-                    <th />
+                    <th className="act" />
                   </tr>
                 </thead>
                 <tbody>
@@ -1074,17 +1110,17 @@ export function ImportPanel({
                       <td>{r.type}</td>
                       <td>{r.batch_no}</td>
                       <td>{r.expiry_date}</td>
-                      <td>{r.qty}</td>
+                      <td className="num">{r.qty}</td>
                       <td>{r.pack}</td>
-                      <td>{r.extra_medicine}</td>
-                      <td>{r.mrp}</td>
-                      <td>{r.rate}</td>
-                      <td>{r.gst_percent}</td>
+                      <td className="num">{r.extra_medicine}</td>
+                      <td className="num">{r.mrp}</td>
+                      <td className="num">{r.rate}</td>
+                      <td className="num">{r.gst_percent}</td>
                       <td>{r.supplier_name}</td>
-                      <td>
+                      <td className="act">
                         <button
                           type="button"
-                          className="settings-link-btn"
+                          className="iset-btn danger"
                           onClick={() =>
                             setOpeningList((rows) => rows.filter((_x, j) => j !== i))
                           }
@@ -1117,16 +1153,16 @@ export function ImportPanel({
               onChange={(e) => onLoadOpeningFile(e.target.files?.[0] ?? null)}
             />
             <textarea
-              className="settings-input"
+              className="settings-input iset-textarea"
               rows={8}
               value={openingText}
               onChange={(e) => setOpeningText(e.target.value)}
               placeholder={'name,batch_no,expiry_date,type,unit,stock_qty,extra_medicine,mrp,rate,gst_percent\nAMOXYCILLIN 500MG,B1204,08/27,Tablet,1x10,12,4,85.50,68.40,12'}
             />
-            <div className="settings-inline-actions">
+            <div className="iset-row">
               <button
                 type="button"
-                className="settings-action-btn"
+                className="settings-action-btn iset-secondary"
                 disabled={busy}
                 onClick={() => openingFileRef.current?.click()}
               >
@@ -1134,15 +1170,7 @@ export function ImportPanel({
               </button>
             </div>
           </details>
-          <div className="settings-inline-actions">
-            <button
-              type="button"
-              className="settings-action-btn"
-              disabled={busy || (!openingText.trim() && !openingList.length)}
-              onClick={() => void runOpening('opening_stock_preview')}
-            >
-              Check rows
-            </button>
+          <div className="iset-row">
             <button
               type="button"
               className="settings-action-btn"
@@ -1153,7 +1181,15 @@ export function ImportPanel({
             </button>
             <button
               type="button"
-              className="settings-action-btn"
+              className="settings-action-btn iset-secondary"
+              disabled={busy || (!openingText.trim() && !openingList.length)}
+              onClick={() => void runOpening('opening_stock_preview')}
+            >
+              Check rows
+            </button>
+            <button
+              type="button"
+              className="settings-action-btn iset-secondary"
               disabled={busy || (!openingText.trim() && !openingRows.length)}
               onClick={() => {
                 setOpeningText('')
@@ -1166,53 +1202,59 @@ export function ImportPanel({
               Clear
             </button>
           </div>
-          {openingRows.length ? (
-            <div className="list-table-panel">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Medicine</th>
-                    <th>Batch</th>
-                    <th>Expiry</th>
-                    <th>Type</th>
-                    <th>Pack</th>
-                    <th>Qty</th>
-                    <th>Loose</th>
-                    <th>MRP</th>
-                    <th>Rate</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {openingRows.slice(0, 200).map((r, i) => (
-                    <tr key={`${String(r.name)}-${String(r.batch_no)}-${i}`}>
-                      <td>{String(r.name ?? '')}</td>
-                      <td>{String(r.batch_no ?? '')}</td>
-                      <td>{String(r.expiry_date ?? '')}</td>
-                      <td>{String(r.type ?? '')}</td>
-                      <td>{String(r.unit ?? '')}</td>
-                      <td>{String(r.stock_qty ?? '')}</td>
-                      <td>{String(r.extra_medicine ?? '')}</td>
-                      <td>{String(r.mrp ?? '')}</td>
-                      <td>{String(r.rate ?? '')}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {openingRows.length > 200 ? (
-                <Note>Showing the first 200 of {openingRows.length} rows.</Note>
-              ) : null}
-            </div>
-          ) : null}
           {openingProblems.length ? (
-            <ul className="settings-note">
+            <ul className="iset-callout warn" style={{ paddingLeft: 26 }}>
               {openingProblems.map((p) => (
                 <li key={p}>{p}</li>
               ))}
             </ul>
           ) : null}
-          {msg ? <p className="settings-note">{msg}</p> : null}
-          {err ? <p className="error">{err}</p> : null}
+          {openingRows.length ? (
+            <>
+              <h4 className="iset-subhead">Rows checked ({openingRows.length})</h4>
+              <div className="iset-table-wrap">
+                <table className="settings-table">
+                  <thead>
+                    <tr>
+                      <th>Medicine</th>
+                      <th>Batch</th>
+                      <th>Expiry</th>
+                      <th>Type</th>
+                      <th>Pack</th>
+                      <th className="num">Qty</th>
+                      <th className="num">Loose</th>
+                      <th className="num">MRP</th>
+                      <th className="num">Rate</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {openingRows.slice(0, 200).map((r, i) => (
+                      <tr key={`${String(r.name)}-${String(r.batch_no)}-${i}`}>
+                        <td>{String(r.name ?? '')}</td>
+                        <td>{String(r.batch_no ?? '')}</td>
+                        <td>{String(r.expiry_date ?? '')}</td>
+                        <td>{String(r.type ?? '')}</td>
+                        <td>{String(r.unit ?? '')}</td>
+                        <td className="num">{String(r.stock_qty ?? '')}</td>
+                        <td className="num">{String(r.extra_medicine ?? '')}</td>
+                        <td className="num">{String(r.mrp ?? '')}</td>
+                        <td className="num">{String(r.rate ?? '')}</td>
+                      </tr>
+                    ))}
+                    {openingRows.length > 200 ? (
+                      <tr>
+                        <td className="iset-more" colSpan={9}>
+                          Showing the first 200 of {openingRows.length} rows.
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : null}
         </Frame>
+        <StatusBar msg={msg} err={err} />
       </>
     )
   }
@@ -1747,6 +1789,12 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
   }
 
   if (sectionId === 'stores') {
+    const pickedServerName = String(
+      serverStores?.find((s) => s.store_id === joinPickId)?.store_name || '\u0000',
+    )
+      .trim()
+      .toLowerCase()
+    const typedMatches = joinTypedName.trim().toLowerCase() === pickedServerName
     return (
       <>
         <PanelTitle>Stores &amp; Startup Alerts</PanelTitle>
@@ -1757,10 +1805,10 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
             Switching reopens the store database immediately. Use Restart App
             for a full clean UI reload.
           </Note>
-          <div style={{ marginBottom: 8 }}>
+          <div className="iset-row">
             <button
               type="button"
-              className="settings-action-btn"
+              className="settings-action-btn iset-secondary"
               disabled={busy}
               onClick={() =>
                 onRequestRestart?.(
@@ -1772,7 +1820,7 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
             </button>
             <button
               type="button"
-              className="settings-action-btn"
+              className="settings-action-btn iset-secondary"
               disabled={busy}
               onClick={() => {
                 if (
@@ -1792,37 +1840,40 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
                Switching and creating cannot work here, and the engine now
                refuses both -- so stop offering them, the way the old screen
                did. Restart and Restore stay: those do work. */
-            <Note>
+            <div className="iset-callout">
               This device is linked to one store only:{' '}
               <strong>{activeStoreName || activeKey || '—'}</strong>. Store
-              switching and creation are disabled on this device.{' '}
-              <button
-                type="button"
-                className="settings-action-btn"
-                disabled={busy}
-                onClick={() => {
-                  if (
-                    window.confirm(
-                      'Let this PC switch, add and remove stores?\n\n' +
-                        'Needs the Satpuda administrator username and password ' +
-                        '(typed in Administrator Tools).',
-                    )
-                  ) {
-                    void run('unlock_store_switching')
-                  }
-                }}
-              >
-                Allow other stores on this PC
-              </button>
-            </Note>
+              switching and creation are disabled on this device.
+              <div className="iset-row" style={{ marginTop: 6 }}>
+                <button
+                  type="button"
+                  className="settings-action-btn"
+                  disabled={busy}
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        'Let this PC switch, add and remove stores?\n\n' +
+                          'Needs the Satpuda administrator username and password ' +
+                          '(typed in Administrator Tools).',
+                      )
+                    ) {
+                      void run('unlock_store_switching')
+                    }
+                  }}
+                >
+                  Allow other stores on this PC
+                </button>
+              </div>
+            </div>
           ) : (
           <>
+          <div className="iset-table-wrap plain">
           <table className="settings-table">
             <thead>
               <tr>
                 <th>Name</th>
                 <th>Key</th>
-                <th />
+                <th className="act">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -1831,16 +1882,16 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
                 const name = String(st.display_name || key)
                 const isActive = key === activeKey
                 return (
-                  <tr key={key}>
+                  <tr key={key} className={isActive ? 'iset-active-row' : undefined}>
                     <td>
                       {name}
-                      {isActive ? ' (active)' : ''}
+                      {isActive ? <span className="iset-badge ok">active</span> : null}
                     </td>
-                    <td>{key}</td>
-                    <td>
+                    <td className="mono">{key}</td>
+                    <td className="act">
                       <button
                         type="button"
-                        className="settings-action-btn"
+                        className="iset-btn primary"
                         disabled={busy || isActive || !key}
                         onClick={() => run('switch_store', { store_key: key })}
                       >
@@ -1848,7 +1899,7 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
                       </button>
                       <button
                         type="button"
-                        className="settings-action-btn"
+                        className="iset-btn danger"
                         disabled={busy || isActive || !key || stores.length < 2}
                         title={
                           isActive
@@ -1874,19 +1925,23 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
               })}
               {!stores.length ? (
                 <tr>
-                  <td colSpan={3}>No stores registered</td>
+                  <td className="iset-empty" colSpan={3}>
+                    No stores registered on this PC yet. Create one below.
+                  </td>
                 </tr>
               ) : null}
             </tbody>
           </table>
-          <div className="settings-inline-row">
-            <Field label="New store name">
+          </div>
+          <div className="iset-create-row">
+            <StackField label="New store name">
               <input
                 className="settings-input"
                 value={newStoreName}
+                placeholder="Shop name as it should appear"
                 onChange={(e) => setNewStoreName(e.target.value)}
               />
-            </Field>
+            </StackField>
             <button
               type="button"
               className="settings-action-btn"
@@ -1925,20 +1980,25 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
             >
               Create Store
             </button>
+            <span className="iset-hint">
+              A new store opens empty and is not active until you switch to it.
+            </span>
           </div>
           </>
           )}
         </Frame>
         {IS_DEMO ? null : (
         <Frame title="Connect this PC to a store on the server">
-          <div className="settings-hint">
+          <Note>
             Use this when this PC's records are on the server but the app opens
-            empty, or when it says it is not linked to any store. Pick the shop
-            this PC belongs to and it will read that shop's books from now on.
-            Nothing on this PC is uploaded into it.
-          </div>
-          {linkError ? <Note>{linkError}</Note> : null}
-          <div className="settings-inline-row">
+            empty, or when it says it is not linked to any store.
+          </Note>
+          <Help>
+            Pick the shop this PC belongs to and it will read that shop's books
+            from now on. Nothing on this PC is uploaded into it.
+          </Help>
+          {linkError ? <p className="iset-callout warn">{linkError}</p> : null}
+          <div className="iset-row">
             <button
               type="button"
               className="settings-action-btn"
@@ -1950,7 +2010,7 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
             {serverStores ? (
               <button
                 type="button"
-                className="settings-action-btn"
+                className="settings-action-btn iset-secondary"
                 disabled={busy}
                 onClick={() => {
                   setServerStores(null)
@@ -1963,7 +2023,7 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
             ) : null}
             <button
               type="button"
-              className="settings-action-btn"
+              className="settings-action-btn iset-danger iset-push"
               disabled={busy}
               onClick={() => {
                 if (
@@ -1983,18 +2043,19 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
             </button>
           </div>
           {serverStores && !serverStores.length ? (
-            <Note>
+            <p className="iset-callout warn">
               The server answered with no stores at all. That is not the same as
               your shop being gone — check the internet and try again before
               concluding anything.
-            </Note>
+            </p>
           ) : null}
           {serverStores && serverStores.length ? (
             <>
+              <div className="iset-table-wrap plain">
               <table className="settings-table">
                 <thead>
                   <tr>
-                    <th />
+                    <th style={{ width: 28 }} />
                     <th>Store on the server</th>
                     <th>Id</th>
                     <th>Key</th>
@@ -2004,7 +2065,10 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
                   {serverStores.map((s) => {
                     const taken = String(s.used_by_local_store || '')
                     return (
-                      <tr key={s.store_id}>
+                      <tr
+                        key={s.store_id}
+                        className={joinPickId === s.store_id ? 'row-selected' : undefined}
+                      >
                         <td>
                           <input
                             type="radio"
@@ -2017,16 +2081,18 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
                             }}
                           />
                         </td>
-                        <td>
+                        <td className="wrap">
                           <strong>{s.store_name}</strong>
-                          {s.is_this_pc ? ' (this PC is on this one)' : ''}
+                          {s.is_this_pc ? (
+                            <span className="iset-badge ok">this PC is on this one</span>
+                          ) : null}
                           {taken ? (
-                            <div className="settings-hint">
+                            <div className="iset-hint">
                               Already connected to “{taken}” on this PC.{' '}
                               {!isSatellite ? (
                                 <button
                                   type="button"
-                                  className="settings-action-btn"
+                                  className="iset-btn"
                                   disabled={busy}
                                   onClick={() => void run('switch_store', { store_key: taken })}
                                 >
@@ -2043,8 +2109,9 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
                   })}
                 </tbody>
               </table>
+              </div>
               {joinPickId ? (
-                <>
+                <div className="iset-form-card editing">
                   <Note>
                     <em>Connect this PC</em> makes the store open now read the books of{' '}
                     <strong>
@@ -2056,28 +2123,19 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
                     shown above to confirm. <em>Add as another store</em> keeps
                     this store and puts the chosen one in the Switch list.
                   </Note>
-                  <div className="settings-inline-row">
-                    <Field label="Type the store name to confirm">
+                  <div className="iset-bar" style={{ margin: 0 }}>
+                    <StackField label="Type the store name to confirm" className="grow">
                       <input
                         className="settings-input"
                         value={joinTypedName}
                         onChange={(e) => setJoinTypedName(e.target.value)}
                         placeholder="exactly as shown above"
                       />
-                    </Field>
+                    </StackField>
                     <button
                       type="button"
                       className="settings-action-btn"
-                      disabled={
-                        busy ||
-                        joinTypedName.trim().toLowerCase() !==
-                          String(
-                            serverStores.find((s) => s.store_id === joinPickId)
-                              ?.store_name || '\u0000',
-                          )
-                            .trim()
-                            .toLowerCase()
-                      }
+                      disabled={busy || !typedMatches}
                       onClick={() =>
                         void run('join_server_store', {
                           store_key: activeKey,
@@ -2091,18 +2149,9 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
                     {!isSatellite ? (
                       <button
                         type="button"
-                        className="settings-action-btn"
+                        className="settings-action-btn iset-secondary"
                         title="Keep this store as it is and add the chosen one beside it, for Switch"
-                        disabled={
-                          busy ||
-                          joinTypedName.trim().toLowerCase() !==
-                            String(
-                              serverStores.find((s) => s.store_id === joinPickId)
-                                ?.store_name || '\u0000',
-                            )
-                              .trim()
-                              .toLowerCase()
-                        }
+                        disabled={busy || !typedMatches}
                         onClick={async () => {
                           const r = (await run('add_server_store', {
                             store_id: joinPickId,
@@ -2128,21 +2177,24 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
                       </button>
                     ) : null}
                   </div>
-                </>
+                </div>
               ) : null}
             </>
           ) : null}
         </Frame>
         )}
         <Frame title="Administrator">
-          <div className="settings-hint">
+          <Note>
+            Set a PIN and only the owner can create, rename or delete a store.
+          </Note>
+          <Help>
             Creating, renaming and deleting a store can move a shop's data
             somewhere it does not belong. Set a PIN and only the owner can do
             them. Switching between stores stays open unless you tighten it
             below, so an assistant can change shop and nothing else.
-          </div>
-          <div className="settings-inline-row">
-            <Field label={adminPinSet ? 'New PIN' : 'Set a PIN'}>
+          </Help>
+          <div className="iset-bar" style={{ margin: 0 }}>
+            <StackField label={adminPinSet ? 'New PIN' : 'Set a PIN'} className="grow">
               <input
                 className="settings-input"
                 type="password"
@@ -2150,7 +2202,7 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
                 onChange={(e) => setNewPin(e.target.value)}
                 placeholder="at least 4 characters"
               />
-            </Field>
+            </StackField>
             <button
               type="button"
               className="settings-action-btn"
@@ -2166,7 +2218,7 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
             {adminPinSet ? (
               <button
                 type="button"
-                className="settings-action-btn"
+                className="settings-action-btn iset-danger"
                 disabled={busy}
                 onClick={async () => {
                   await run('admin_clear_pin')
@@ -2217,12 +2269,12 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
             Online mode is on.
           </Note>
         </Frame>
-        {msg ? <p className="settings-note">{msg}</p> : null}
-        {err ? <p className="error">{err}</p> : null}
-        <SaveBtn
+        <SaveBar
           label="Save System Prefs"
           saving={saving}
           onClick={onSaveSystem}
+          msg={msg}
+          err={err}
         />
       </>
     )
@@ -2249,7 +2301,7 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
               ))}
             </select>
           </Field>
-          <div className="settings-inline-row">
+          <div className="iset-row">
             {(
               [
                 ['sales', 'Export Sales'],
@@ -2261,7 +2313,7 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
               <button
                 key={kind}
                 type="button"
-                className="settings-action-btn"
+                className={`settings-action-btn${kind === 'all' ? '' : ' iset-secondary'}`}
                 disabled={busy}
                 onClick={() =>
                   void run('export', { kind, format: fmt }).then((res) => {
@@ -2274,13 +2326,13 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
               </button>
             ))}
           </div>
-          {msg ? <p className="settings-note">{msg}</p> : null}
-          {err ? <p className="error">{err}</p> : null}
         </Frame>
-        <SaveBtn
+        <SaveBar
           label="Save System Prefs"
           saving={saving}
           onClick={onSaveSystem}
+          msg={msg}
+          err={err}
         />
       </>
     )
@@ -2291,28 +2343,52 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
       <>
         <PanelTitle>Data Maintenance</PanelTitle>
         <Frame title="Maintenance">
-          <button
-            type="button"
-            className="settings-action-btn"
-            disabled={busy}
-            onClick={() => run('normalize_names')}
-          >
-            Normalize names
-          </button>
           <Note>Normalizes medicine names in the active database.</Note>
-          {msg ? <p className="settings-note">{msg}</p> : null}
-          {err ? <p className="error">{err}</p> : null}
+          <div className="iset-row">
+            <button
+              type="button"
+              className="settings-action-btn"
+              disabled={busy}
+              onClick={() => run('normalize_names')}
+            >
+              Normalize names
+            </button>
+          </div>
         </Frame>
+        <StatusBar msg={msg} err={err} busy={busy} />
       </>
     )
   }
 
   if (sectionId === 'backup') {
+    const backupTable = (
+      title: string,
+      rows: { key: string; label: string; actions: React.ReactNode }[],
+    ) => (
+      <div className="iset-table-wrap plain">
+        <table className="settings-table">
+          <thead>
+            <tr>
+              <th>{title}</th>
+              <th className="act">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.key}>
+                <td>{r.label}</td>
+                <td className="act">{r.actions}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
     return (
       <>
         <PanelTitle>Google Drive Backup</PanelTitle>
         <Frame title="Backup">
-          {backupStatus ? <Note>{backupStatus}</Note> : null}
+          {backupStatus ? <p className="iset-callout">{backupStatus}</p> : null}
           <Check
             label="Auto backup enabled"
             checked={autoBackup}
@@ -2321,7 +2397,7 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
               void run('set_auto_backup', { enabled: v })
             }}
           />
-          <div className="settings-inline-actions">
+          <div className="iset-row">
             <button
               type="button"
               className="settings-action-btn"
@@ -2332,7 +2408,7 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
             </button>
             <button
               type="button"
-              className="settings-action-btn"
+              className="settings-action-btn iset-secondary"
               disabled={busy}
               onClick={() => run('list_drive_backups')}
             >
@@ -2340,7 +2416,15 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
             </button>
             <button
               type="button"
-              className="settings-action-btn"
+              className="settings-action-btn iset-secondary"
+              disabled={busy}
+              onClick={() => run('list_usb_backups')}
+            >
+              List USB backups
+            </button>
+            <button
+              type="button"
+              className="settings-action-btn iset-danger iset-push"
               disabled={busy}
               onClick={() => {
                 if (
@@ -2356,190 +2440,172 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
             >
               Sync from Drive…
             </button>
-            <button
-              type="button"
-              className="settings-action-btn"
-              disabled={busy}
-              onClick={() => run('list_usb_backups')}
-            >
-              List USB backups
-            </button>
-            {backupOnlineMode && backupServerConfigured ? (
-              <>
-                <button
-                  type="button"
-                  className="settings-action-btn"
-                  disabled={busy}
-                  onClick={() => {
-                    if (
-                      window.confirm(
-                        'PUSH — Upload the ACTIVE store only to Satpuda Core Server?\n\n' +
-                          'Each store has its own server partition (store_pk). ' +
-                          'Data does not mix with other stores.\n\n' +
-                          'Use “Push All Stores” for every store on this PC.',
-                      )
-                    ) {
-                      void run('push_to_server')
-                    }
-                  }}
-                >
-                  Push to Server
-                </button>
-                <button
-                  type="button"
-                  className="settings-action-btn"
-                  disabled={busy}
-                  onClick={() => {
-                    if (
-                      window.confirm(
-                        'PUSH ALL — Upload EVERY local store on this PC?\n\n' +
-                          'Each store is paired separately and written only under ' +
-                          'that store’s store_pk. Data is not merged across stores.',
-                      )
-                    ) {
-                      void run('push_all_stores_to_server')
-                    }
-                  }}
-                >
-                  Push All Stores
-                </button>
-                <button
-                  type="button"
-                  className="settings-action-btn"
-                  disabled={busy}
-                  onClick={() => {
-                    if (
-                      window.confirm(
-                        'PULL FROM SERVER — disaster recovery full replace?\n\n' +
-                          'Day-to-day sync is automatic (revision SyncEngine). ' +
-                          'Use this only when this PC is badly out of date or recovering.\n\n' +
-                          'Local business rows are cleared, then a clean download runs.',
-                      )
-                    ) {
-                      void run('pull_from_server')
-                    }
-                  }}
-                >
-                  Pull from Server
-                </button>
-                <button
-                  type="button"
-                  className="settings-action-btn"
-                  disabled={busy}
-                  onClick={() => void run('verify_server_sync')}
-                >
-                  Verify Server Sync
-                </button>
-              </>
-            ) : null}
           </div>
-          {backupOnlineMode ? (
+          {driveBackups.length
+            ? backupTable(
+                'Drive backup',
+                driveBackups.map((b) => ({
+                  key: String(b.id || b.name),
+                  label: String(b.label || b.name || ''),
+                  actions: (
+                    <>
+                      <button
+                        type="button"
+                        className="iset-btn"
+                        disabled={busy}
+                        onClick={() => {
+                          if (
+                            window.confirm(
+                              `Restore backup "${b.name}"? The app will restart.`,
+                            )
+                          ) {
+                            void run('restore_drive_backup', {
+                              file_id: b.id,
+                              store_key: activeKey,
+                            })
+                          }
+                        }}
+                      >
+                        Restore
+                      </button>
+                      <button
+                        type="button"
+                        className="iset-btn"
+                        disabled={busy}
+                        onClick={() => {
+                          if (
+                            window.confirm(
+                              `Sync from "${b.name}"? Local DB will be replaced and the app will restart.`,
+                            )
+                          ) {
+                            void run('sync_from_drive', { file_id: b.id })
+                          }
+                        }}
+                      >
+                        Sync
+                      </button>
+                    </>
+                  ),
+                })),
+              )
+            : null}
+          {usbBackups.length
+            ? backupTable(
+                'USB backup',
+                usbBackups.map((b) => ({
+                  key: String(b.path || b.name),
+                  label: String(b.label || b.name || ''),
+                  actions: (
+                    <button
+                      type="button"
+                      className="iset-btn"
+                      disabled={busy}
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            `Restore USB backup "${b.name}"? The local database will be replaced and the app will restart.`,
+                          )
+                        ) {
+                          void run('restore_usb_backup', {
+                            path: b.path,
+                            store_key: activeKey,
+                          })
+                        }
+                      }}
+                    >
+                      Restore
+                    </button>
+                  ),
+                })),
+              )
+            : null}
+        </Frame>
+        {backupOnlineMode && backupServerConfigured ? (
+          <Frame title="Satpuda Core Server">
             <Note>
               Online: each save pushes live; SyncEngine pulls revision deltas
-              (WebSocket + 45s safety). Manual: Push to Server / Push All Stores.
-              Pull from Server = disaster-recovery full replace only. Verify compares
-              counts.
+              (WebSocket + 45s safety).
             </Note>
-          ) : null}
-          {msg ? (
-            String(msg).includes('Collection') ? (
-              <pre className="settings-note mobile-preview">{msg}</pre>
-            ) : (
-              <p className="settings-note">
-                {busy ? `Working… ${msg}` : msg}
-              </p>
-            )
-          ) : null}
-          {err ? <p className="error">{err}</p> : null}
-          {driveBackups.length ? (
-            <div className="settings-table-wrap">
-              <table className="settings-table">
-                <tbody>
-                  {driveBackups.map((b) => (
-                    <tr key={String(b.id || b.name)}>
-                      <td>{b.label || b.name}</td>
-                      <td>
-                        <button
-                          type="button"
-                          className="settings-action-btn"
-                          disabled={busy}
-                          onClick={() => {
-                            if (
-                              window.confirm(
-                                `Restore backup "${b.name}"? The app will restart.`,
-                              )
-                            ) {
-                              void run('restore_drive_backup', {
-                                file_id: b.id,
-                                store_key: activeKey,
-                              })
-                            }
-                          }}
-                        >
-                          Restore
-                        </button>
-                        <button
-                          type="button"
-                          className="settings-action-btn"
-                          disabled={busy}
-                          onClick={() => {
-                            if (
-                              window.confirm(
-                                `Sync from "${b.name}"? Local DB will be replaced and the app will restart.`,
-                              )
-                            ) {
-                              void run('sync_from_drive', { file_id: b.id })
-                            }
-                          }}
-                        >
-                          Sync
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <Help>
+              Manual: Push to Server / Push All Stores. Pull from Server =
+              disaster-recovery full replace only. Verify compares counts.
+            </Help>
+            <div className="iset-row">
+              <button
+                type="button"
+                className="settings-action-btn"
+                disabled={busy}
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      'PUSH — Upload the ACTIVE store only to Satpuda Core Server?\n\n' +
+                        'Each store has its own server partition (store_pk). ' +
+                        'Data does not mix with other stores.\n\n' +
+                        'Use “Push All Stores” for every store on this PC.',
+                    )
+                  ) {
+                    void run('push_to_server')
+                  }
+                }}
+              >
+                Push to Server
+              </button>
+              <button
+                type="button"
+                className="settings-action-btn iset-secondary"
+                disabled={busy}
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      'PUSH ALL — Upload EVERY local store on this PC?\n\n' +
+                        'Each store is paired separately and written only under ' +
+                        'that store’s store_pk. Data is not merged across stores.',
+                    )
+                  ) {
+                    void run('push_all_stores_to_server')
+                  }
+                }}
+              >
+                Push All Stores
+              </button>
+              <button
+                type="button"
+                className="settings-action-btn iset-secondary"
+                disabled={busy}
+                onClick={() => void run('verify_server_sync')}
+              >
+                Verify Server Sync
+              </button>
+              <button
+                type="button"
+                className="settings-action-btn iset-danger iset-push"
+                disabled={busy}
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      'PULL FROM SERVER — disaster recovery full replace?\n\n' +
+                        'Day-to-day sync is automatic (revision SyncEngine). ' +
+                        'Use this only when this PC is badly out of date or recovering.\n\n' +
+                        'Local business rows are cleared, then a clean download runs.',
+                    )
+                  ) {
+                    void run('pull_from_server')
+                  }
+                }}
+              >
+                Pull from Server
+              </button>
             </div>
-          ) : null}
-          {usbBackups.length ? (
-            <div className="settings-table-wrap">
-              <table className="settings-table">
-                <tbody>
-                  {usbBackups.map((b) => (
-                    <tr key={String(b.path || b.name)}>
-                      <td>{b.label || b.name}</td>
-                      <td>
-                        <button
-                          type="button"
-                          className="settings-action-btn"
-                          disabled={busy}
-                          onClick={() => {
-                            if (
-                              window.confirm(
-                                `Restore USB backup "${b.name}"? The local database will be replaced and the app will restart.`,
-                              )
-                            ) {
-                              void run('restore_usb_backup', {
-                                path: b.path,
-                                store_key: activeKey,
-                              })
-                            }
-                          }}
-                        >
-                          Restore
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : null}
-          {msg && !(String(msg).includes('Collection')) ? (
-            <p className="settings-note">{msg}</p>
-          ) : null}
-          {err ? <p className="error">{err}</p> : null}
-        </Frame>
+          </Frame>
+        ) : backupOnlineMode ? (
+          <Note>
+            Online: each save pushes live; SyncEngine pulls revision deltas
+            (WebSocket + 45s safety). Manual: Push to Server / Push All Stores.
+            Pull from Server = disaster-recovery full replace only. Verify compares
+            counts.
+          </Note>
+        ) : null}
+        <StatusBar msg={msg} err={err} busy={busy} />
       </>
     )
   }
@@ -2557,7 +2623,19 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
               void run('set_auto_check_updates', { enabled: v })
             }}
           />
-          <div className="settings-inline-actions">
+          {updateInfo?.latest_version ? (
+            <div className="iset-summary">
+              <div className="iset-stat">
+                <span>Installed</span>
+                <strong>v{String(updateInfo.current_version || '—')}</strong>
+              </div>
+              <div className="iset-stat">
+                <span>Latest</span>
+                <strong>v{String(updateInfo.latest_version)}</strong>
+              </div>
+            </div>
+          ) : null}
+          <div className="iset-row">
             <button
               type="button"
               className="settings-action-btn"
@@ -2584,7 +2662,7 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
             </button>
             <button
               type="button"
-              className="settings-action-btn"
+              className="settings-action-btn iset-secondary"
               disabled={busy}
               onClick={() => run('reinstall_installer')}
             >
@@ -2592,7 +2670,7 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
             </button>
             <button
               type="button"
-              className="settings-action-btn"
+              className="settings-action-btn iset-secondary"
               disabled={busy}
               onClick={() => run('open_installer')}
             >
@@ -2600,25 +2678,18 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
             </button>
             <button
               type="button"
-              className="settings-action-btn"
+              className="settings-action-btn iset-secondary"
               disabled={busy}
               onClick={() => run('open_releases')}
             >
               Open Releases Page
             </button>
           </div>
-          {updateInfo?.latest_version ? (
-            <Note>
-              Installed v{String(updateInfo.current_version || '—')} · Latest v
-              {String(updateInfo.latest_version)}
-            </Note>
-          ) : null}
           {updateNotes ? (
             <pre className="settings-note mobile-preview">{updateNotes}</pre>
           ) : null}
-          {msg ? <p className="settings-note">{msg}</p> : null}
-          {err ? <p className="error">{err}</p> : null}
         </Frame>
+        <StatusBar msg={msg} err={err} busy={busy} />
       </>
     )
   }
@@ -2628,11 +2699,18 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
       <>
         <PanelTitle>My Assist</PanelTitle>
         <Frame title="Voice assistant">
-          <Check
-            label="Enable voice assistant"
-            checked={voice.enabled}
-            onChange={(v) => setVoice((x) => ({ ...x, enabled: v }))}
-          />
+          <div className="settings-check-grid-3">
+            <Check
+              label="Enable voice assistant"
+              checked={voice.enabled}
+              onChange={(v) => setVoice((x) => ({ ...x, enabled: v }))}
+            />
+            <Check
+              label="Text-to-speech"
+              checked={voice.tts}
+              onChange={(v) => setVoice((x) => ({ ...x, tts: v }))}
+            />
+          </div>
           <Field label="Assistant name">
             <input
               className="settings-input"
@@ -2651,26 +2729,21 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
               }
             />
           </Field>
-          <Check
-            label="Text-to-speech"
-            checked={voice.tts}
-            onChange={(v) => setVoice((x) => ({ ...x, tts: v }))}
-          />
-          <SaveBtn
-            label="Save Voice Settings"
-            saving={busy}
-            onClick={() =>
-              void run('save_voice', {
-                enabled: voice.enabled,
-                name: voice.name,
-                language: voice.language,
-                tts: voice.tts,
-              })
-            }
-          />
-          {msg ? <p className="settings-note">{msg}</p> : null}
-          {err ? <p className="error">{err}</p> : null}
         </Frame>
+        <SaveBar
+          label="Save Voice Settings"
+          saving={busy}
+          onClick={() =>
+            void run('save_voice', {
+              enabled: voice.enabled,
+              name: voice.name,
+              language: voice.language,
+              tts: voice.tts,
+            })
+          }
+          msg={msg}
+          err={err}
+        />
       </>
     )
   }
@@ -2679,28 +2752,28 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
     return (
       <>
         <PanelTitle>Administrator</PanelTitle>
-        <Frame title="Administrator login">
-          <Note>
-            Restricted tools: Drive backup folder, expiry.dat editor, sync mode,
-            server connection info, and Android store connection key.
-          </Note>
-          {!adminLoggedIn ? (
-            <>
-              <Field label="Username">
-                <input
-                  className="settings-input"
-                  value={adminUser}
-                  onChange={(e) => setAdminUser(e.target.value)}
-                />
-              </Field>
-              <Field label="Password">
-                <input
-                  className="settings-input"
-                  type="password"
-                  value={adminPass}
-                  onChange={(e) => setAdminPass(e.target.value)}
-                />
-              </Field>
+        {!adminLoggedIn ? (
+          <Frame title="Administrator login">
+            <Note>
+              Restricted tools: Drive backup folder, expiry.dat editor, sync mode,
+              server connection info, and Android store connection key.
+            </Note>
+            <Field label="Username">
+              <input
+                className="settings-input"
+                value={adminUser}
+                onChange={(e) => setAdminUser(e.target.value)}
+              />
+            </Field>
+            <Field label="Password">
+              <input
+                className="settings-input"
+                type="password"
+                value={adminPass}
+                onChange={(e) => setAdminPass(e.target.value)}
+              />
+            </Field>
+            <div className="iset-row">
               <button
                 type="button"
                 className="settings-action-btn"
@@ -2724,35 +2797,43 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
               >
                 Administrator Login
               </button>
-            </>
-          ) : (
-            <>
-              <Note>Logged in as administrator.</Note>
-              <Frame title="Global Master Medicines">
-                <Note>
-                  Server holds one global catalog. Normal Push/Pull never touches it.
-                  Download replaces the local snapshot; Push stock enriches the server
-                  from inventory.
-                </Note>
-                <div className="settings-btn-row">
-                  <button
-                    type="button"
-                    className="settings-action-btn"
-                    disabled={busy}
-                    onClick={() => run('admin_download_master', {})}
-                  >
-                    Download Master (replace local)
-                  </button>
-                  <button
-                    type="button"
-                    className="settings-action-btn"
-                    disabled={busy}
-                    onClick={() => run('admin_push_stock_master', {})}
-                  >
-                    Push Stock → Master
-                  </button>
-                </div>
-              </Frame>
+            </div>
+          </Frame>
+        ) : (
+          <>
+            <p className="iset-callout">
+              Logged in as administrator. Restricted tools: Drive backup folder,
+              expiry.dat editor, sync mode, server connection info, and Android
+              store connection key.
+            </p>
+            <Frame title="Global Master Medicines">
+              <Note>
+                Server holds one global catalog. Normal Push/Pull never touches it.
+              </Note>
+              <Help>
+                Download replaces the local snapshot; Push stock enriches the server
+                from inventory.
+              </Help>
+              <div className="iset-row">
+                <button
+                  type="button"
+                  className="settings-action-btn iset-secondary"
+                  disabled={busy}
+                  onClick={() => run('admin_download_master', {})}
+                >
+                  Download Master (replace local)
+                </button>
+                <button
+                  type="button"
+                  className="settings-action-btn iset-secondary"
+                  disabled={busy}
+                  onClick={() => run('admin_push_stock_master', {})}
+                >
+                  Push Stock → Master
+                </button>
+              </div>
+            </Frame>
+            <Frame title="Drive backup">
               <Field label="Store name (Drive backup)">
                 <input
                   className="settings-input"
@@ -2778,87 +2859,105 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
                   onChange={(e) => setBackupCfgFolder(e.target.value)}
                 />
               </Field>
-              <button
-                type="button"
-                className="settings-action-btn"
-                disabled={busy}
-                onClick={() =>
-                  run('admin_save_backup_config', {
-                    store_name: backupCfgStore,
-                    folder_id: backupCfgFolder,
-                  })
-                }
-              >
-                Save Drive Backup Settings
-              </button>
+              <div className="iset-row">
+                <button
+                  type="button"
+                  className="settings-action-btn"
+                  disabled={busy}
+                  onClick={() =>
+                    run('admin_save_backup_config', {
+                      store_name: backupCfgStore,
+                      folder_id: backupCfgFolder,
+                    })
+                  }
+                >
+                  Save Drive Backup Settings
+                </button>
+              </div>
+            </Frame>
+            <Frame title="Activation and expiry">
               <Note>
+                Stored and signed on the Satpuda server: needs the internet and
+                the Satpuda administrator password.
+              </Note>
+              <Help>
                 The expiry is stored and signed on the Satpuda server, in Online
                 and Offline mode alike, so this needs the internet and the
                 Satpuda administrator password. Nothing is changed on this
                 computer unless the server accepts it. For old stores, type the
                 real activation date here.
-              </Note>
-              <Field label="Activation date (YYYY-MM-DD)">
-                <input
-                  className="settings-input"
-                  value={activationDate}
-                  onChange={(e) => setActivationDate(e.target.value)}
-                  placeholder="e.g. 2024-06-15"
+              </Help>
+              <div className="settings-form-row">
+                <Field label="Activation date (YYYY-MM-DD)">
+                  <input
+                    className="settings-input"
+                    value={activationDate}
+                    onChange={(e) => setActivationDate(e.target.value)}
+                    placeholder="e.g. 2024-06-15"
+                  />
+                </Field>
+                <Field label="Expiry date (YYYY-MM-DD)">
+                  <input
+                    className="settings-input"
+                    value={expiryDate}
+                    onChange={(e) => setExpiryDate(e.target.value)}
+                  />
+                </Field>
+              </div>
+              <div className="settings-check-grid-3">
+                <Check
+                  label="Apply expiry check (master switch)"
+                  checked={expiryApply}
+                  onChange={setExpiryApply}
                 />
-              </Field>
-              <Check
-                label="Apply expiry check (master switch)"
-                checked={expiryApply}
-                onChange={setExpiryApply}
-              />
-              <Check
-                label="Expiry enabled"
-                checked={expiryEnabled}
-                onChange={setExpiryEnabled}
-              />
-              <Field label="Expiry date (YYYY-MM-DD)">
-                <input
-                  className="settings-input"
-                  value={expiryDate}
-                  onChange={(e) => setExpiryDate(e.target.value)}
+                <Check
+                  label="Expiry enabled"
+                  checked={expiryEnabled}
+                  onChange={setExpiryEnabled}
                 />
-              </Field>
-              <Field label="Satpuda administrator username">
-                <input
-                  className="settings-input"
-                  autoComplete="off"
-                  value={expiryAdminUser}
-                  onChange={(e) => setExpiryAdminUser(e.target.value)}
-                />
-              </Field>
-              <Field label="Satpuda administrator password">
-                <input
-                  className="settings-input"
-                  type="password"
-                  autoComplete="off"
-                  value={expiryAdminPass}
-                  onChange={(e) => setExpiryAdminPass(e.target.value)}
-                />
-              </Field>
-              <button
-                type="button"
-                className="settings-action-btn"
-                disabled={busy || !expiryAdminUser.trim() || !expiryAdminPass}
-                onClick={() => {
-                  run('admin_save_expiry', {
-                    apply_expiry_check: expiryApply,
-                    enabled: expiryEnabled,
-                    expiry_date: expiryDate,
-                    activation_date: activationDate,
-                    admin_username: expiryAdminUser.trim(),
-                    admin_password: expiryAdminPass,
-                  })
-                  // Held only for the length of one request.
-                  setExpiryAdminPass('')
-                }}
-              >
-                Save Activation &amp; Expiry
-              </button>
+              </div>
+              <div className="settings-form-row">
+                <Field label="Satpuda administrator username">
+                  <input
+                    className="settings-input"
+                    autoComplete="off"
+                    value={expiryAdminUser}
+                    onChange={(e) => setExpiryAdminUser(e.target.value)}
+                  />
+                </Field>
+                <Field label="Satpuda administrator password">
+                  <input
+                    className="settings-input"
+                    type="password"
+                    autoComplete="off"
+                    value={expiryAdminPass}
+                    onChange={(e) => setExpiryAdminPass(e.target.value)}
+                  />
+                </Field>
+              </div>
+              <div className="iset-row">
+                <button
+                  type="button"
+                  className="settings-action-btn"
+                  disabled={busy || !expiryAdminUser.trim() || !expiryAdminPass}
+                  onClick={() => {
+                    run('admin_save_expiry', {
+                      apply_expiry_check: expiryApply,
+                      enabled: expiryEnabled,
+                      expiry_date: expiryDate,
+                      activation_date: activationDate,
+                      admin_username: expiryAdminUser.trim(),
+                      admin_password: expiryAdminPass,
+                    })
+                    // Held only for the length of one request.
+                    setExpiryAdminPass('')
+                  }}
+                >
+                  Save Activation &amp; Expiry
+                </button>
+              </div>
+            </Frame>
+            <Frame title="Sync mode">
               <Field label="Sync mode">
                 <select
                   className="settings-input"
@@ -2874,98 +2973,119 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
                   ))}
                 </select>
               </Field>
-              <SaveBtn
-                label="Save Sync Mode"
-                saving={saving}
-                onClick={onSaveSystem}
-              />
-              <Frame title="Server Connection">
-                <Note>
-                  API: {serverApiBase || '—'} | Project:{' '}
-                  {serverProject || 'satpuda-core-server'} | Store:{' '}
-                  {serverStoreId || '—'} | Ready:{' '}
-                  {serverConfigured ? 'Yes' : 'No'}
-                  {serverSource === 'server' ? ' (Satpuda Core Server)' : ''}
-                  . Online is server-first: lists load from the server; switching
-                  Online does not download the full DB into SQLite.
-                </Note>
-              </Frame>
-              <Frame title="Android Store Connection Key">
-                <Note>
-                  Use this SC- key when activating Satpuda Core on Android. Enter
-                  the same store name and this key on the phone to pair with
-                  Satpuda Core Server.
-                </Note>
-                {!androidOnline ? (
-                  <Note>
-                    Sync mode is {androidModeLabel || 'Offline'}. Switch to
-                    Online (Server) in Sync Mode above first.
-                  </Note>
-                ) : null}
-                <Field label="Store">
-                  <input
-                    className="settings-input"
-                    readOnly
-                    value={androidStore}
-                  />
-                </Field>
-                <Field label="Key">
-                  <input
-                    className="settings-input"
-                    readOnly
-                    value={androidKey || '(not generated yet)'}
-                  />
-                </Field>
-                <div className="settings-inline-actions">
-                  <button
-                    type="button"
-                    className="settings-action-btn"
-                    disabled={busy || !androidOnline}
-                    onClick={() => void run('admin_ensure_android_key')}
-                  >
-                    Generate / Refresh
-                  </button>
-                  <button
-                    type="button"
-                    className="settings-action-btn"
-                    disabled={busy || !androidOnline}
-                    onClick={() => {
-                      if (
-                        !window.confirm(
-                          'This invalidates the old Android key. Devices using the old key must be re-activated. Continue?',
-                        )
-                      ) {
-                        return
-                      }
-                      void run('admin_regenerate_android_key')
-                    }}
-                  >
-                    Regenerate New Key
-                  </button>
-                  <button
-                    type="button"
-                    className="settings-action-btn"
-                    disabled={!androidKey || androidKey.startsWith('(')}
-                    onClick={async () => {
-                      try {
-                        await navigator.clipboard.writeText(androidKey)
-                        setMsg('Android key copied to clipboard.')
-                      } catch (e) {
-                        setErr(
-                          e instanceof Error ? e.message : 'Copy failed.',
-                        )
-                      }
-                    }}
-                  >
-                    Copy Key
-                  </button>
+              <div className="iset-row">
+                <SaveBtn
+                  label="Save Sync Mode"
+                  saving={saving}
+                  onClick={onSaveSystem}
+                />
+              </div>
+            </Frame>
+            <Frame title="Server Connection">
+              <div className="iset-summary">
+                <div className="iset-stat">
+                  <span>API</span>
+                  <strong style={{ fontSize: 12 }}>{serverApiBase || '—'}</strong>
                 </div>
-              </Frame>
-            </>
-          )}
-          {msg ? <p className="settings-note">{msg}</p> : null}
-          {err ? <p className="error">{err}</p> : null}
-        </Frame>
+                <div className="iset-stat">
+                  <span>Project</span>
+                  <strong style={{ fontSize: 12 }}>
+                    {serverProject || 'satpuda-core-server'}
+                  </strong>
+                </div>
+                <div className="iset-stat">
+                  <span>Store</span>
+                  <strong style={{ fontSize: 12 }}>{serverStoreId || '—'}</strong>
+                </div>
+                <div className="iset-stat">
+                  <span>Ready</span>
+                  <strong style={{ fontSize: 12 }}>
+                    {serverConfigured ? 'Yes' : 'No'}
+                    {serverSource === 'server' ? ' (Satpuda Core Server)' : ''}
+                  </strong>
+                </div>
+              </div>
+              <Note>
+                Online is server-first: lists load from the server; switching
+                Online does not download the full DB into SQLite.
+              </Note>
+            </Frame>
+            <Frame title="Android Store Connection Key">
+              <Note>
+                Use this SC- key when activating Satpuda Core on Android.
+              </Note>
+              <Help>
+                Enter the same store name and this key on the phone to pair with
+                Satpuda Core Server.
+              </Help>
+              {!androidOnline ? (
+                <p className="iset-callout warn">
+                  Sync mode is {androidModeLabel || 'Offline'}. Switch to
+                  Online (Server) in Sync Mode above first.
+                </p>
+              ) : null}
+              <Field label="Store">
+                <input
+                  className="settings-input"
+                  readOnly
+                  value={androidStore}
+                />
+              </Field>
+              <Field label="Key">
+                <input
+                  className="settings-input mono"
+                  readOnly
+                  value={androidKey || '(not generated yet)'}
+                />
+              </Field>
+              <div className="iset-row">
+                <button
+                  type="button"
+                  className="settings-action-btn"
+                  disabled={busy || !androidOnline}
+                  onClick={() => void run('admin_ensure_android_key')}
+                >
+                  Generate / Refresh
+                </button>
+                <button
+                  type="button"
+                  className="settings-action-btn iset-secondary"
+                  disabled={!androidKey || androidKey.startsWith('(')}
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(androidKey)
+                      setMsg('Android key copied to clipboard.')
+                    } catch (e) {
+                      setErr(
+                        e instanceof Error ? e.message : 'Copy failed.',
+                      )
+                    }
+                  }}
+                >
+                  Copy Key
+                </button>
+                <button
+                  type="button"
+                  className="settings-action-btn iset-danger iset-push"
+                  disabled={busy || !androidOnline}
+                  onClick={() => {
+                    if (
+                      !window.confirm(
+                        'This invalidates the old Android key. Devices using the old key must be re-activated. Continue?',
+                      )
+                    ) {
+                      return
+                    }
+                    void run('admin_regenerate_android_key')
+                  }}
+                >
+                  Regenerate New Key
+                </button>
+              </div>
+            </Frame>
+          </>
+        )}
+        <StatusBar msg={msg} err={err} busy={busy} />
       </>
     )
   }
@@ -2974,56 +3094,59 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
     return (
       <>
         <PanelTitle>Danger Zone</PanelTitle>
-        <Frame title="Delete All Tables">
-          <Note>
-            This will permanently delete <strong>all local data</strong> for this
-            store. Server cloud data is not wiped here (use the admin dashboard).
-            This action cannot be undone.
-          </Note>
-          <Field label="Administrator password">
-            <input
-              className="settings-input"
-              type="password"
-              value={wipePassword}
-              onChange={(e) => setWipePassword(e.target.value)}
-              autoComplete="off"
-            />
-          </Field>
-          <Field label='Type "DELETE ALL TABLES" to confirm'>
-            <input
-              className="settings-input"
-              value={confirmWipe}
-              onChange={(e) => setConfirmWipe(e.target.value)}
-              placeholder="DELETE ALL TABLES"
-            />
-          </Field>
-          <button
-            type="button"
-            className="settings-action-btn danger-text"
-            disabled={
-              busy ||
-              confirmWipe !== 'DELETE ALL TABLES' ||
-              !wipePassword.trim()
-            }
-            onClick={() => {
-              if (
-                !window.confirm(
-                  'This will permanently delete ALL local data for this store. Are you sure?',
-                )
-              ) {
-                return
-              }
-              void run('danger_wipe', {
-                confirm: 'DELETE ALL TABLES',
-                password: wipePassword,
-              })
-            }}
-          >
-            DELETE ALL TABLES
-          </button>
-          {msg ? <p className="settings-note">{msg}</p> : null}
-          {err ? <p className="error">{err}</p> : null}
-        </Frame>
+        <div className="iset-danger-zone">
+          <Frame title="Delete All Tables">
+            <p className="iset-callout warn">
+              This will permanently delete <strong>all local data</strong> for this
+              store. Server cloud data is not wiped here (use the admin dashboard).
+              This action cannot be undone.
+            </p>
+            <Field label="Administrator password">
+              <input
+                className="settings-input"
+                type="password"
+                value={wipePassword}
+                onChange={(e) => setWipePassword(e.target.value)}
+                autoComplete="off"
+              />
+            </Field>
+            <Field label='Type "DELETE ALL TABLES" to confirm'>
+              <input
+                className="settings-input"
+                value={confirmWipe}
+                onChange={(e) => setConfirmWipe(e.target.value)}
+                placeholder="DELETE ALL TABLES"
+              />
+            </Field>
+            <div className="iset-row">
+              <button
+                type="button"
+                className="settings-action-btn iset-danger"
+                disabled={
+                  busy ||
+                  confirmWipe !== 'DELETE ALL TABLES' ||
+                  !wipePassword.trim()
+                }
+                onClick={() => {
+                  if (
+                    !window.confirm(
+                      'This will permanently delete ALL local data for this store. Are you sure?',
+                    )
+                  ) {
+                    return
+                  }
+                  void run('danger_wipe', {
+                    confirm: 'DELETE ALL TABLES',
+                    password: wipePassword,
+                  })
+                }}
+              >
+                DELETE ALL TABLES
+              </button>
+            </div>
+          </Frame>
+        </div>
+        <StatusBar msg={msg} err={err} busy={busy} />
       </>
     )
   }
