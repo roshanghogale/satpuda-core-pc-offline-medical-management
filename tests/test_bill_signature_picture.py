@@ -112,10 +112,21 @@ class OnTheBill(unittest.TestCase):
         return html.split("</style>", 1)[1]
 
     def test_it_sits_between_for_shop_and_the_caption(self):
-        body = self.render(uri=self.URI)
+        # The old place, under the totals: "For SHOP", the picture, the caption.
+        body = self.render(uri=self.URI, signature_position="right")
         self.assertEqual(body.count('class="sign-img"'), 2)
         cell = body[body.index('class="signature-cell"'):]
         self.assertLess(cell.index("For SATPUDA MEDICAL"), cell.index("sign-img"))
+        self.assertLess(cell.index("sign-img"), cell.index("SIGN OF Q.P."))
+
+    def test_in_the_middle_it_has_no_shop_name(self):
+        # Owner, 18 Oct 2026: the box sits between the messages and the totals, too narrow
+        # for "For SHOP"; the picture above the caption.
+        body = self.render(uri=self.URI)
+        self.assertIn("bottom-zone-sign-center", body)
+        cell = body[body.index('class="signature-cell"'):]
+        cell = cell[:cell.index("</div>\n      </div>") if "</div>\n      </div>" in cell else len(cell)]
+        self.assertNotIn("For SATPUDA MEDICAL", body)
         self.assertLess(cell.index("sign-img"), cell.index("SIGN OF Q.P."))
 
     def test_no_picture_prints_the_old_empty_box(self):
