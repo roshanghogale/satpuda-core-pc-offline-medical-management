@@ -17,7 +17,7 @@ _lock = threading.Lock()
 _load_locks: dict[str, threading.Lock] = {}
 _cache: dict[str, tuple[float, list[dict]]] = {}
 _TTL_SEC = 120.0
-_BILL_NAMES_TTL_SEC = 300.0
+_BILL_NAMES_TTL_SEC = 3600.0  # the year's bill names; ~460 KB to read (17 Oct 2026)
 _PAGE = 2500
 _customer_index: dict[str, dict] = {}
 _customer_by_id: dict[int, dict] = {}
@@ -116,7 +116,14 @@ def invalidate(collection: str | None = None) -> None:
         except Exception:
             pass
     with _lock:
-        if collection:
+        inc_key = "medicines_inventory" if collection == "medicines" else collection
+        if collection and inc_key in _INCREMENTAL and _cache.get(inc_key) and _changes_since.get(inc_key):
+            # Keep the list and mark it stale: the next read asks the server only for what
+            # changed (_refresh_incrementally) instead of the whole list again.
+            _cache[inc_key] = (0.0, _cache[inc_key][1])
+            if collection == "medicines":
+                _cache.pop("medicines", None)
+        elif collection:
             _cache.pop(collection, None)
             if collection == "medicines":
                 _cache.pop("medicines_inventory", None)
@@ -127,10 +134,12 @@ def invalidate(collection: str | None = None) -> None:
                 _clear_supplier_indexes()
             if collection == "doctors":
                 _clear_doctor_indexes()
-            if collection in ("sales", "customers"):
-                if collection == "sales":
-                    _bill_customer_names = None
+            # "sales" no longer drops the bill-name set: it only adds names of old bills
+            # whose customer is not in the customer list, and re-reading the year's bills
+            # (~460 KB) after every sale cost far more than it ever added.
         else:
+            _full_loaded_at.clear()
+            _changes_since.clear()
             _cache.clear()
             _clear_customer_indexes()
             _clear_medicine_indexes()
@@ -501,6 +510,106 @@ def patch_docs(collection: str, docs: list[dict] | None) -> None:
         _apply_list_indexes(key, rows)
 
 
+# When a cached list is older than _TTL_SEC it used to be downloaded again whole -- the
+# store's inventory (~450 KB at a large shop) and customers (~350 KB) every two minutes of
+# billing, on a shop's mobile data (owner, 17 Oct 2026: "saving bills is very slow").
+# Now only what changed since the last read is asked for (GET /api/sync/<collection>?since=,
+# the same pull the devices sync with) and merged in; the whole list is read again only
+# every _FULL_RELOAD_SEC, or when the change pull cannot be used.
+_FULL_RELOAD_SEC = 1800.0
+_INCREMENTAL = {
+    "medicines_inventory": "medicines",
+    "customers": "customers",
+    "suppliers": "suppliers",
+    "doctors": "doctors",
+}
+_full_loaded_at: dict[str, float] = {}
+_changes_since: dict[str, str] = {}
+
+
+def _iso_utc(ts: float) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts))
+
+
+def _refresh_incrementally(key: str) -> bool:
+    """Merge into the cached list what changed on the server since it was read. False when
+    the whole list has to be read instead."""
+    collection = _INCREMENTAL.get(key)
+    since = _changes_since.get(key)
+    if not collection or not since:
+        return False
+    if time.time() - _full_loaded_at.get(key, 0.0) > _FULL_RELOAD_SEC:
+        return False
+    try:
+        from urllib.parse import quote
+
+        from core import server_api as api
+
+        res = api._request(
+            "GET",
+            f"/api/sync/{collection}?since={quote(since)}&include_deleted=1&limit=5000",
+            token=_token(),
+            timeout=20,
+        )
+    except Exception as exc:
+        log.debug("online_catalog %s changes: %s", key, exc)
+        return False
+    if not isinstance(res, dict) or not res.get("ok") or not isinstance(res.get("data"), list):
+        return False
+    docs = res["data"]
+    if len(docs) >= 5000:
+        return False
+    server_time = str(((res.get("meta") or {}).get("server_time")) or "")
+    with _lock:
+        hit = _cache.get(key)
+        if not hit:
+            return False
+        rows = list(hit[1])
+        by_id: dict[int, int] = {}
+        for i, r in enumerate(rows):
+            try:
+                rid = int(r.get("id") or r.get("local_id") or 0)
+            except (TypeError, ValueError):
+                continue
+            if rid:
+                by_id[rid] = i
+        drop: set[int] = set()
+        for d in docs:
+            if not isinstance(d, dict):
+                continue
+            try:
+                did = int(d.get("id") or d.get("local_id") or 0)
+            except (TypeError, ValueError):
+                continue
+            if did <= 0:
+                continue
+            gone = bool(d.get("deleted")) or (
+                key == "medicines_inventory" and bool(d.get("is_hidden"))
+            )
+            if gone:
+                if did in by_id:
+                    drop.add(by_id[did])
+                continue
+            if did in by_id:
+                merged = dict(rows[by_id[did]])
+                merged.update(d)
+                merged["id"] = did
+                merged["local_id"] = did
+                rows[by_id[did]] = merged
+            else:
+                new = dict(d)
+                new["id"] = did
+                new["local_id"] = did
+                by_id[did] = len(rows)
+                rows.append(new)
+        if drop:
+            rows = [r for i, r in enumerate(rows) if i not in drop]
+        _cache[key] = (time.time(), rows)
+        _apply_list_indexes(key, rows)
+    _changes_since[key] = server_time or _iso_utc(time.time() - 300)
+    return True
+
+
 def _cached_list(key: str, loader, *, force: bool = False) -> list[dict]:
     now = time.time()
     with _lock:
@@ -514,6 +623,10 @@ def _cached_list(key: str, loader, *, force: bool = False) -> list[dict]:
             hit = _cache.get(key)
             if not force and hit and (now - hit[0]) < _TTL_SEC:
                 return list(hit[1])
+        if not force and hit and _refresh_incrementally(key):
+            with _lock:
+                return list(_cache[key][1])
+        started = time.time()
         try:
             rows = loader()
         except Exception as exc:
@@ -530,6 +643,11 @@ def _cached_list(key: str, loader, *, force: bool = False) -> list[dict]:
                     _apply_list_indexes(key, snap)
                 return list(snap)
             return []
+        if key in _INCREMENTAL:
+            # Changes are asked for from a little before this read began, so nothing
+            # written while it ran is missed (a doc seen twice is simply merged again).
+            _full_loaded_at[key] = started
+            _changes_since[key] = _iso_utc(started - 120)
         with _lock:
             _last_error.pop(key, None)
             _cache[key] = (now, rows)
@@ -848,6 +966,46 @@ def _supplier_view(s: dict) -> dict:
     }
 
 
+def customers_fresh() -> list[dict]:
+    """The customer list with the server's latest changes merged in now, TTL or not --
+    for a screen that shows dues. A change pull, not the whole list, when one is possible."""
+    with _lock:
+        hit = _cache.get("customers")
+    if hit and _refresh_incrementally("customers"):
+        with _lock:
+            return list(_cache["customers"][1])
+    return customers(force=bool(hit))
+
+
+def fresh_customer_by_name(name: str) -> Optional[dict]:
+    """One customer, as the server has it now, by name -- without the whole list.
+
+    "force" used to mean: download every customer of the store again (2,500 rows, a third
+    of a megabyte at a large shop) to read one row's due -- on every customer picked and again on
+    every save. The server answers a name search with the same row; that row is merged into
+    the cached list. None when the server has no such customer (or cannot be asked).
+    """
+    from core.customer_service import COUNTER_SALE, is_counter_sale_name
+
+    n = (name or "").strip()
+    if not n:
+        return None
+    if is_counter_sale_name(n):
+        n = COUNTER_SALE
+    up = n.upper()
+    try:
+        from core import store_query_client as sq
+
+        data = sq.list_customers(q=n, limit=50, include_total=False) or {}
+    except Exception:
+        return None
+    for row in data.get("rows") or []:
+        if isinstance(row, dict) and str(row.get("name") or "").strip().upper() == up and not row.get("deleted"):
+            patch_customer_cache(dict(row))
+            return _customer_view(row)
+    return None
+
+
 def find_customer_by_name(name: str, *, force: bool = False) -> Optional[dict]:
     from core.customer_service import COUNTER_SALE, is_counter_sale_name
 
@@ -857,6 +1015,13 @@ def find_customer_by_name(name: str, *, force: bool = False) -> Optional[dict]:
     if is_counter_sale_name(n):
         n = COUNTER_SALE
     up = n.upper()
+    if force:
+        found = fresh_customer_by_name(n)
+        if found:
+            return found
+        # Not on the server under that name (a new customer), or the server could not be
+        # asked: the cached list is the answer, as it was without force.
+        force = False
     customers(force=force)
     with _lock:
         c = _customer_index.get(up)

@@ -611,7 +611,7 @@ def fetch_from_server(kind: str) -> str:
         hit = _server_cache.get(key)
         if hit and (now - hit[0]) < _SERVER_TTL:
             return hit[1]
-    rows = _kv_rows_cached()
+    rows = _kv_rows_cached(_FETCH_GROUP.get(kind, (name,)))
     if rows is None:
         return ""
     found = ""
@@ -629,39 +629,50 @@ def fetch_from_server(kind: str) -> str:
 
 
 # Every bill print asks for the logo AND (since 17 Oct 2026) the signature. Each used to
-# fetch the whole settings list on its own with a 30 s timeout, and a failure was not
-# remembered -- so with the server slow or down, every bill save waited up to a minute
-# for two pictures. One fetch now serves both, gives up after 8 s, and a failure is
-# remembered for a minute so the next bills do not wait again.
+# fetch the whole settings list on its own -- the HOME BANNER picture included, ~350 KB at
+# a large shop -- with a 30 s timeout, and a failure was not remembered: on a shop's mobile data
+# every bill waited for two big downloads, and with the server down for two timeouts. Now
+# one request asks only for the two bill pictures (?names=, server 17 Oct 2026; an older
+# server answers the whole list and the rows are picked here), gives up after 8 s, and a
+# failure is remembered for a minute.
 _KV_FETCH_TIMEOUT = 8
 _KV_FAIL_TTL = 60.0
-_kv_list_cache: dict[str, tuple[float, list | None]] = {}
+_FETCH_GROUP = {
+    BILL_LOGO: (_KV_NAMES[BILL_LOGO], _KV_NAMES[BILL_SIGNATURE]),
+    BILL_SIGNATURE: (_KV_NAMES[BILL_LOGO], _KV_NAMES[BILL_SIGNATURE]),
+}
+_kv_list_cache: dict[tuple, tuple[float, list | None]] = {}
 
 
-def _kv_rows_cached() -> list | None:
-    """The store's settings rows, or None when the server could not be asked."""
-    store = _store_key()
+def _kv_rows_cached(names: tuple = ()) -> list | None:
+    """The store's settings rows named, or None when the server could not be asked."""
+    key = (_store_key(), tuple(names))
     now = time.time()
     with _lock:
-        hit = _kv_list_cache.get(store)
+        hit = _kv_list_cache.get(key)
         if hit is not None:
             ttl = _SERVER_TTL if hit[1] is not None else _KV_FAIL_TTL
             if now - hit[0] < ttl:
                 return hit[1]
     rows: list | None
     try:
+        from urllib.parse import quote
+
         from core import server_api as api
         from core.server_live import _token as live_token
 
-        res = api._request(
-            "GET", "/api/sync/settings/kv", token=live_token(), timeout=_KV_FETCH_TIMEOUT
-        )
+        path = "/api/sync/settings/kv"
+        if names:
+            path += "?names=" + quote(",".join(names), safe=",")
+        res = api._request("GET", path, token=live_token(), timeout=_KV_FETCH_TIMEOUT)
         rows = _kv_rows(res.get("data")) if isinstance(res, dict) and res.get("ok") else None
+        if rows is not None and names:
+            rows = [r for r in rows if str(r.get("name") or "") in names]
     except Exception as exc:
         log.debug("store image kv fetch: %s", exc)
         rows = None
     with _lock:
-        _kv_list_cache[store] = (time.time(), rows)
+        _kv_list_cache[key] = (time.time(), rows)
     return rows
 
 

@@ -100,13 +100,16 @@ def _parse(raw: Any) -> Optional[dict[str, Any]]:
 
 def _server_rows(force: bool = False) -> dict[str, Any]:
     now = time.time()
-    if not force and _cache["rows"] and now - _cache["at"] < _TTL:
+    # "at", not "rows": a store with none of these rows has an EMPTY dict, which read as
+    # "not loaded" -- so every bill fetched the whole settings list again (17 Oct 2026).
+    if not force and _cache["at"] and now - _cache["at"] < _TTL:
         return _cache["rows"]
     from core import server_api as api
     from core.server_live import _token
     from core.store_images import _kv_rows
 
-    res = api._request("GET", "/api/sync/settings/kv", token=_token(), timeout=30)
+    # ?prefix=: only these rows, not the whole list with the home banner picture in it.
+    res = api._request("GET", f"/api/sync/settings/kv?prefix={PREFIX}", token=_token(), timeout=15)
     if not isinstance(res, dict) or not res.get("ok"):
         raise RuntimeError("Server varun grahakanche GSTIN vachta ale nahit.")
     rows: dict[str, Any] = {}
