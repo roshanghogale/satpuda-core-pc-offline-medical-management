@@ -18,7 +18,7 @@ _PID_FILE = "desktop_api.pid"
 # events cannot each fire one.
 _CLOSE_BACKUP_DONE = False
 # Bump when routes/payload change so the Tauri shell can replace a stale engine.
-API_REVISION = 65
+API_REVISION = 66
 _server: Optional[ThreadingHTTPServer] = None
 _server_thread: Optional[threading.Thread] = None
 _port = _DEFAULT_PORT
@@ -697,6 +697,7 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                             "/api/purchase/last",
                             "/api/purchase/prefs",
                             "/api/purchase/recent",
+                            "/api/purchase/rate-check",
                             "/api/purchase/import/capabilities",
                             "/api/purchase/import/pick",
                             "/api/purchase/import/start",
@@ -1185,6 +1186,7 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 "/api/purchase/recent",
                 "/api/purchase/last",
                 "/api/purchase/load",
+                "/api/purchase/rate-check",
                 "/api/purchase/import/capabilities",
                 "/api/inventory/reorder-prefill",
                 "/api/sales/bill/preview",
@@ -1598,6 +1600,22 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                     _json_response(
                         self, 200 if result.get("ok") else 404, result
                     )
+                    return
+                if path == "/api/purchase/rate-check":
+                    from core.purchase_rate_check import rate_check
+
+                    def _num(key: str) -> float:
+                        try:
+                            return float((qs.get(key) or ["0"])[0] or 0)
+                        except ValueError:
+                            return 0.0
+
+                    _json_response(self, 200, rate_check(
+                        conn,
+                        name=(qs.get("name") or [""])[0],
+                        rate=_num("rate"),
+                        mrp=_num("mrp"),
+                    ))
                     return
                 if path == "/api/purchase/load":
                     from core.desktop_purchase_service import load_purchase

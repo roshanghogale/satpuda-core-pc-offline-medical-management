@@ -11,6 +11,7 @@ import {
   autosavePurchaseBill,
   applyPurchaseImport,
   calcPurchaseBill,
+  checkPurchaseRate,
   cancelPurchaseImport,
   discardPurchaseAutosave,
   fetchPurchaseForm,
@@ -703,6 +704,48 @@ export function PurchasePage({
     setTabletRate(v)
     const tr = Number(v) || 0
     setRate(tr > 0 ? fmtPrice(tr * tps) : '0')
+  }
+
+  // Leaving the MRP or Rate box asks whether any supplier -- this one or another --
+  // last sold this medicine (same pack, by MRP) for less, and says so in a popup
+  // (owner, 17 Oct 2026). Asked once per medicine + rate + MRP; never blocks the entry.
+  const rateCheckedRef = useRef('')
+  const checkRateAgainstHistory = () => {
+    const name = medicine.trim()
+    const r = Number(rate) || 0
+    const m = Number(mrp) || 0
+    if (!name || r <= 0) return
+    const key = `${name.toUpperCase()}|${r}|${m}`
+    if (rateCheckedRef.current === key) return
+    rateCheckedRef.current = key
+    checkPurchaseRate(name, r, m)
+      .then((res) => {
+        const rows = res?.cheaper || []
+        if (!rows.length) return
+        const here = (tab?.supplier || '').trim().toUpperCase()
+        const lines = rows.map((c) => {
+          const who = c.supplier_name || '—'
+          const mine = here && who.trim().toUpperCase() === here ? ' (this supplier)' : ''
+          const bill = c.bill_number ? `, bill ${c.bill_number}` : ''
+          const when = c.purchase_date ? `, ${c.purchase_date}` : ''
+          const mrpText = c.mrp > 0 ? ` (MRP ₹${fmtPrice(c.mrp)})` : ''
+          return `• ${who}${mine}: ₹${fmtPrice(c.rate)}${mrpText}${bill}${when}`
+        })
+        const gap = r - rows[0].rate
+        const back = document.activeElement as HTMLElement | null
+        setAlert({
+          title: 'Bought cheaper before',
+          message: [
+            `${name} was bought for less before:`,
+            ...lines,
+            '',
+            `This rate ₹${fmtPrice(r)} is ₹${fmtPrice(gap)} more than the cheapest.`,
+          ].join('\n'),
+          kind: 'warning',
+          focusAfterClose: back ? () => back.focus() : undefined,
+        })
+      })
+      .catch(() => {})
   }
 
   const clearMedicineFieldsRef = useRef(() => {})
@@ -2756,6 +2799,7 @@ export function PurchasePage({
                       data-nav-order={16}
                       data-nav-chain={NAV}
                       onChange={(e) => onStripMrpChange(e.target.value)}
+                      onBlur={checkRateAgainstHistory}
                     />
                   </div>
                   <div className="price-half">
@@ -2766,6 +2810,7 @@ export function PurchasePage({
                       data-nav-order={17}
                       data-nav-chain={NAV}
                       onChange={(e) => onTabletMrpChange(e.target.value)}
+                      onBlur={checkRateAgainstHistory}
                     />
                   </div>
                 </div>
@@ -2777,6 +2822,7 @@ export function PurchasePage({
                   data-nav-order={16}
                   data-nav-chain={NAV}
                   onChange={(e) => onStripMrpChange(e.target.value)}
+                  onBlur={checkRateAgainstHistory}
                 />
               )}
             </Field>
@@ -2795,6 +2841,7 @@ export function PurchasePage({
                       data-nav-order={18}
                       data-nav-chain={NAV}
                       onChange={(e) => onStripRateChange(e.target.value)}
+                      onBlur={checkRateAgainstHistory}
                     />
                   </div>
                   <div className="price-half">
@@ -2805,6 +2852,7 @@ export function PurchasePage({
                       data-nav-order={19}
                       data-nav-chain={NAV}
                       onChange={(e) => onTabletRateChange(e.target.value)}
+                      onBlur={checkRateAgainstHistory}
                     />
                   </div>
                 </div>
@@ -2816,6 +2864,7 @@ export function PurchasePage({
                   data-nav-order={18}
                   data-nav-chain={NAV}
                   onChange={(e) => onStripRateChange(e.target.value)}
+                  onBlur={checkRateAgainstHistory}
                 />
               )}
             </Field>

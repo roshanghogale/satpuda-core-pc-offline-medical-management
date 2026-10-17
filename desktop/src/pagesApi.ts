@@ -1302,6 +1302,22 @@ export function mergePurchaseLines(body: {
   }>('/api/purchase/merge-lines', body)
 }
 
+export type PurchaseRateCheapest = {
+  supplier_name: string
+  rate: number
+  mrp: number
+  bill_number: string
+  purchase_date: string
+}
+
+/** Earlier purchases of this medicine (same pack, one per supplier) that cost less. */
+export function checkPurchaseRate(name: string, rate: number, mrp: number) {
+  const qs = new URLSearchParams({ name, rate: String(rate), mrp: String(mrp) })
+  return getJson<{ ok: boolean; cheaper: PurchaseRateCheapest[]; error?: string }>(
+    `/api/purchase/rate-check?${qs.toString()}`,
+  )
+}
+
 export function lookupPurchaseMedicine(name: string) {
   return postJson<{
     ok: boolean
@@ -1585,6 +1601,8 @@ export function printAllSalesBills(body: {
   to?: string
   sale_ids?: number[]
   paper?: string
+  /** '' | 'customer' | 'store' -- printed under each bill (standard print). */
+  copy_label?: string
   slot?: number
 }) {
   return postJson<{

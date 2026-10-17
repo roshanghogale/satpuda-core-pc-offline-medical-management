@@ -528,6 +528,18 @@ def _bill_copy(ctx, copy_label: str, settings, *, upright: bool = False, layout:
     )
 
     shell_extra = " copy-shell-supplier" if settings.get("supplier_doc_compact") else ""
+    # Print All's "Customer copy" / "Store copy" (owner, 17 Oct 2026): printed just under
+    # the bill's bottom border, outside it. The frame is the invoice's own box and turns
+    # with it, so "under" stays under the bill on rotated A4/A5 copies too.
+    copy_tag = str(settings.get("copy_footer_label") or "").strip()
+    copy_tag_html = (
+        f'<div class="copy-tag-frame{"" if upright else " copy-tag-rotated"}">'
+        f'<div class="copy-tag">{esc(copy_tag.upper())}</div></div>'
+        if copy_tag
+        else ""
+    )
+    if copy_tag:
+        shell_extra += " has-copy-tag"
     return f"""
   <section class="copy-shell{shell_extra}">
     {copy_id_html}
@@ -553,6 +565,7 @@ def _bill_copy(ctx, copy_label: str, settings, *, upright: bool = False, layout:
 
       {bottom_zone}
     </div>
+    {copy_tag_html}
   </section>"""
 
 
@@ -1005,6 +1018,33 @@ def render_classic_html(ctx: BillContext, settings: Dict[str, Any] | None = None
     font-weight: 800;
     transform: rotate(-90deg);
     transform-origin: left bottom;
+    white-space: nowrap;
+  }}
+  .copy-tag-frame {{
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: {layout["inv_w"]};
+    height: {layout["inv_h"]};
+    transform: translate(-50%, -50%);
+    transform-origin: center center;
+    pointer-events: none;
+    z-index: 3;
+  }}
+  .copy-tag-frame.copy-tag-rotated {{
+    transform: translate(-50%, -50%) rotate(90deg);
+  }}
+  .copy-tag {{
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    margin-top: 0.5mm;
+    text-align: center;
+    font-size: {7.0 * font_scale:.2f}pt;
+    font-weight: 800;
+    letter-spacing: 0.6pt;
+    line-height: 1;
     white-space: nowrap;
   }}
   .rotated-invoice {{
@@ -1475,6 +1515,17 @@ def _build_classic_body_multi(ctxs, settings, paper: str, layout: dict) -> str:
     paper = (paper or "A5").upper()
     if not ctxs:
         return ""
+    if paper == "A5":
+        # Upright halves, as for two bills. The odd bill left at the end of a Print All
+        # run used to fall through to the single-bill A5 landscape layout, which the
+        # PDF step printed cut off (shop name and bill number off the page).
+        pdf_layout = dict(layout)
+        top = _bill_copy(ctxs[0], "", settings, upright=True, layout=pdf_layout)
+        bottom = _bill_copy(ctxs[1], "", settings, upright=True, layout=pdf_layout) if len(ctxs) > 1 else ""
+        return (
+            f'<div class="bill-band band-a5p-half band-a5p-top-copy">{top}</div>'
+            f'<div class="bill-band band-a5p-half band-a5p-bottom-copy">{bottom}</div>'
+        )
     if len(ctxs) == 1:
         return _build_classic_body_content(ctxs[0], settings, paper, 1, layout)
 
@@ -1514,15 +1565,6 @@ def _build_classic_body_multi(ctxs, settings, paper: str, layout: dict) -> str:
             f'<div class="bill-band band-a4">{half_pair(bills[2], bills[3])}</div>'
         )
 
-    if paper == "A5":
-        pdf_layout = dict(layout)
-        top = _bill_copy(ctxs[0], "", settings, upright=True, layout=pdf_layout)
-        bottom = _bill_copy(ctxs[1], "", settings, upright=True, layout=pdf_layout) if len(ctxs) > 1 else ""
-        return (
-            f'<div class="bill-band band-a5p-half band-a5p-top-copy">{top}</div>'
-            f'<div class="bill-band band-a5p-half band-a5p-bottom-copy">{bottom}</div>'
-        )
-
     return _build_classic_body_content(ctxs[0], settings, paper, 1, layout)
 
 
@@ -1535,7 +1577,7 @@ def render_classic_bill_html_multi(
         raise ValueError("No bills to render.")
     settings = dict(settings or load_bill_print_settings())
     paper = (settings.get("paper_size") or "A5").upper()
-    if paper == "A5" and len(contexts) > 1:
+    if paper == "A5":
         settings["for_pdf_save"] = True
         settings["orientation"] = "portrait"
         from core.bill_page_config import get_pdf_save_layout
