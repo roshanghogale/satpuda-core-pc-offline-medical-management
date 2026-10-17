@@ -356,6 +356,7 @@ def _migrate_all(cur, conn):
     _migrate_sales_due_formula(conn)
     _migrate_bill_credit_overpay_only(conn)
     _migrate_customer_payments(cur)
+    _migrate_payment_allocations(cur)
     _migrate_suppliers(cur)
     _migrate_purchase_items_entry_paid(cur)
     _migrate_purchase_payment_split(cur)
@@ -1060,6 +1061,15 @@ def _migrate_customer_payments(cur):
         """)
     except Exception as e:
         print(f"customer_payments migration: {e}")
+
+
+def _migrate_payment_allocations(cur):
+    """The bills a payment was given (core/bill_clearing.py): JSON text, NULL = oldest first."""
+    for table in ('customer_payments', 'supplier_payments'):
+        try:
+            _alter_if_missing(cur, table, 'allocations', 'TEXT')
+        except Exception as e:
+            print(f"{table}.allocations migration: {e}")
 
 
 def _migrate_location_format(cur):

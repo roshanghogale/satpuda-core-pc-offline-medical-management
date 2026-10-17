@@ -121,8 +121,24 @@ export type SettingsBundle = {
   payments_customer?: PaymentBundle
 }
 
+/** A bill a payment was given ("Choose bills"); engine: core/bill_clearing.py. */
+export type PaymentAllocation = { bill_id: number; bill_no?: string | null; amount: number }
+
+/** What a payment cleared: chosen = the bill was picked, oldest = it went oldest first. */
+export type PaymentCleared = {
+  bill_id: number
+  bill_no: string
+  date: string
+  amount: number
+  how: 'chosen' | 'oldest'
+}
+
+/** A bill of the party that still owes, for "Which bills does this pay?". */
+export type OpenBill = { bill_id: number; bill_no: string; date: string; total: number; owes: number }
+
 export type PaymentBundle = {
   kind: string
+  /** Each row may carry `cleared` (PaymentCleared[]), `credit_left` and `allocations`. */
   history: Record<string, unknown>[]
   parties: { id: number; name: string; due: number }[]
   /** What looks mistyped (a date after today); the payment was saved regardless. */
@@ -273,6 +289,45 @@ export function deletePayment(body: Record<string, unknown>) {
     method: 'PUT',
     body: JSON.stringify(body),
   })
+}
+
+/** The party's open bills; `supported` is false Online (payments there clear oldest first). */
+export function fetchOpenBills(params: {
+  kind: 'supplier' | 'customer'
+  party: string
+  partyId?: number | null
+  paymentId?: number | null
+}) {
+  const q = new URLSearchParams({
+    kind: params.kind,
+    party: params.party,
+    party_id: String(params.partyId || 0),
+    payment_id: String(params.paymentId || 0),
+  })
+  return jsonFetch<{
+    ok: boolean
+    supported: boolean
+    bills: OpenBill[]
+    allocations: PaymentAllocation[]
+  }>(`/api/settings/payments/open-bills?${q.toString()}`)
+}
+
+/** Payment report (which bills each payment cleared) as a CSV or PDF file. */
+export function exportPaymentReport(body: {
+  kind: 'supplier' | 'customer'
+  from: string
+  to: string
+  party: string
+  format: 'csv' | 'pdf'
+}) {
+  return jsonFetch<{
+    ok: boolean
+    error?: string
+    filename?: string
+    mime?: string
+    content_base64?: string
+    row_count?: number
+  }>('/api/settings/payments/report', { method: 'PUT', body: JSON.stringify(body) })
 }
 
 export function fetchLedger(params: {

@@ -1,6 +1,7 @@
 /** Take a payment for one bill, straight from Sales / Purchase History (engine:
  *  core/history_pay.py). Saved as an ordinary customer / supplier payment with the bill number
- *  as its reference, so it is in the ledger, the party's due and every bill's status. */
+ *  as its reference, so it is in the ledger, the party's due and every bill's status. It pays
+ *  THIS bill first (the amount starts at this bill's due); any more clears the oldest bills. */
 import { useEffect, useRef, useState } from 'react'
 import { getApiBase } from '../api'
 import { dispatchPaymentsChanged } from '../syncRefresh'
@@ -145,7 +146,7 @@ export function PayDueDialog({
               </table>
               {info.oldest_first_note ? (
                 <p className="muted" style={{ fontSize: 12 }}>
-                  {info.oldest_first_note} {rs(info.to_clear)} clears this bill.
+                  {info.oldest_first_note}
                 </p>
               ) : null}
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>

@@ -97,10 +97,12 @@ class ASupplierPaymentClearsThePurchase(Base):
 
 
 class PayFromHistory(Base):
-    def test_the_amount_that_clears_a_newer_bill_includes_the_older_dues(self):
+    def test_a_payment_from_a_newer_bill_pays_that_bill_first(self):
+        # 17 Oct 2026: the payment is given this bill (core/bill_clearing.py), so its own due
+        # clears it; the older dues are only pointed out.
         info = history_pay.bill_due_info(self.conn, "sale", self.s2)
-        self.assertEqual((info["bill_due"], info["older_due"], info["to_clear"]), (60.0, 90.0, 150.0))
-        self.assertTrue(info["oldest_first_note"])
+        self.assertEqual((info["bill_due"], info["older_due"], info["to_clear"]), (60.0, 90.0, 60.0))
+        self.assertIn("Clears this bill; any more clears the oldest bills", info["oldest_first_note"])
         self.assertEqual(history_pay.bill_due_info(self.conn, "sale", self.s1)["older_due"], 0.0)
 
     def test_a_payment_from_the_row_is_a_ledger_entry_and_clears_the_bills(self):

@@ -20,6 +20,8 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, Callable, Optional
 
+from core.bill_clearing import allocations_json, clean_allocations
+
 log = logging.getLogger(__name__)
 
 _DEFAULT_PROJECT = 'satpuda-core-online'
@@ -1023,6 +1025,7 @@ def build_customer_payment_payload(conn, payment_id: int) -> Optional[dict]:
         'reference_no': p.get('reference_no'),
         'note': p.get('note'),
         'created_at': p.get('created_at'),
+        'allocations': clean_allocations(p.get('allocations')),
     }
     payload.update(_sync_meta_fields_from_row(p))
     return payload
@@ -1056,6 +1059,7 @@ def build_supplier_payment_payload(conn, payment_id: int) -> Optional[dict]:
         'due_before': p.get('due_before', 0),
         'due_after': p.get('due_after', 0),
         'created_at': p.get('created_at'),
+        'allocations': clean_allocations(p.get('allocations')),
     }
     payload.update(_sync_meta_fields_from_row(p))
     return payload
@@ -1627,6 +1631,21 @@ def _offline_first_applying() -> bool:
     return bool(getattr(_OF_APPLY, "on", 0))
 
 
+def _pulled_allocations(conn, table: str, doc_id: str, data: dict) -> tuple[str, list]:
+    """(", allocations", [JSON text or None]) for a pulled payment, or ("", []) on a store
+    without the column. A document with no ``allocations`` key (an older server) keeps what
+    this PC holds; the server sends null or a list."""
+    if 'allocations' not in _table_columns(conn, table):
+        return '', []
+    if 'allocations' in data:
+        return ', allocations', [allocations_json(data.get('allocations'))]
+    try:
+        row = conn.execute(f'SELECT allocations FROM {table} WHERE id=?', (int(doc_id),)).fetchone()
+    except Exception:
+        row = None
+    return ', allocations', [row[0] if row else None]
+
+
 def sync_down_doc(conn, collection: str, doc_id: str, data: dict) -> str:
     """
     Apply one cloud document locally.
@@ -2098,11 +2117,14 @@ def sync_down_doc(conn, collection: str, doc_id: str, data: dict) -> str:
                     data.get('name', ''),
                 ))
             elif collection == 'customer_payments':
-                cur.execute('''
+                # INSERT OR REPLACE writes a whole new row: a column left out here is wiped
+                # on every pull, so the bills the payment was given go in too.
+                alloc_cols, alloc_vals = _pulled_allocations(conn, 'customer_payments', doc_id, data)
+                cur.execute(f'''
                     INSERT OR REPLACE INTO customer_payments
                     (id, customer_id, payment_date, amount, payment_mode,
-                     cash_amount, online_amount, reference_no, note, created_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?)
+                     cash_amount, online_amount, reference_no, note, created_at{alloc_cols})
+                    VALUES (?,?,?,?,?,?,?,?,?,?{',?' * len(alloc_vals)})
                 ''', (
                     int(doc_id),
                     int(data.get('customer_id') or 0),
@@ -2114,13 +2136,15 @@ def sync_down_doc(conn, collection: str, doc_id: str, data: dict) -> str:
                     data.get('reference_no'),
                     data.get('note'),
                     data.get('created_at'),
+                    *alloc_vals,
                 ))
             elif collection == 'supplier_payments':
-                cur.execute('''
+                alloc_cols, alloc_vals = _pulled_allocations(conn, 'supplier_payments', doc_id, data)
+                cur.execute(f'''
                     INSERT OR REPLACE INTO supplier_payments
                     (id, payment_no, supplier_id, payment_date, amount, mode,
-                     reference, due_before, due_after, created_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?)
+                     reference, due_before, due_after, created_at{alloc_cols})
+                    VALUES (?,?,?,?,?,?,?,?,?,?{',?' * len(alloc_vals)})
                 ''', (
                     int(doc_id),
                     data.get('payment_no', ''),
@@ -2132,6 +2156,7 @@ def sync_down_doc(conn, collection: str, doc_id: str, data: dict) -> str:
                     float(data.get('due_before') or 0),
                     float(data.get('due_after') or 0),
                     data.get('created_at'),
+                    *alloc_vals,
                 ))
             elif collection == 'sales_returns':
                 return_id = int(doc_id)

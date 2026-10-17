@@ -4,10 +4,10 @@ The shop clicks a bill's Due / Partial status and takes the payment there. It is
 ordinary customer / supplier payment (the same save as the Payments screen, so it lands in the
 ledger, the party's due and every bill's status), with the bill number as its reference.
 
-Payments clear a party's OLDEST unpaid bill first -- on the server, the PC and the phone alike
-(server-live partyDueCascade.js, core.due_fifo). So "clear this bill" may need more than the
-bill's own due when an older bill is still open: ``bill_due_info`` says how much
-(``to_clear`` = this bill's due + the older bills' dues).
+Since 17 Oct 2026 a payment can name the bills it pays (core/bill_clearing.py, the same rule
+on the server and the phone). A payment taken here pays THIS bill first -- it is saved with
+the allocation [{this bill, min(amount, its due)}] -- and anything more clears the party's
+oldest open bills, as every payment did before. ``to_clear`` is this bill's own due.
 """
 from __future__ import annotations
 
@@ -71,14 +71,18 @@ def bill_due_info(conn: sqlite3.Connection | None, kind: str, bill_id: int) -> d
     ).fetchone()
     if not party:
         raise ValueError("This bill has no customer / supplier to take a payment from.")
-    bill_due = _r2(row[4])
-    older = conn.execute(
-        f"SELECT COALESCE(SUM(total_due),0) FROM {table} "
-        f"WHERE {pcol}=? AND COALESCE(deleted,0)=0 AND COALESCE(is_autosave,0)=0 "
-        f"AND ({dcol} < ? OR ({dcol} = ? AND id < ?))",
-        (party_id, row[2], row[2], bill_id),
-    ).fetchone()
-    older_due = _r2(older[0] if older else 0)
+    # What each bill owes by the rule the dues are stored with (equal to the stored total_due
+    # once the party has been recalculated, and right even when it has not).
+    from core.bill_clearing import open_bills
+
+    open_ = open_bills(conn, pkind, party_id)
+    owes = {b["bill_id"]: b["owes"] for b in open_}
+    bill_due = _r2(owes.get(bill_id, 0.0))
+    key = (str(row[2] or "")[:10], bill_id)
+    older_due = 0.0
+    for b in open_:
+        if (b["date"], b["bill_id"]) < key:
+            older_due = _r2(older_due + b["owes"])
     return {
         "ok": True,
         "kind": k,
@@ -92,11 +96,11 @@ def bill_due_info(conn: sqlite3.Connection | None, kind: str, bill_id: int) -> d
         "party_credit": _r2(party[2]),
         "bill_due": bill_due,
         "older_due": older_due,
-        "to_clear": _r2(bill_due + older_due) if bill_due > 0.009 else 0.0,
+        "to_clear": bill_due if bill_due > 0.009 else 0.0,
         "oldest_first_note": (
-            "Payments clear the oldest bill first: "
-            f"₹{older_due:.2f} is still due on older bills."
-            if older_due > 0.009 and bill_due > 0.009
+            "Clears this bill; any more clears the oldest bills"
+            + (f" (₹{older_due:.2f} is still due on older bills)." if older_due > 0.009 else ".")
+            if bill_due > 0.009
             else ""
         ),
     }
@@ -145,6 +149,8 @@ def _online_info(k: str, bill_id: int) -> dict[str, Any]:
         # The older bills are not read Online; the party's total due bounds them.
         "older_due": _r2(max(0.0, party_due - bill_due)) if party_due > bill_due else 0.0,
         "to_clear": bill_due,
+        # Online the payment goes to the server without a choice of bills, so it still
+        # clears the oldest bill first there.
         "oldest_first_note": (
             (f"Payments clear the oldest bill first; this customer owes ₹{party_due:.2f} in all."
              if pkind == "customer"
@@ -185,6 +191,13 @@ def pay_bill(conn: sqlite3.Connection | None, data: dict[str, Any]) -> dict[str,
             "date": pdate,
             "reference": reference,
         }
+    if not _online() and conn is not None and info["bill_due"] > 0.009:
+        # This bill first; anything more clears the oldest bills.
+        body["allocations"] = [{
+            "bill_id": info["bill_id"],
+            "bill_no": info["bill_no"],
+            "amount": _r2(min(amount, info["bill_due"])),
+        }]
     saved = save_payment(conn, body)
     after = bill_due_info(conn, info["kind"], info["bill_id"])
     return {

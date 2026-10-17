@@ -260,58 +260,27 @@ def compute_paid_via_payments_by_bill(conn, supplier_ids=None) -> dict:
     """
     Map purchase_id -> amount covered by supplier_payments.
 
-    Payments are applied oldest bill first (purchase_date, then id) so credit
-    payments clear earlier purchase bills before newer ones.
+    What the supplier's payments cleared on each purchase under core/bill_clearing.py (the
+    rule recalculate_supplier_due stores): first the purchases a payment was given, then
+    oldest first (purchase_date, then id). Returns are credits in that rule too, so a
+    purchase a return cleared shows nothing here.
     """
+    from core.bill_clearing import party_ledgers
+
     cur = conn.cursor()
     supplier_ids = [int(s) for s in (supplier_ids or []) if s]
+    if not supplier_ids:
+        cur.execute("SELECT DISTINCT supplier_id FROM purchases WHERE COALESCE(supplier_id,0)>0")
+        supplier_ids = [int(r[0]) for r in cur.fetchall()]
 
-    if supplier_ids:
-        placeholders = ','.join('?' * len(supplier_ids))
-        cur.execute(
-            f"SELECT supplier_id, COALESCE(SUM(amount),0) FROM supplier_payments "
-            f"WHERE COALESCE(deleted,0)=0 "
-            f"AND supplier_id IN ({placeholders}) GROUP BY supplier_id",
-            supplier_ids,
-        )
-    else:
-        cur.execute(
-            "SELECT supplier_id, COALESCE(SUM(amount),0) FROM supplier_payments "
-            "WHERE COALESCE(deleted,0)=0 GROUP BY supplier_id"
-        )
-    pool_remaining = {
-        int(sid): round(float(amt or 0), 2) for sid, amt in cur.fetchall()
-    }
-
-    if supplier_ids:
-        placeholders = ','.join('?' * len(supplier_ids))
-        cur.execute(
-            f"SELECT id, supplier_id, COALESCE(final_amount,total_amount), "
-            f"{PURCHASE_ENTRY_PAID_SQL} "
-            f"FROM purchases WHERE supplier_id IN ({placeholders}) "
-            f"ORDER BY supplier_id, purchase_date ASC, id ASC",
-            supplier_ids,
-        )
-    else:
-        cur.execute(
-            "SELECT id, supplier_id, COALESCE(final_amount,total_amount), "
-            f"{PURCHASE_ENTRY_PAID_SQL} "
-            "FROM purchases "
-            "ORDER BY supplier_id, purchase_date ASC, id ASC"
-        )
-
-    paid_map = {}
-    for bill_id, sid, bill_final, bill_entry_paid in cur.fetchall():
-        pool = pool_remaining.get(int(sid), 0.0)
-        bill_final = float(bill_final or 0)
-        bill_entry_paid = float(bill_entry_paid or 0)
-        unpaid = round(max(0.0, bill_final - bill_entry_paid), 2)
-        if pool <= 0 or unpaid <= 0:
-            paid_map[int(bill_id)] = 0.0
-        else:
-            applied = min(pool, unpaid)
-            paid_map[int(bill_id)] = round(applied, 2)
-            pool_remaining[int(sid)] = round(pool - applied, 2)
+    paid_map: dict[int, float] = {}
+    for led in party_ledgers(conn, "supplier", supplier_ids).values():
+        for b in led["bills"]:
+            paid_map[int(b["id"])] = 0.0
+        for a in led["result"]["applied"]:
+            if a["credit_kind"] == "payment":
+                bid = int(a["bill_id"])
+                paid_map[bid] = round(paid_map.get(bid, 0.0) + float(a["amount"]), 2)
     return paid_map
 
 
@@ -425,22 +394,18 @@ def recalculate_supplier_due(conn, supplier_id: int, *, commit: bool = True) -> 
         "UPDATE suppliers SET total_due=?, total_credit=? WHERE id=?",
         (total_due, total_credit, supplier_id))
 
-    # Oldest-first clear of every purchase for this supplier.
-    from core.due_fifo import cascade_purchases_fifo
+    # Clear every purchase for this supplier: each payment first pays the purchases it was
+    # given (its allocations), the rest of payments + returns oldest first
+    # (core/bill_clearing.py, the server's rule; with no allocations the old FIFO).
+    from core.bill_clearing import party_ledger
 
-    cur.execute(
-        f"SELECT id, COALESCE(final_amount, total_amount), {PURCHASE_ENTRY_PAID_SQL} FROM purchases "
-        "WHERE supplier_id=? AND COALESCE(deleted,0)=0 AND COALESCE(is_autosave,0)=0 "
-        "ORDER BY purchase_date ASC, id ASC",
-        (supplier_id,))
-    bills = [(int(r[0]), float(r[1] or 0), float(r[2] or 0)) for r in cur.fetchall()]
+    led = party_ledger(conn, "supplier", supplier_id)
     # The same fields the server's cascade writes (server-live partyDueCascade.js
     # cascadeSupplierAfterLedgerChange). Only account_cleared was written, so a supplier
     # payment taken in Offline / offline-first left the purchase "Due" in Purchase History.
     # Only purchases whose figures move are written.
-    for bill_id, remaining, cleared in cascade_purchases_fifo(
-        bills, total_payments, total_returns,
-    ):
+    for b in led["result"]["bills"]:
+        bill_id, remaining, cleared = b["id"], b["remaining"], b["cleared"]
         rem = round(float(remaining or 0), 2)
         c = int(bool(cleared))
         cur.execute(

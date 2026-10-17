@@ -276,24 +276,21 @@ def recalculate_customer_due(conn, customer_id, *, commit: bool = True, sync: bo
         "UPDATE customers SET total_due=?, total_credit=?, last_updated=? WHERE id=?",
         (net_due, net_credit, datetime.now().isoformat(), customer_id))
 
-    # Cascade every bill for this customer: FIFO clear using payments/returns
-    # plus excess paid on later bills (previous-due paid on a new invoice).
-    from core.due_fifo import cascade_sales_fifo
+    # Cascade every bill for this customer: each payment first pays the bills it was given
+    # (its allocations), then what is left of payments/returns plus excess paid on later
+    # bills (previous-due paid on a new invoice) clears oldest first -- core/bill_clearing.py,
+    # the same rule as the server's cascade. With no allocations this is the old FIFO.
+    from core.bill_clearing import party_ledger
 
-    cur.execute(
-        "SELECT id, COALESCE(total_amount,0), COALESCE(amount_paid,0) FROM sales "
-        "WHERE customer_id=? AND COALESCE(deleted,0)=0 AND COALESCE(is_autosave,0)=0 "
-        "ORDER BY bill_date ASC, id ASC",
-        (customer_id,),
-    )
-    bills = [(int(r[0]), float(r[1] or 0), float(r[2] or 0)) for r in cur.fetchall()]
+    led = party_ledger(conn, "customer", customer_id)
     # The same four fields the server's cascade writes (server-live partyDueCascade.js
     # cascadeCustomerAfterLedgerChange). This wrote total_due / account_cleared only, so a
     # payment taken in Offline or offline-first left each bill's due_amount and bill_cleared
     # as billed: Sales History still said "Partial Payment" until the server's figures came
     # back by sync (and never without internet). Only bills whose figures move are written,
     # so a payment does not re-send every bill of the customer.
-    for bid, remaining, cleared in cascade_sales_fifo(bills, total_standalone, total_returns):
+    for b in led["result"]["bills"]:
+        bid, remaining, cleared = b["id"], b["remaining"], b["cleared"]
         rem = round(float(remaining or 0), 2)
         bill_cleared = 1 if rem <= 0.01 else 0
         cur.execute(

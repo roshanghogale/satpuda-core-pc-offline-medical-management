@@ -8,7 +8,9 @@ import {
   applyAlertNavigation,
   deletePayment,
   exportAlerts,
+  exportPaymentReport,
   fetchLedger,
+  fetchOpenBills,
   mutateContact,
   mutateShelf,
   reorderAction,
@@ -16,7 +18,10 @@ import {
   saveSettingsSection,
   systemAction,
   type LedgerBundle,
+  type OpenBill,
+  type PaymentAllocation,
   type PaymentBundle,
+  type PaymentCleared,
   type SettingsBundle,
 } from '../../settingsApi'
 import { focusTableSection, usePageHotkeys } from '../../hooks/usePageHotkeys'
@@ -1681,6 +1686,23 @@ export function AlertsPanel({
 
 /* ─── Payment ──────────────────────────────────────────────────────────── */
 
+/** SCB12/FY2026-27 -> SCB12, as bills are shown everywhere else. */
+function shortNo(raw: unknown) {
+  return String(raw ?? '').split('/FY')[0]
+}
+
+/** "Bills cleared" for a history row: S2-55 ₹500 ✓ · S2-61 ₹200 · ₹50 left as credit
+ *  (✓ = the bill was chosen for the payment; the rest went to the oldest bills). */
+function clearedText(r: Record<string, unknown>) {
+  const cleared = Array.isArray(r.cleared) ? (r.cleared as PaymentCleared[]) : []
+  const parts = cleared.map(
+    (c) => `${shortNo(c.bill_no) || `#${c.bill_id}`} ₹${money(c.amount)}${c.how === 'chosen' ? ' ✓' : ''}`,
+  )
+  const left = Number(r.credit_left || 0)
+  if (left > 0.009) parts.push(`₹${money(left)} left as credit`)
+  return parts.length ? parts.join(' · ') : '—'
+}
+
 export function PaymentPanel({
   kind,
   initial,
@@ -1708,6 +1730,20 @@ export function PaymentPanel({
   const [msg, setMsg] = useState('')
   const [editHint, setEditHint] = useState('')
   const [editingId, setEditingId] = useState<number | null>(null)
+  // "Which bills does this pay?" -- oldest first (as always) or the bills ticked here.
+  const [billMode, setBillMode] = useState<'oldest' | 'choose'>('oldest')
+  const [openBills, setOpenBills] = useState<OpenBill[]>([])
+  const [billsSupported, setBillsSupported] = useState(true)
+  const [billsErr, setBillsErr] = useState('')
+  /** bill id -> amount typed for it; a ticked bill is a key here. */
+  const [ticks, setTicks] = useState<Record<number, string>>({})
+  /** The amount follows the ticked total until the shop types it. */
+  const [amountTyped, setAmountTyped] = useState(false)
+  const today = new Date().toISOString().slice(0, 10)
+  const [repFrom, setRepFrom] = useState(today.slice(0, 8) + '01')
+  const [repTo, setRepTo] = useState(today)
+  const [repParty, setRepParty] = useState<'all' | 'this'>('all')
+  const [repBusy, setRepBusy] = useState(false)
 
   useEffect(() => {
     setData(initial)
@@ -1730,6 +1766,73 @@ export function PaymentPanel({
     [data.parties, party, partyId],
   )
   const selectedDue = selectedParty?.due ?? 0
+  const selectedPartyId = selectedParty?.id ?? null
+
+  // The party's open bills, read when "Choose bills" is on (owes = without the payment
+  // being edited, so its own bills show what they owed before it).
+  useEffect(() => {
+    if (billMode !== 'choose' || !party.trim()) {
+      setOpenBills([])
+      return
+    }
+    let alive = true
+    setBillsErr('')
+    fetchOpenBills({ kind, party, partyId: selectedPartyId, paymentId: editingId })
+      .then((d) => {
+        if (!alive) return
+        setBillsSupported(d.supported !== false)
+        const bills = Array.isArray(d.bills) ? d.bills : []
+        setOpenBills(bills)
+        const open = new Set(bills.map((b) => b.bill_id))
+        setTicks((t) => {
+          const kept: Record<number, string> = {}
+          for (const [id, v] of Object.entries(t)) if (open.has(Number(id))) kept[Number(id)] = v
+          return kept
+        })
+      })
+      .catch((e) => alive && setBillsErr(e instanceof Error ? e.message : String(e)))
+    return () => {
+      alive = false
+    }
+  }, [billMode, kind, party, selectedPartyId, editingId])
+
+  const tickedTotal = Object.values(ticks).reduce((s, v) => s + (Number(v) || 0), 0)
+  const payAmount = kind === 'supplier' ? Number(amount) || 0 : (Number(cash) || 0) + (Number(online) || 0)
+  const choosing = billMode === 'choose' && billsSupported
+
+  /** Put the ticked total in the amount box, unless the shop typed the amount. */
+  function followTicked(next: Record<number, string>) {
+    setTicks(next)
+    if (amountTyped) return
+    const total = Object.values(next).reduce((s, v) => s + (Number(v) || 0), 0)
+    const shown = total > 0 ? total.toFixed(2) : ''
+    if (kind === 'supplier') {
+      setAmount(shown)
+    } else {
+      setCash(shown || '0')
+      setOnline('0')
+    }
+  }
+
+  function tickBill(b: OpenBill, on: boolean) {
+    const next = { ...ticks }
+    if (on) next[b.bill_id] = b.owes.toFixed(2)
+    else delete next[b.bill_id]
+    followTicked(next)
+  }
+
+  function setTickAmount(b: OpenBill, raw: string) {
+    // never more than the bill owes
+    const v = Number(raw) > b.owes ? b.owes.toFixed(2) : raw
+    followTicked({ ...ticks, [b.bill_id]: v })
+  }
+
+  function chosenAllocations(): PaymentAllocation[] {
+    if (!choosing) return []
+    return openBills
+      .filter((b) => ticks[b.bill_id] != null && Number(ticks[b.bill_id]) > 0)
+      .map((b) => ({ bill_id: b.bill_id, bill_no: b.bill_no, amount: Number(Number(ticks[b.bill_id]).toFixed(2)) }))
+  }
 
   function clearForm() {
     setAmount('')
@@ -1739,13 +1842,54 @@ export function PaymentPanel({
     setNote('')
     setEditingId(null)
     setEditHint('')
+    setBillMode('oldest')
+    setTicks({})
+    setAmountTyped(false)
+  }
+
+  async function exportReport(format: 'csv' | 'pdf') {
+    setErr('')
+    setMsg('')
+    if (repParty === 'this' && !party.trim()) {
+      setErr(kind === 'supplier' ? 'Pick the supplier first.' : 'Pick the customer first.')
+      return
+    }
+    setRepBusy(true)
+    try {
+      const res = await exportPaymentReport({
+        kind,
+        from: repFrom,
+        to: repTo,
+        party: repParty === 'this' ? party : '',
+        format,
+      })
+      if (res.content_base64 && res.filename) {
+        await saveFileAndShow(res.filename, res.mime || 'application/octet-stream', res.content_base64)
+        setMsg(`Saved ${res.filename}`)
+      } else {
+        setErr(res.error || 'Report not saved.')
+      }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setRepBusy(false)
+    }
   }
 
   /** Null when saved, else why not (voice shows it). */
   async function save(): Promise<string | null> {
     setErr('')
     setMsg('')
+    const allocations = chosenAllocations()
+    const ticked = allocations.reduce((s, a) => s + a.amount, 0)
+    if (choosing && ticked > payAmount + 0.009) {
+      const why = `The bills you ticked need ₹${money(ticked)}; the amount is ₹${money(payAmount)}.`
+      setErr(why)
+      return why
+    }
     try {
+      // Always sent ([] = oldest bills first), so an edit back to "Oldest bills first"
+      // drops the saved choice. Online the engine ignores it (the server clears oldest first).
       const body =
         kind === 'supplier'
           ? {
@@ -1755,6 +1899,7 @@ export function PaymentPanel({
               mode,
               date,
               reference,
+              allocations,
               ...(editingId ? { id: editingId } : {}),
             }
           : {
@@ -1765,6 +1910,7 @@ export function PaymentPanel({
               date,
               reference,
               note,
+              allocations,
               ...(editingId ? { id: editingId } : {}),
             }
       const next = await savePayment(body)
@@ -1896,6 +2042,13 @@ export function PaymentPanel({
       setOnline(String(r.online ?? 0))
       setNote(String(r.note ?? ''))
     }
+    // The saved choice of bills, as it was saved; the amount stays as saved too.
+    const saved = Array.isArray(r.allocations) ? (r.allocations as PaymentAllocation[]) : []
+    const t: Record<number, string> = {}
+    for (const a of saved) if (Number(a.amount) > 0) t[Number(a.bill_id)] = Number(a.amount).toFixed(2)
+    setTicks(t)
+    setBillMode(saved.length ? 'choose' : 'oldest')
+    setAmountTyped(true)
     if (id > 0) {
       setEditingId(id)
       setEditHint(`Editing payment #${id}. Save updates this row.`)
@@ -1933,11 +2086,15 @@ export function PaymentPanel({
             // Typing has moved off whatever was clicked, so the id that told two
             // same-named parties apart no longer describes this text.
             setPartyId(null)
+            setTicks({})
           }}
           onPick={(it) => {
             setParty(it.label)
             const id = Number(it.id)
             setPartyId(id)
+            // another party's bills are not this one's
+            setTicks({})
+            setAmountTyped(false)
             const p = data.parties.find((x) => x.id === id)
             if (p && kind === 'supplier' && p.due > 0) {
               setAmount(p.due.toFixed(2))
@@ -1946,13 +2103,99 @@ export function PaymentPanel({
         />
       </Field>
       <Note>Outstanding due: ₹{money(selectedDue)}</Note>
+      {party.trim() ? (
+        <Field label="Which bills does this pay?">
+          <select
+            className="settings-input"
+            value={billMode}
+            onChange={(e) => setBillMode(e.target.value === 'choose' ? 'choose' : 'oldest')}
+          >
+            <option value="oldest">Oldest bills first</option>
+            <option value="choose">Choose bills</option>
+          </select>
+        </Field>
+      ) : null}
+      {billMode === 'choose' && party.trim() ? (
+        !billsSupported ? (
+          <Note>Online, a payment clears the oldest bills first; bills can be chosen in Offline / offline-first.</Note>
+        ) : (
+          <>
+            {billsErr ? <p className="error">{billsErr}</p> : null}
+            <div className="settings-table-wrap" style={{ maxHeight: 260, overflow: 'auto' }}>
+              <table className="settings-table">
+                <thead>
+                  <tr>
+                    <th />
+                    <th>{kind === 'supplier' ? 'Purchase / Bill No' : 'Bill No'}</th>
+                    <th>Date</th>
+                    <th>Bill total</th>
+                    <th>Owes now</th>
+                    <th>Pay on it</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {openBills.map((b) => {
+                    const on = ticks[b.bill_id] != null
+                    return (
+                      <tr key={b.bill_id} className={on ? 'row-selected' : undefined}>
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={on}
+                            aria-label={`Pay ${shortNo(b.bill_no)}`}
+                            onChange={(e) => tickBill(b, e.target.checked)}
+                          />
+                        </td>
+                        <td>{shortNo(b.bill_no) || `#${b.bill_id}`}</td>
+                        <td>{b.date}</td>
+                        <td className="num">{money(b.total)}</td>
+                        <td className="num">{money(b.owes)}</td>
+                        <td>
+                          <input
+                            className="settings-input"
+                            style={{ width: 100 }}
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            disabled={!on}
+                            value={on ? ticks[b.bill_id] : ''}
+                            onChange={(e) => setTickAmount(b, e.target.value)}
+                          />
+                        </td>
+                      </tr>
+                    )
+                  })}
+                  {!openBills.length ? (
+                    <tr>
+                      <td colSpan={6}>No bill of this party owes anything.</td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+            {tickedTotal > 0.009 && payAmount > tickedTotal + 0.009 ? (
+              <Note>
+                Ticked ₹{money(tickedTotal)} · ₹{money(payAmount - tickedTotal)} more goes to the oldest bills
+              </Note>
+            ) : null}
+            {tickedTotal > 0.009 && payAmount < tickedTotal - 0.009 ? (
+              <p className="error">
+                The bills you ticked need ₹{money(tickedTotal)}; the amount is ₹{money(payAmount)}.
+              </p>
+            ) : null}
+          </>
+        )
+      ) : null}
       {kind === 'supplier' ? (
         <>
           <Field label="Amount">
             <input
               className="settings-input"
               value={amount}
-              onChange={(e) => setAmount(e.target.value)}
+              onChange={(e) => {
+                setAmount(e.target.value)
+                setAmountTyped(true)
+              }}
             />
           </Field>
           <Field label="Mode">
@@ -1975,14 +2218,20 @@ export function PaymentPanel({
             <input
               className="settings-input"
               value={cash}
-              onChange={(e) => setCash(e.target.value)}
+              onChange={(e) => {
+                setCash(e.target.value)
+                setAmountTyped(true)
+              }}
             />
           </Field>
           <Field label="Online">
             <input
               className="settings-input"
               value={online}
-              onChange={(e) => setOnline(e.target.value)}
+              onChange={(e) => {
+                setOnline(e.target.value)
+                setAmountTyped(true)
+              }}
             />
           </Field>
         </>
@@ -2022,6 +2271,28 @@ export function PaymentPanel({
           </button>
         ) : null}
       </div>
+      <Frame title="Payment report — which bills each payment cleared">
+        <div className="settings-inline-actions" style={{ flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <Field label="From">
+            <input className="settings-input" type="date" value={repFrom} onChange={(e) => setRepFrom(e.target.value)} />
+          </Field>
+          <Field label="To">
+            <input className="settings-input" type="date" value={repTo} onChange={(e) => setRepTo(e.target.value)} />
+          </Field>
+          <Field label={kind === 'supplier' ? 'Suppliers' : 'Customers'}>
+            <select
+              className="settings-input"
+              value={repParty}
+              onChange={(e) => setRepParty(e.target.value === 'this' ? 'this' : 'all')}
+            >
+              <option value="all">All</option>
+              <option value="this">Only {party.trim() || (kind === 'supplier' ? 'the supplier above' : 'the customer above')}</option>
+            </select>
+          </Field>
+          <SaveBtn label="Export CSV" saving={repBusy} onClick={() => void exportReport('csv')} />
+          <SaveBtn label="Save PDF" saving={repBusy} onClick={() => void exportReport('pdf')} />
+        </div>
+      </Frame>
       <div className="settings-table-wrap">
         <table className="settings-table">
           <thead>
@@ -2039,6 +2310,7 @@ export function PaymentPanel({
               <th>Ref</th>
               <th>Due Before</th>
               <th>Due After</th>
+              <th title="✓ = chosen for this payment; the rest went to the oldest bills">Bills cleared</th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -2067,6 +2339,7 @@ export function PaymentPanel({
                   {r.due_before != null ? money(r.due_before) : '—'}
                 </td>
                 <td>{r.due_after != null ? money(r.due_after) : '—'}</td>
+                <td style={{ whiteSpace: 'normal', minWidth: 160 }}>{clearedText(r)}</td>
                 <td>
                   <button
                     type="button"
@@ -2087,7 +2360,7 @@ export function PaymentPanel({
             ))}
             {!data.history.length ? (
               <tr>
-                <td colSpan={kind === 'customer' ? 10 : 8}>No payments yet</td>
+                <td colSpan={kind === 'customer' ? 11 : 9}>No payments yet</td>
               </tr>
             ) : null}
           </tbody>

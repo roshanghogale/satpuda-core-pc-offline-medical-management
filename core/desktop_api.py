@@ -1011,6 +1011,31 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                     return
                 _json_response(self, 200, get_payments(conn, kind))
                 return
+            if path == "/api/settings/payments/open-bills":
+                # "Which bills does this pay?" on the Payment screen (core/bill_clearing.py).
+                from core.desktop_settings_service import payment_open_bills
+                from urllib.parse import parse_qs
+
+                qs = parse_qs(urlparse(self.path).query)
+                conn = _db.get("conn")
+                if conn is None:
+                    _json_response(self, 503, {"error": "Database not open"})
+                    return
+
+                def _int(key: str) -> int:
+                    try:
+                        return int((qs.get(key) or ["0"])[0] or 0)
+                    except ValueError:
+                        return 0
+
+                _json_response(self, 200, payment_open_bills(
+                    conn,
+                    (qs.get("kind") or ["supplier"])[0],
+                    party=(qs.get("party") or [""])[0],
+                    party_id=_int("party_id"),
+                    payment_id=_int("payment_id"),
+                ))
+                return
             if path == "/api/settings/ledger":
                 from core.desktop_settings_service import get_ledger
                 from urllib.parse import parse_qs
@@ -2511,13 +2536,28 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 if conn is None:
                     _json_response(self, 503, {"error": "Database not open"})
                     return
-                _json_response(self, 200, svc.save_payment(conn, body))
+                try:
+                    _json_response(self, 200, svc.save_payment(conn, body))
+                except ValueError as exc:
+                    # A refusal the shop can act on ("The bills you ticked need ..."),
+                    # said as it is, not as an engine failure.
+                    _json_response(self, 400, {"ok": False, "error": str(exc)})
                 return
             if path in ("/api/settings/payments/delete",):
                 if conn is None:
                     _json_response(self, 503, {"error": "Database not open"})
                     return
                 _json_response(self, 200, svc.delete_payment(conn, body))
+                return
+            if path in ("/api/settings/payments/report",):
+                # Payment report: which bills each payment cleared, CSV / PDF.
+                if conn is None:
+                    _json_response(self, 503, {"error": "Database not open"})
+                    return
+                from core.desktop_export_service import export_payment_report
+
+                result = export_payment_report(conn, body)
+                _json_response(self, 200 if result.get("ok") else 400, result)
                 return
             if path in ("/api/settings/shelf", "/api/settings/shelf/mutate"):
                 if conn is None:

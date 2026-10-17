@@ -2131,3 +2131,190 @@ def print_report(title: str, cols: list, rows: list, print_to: str, page_layout:
                 "path": saved, "pdf_path": saved}
     return {"ok": True, "printed": True, "path": saved, "pdf_path": saved,
             "message": f"Printer la pathavle (A4 {'horizontal' if landscape else 'vertical'})."}
+
+
+# ── Payment report: which bills each payment cleared (owner, 17 Oct 2026) ─────────────────
+PAYMENT_REPORT_COLUMNS = ["Date", "Payment", "Party", "Mode", "Amount", "Bill No", "Bill Date", "Cleared", "How"]
+
+
+def payment_report(conn, kind: str, from_date: str = "", to_date: str = "", party: str = "") -> dict[str, Any]:
+    """The payments of a date range (one party or all), each with the bills it cleared.
+
+    {"payments": [{id, date, number, party, mode, amount, cleared: [...], credit_left}],
+     "totals": {count, amount, cleared, credit_left}} -- from this PC's books, by the rule
+    the dues are stored with (core/bill_clearing.py): "chosen" = the bill was picked for the
+    payment, "oldest" = it went to the oldest open bills.
+    """
+    from core.bill_clearing import payment_clearing, r2
+
+    kind = "customer" if str(kind or "").lower().startswith("c") else "supplier"
+    where = ["COALESCE(p.deleted,0)=0"]
+    params: list[Any] = []
+    if from_date:
+        where.append("substr(p.payment_date,1,10) >= ?")
+        params.append(str(from_date)[:10])
+    if to_date:
+        where.append("substr(p.payment_date,1,10) <= ?")
+        params.append(str(to_date)[:10])
+    if str(party or "").strip():
+        where.append("UPPER(t.name) = UPPER(?)")
+        params.append(str(party).strip())
+    if kind == "customer":
+        sql = (
+            "SELECT p.id, p.payment_date, '', COALESCE(p.reference_no,''), t.name, "
+            "COALESCE(p.payment_mode,''), COALESCE(p.amount,0), p.customer_id "
+            "FROM customer_payments p JOIN customers t ON t.id = p.customer_id "
+        )
+    else:
+        sql = (
+            "SELECT p.id, p.payment_date, COALESCE(p.payment_no,''), COALESCE(p.reference,''), t.name, "
+            "COALESCE(p.mode,''), COALESCE(p.amount,0), p.supplier_id "
+            "FROM supplier_payments p JOIN suppliers t ON t.id = p.supplier_id "
+        )
+    rows = conn.execute(
+        sql + "WHERE " + " AND ".join(where) + " ORDER BY substr(p.payment_date,1,10), p.id", params
+    ).fetchall()
+    cleared = payment_clearing(
+        conn, kind, [{"id": r[0], "party_id": r[7], "amount": r[6]} for r in rows]
+    )
+    payments = []
+    for pid, pdate, pno, ref, name, mode, amount, _party_id in rows:
+        hit = cleared.get(int(pid)) or {}
+        number = str(pno or "").strip() or f"#{pid}"
+        if str(ref or "").strip():
+            number = f"{number} · {str(ref).strip()}"
+        payments.append({
+            "id": int(pid),
+            "date": str(pdate or "")[:10],
+            "number": number,
+            "party": str(name or ""),
+            "mode": str(mode or ""),
+            "amount": r2(amount),
+            "cleared": hit.get("cleared") or [],
+            "credit_left": float(hit.get("credit_left") or 0),
+        })
+    tot_amount = tot_cleared = tot_left = 0.0
+    for p in payments:
+        tot_amount += p["amount"]
+        tot_cleared += sum(float(c["amount"]) for c in p["cleared"])
+        tot_left += p["credit_left"]
+    return {
+        "kind": kind,
+        "payments": payments,
+        "totals": {
+            "count": len(payments),
+            "amount": r2(tot_amount),
+            "cleared": r2(tot_cleared),
+            "credit_left": r2(tot_left),
+        },
+    }
+
+
+def _payment_report_lines(rep: dict[str, Any]) -> list[tuple[str, list[Any]]]:
+    """(row kind, cells) for the CSV and the PDF: "pay", "bill", "credit", "total"."""
+    from core.fy_serial import display_purchase_no, display_sales_bill_no
+
+    short = display_sales_bill_no if rep.get("kind") == "customer" else display_purchase_no
+    out: list[tuple[str, list[Any]]] = []
+    for p in rep["payments"]:
+        out.append(("pay", [p["date"], p["number"], p["party"], p["mode"], p["amount"], "", "", "", ""]))
+        for c in p["cleared"]:
+            out.append(("bill", ["", "", "", "", "", short(c.get("bill_no")) or f"#{c.get('bill_id')}",
+                                 c.get("date") or "", c["amount"],
+                                 "Chosen" if c.get("how") == "chosen" else "Oldest first"]))
+        if p["credit_left"] > 0.009:
+            out.append(("credit", ["", "", "", "", "", "Left as credit", "", p["credit_left"], ""]))
+    t = rep["totals"]
+    out.append(("total", ["TOTAL", f"{t['count']} payments", "", "", t["amount"], "", "", t["cleared"], "cleared"]))
+    if t["credit_left"] > 0.009:
+        out.append(("total", ["", "", "", "", "", "Left as credit", "", t["credit_left"], ""]))
+    return out
+
+
+def _payment_report_pdf(path: str, title: str, subtitle: str, lines) -> str:
+    def esc(v: Any) -> str:
+        return str(v).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    def cell(v: Any, i: int) -> str:
+        if isinstance(v, (int, float)) and i in (4, 7):
+            return f"<td class=num>{float(v):.2f}</td>"
+        return f"<td>{esc(v)}</td>"
+
+    hdr = "".join(f"<th>{esc(h)}</th>" for h in PAYMENT_REPORT_COLUMNS)
+    trs = "".join(
+        f"<tr class={k}>" + "".join(cell(v, i) for i, v in enumerate(cells)) + "</tr>"
+        for k, cells in lines
+    )
+    css = (
+        "@page{size:A4 portrait;margin:10mm}body{font-family:Segoe UI,Arial;font-size:9pt}"
+        "h2{margin:0 0 4px}table{width:100%;border-collapse:collapse}"
+        "th{background:#2c3e50;color:#fff;padding:4px;text-align:left}td{border:1px solid #ccc;padding:3px}"
+        "td.num{text-align:right}tr.pay td{font-weight:600;background:#f2f4f6}"
+        "tr.credit td{font-style:italic}tr.total td{font-weight:700;border-top:2px solid #333}"
+    )
+    html = (f"<!DOCTYPE html><html><head><meta charset=UTF-8><title>{esc(title)}</title>"
+            f"<style>{css}</style></head><body><h2>{esc(title)}</h2>"
+            f"<p>{esc(subtitle)} · {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>"
+            f"<table><thead><tr>{hdr}</tr></thead><tbody>{trs}</tbody></table></body></html>")
+    from core.document_output import save_html_as_pdf
+
+    pdf_path, html_path = save_html_as_pdf(html, path)
+    return pdf_path or html_path
+
+
+def export_payment_report(conn, body: dict[str, Any]) -> dict[str, Any]:
+    """Payment report as a file: body {kind, from, to, party, format: csv|pdf}."""
+    import base64
+    import csv
+    import io
+    import os
+    import tempfile
+
+    if _is_online():
+        return {"ok": False, "error": (
+            "The payment report reads this PC's own books; an Online store's payments are "
+            "on the server (Payments on the web).")}
+    kind = "customer" if str(body.get("kind") or "").lower().startswith("c") else "supplier"
+    from_d, to_d = str(body.get("from") or "")[:10], str(body.get("to") or "")[:10]
+    party = str(body.get("party") or "").strip()
+    rep = payment_report(conn, kind, from_d, to_d, party)
+    if not rep["payments"]:
+        return {"ok": False, "error": "No payments in this period."}
+    lines = _payment_report_lines(rep)
+    who = party or ("all customers" if kind == "customer" else "all suppliers")
+    period = f"{from_d or 'start'} to {to_d or 'today'}"
+    title = f"{'Customer' if kind == 'customer' else 'Supplier'} payment report"
+    base = f"payment_report_{'customers' if kind == 'customer' else 'suppliers'}_{date.today().isoformat()}"
+    fmt = str(body.get("format") or "csv").strip().lower()
+    if fmt == "csv":
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow([title, who, period])
+        w.writerow(PAYMENT_REPORT_COLUMNS)
+        w.writerows(cells for _k, cells in lines)
+        payload, mime = buf.getvalue().encode("utf-8-sig"), "text/csv;charset=utf-8"
+    elif fmt == "pdf":
+        fd, path = tempfile.mkstemp(suffix=".pdf", prefix="payment_report_")
+        os.close(fd)
+        saved = _payment_report_pdf(path, title, f"{who} · {period}", lines)
+        with open(saved, "rb") as fh:
+            payload = fh.read()
+        for p in {saved, path, saved.rsplit(".", 1)[0] + ".html"}:
+            try:
+                if p and os.path.isfile(p):
+                    os.remove(p)
+            except OSError:
+                pass
+        mime = "application/pdf" if saved.lower().endswith(".pdf") else "text/html"
+        fmt = "pdf" if mime.endswith("pdf") else "html"
+    else:
+        return {"ok": False, "error": f"Unknown export format: {fmt}"}
+    return {
+        "ok": True,
+        "filename": f"{base}.{fmt}",
+        "mime": mime,
+        "format": fmt,
+        "content_base64": base64.b64encode(payload).decode("ascii"),
+        "row_count": len(rep["payments"]),
+        "totals": rep["totals"],
+    }

@@ -3,6 +3,11 @@
 Sales: pool = standalone payments + returns + excess paid on later bills
        (amount_paid - total_amount), which is how previous dues are paid.
 Purchases: pool = supplier payments + returns (entry paid is already on each bill).
+
+Since 17 Oct 2026 a payment can name the bills it pays (``allocations``); the per-bill
+figures come from core/bill_clearing.py, which pays those first and runs exactly this pool
+over the rest. cascade_sales_fifo / cascade_purchases_fifo are the old pool alone, no longer
+called by the app: they stay as what the rule must equal when nothing has allocations.
 """
 from __future__ import annotations
 
@@ -40,7 +45,14 @@ def fifo_paid_via_by_bill(
     purchases: list[dict],
     payments: list[dict],
 ) -> dict[int, float]:
-    """Allocate supplier_payments oldest-bill-first. Returns purchase_id -> via amount."""
+    """What supplier_payments cleared on each purchase. Returns purchase_id -> via amount.
+
+    core/bill_clearing.py: a payment first pays the purchases it was given (``allocations``,
+    when the rows carry them), the rest oldest bill first -- with no allocations exactly the
+    old oldest-first split. A purchase's own returns come off it first, as before.
+    """
+    from core.bill_clearing import clear_bills
+
     fill_fk_from_name(
         payments,
         id_key="supplier_id",
@@ -49,7 +61,7 @@ def fifo_paid_via_by_bill(
             purchases, id_key="supplier_id", name_key="supplier_name"
         ),
     )
-    bills_by_sid: dict[int, list[tuple[str, int, float]]] = {}
+    bills_by_sid: dict[int, list[dict]] = {}
     for r in purchases or []:
         if not isinstance(r, dict) or r.get("deleted"):
             continue
@@ -67,14 +79,14 @@ def fifo_paid_via_by_bill(
             or r.get("returns")
             or 0
         )
-        unpaid = _r2(max(0.0, final - purchase_entry_paid(r) - returns))
-        bills_by_sid.setdefault(sid, []).append(
-            (str(r.get("purchase_date") or ""), pid, unpaid)
-        )
-    for sid in bills_by_sid:
-        bills_by_sid[sid].sort(key=lambda t: (t[0], t[1]))
+        bills_by_sid.setdefault(sid, []).append({
+            "id": pid,
+            "date": str(r.get("purchase_date") or ""),
+            "total": _r2(final - returns),
+            "paid": purchase_entry_paid(r),
+        })
 
-    pool: dict[int, float] = {}
+    credits_by_sid: dict[int, list[dict]] = {}
     for p in payments or []:
         if not isinstance(p, dict) or p.get("deleted"):
             continue
@@ -84,19 +96,31 @@ def fifo_paid_via_by_bill(
             sid = 0
         if sid <= 0:
             continue
-        pool[sid] = _r2(pool.get(sid, 0.0) + float(p.get("amount") or 0))
+        credits_by_sid.setdefault(sid, []).append(_payment_credit(p))
 
     paid_map: dict[int, float] = {}
     for sid, bills in bills_by_sid.items():
-        remaining_pool = pool.get(sid, 0.0)
-        for _date, pid, unpaid in bills:
-            if remaining_pool <= 0.01 or unpaid <= 0.01:
-                paid_map[pid] = 0.0
-                continue
-            applied = min(remaining_pool, unpaid)
-            paid_map[pid] = _r2(applied)
-            remaining_pool = _r2(remaining_pool - applied)
+        unpaid = {b["id"]: max(0.0, _r2(b["total"] - b["paid"])) for b in bills}
+        res = clear_bills(bills, credits_by_sid.get(sid, []), overpay_joins=False)
+        for b in res["bills"]:
+            pid = int(b["id"])
+            paid_map[pid] = _r2(max(0.0, unpaid.get(pid, 0.0) - float(b["remaining"] or 0)))
     return paid_map
+
+
+def _payment_credit(p: dict) -> dict:
+    """A payment row (server or local, any of its spellings) as a bill_clearing credit."""
+    try:
+        pay_id = int(p.get("id") or p.get("local_id") or 0)
+    except (TypeError, ValueError):
+        pay_id = 0
+    return {
+        "kind": "payment",
+        "id": pay_id,
+        "date": str(p.get("payment_date") or p.get("date") or ""),
+        "amount": float(p.get("amount") or 0),
+        "allocations": p.get("allocations") or [],
+    }
 
 
 def sale_entry_paid(row: dict | None) -> float:
@@ -175,7 +199,7 @@ def fifo_sales_remaining_by_bill(
         lookup=lookup,
     )
 
-    bills_by_cid: dict[int, list[tuple[str, int, float, float]]] = {}
+    bills_by_cid: dict[int, list[dict]] = {}
     for r in sales or []:
         if not isinstance(r, dict) or r.get("deleted"):
             continue
@@ -188,15 +212,14 @@ def fifo_sales_remaining_by_bill(
             continue
         if sid == 0 or cid <= 0:
             continue
-        total = _r2(r.get("total_amount") or 0)
-        paid = sale_entry_paid(r)
-        bills_by_cid.setdefault(cid, []).append(
-            (str(r.get("bill_date") or ""), sid, total, paid)
-        )
-    for cid in bills_by_cid:
-        bills_by_cid[cid].sort(key=lambda t: (t[0], t[1]))
+        bills_by_cid.setdefault(cid, []).append({
+            "id": sid,
+            "date": str(r.get("bill_date") or ""),
+            "total": _r2(r.get("total_amount") or 0),
+            "paid": sale_entry_paid(r),
+        })
 
-    pay_pool: dict[int, float] = {}
+    credits_by_cid: dict[int, list[dict]] = {}
     for p in payments or []:
         if not isinstance(p, dict) or p.get("deleted"):
             continue
@@ -206,32 +229,36 @@ def fifo_sales_remaining_by_bill(
             cid = 0
         if cid <= 0:
             continue
-        pay_pool[cid] = _r2(pay_pool.get(cid, 0.0) + float(p.get("amount") or 0))
+        credits_by_cid.setdefault(cid, []).append(_payment_credit(p))
 
-    ret_pool: dict[int, float] = {}
     for ret in returns or []:
         if not isinstance(ret, dict) or ret.get("deleted"):
             continue
         try:
             cid = int(ret.get("customer_id") or 0)
+            rid = int(ret.get("id") or ret.get("local_id") or 0)
         except (TypeError, ValueError):
-            cid = 0
+            continue
         if cid <= 0:
             continue
-        ret_pool[cid] = _r2(
-            ret_pool.get(cid, 0.0)
-            + float(ret.get("refund_amount") or ret.get("amount") or 0)
-        )
+        credits_by_cid.setdefault(cid, []).append({
+            "kind": "return",
+            "id": rid,
+            "date": str(ret.get("return_date") or ret.get("date") or ""),
+            "amount": float(ret.get("refund_amount") or ret.get("amount") or 0),
+            "allocations": [],
+        })
+
+    # core/bill_clearing.py: payments pay the bills they were given first, the rest of
+    # payments + returns + counter overpayments clears oldest first (the old FIFO when no
+    # payment has allocations).
+    from core.bill_clearing import clear_bills
 
     out: dict[int, tuple[float, int]] = {}
     for cid, bills in bills_by_cid.items():
-        cascade = cascade_sales_fifo(
-            [(bid, total, paid) for _d, bid, total, paid in bills],
-            pay_pool.get(cid, 0.0),
-            ret_pool.get(cid, 0.0),
-        )
-        for bid, remaining, cleared in cascade:
-            out[int(bid)] = (_r2(remaining), int(cleared))
+        res = clear_bills(bills, credits_by_cid.get(cid, []), overpay_joins=True)
+        for b in res["bills"]:
+            out[int(b["id"])] = (_r2(b["remaining"]), int(bool(b["cleared"])))
     return out
 
 

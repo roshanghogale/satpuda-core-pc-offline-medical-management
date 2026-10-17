@@ -1895,7 +1895,8 @@ def get_payments(conn: sqlite3.Connection, kind: str = "supplier") -> dict[str, 
             """
             SELECT cp.id, cp.payment_date, c.name, cp.amount, cp.payment_mode,
                    COALESCE(cp.cash_amount,0), COALESCE(cp.online_amount,0),
-                   COALESCE(cp.reference_no,''), COALESCE(cp.note,'')
+                   COALESCE(cp.reference_no,''), COALESCE(cp.note,''),
+                   cp.customer_id, cp.allocations
             FROM customer_payments cp
             JOIN customers c ON c.id = cp.customer_id
             ORDER BY cp.id DESC LIMIT 300
@@ -1904,6 +1905,7 @@ def get_payments(conn: sqlite3.Connection, kind: str = "supplier") -> dict[str, 
         customers = conn.execute(
             "SELECT id, name, COALESCE(total_due,0) FROM customers ORDER BY name COLLATE NOCASE"
         ).fetchall()
+        cleared = _payments_cleared(conn, "customer", rows, party_col=9, amount_col=3)
         return {
             "kind": "customer",
             "history": [
@@ -1917,6 +1919,7 @@ def get_payments(conn: sqlite3.Connection, kind: str = "supplier") -> dict[str, 
                     "online": float(r[6] or 0),
                     "reference": r[7],
                     "note": r[8],
+                    **_cleared_fields(cleared, r[0], r[10]),
                 }
                 for r in rows
             ],
@@ -1928,7 +1931,8 @@ def get_payments(conn: sqlite3.Connection, kind: str = "supplier") -> dict[str, 
     rows = conn.execute(
         """
         SELECT sp.id, sp.payment_no, sp.payment_date, s.name, sp.amount, sp.mode,
-               COALESCE(sp.reference,''), sp.due_before, sp.due_after
+               COALESCE(sp.reference,''), sp.due_before, sp.due_after,
+               sp.supplier_id, sp.allocations
         FROM supplier_payments sp
         JOIN suppliers s ON s.id = sp.supplier_id
         ORDER BY sp.id DESC LIMIT 300
@@ -1937,6 +1941,7 @@ def get_payments(conn: sqlite3.Connection, kind: str = "supplier") -> dict[str, 
     suppliers = conn.execute(
         "SELECT id, name, COALESCE(total_due,0) FROM suppliers ORDER BY name COLLATE NOCASE"
     ).fetchall()
+    cleared = _payments_cleared(conn, "supplier", rows, party_col=9, amount_col=4)
     return {
         "kind": "supplier",
         "history": [
@@ -1950,12 +1955,43 @@ def get_payments(conn: sqlite3.Connection, kind: str = "supplier") -> dict[str, 
                 "reference": r[6],
                 "due_before": float(r[7] or 0),
                 "due_after": float(r[8] or 0),
+                **_cleared_fields(cleared, r[0], r[10]),
             }
             for r in rows
         ],
         "parties": [
             {"id": r[0], "name": r[1], "due": float(r[2] or 0)} for r in suppliers
         ],
+    }
+
+
+def _payments_cleared(
+    conn: sqlite3.Connection, kind: str, rows: list, *, party_col: int, amount_col: int
+) -> dict[int, dict]:
+    """payment id -> what it cleared (core/bill_clearing.payment_clearing), for the
+    "Bills cleared" column; {} when that cannot be worked out (the list still shows)."""
+    from core.bill_clearing import payment_clearing
+
+    try:
+        return payment_clearing(
+            conn,
+            kind,
+            [{"id": r[0], "party_id": r[party_col], "amount": r[amount_col]} for r in rows],
+        )
+    except Exception as exc:
+        log.warning("payments cleared (%s): %s", kind, exc)
+        return {}
+
+
+def _cleared_fields(cleared: dict[int, dict], payment_id: Any, allocations: Any) -> dict[str, Any]:
+    """The history row's bills: what it cleared, what is left as credit, the saved choice."""
+    from core.bill_clearing import clean_allocations
+
+    hit = cleared.get(int(payment_id or 0)) or {}
+    return {
+        "cleared": hit.get("cleared") or [],
+        "credit_left": float(hit.get("credit_left") or 0),
+        "allocations": clean_allocations(allocations),
     }
 
 
@@ -3303,6 +3339,76 @@ def _fifo_clear_supplier_purchases_online(supplier_id: int, supplier_name: str) 
         pass
 
 
+def _payment_allocations(
+    conn: sqlite3.Connection,
+    kind: str,
+    party_id: int,
+    amount: float,
+    data: dict[str, Any],
+    editing_id: int,
+) -> tuple[str, list]:
+    """(", allocations=?", [JSON or None]) for a payment saved with a choice of bills, or
+    ("", []) when the request says nothing about bills (an edit then keeps its saved choice).
+
+    The choice is checked against what each bill owes now, without the payment being edited
+    (core/bill_clearing.check_allocations); a bad one is refused with the reason.
+    """
+    import json
+
+    from core.bill_clearing import check_allocations
+
+    if "allocations" not in (data or {}):
+        return "", []
+    chosen = check_allocations(
+        conn, kind, party_id, amount, data.get("allocations"),
+        leave_out_payment=editing_id if editing_id > 0 else None,
+    )
+    return ", allocations=?", [json.dumps(chosen) if chosen else None]
+
+
+def payment_open_bills(
+    conn: sqlite3.Connection,
+    kind: str,
+    party: str = "",
+    party_id: int = 0,
+    payment_id: int = 0,
+) -> dict[str, Any]:
+    """The party's bills that still owe, for "Which bills does this pay?" on the Payment
+    screen: [{bill_id, bill_no, date, total, owes}] oldest first, plus the saved choice of
+    the payment being edited. Online stores answer supported=False: the bills there are read
+    from the server, and a payment taken Online clears oldest first as before."""
+    from core.bill_clearing import clean_allocations, open_bills
+    from core.sync_prefs import is_online_mode
+
+    kind = "customer" if str(kind or "").lower().startswith("c") else "supplier"
+    if is_online_mode():
+        return {"ok": True, "supported": False, "kind": kind, "bills": [], "allocations": []}
+    table = "customers" if kind == "customer" else "suppliers"
+    pid = int(party_id or 0)
+    if pid <= 0 and str(party or "").strip():
+        row = conn.execute(
+            f"SELECT id FROM {table} WHERE UPPER(name)=UPPER(?) LIMIT 1", (str(party).strip(),)
+        ).fetchone()
+        pid = int(row[0]) if row else 0
+    saved: list = []
+    edit_id = int(payment_id or 0)
+    if edit_id > 0:
+        ptable = "customer_payments" if kind == "customer" else "supplier_payments"
+        row = conn.execute(f"SELECT allocations FROM {ptable} WHERE id=?", (edit_id,)).fetchone()
+        saved = clean_allocations(row[0]) if row else []
+    if pid <= 0:
+        return {"ok": True, "supported": True, "kind": kind, "party_id": 0, "bills": [], "allocations": saved}
+    bills = open_bills(conn, kind, pid, leave_out_payment=edit_id if edit_id > 0 else None)
+    return {
+        "ok": True,
+        "supported": True,
+        "kind": kind,
+        "party_id": pid,
+        "bills": bills,
+        "allocations": saved,
+    }
+
+
 def save_payment(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, Any]:
     """Save a customer receipt or a supplier payment, and point out a date after today.
 
@@ -3718,12 +3824,17 @@ def _save_payment(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, A
                 if not owned:
                     raise ValueError("Payment not found for edit.")
                 customer_id = int(owned[1])
+        # The bills this receipt pays (Choose bills); none = oldest bills first. A request
+        # without the key (voice, an older screen) leaves an edited receipt's choice as saved.
+        alloc_sql, alloc_val = _payment_allocations(
+            conn, "customer", customer_id, amount, data, editing_id)
+        if editing_id > 0:
             conn.execute(
-                """
+                f"""
                 UPDATE customer_payments
                 SET payment_date=?, amount=?, payment_mode=?,
                     cash_amount=?, online_amount=?, reference_no=?, note=?,
-                    customer_id=?
+                    customer_id=?{alloc_sql}
                 WHERE id=?
                 """,
                 (
@@ -3735,6 +3846,7 @@ def _save_payment(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, A
                     reference,
                     note,
                     customer_id,
+                    *alloc_val,
                     editing_id,
                 ),
             )
@@ -3744,10 +3856,11 @@ def _save_payment(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, A
                 """
                 INSERT INTO customer_payments
                     (customer_id, payment_date, amount, payment_mode,
-                     cash_amount, online_amount, reference_no, note)
-                VALUES (?,?,?,?,?,?,?,?)
+                     cash_amount, online_amount, reference_no, note, allocations)
+                VALUES (?,?,?,?,?,?,?,?,?)
                 """,
-                (customer_id, pdate, amount, mode, cash, online, reference, note),
+                (customer_id, pdate, amount, mode, cash, online, reference, note,
+                 alloc_val[0] if alloc_val else None),
             )
             payment_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
         conn.commit()
@@ -3789,6 +3902,14 @@ def _save_payment(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, A
         editing_id = 0
     pdate = str(data.get("date") or today)
     reference = str(data.get("reference") or "")
+    if editing_id > 0 and not conn.execute(
+        "SELECT 1 FROM supplier_payments WHERE id=?", (editing_id,)
+    ).fetchone():
+        raise ValueError("Payment not found for edit.")
+    # The purchases this payment pays (Choose bills); none = oldest first. No key in the
+    # request leaves an edited payment's choice as saved.
+    alloc_sql, alloc_val = _payment_allocations(
+        conn, "supplier", supplier_id, amount, data, editing_id)
     if editing_id > 0:
         owned = conn.execute(
             "SELECT id, COALESCE(amount,0), supplier_id FROM supplier_payments WHERE id=?",
@@ -3807,10 +3928,10 @@ def _save_payment(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, A
         due_before = round(max(0.0, base_net), 2)
         due_after = round(max(0.0, base_net - amount), 2)
         conn.execute(
-            """
+            f"""
             UPDATE supplier_payments
             SET supplier_id=?, payment_date=?, amount=?, mode=?, reference=?,
-                due_before=?, due_after=?
+                due_before=?, due_after=?{alloc_sql}
             WHERE id=?
             """,
             (
@@ -3821,6 +3942,7 @@ def _save_payment(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, A
                 reference,
                 due_before,
                 due_after,
+                *alloc_val,
                 editing_id,
             ),
         )
@@ -3834,10 +3956,12 @@ def _save_payment(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, A
         conn.execute(
             """
             INSERT INTO supplier_payments
-                (payment_no,supplier_id,payment_date,amount,mode,reference,due_before,due_after)
-            VALUES (?,?,?,?,?,?,?,?)
+                (payment_no,supplier_id,payment_date,amount,mode,reference,due_before,due_after,
+                 allocations)
+            VALUES (?,?,?,?,?,?,?,?,?)
             """,
-            (pay_no, supplier_id, pdate, amount, mode, reference, due_before, due_after),
+            (pay_no, supplier_id, pdate, amount, mode, reference, due_before, due_after,
+             alloc_val[0] if alloc_val else None),
         )
         payment_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
     conn.commit()

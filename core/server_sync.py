@@ -272,6 +272,7 @@ def _rows_as_dicts(cur) -> list[dict]:
 
 def _build_flat_docs(conn, collection: str, ids=None) -> list[dict]:
     """One SELECT * for flat masters/payments — avoid N+1 payload builds."""
+    from core.bill_clearing import clean_allocations
     from core.server_entity_sync import _sync_meta_fields_from_row
 
     cur = conn.cursor()
@@ -354,6 +355,9 @@ def _build_flat_docs(conn, collection: str, ids=None) -> list[dict]:
                     "reference_no": row.get("reference_no"),
                     "note": row.get("note"),
                     "created_at": row.get("created_at"),
+                    # Always sent, [] when none: the server keeps the stored bills only when
+                    # a document has no key at all (an older app).
+                    "allocations": clean_allocations(row.get("allocations")),
                 }
             elif collection == "supplier_payments":
                 sid = row.get("supplier_id")
@@ -368,6 +372,7 @@ def _build_flat_docs(conn, collection: str, ids=None) -> list[dict]:
                     "due_before": row.get("due_before", 0),
                     "due_after": row.get("due_after", 0),
                     "created_at": row.get("created_at"),
+                    "allocations": clean_allocations(row.get("allocations")),
                 }
             else:
                 # Plain tables with no hand-written mapping (stock_disposals,
