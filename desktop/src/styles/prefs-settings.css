@@ -1,0 +1,167 @@
+/* Settings, 18 Oct 2026 redesign, second pass: Appearance, Layout & Lists,
+ * Sales & Billing, Alert & Monitoring -> Popup & Thresholds and the Reorder
+ * multi-supplier editor. Rules in docs/SETTINGS_DESIGN.md. Only adds classes;
+ * the shared ones (.settings-type-table, .settings-savebar, ...) live in
+ * styles.css and are reused as they are. */
+
+/* Numbers are short boxes, right aligned (rule 2). */
+.settings-input.prefs-num {
+  width: 96px;
+  max-width: 96px;
+  min-width: 0;
+  text-align: right;
+  justify-self: start;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Names and paths: a long box. */
+.prefs-wide > .settings-field {
+  grid-template-columns: 210px minmax(180px, 620px);
+}
+@container (max-width: 640px) {
+  .prefs-wide > .settings-field {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* A box and its own small button on one line (Save interval). */
+.prefs-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.prefs-inline > .settings-input:not(.prefs-num) {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+/* Buttons beside the main one: same height, outline. */
+.settings-action-btn.prefs-btn-secondary {
+  background: transparent;
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.settings-action-btn.prefs-btn-danger {
+  background: transparent;
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.settings-action-btn.prefs-btn-small {
+  height: 24px;
+  padding: 0 10px;
+  font-size: 11px;
+}
+
+/* A row of actions with a short muted explanation beside them. */
+.prefs-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.prefs-action-hint {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+/* A checkbox with its own one-line explanation under the label. */
+.prefs-check-item {
+  min-width: 0;
+}
+.prefs-check-hint {
+  margin: 2px 0 0 24px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+.settings-check-grid-3.prefs-check-cards {
+  gap: 12px 18px;
+}
+
+/* Column Visibility: one group per page, a clear heading, 3 columns of ticks. */
+.settings-column-page.prefs-col-group {
+  margin: 0;
+  padding: 8px 0 10px;
+}
+.prefs-col-group + .prefs-col-group {
+  border-top: 1px solid var(--border);
+}
+.settings-labelframe > .prefs-col-group > h4,
+.prefs-col-group > h4 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--accent-dark);
+}
+.prefs-col-group > h4 .prefs-count {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.prefs-col-group .settings-check-grid-3 {
+  gap: 4px 18px;
+}
+
+/* Medicine Types / Schedules: a tall list box, label above it. */
+.prefs-list-field {
+  max-width: 340px;
+}
+.prefs-list-field .settings-textarea.prefs-list-box {
+  min-height: 340px;
+  line-height: 1.55;
+  padding: 6px 10px;
+  font-variant-numeric: tabular-nums;
+}
+.prefs-list-field.short .settings-textarea.prefs-list-box {
+  min-height: 240px;
+}
+.prefs-list-count {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+/* Per-type tables: a muted "allowed" column, number cells on the right. */
+.settings-type-table td.prefs-range {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Reorder multi-supplier editor. */
+.prefs-tab-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.prefs-tab-bar .prefs-btn-danger {
+  margin-left: 14px;
+}
+.prefs-lines-table {
+  max-width: 900px;
+}
+.prefs-lines-table th.num,
+.prefs-lines-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.prefs-lines-table td.num .settings-input {
+  width: 96px;
+  height: 26px;
+  text-align: right;
+}
+.prefs-lines-table th.act,
+.prefs-lines-table td.act {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+}
+.prefs-empty {
+  padding: 14px 8px !important;
+  text-align: center !important;
+  color: var(--text-muted);
+}

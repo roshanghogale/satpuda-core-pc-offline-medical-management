@@ -1,7 +1,8 @@
 import { useCallback, useContext, useEffect, useState } from 'react'
 import { PageActiveContext } from '../../hooks/usePageHotkeys'
 import { reorderAction } from '../../settingsApi'
-import { Field, Frame, Note, SaveBtn } from './SettingsChrome'
+import { Check, Field, Frame, Note, SaveBtn } from './SettingsChrome'
+import '../../styles/prefs-settings.css'
 
 export type ReorderLine = {
   id?: number
@@ -195,7 +196,7 @@ export function ReorderMultiTabEditor({
         One tab per supplier — bulk load fills tabs from low-stock candidates.
         Ctrl+Shift+N new tab · Ctrl+Shift+W close · Ctrl+[ / Ctrl+] switch tabs.
       </Note>
-      <div className="settings-inline-actions reorder-tab-bar">
+      <div className="settings-inline-actions reorder-tab-bar prefs-tab-bar">
         {tabs.map((t, i) => (
           <button
             key={`${t.label}-${i}`}
@@ -206,27 +207,31 @@ export function ReorderMultiTabEditor({
             {t.label || `Tab ${i + 1}`}
           </button>
         ))}
-        <button type="button" className="settings-action-btn" onClick={addTab}>
+        <button
+          type="button"
+          className="settings-action-btn prefs-btn-secondary"
+          onClick={addTab}
+        >
           + Tab
         </button>
         {tabs.length > 1 ? (
           <button
             type="button"
-            className="settings-action-btn"
+            className="settings-action-btn prefs-btn-danger"
             onClick={() => closeTab(activeIdx)}
           >
             Close tab
           </button>
         ) : null}
       </div>
-      <Field label="Supplier name">
-        <input
-          className="settings-input"
-          value={active.supplier_name}
-          onChange={(e) => patchActive({ supplier_name: e.target.value })}
-        />
-      </Field>
-      <div className="settings-inline-row">
+      <div className="settings-form-row">
+        <Field label="Supplier name">
+          <input
+            className="settings-input"
+            value={active.supplier_name}
+            onChange={(e) => patchActive({ supplier_name: e.target.value })}
+          />
+        </Field>
         <Field label="Phone">
           <input
             className="settings-input"
@@ -242,59 +247,64 @@ export function ReorderMultiTabEditor({
           />
         </Field>
       </div>
-      <label className="settings-check">
-        <input
-          type="checkbox"
-          checked={active.offline}
-          onChange={(e) => patchActive({ offline: e.target.checked })}
-        />
-        Offline order (no supplier record)
-      </label>
-      <div className="settings-table-wrap">
-        <table className="settings-table">
-          <thead>
-            <tr>
-              <th>Medicine</th>
-              <th>Pack</th>
-              <th>Qty</th>
-              <th>Rate</th>
-              <th />
+      <Check
+        label="Offline order (no supplier record)"
+        checked={active.offline}
+        onChange={(v) => patchActive({ offline: v })}
+      />
+      <table className="settings-table prefs-lines-table">
+        <thead>
+          <tr>
+            <th>Medicine</th>
+            <th>Pack</th>
+            <th className="num">Qty</th>
+            <th className="num">Rate</th>
+            <th className="act" aria-label="Actions" />
+          </tr>
+        </thead>
+        <tbody>
+          {active.lines.map((ln, i) => (
+            <tr key={`${ln.medicine_name}-${i}`}>
+              <td>{ln.medicine_name}</td>
+              <td>{ln.pack_size}</td>
+              <td className="num">
+                <input
+                  className="settings-input"
+                  type="number"
+                  aria-label={`${ln.medicine_name} qty`}
+                  value={ln.quantity}
+                  onChange={(e) => updateLine(i, 'quantity', e.target.value)}
+                />
+              </td>
+              <td className="num">
+                <input
+                  className="settings-input"
+                  type="number"
+                  aria-label={`${ln.medicine_name} rate`}
+                  value={ln.unit_price}
+                  onChange={(e) => updateLine(i, 'unit_price', e.target.value)}
+                />
+              </td>
+              <td className="act">
+                <button
+                  type="button"
+                  className="settings-action-btn prefs-btn-danger prefs-btn-small"
+                  onClick={() => removeLine(i)}
+                >
+                  Remove
+                </button>
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {active.lines.map((ln, i) => (
-              <tr key={`${ln.medicine_name}-${i}`}>
-                <td>{ln.medicine_name}</td>
-                <td>{ln.pack_size}</td>
-                <td>
-                  <input
-                    className="settings-input"
-                    type="number"
-                    value={ln.quantity}
-                    onChange={(e) => updateLine(i, 'quantity', e.target.value)}
-                  />
-                </td>
-                <td>
-                  <input
-                    className="settings-input"
-                    type="number"
-                    value={ln.unit_price}
-                    onChange={(e) => updateLine(i, 'unit_price', e.target.value)}
-                  />
-                </td>
-                <td>
-                  <SaveBtn label="Remove" onClick={() => removeLine(i)} />
-                </td>
-              </tr>
-            ))}
-            {!active.lines.length ? (
-              <tr>
-                <td colSpan={5}>No lines in this tab</td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
+          ))}
+          {!active.lines.length ? (
+            <tr>
+              <td colSpan={5} className="prefs-empty">
+                No medicines in this tab yet.
+              </td>
+            </tr>
+          ) : null}
+        </tbody>
+      </table>
       <div className="settings-inline-actions">
         <SaveBtn
           label="Save draft"

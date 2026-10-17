@@ -8,7 +8,8 @@ import {
   type AlertPopupPrefs,
   type SettingsBundle,
 } from '../../settingsApi'
-import { Check, Field, Frame, Note, PanelTitle, SaveBtn } from './SettingsChrome'
+import { Check, Field, Frame, Help, Note, PanelTitle, SaveBar, SaveBtn } from './SettingsChrome'
+import '../../styles/prefs-settings.css'
 
 type Thresholds = NonNullable<SettingsBundle['thresholds']>
 
@@ -60,6 +61,7 @@ export function AlertPrefsPanel({
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [msg, setMsg] = useState('')
+  const [typeFilter, setTypeFilter] = useState('')
 
   function adopt(p: AlertPopupPrefs) {
     setPrefs(p)
@@ -156,6 +158,12 @@ export function AlertPrefsPanel({
   const setType = (field: 'low_stock' | 'near_expiry', key: string, v: string) =>
     setThr((t) => (t ? { ...t, [field]: { ...t[field], [key]: v } } : t))
 
+  const shownTypes = thr
+    ? thr.med_types.filter((mt) =>
+        mt.toLowerCase().includes(typeFilter.trim().toLowerCase()),
+      )
+    : []
+
   return (
     <>
       <PanelTitle>Popup &amp; Thresholds</PanelTitle>
@@ -163,27 +171,30 @@ export function AlertPrefsPanel({
         What the alert popup shows, when it shows, and the limits every alert is
         judged by. The same numbers drive Inventory&apos;s status column.
       </Note>
-      {err ? <p className="settings-error">{err}</p> : null}
-      {msg ? <p className="settings-msg">{msg}</p> : null}
+      {/* With the thresholds loaded, every message shows in the Save bar at the
+          bottom, which stays in sight wherever the page is scrolled. */}
+      {!thr && err ? <p className="settings-error">{err}</p> : null}
+      {!thr && msg ? <p className="settings-msg">{msg}</p> : null}
 
       <Frame title="Startup popup">
-        <Check
-          label="Show alerts when the app opens"
-          checked={prefs.enabled}
-          onChange={(v) =>
-            void savePrefs(
-              { enabled: v },
-              v ? 'Startup popup turned on.' : 'Startup popup turned off.',
-            )
-          }
-        />
-        <Note>
-          One window with a tab per category ticked below. &quot;Skip Today&quot;
-          in the popup silences it until tomorrow.
-        </Note>
+        <div className="prefs-check-item">
+          <Check
+            label="Show alerts when the app opens"
+            checked={prefs.enabled}
+            onChange={(v) =>
+              void savePrefs(
+                { enabled: v },
+                v ? 'Startup popup turned on.' : 'Startup popup turned off.',
+              )
+            }
+          />
+          <p className="prefs-check-hint">
+            One window with a tab per category ticked below. &quot;Skip Today&quot;
+            in the popup silences it until tomorrow.
+          </p>
+        </div>
         {prefs.snoozed_today ? (
-          <div className="settings-inline-actions">
-            <Note>Skipped for today.</Note>
+          <div className="prefs-action-row">
             <SaveBtn
               label="Show again today"
               saving={busy}
@@ -191,77 +202,91 @@ export function AlertPrefsPanel({
                 void savePrefs({ clear_snooze: true }, 'Skip Today cleared.')
               }
             />
+            <span className="prefs-action-hint">Skipped for today.</span>
           </div>
         ) : null}
-        <div className="settings-inline-actions">
+        <div className="prefs-action-row">
           <SaveBtn label="Test the popup now" saving={busy} onClick={() => void testNow()} />
+          <span className="prefs-action-hint">
+            Opens the popup with today&apos;s data right now, even when it is
+            turned off or skipped.
+          </span>
         </div>
-        <Note>
-          Opens the popup with today&apos;s data right now, even when it is
-          turned off or skipped.
-        </Note>
       </Frame>
 
       <Frame title="What the popup includes">
-        {CATEGORIES.map((c) => (
-          <div key={c.key}>
-            <Check
-              label={
-                counts && typeof counts[c.key] === 'number'
-                  ? `${c.label} (${counts[c.key]} now)`
-                  : c.label
-              }
-              checked={prefs.categories[c.key] !== false}
-              onChange={(v) =>
-                void savePrefs(
-                  { categories: { [c.key]: v } },
-                  `${c.label} ${v ? 'included in' : 'left out of'} the popup.`,
-                )
-              }
-            />
-            <Note>{c.hint}</Note>
-          </div>
-        ))}
+        <div className="settings-check-grid-3 prefs-check-cards">
+          {CATEGORIES.map((c) => (
+            <div key={c.key} className="prefs-check-item">
+              <Check
+                label={
+                  counts && typeof counts[c.key] === 'number'
+                    ? `${c.label} (${counts[c.key]} now)`
+                    : c.label
+                }
+                checked={prefs.categories[c.key] !== false}
+                onChange={(v) =>
+                  void savePrefs(
+                    { categories: { [c.key]: v } },
+                    `${c.label} ${v ? 'included in' : 'left out of'} the popup.`,
+                  )
+                }
+              />
+              <p className="prefs-check-hint">{c.hint}</p>
+            </div>
+          ))}
+        </div>
       </Frame>
 
       <Frame title="While the app is open">
         <Field label="Check again every (minutes)">
-          <input
-            className="settings-input"
-            type="number"
-            min={0}
-            max={1440}
-            step={1}
-            value={recheck}
-            onChange={(e) => setRecheck(e.target.value)}
-          />
+          <span className="prefs-inline">
+            <input
+              className="settings-input prefs-num"
+              type="number"
+              min={0}
+              max={1440}
+              step={1}
+              value={recheck}
+              onChange={(e) => setRecheck(e.target.value)}
+            />
+            <SaveBtn
+              label="Save interval"
+              saving={busy}
+              onClick={() =>
+                void savePrefs(
+                  { recheck_minutes: recheck === '' ? 0 : Number(recheck) },
+                  'Re-check interval saved.',
+                )
+              }
+            />
+          </span>
         </Field>
-        <Note>
-          0 = only when the app opens. Otherwise the popup comes back only for
-          rows not already shown today, such as a batch that just went low or
-          crossed into near expiry. It never repeats what you have seen.
-        </Note>
-        <SaveBtn
-          label="Save interval"
-          saving={busy}
-          onClick={() =>
-            void savePrefs(
-              { recheck_minutes: recheck === '' ? 0 : Number(recheck) },
-              'Re-check interval saved.',
-            )
-          }
-        />
+        <Note>0 = only when the app opens.</Note>
+        <Help>
+          Above 0, the popup comes back only for rows not already shown today,
+          such as a batch that just went low or crossed into near expiry. It
+          never repeats what you have seen.
+        </Help>
       </Frame>
 
       {thr ? (
-        <Frame title="Thresholds (per medicine type)">
-          <Note>
-            Low stock: alert when the total stock of a medicine (all batches, in
-            the same units as Inventory) is below this number. Near expiry:
-            alert this many months before expiry.
-          </Note>
-          <div className="settings-table-wrap">
-            <table className="settings-table">
+        <>
+          <Frame title="Thresholds (per medicine type)">
+            <Note>
+              Low stock: alert when the total stock of a medicine (all batches, in
+              the same units as Inventory) is below this number. Near expiry:
+              alert this many months before expiry.
+            </Note>
+            {thr.med_types.length > 12 ? (
+              <input
+                className="settings-input settings-type-filter"
+                placeholder="Find a medicine type…"
+                value={typeFilter}
+                onChange={(e) => setTypeFilter(e.target.value)}
+              />
+            ) : null}
+            <table className="settings-type-table">
               <thead>
                 <tr>
                   <th>Medicine type</th>
@@ -270,7 +295,7 @@ export function AlertPrefsPanel({
                 </tr>
               </thead>
               <tbody>
-                {thr.med_types.map((mt) => {
+                {shownTypes.map((mt) => {
                   const key = mt.toLowerCase()
                   return (
                     <tr key={mt}>
@@ -281,6 +306,7 @@ export function AlertPrefsPanel({
                           type="number"
                           min={0}
                           step={1}
+                          aria-label={`${mt} low stock below`}
                           value={thr.low_stock[key] ?? '10'}
                           onChange={(e) => setType('low_stock', key, e.target.value)}
                         />
@@ -291,6 +317,7 @@ export function AlertPrefsPanel({
                           type="number"
                           min={0}
                           step={1}
+                          aria-label={`${mt} near expiry months`}
                           value={thr.near_expiry[key] ?? '3'}
                           onChange={(e) => setType('near_expiry', key, e.target.value)}
                         />
@@ -298,37 +325,54 @@ export function AlertPrefsPanel({
                     </tr>
                   )
                 })}
+                {!shownTypes.length ? (
+                  <tr>
+                    <td colSpan={3} className="prefs-empty">
+                      {typeFilter.trim()
+                        ? `No medicine type matches "${typeFilter.trim()}".`
+                        : 'No medicine types yet. Add them in Layout & Lists → Medicine Types.'}
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
-          </div>
-          <Field label="Customer due: minimum amount (Rs)">
-            <input
-              className="settings-input"
-              type="number"
-              min={0}
-              value={thr.customer_due_min_amount}
-              onChange={(e) =>
-                setThr((t) => (t ? { ...t, customer_due_min_amount: e.target.value } : t))
-              }
-            />
-          </Field>
-          <Note>Balances smaller than this are not listed. 0 = any amount owed.</Note>
-          <Field label="Customer due: minimum age (days)">
-            <input
-              className="settings-input"
-              type="number"
-              min={0}
-              step={1}
-              value={thr.customer_due_min_days}
-              onChange={(e) =>
-                setThr((t) => (t ? { ...t, customer_due_min_days: e.target.value } : t))
-              }
-            />
-          </Field>
-          <Note>Only customers with an unpaid bill at least this old. 0 = any age.</Note>
-          <SaveBtn label="Save thresholds" saving={busy} onClick={() => void saveThresholds()} />
-          <Note>Also editable in Layout &amp; Lists → Thresholds; both edit the same values.</Note>
-        </Frame>
+            <Note>Also editable in Layout &amp; Lists → Thresholds; both edit the same values.</Note>
+          </Frame>
+          <Frame title="Customer dues">
+            <Field label="Customer due: minimum amount (Rs)">
+              <input
+                className="settings-input prefs-num"
+                type="number"
+                min={0}
+                value={thr.customer_due_min_amount}
+                onChange={(e) =>
+                  setThr((t) => (t ? { ...t, customer_due_min_amount: e.target.value } : t))
+                }
+              />
+            </Field>
+            <Note>Balances smaller than this are not listed. 0 = any amount owed.</Note>
+            <Field label="Customer due: minimum age (days)">
+              <input
+                className="settings-input prefs-num"
+                type="number"
+                min={0}
+                step={1}
+                value={thr.customer_due_min_days}
+                onChange={(e) =>
+                  setThr((t) => (t ? { ...t, customer_due_min_days: e.target.value } : t))
+                }
+              />
+            </Field>
+            <Note>Only customers with an unpaid bill at least this old. 0 = any age.</Note>
+          </Frame>
+          <SaveBar
+            label="Save thresholds"
+            saving={busy}
+            onClick={() => void saveThresholds()}
+            msg={msg}
+            err={err}
+          />
+        </>
       ) : null}
     </>
   )
