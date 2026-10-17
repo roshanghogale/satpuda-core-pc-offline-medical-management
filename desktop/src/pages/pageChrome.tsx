@@ -4,6 +4,9 @@ import { useLayoutEffect, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode, Ref } from 'react'
 import { useDesktopUiPrefs } from '../desktopUiPrefsContext'
 import { StatusGlyph, statusIconUrl } from '../statusIcons'
+// SummaryStrip / EmptyState / DataTable row actions are styled here; every
+// rule in it is scoped to the list pages' own lp- classes.
+import '../styles/list-pages.css'
 
 export type RowStyle = {
   status?: string
@@ -84,8 +87,82 @@ export function SectionFrame({
   )
 }
 
-export function FilterBar({ children }: { children: ReactNode }) {
-  return <div className="page-filter-bar">{children}</div>
+/** One row of filters (wraps on a narrow window). `className="lp-filterbar"` is
+ *  the list-page bar of 18 Oct 2026: search boxes, dates, dropdowns, then the
+ *  ActionBar pushed to the right; labels above the boxes. Keep the children in
+ *  that order in the source: the visual order IS the Tab order. */
+export function FilterBar({
+  children,
+  className = '',
+}: {
+  children: ReactNode
+  className?: string
+}) {
+  return <div className={`page-filter-bar ${className}`.trim()}>{children}</div>
+}
+
+export type SummaryCard = {
+  label: string
+  value: string | number
+  /** Colours the figure (a due in red, a profit in green); theme variables only. */
+  tone?: 'danger' | 'success' | 'warning' | 'accent'
+}
+
+/** The summary figures of a list page as a strip of small cards above the table
+ *  (design rule 10). Replaces a framed SummaryBar; the frame's old title stays
+ *  as the strip's label so the owner still finds "Sales Summary" where it was. */
+export function SummaryStrip({
+  title,
+  items,
+  className = '',
+}: {
+  title?: string
+  items: SummaryCard[]
+  className?: string
+}) {
+  // Up to 8 cards share one row; more split into two even rows (12 -> 6 + 6),
+  // never one full row and a stray few. Narrow windows wrap further by CSS.
+  const perRow = items.length <= 8 ? items.length : Math.ceil(items.length / 2)
+  return (
+    <section className={`lp-summary ${className}`.trim()} aria-label={title}>
+      {title ? <h2 className="lp-summary-title">{title}</h2> : null}
+      <div
+        className="lp-summary-cards"
+        style={{ ['--lp-per-row' as string]: Math.max(perRow, 1) } as CSSProperties}
+      >
+        {items.map((it) => (
+          <div
+            key={it.label}
+            className={`lp-card${it.tone ? ` tone-${it.tone}` : ''}`}
+          >
+            <span className="lp-card-label">{it.label}</span>
+            <strong className="lp-card-value">{it.value}</strong>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+/** An empty list said in words ("No bills in these dates."), not a lone "No rows". */
+export function EmptyState({ children }: { children: ReactNode }) {
+  return <p className="lp-empty">{children}</p>
+}
+
+/** Columns that hold amounts / counts, so a list right-aligns them with
+ *  tabular figures. By header name, because the shop picks the columns
+ *  (Settings → Layout & Lists → Column Visibility) and their order moves. */
+const NUMERIC_COLUMN_RE =
+  /amount|paid|due|discount|total|credit|refund|profit|value|mrp|rate|stock|days left|^qty$|quantity|^items$|^returns$/i
+
+export function numericColumns(columns: string[] | undefined): number[] {
+  const out: number[] = []
+  ;(columns || []).forEach((c, i) => {
+    const name = String(c || '')
+    if (/status|^__/i.test(name)) return
+    if (NUMERIC_COLUMN_RE.test(name)) out.push(i)
+  })
+  return out
 }
 
 /** Size a table viewport to N visible data rows (Settings → Layout & Lists). */
@@ -487,17 +564,44 @@ export const MED_SALES_HISTORY_WIDTHS: Record<string, number> = {
   Amount: 80,
 }
 
+/** Name-like text columns may give up to 40% of their width before the list
+ *  grows a horizontal scrollbar (design rule 1). Names, parties, doctors and
+ *  manufacturers ellipsize (and scroll on hover); numbers, dates, phones, bill
+ *  numbers and the status badge never shrink, so none of those is ever cut. */
+const SHRINKABLE_COLUMN_RE = /name|customer|supplier|doctor|manufacturer|reason|location/i
+const SHRINK_MAX = 0.4
+
 function distributeFixedColumnWidths(
   columns: string[],
   columnWidths: Record<string, number>,
   containerWidth: number,
+  numeric?: Set<number>,
 ): { widths: number[]; fillContainer: boolean } {
   const bases = columns.map((c) => columnWidths[c] ?? 100)
   if (!columns.length || containerWidth <= 0) {
     return { widths: bases, fillContainer: false }
   }
   const totalBase = bases.reduce((a, b) => a + b, 0)
-  if (containerWidth <= totalBase) {
+  if (containerWidth < totalBase) {
+    const shrinkable = columns.map(
+      (c, i) =>
+        !numeric?.has(i) && SHRINKABLE_COLUMN_RE.test(c),
+    )
+    const shrinkBase = bases.reduce((a, b, i) => a + (shrinkable[i] ? b : 0), 0)
+    const deficit = totalBase - containerWidth
+    if (shrinkBase > 0 && deficit <= shrinkBase * SHRINK_MAX) {
+      const factor = deficit / shrinkBase
+      return {
+        widths: bases.map((b, i) =>
+          shrinkable[i] ? Math.floor(b * (1 - factor)) : b,
+        ),
+        fillContainer: true,
+      }
+    }
+    // Many columns turned on: keep their widths and let the list scroll sideways.
+    return { widths: bases, fillContainer: false }
+  }
+  if (containerWidth === totalBase) {
     return { widths: bases, fillContainer: false }
   }
   const perCol = (containerWidth - totalBase) / columns.length
@@ -655,6 +759,8 @@ export function DataTable({
   onRowClick,
   selectedRowIndex,
   onStatusClick,
+  rowActions,
+  rowActionsLabel = '',
 }: {
   columns: string[]
   rows: unknown[][]
@@ -672,6 +778,10 @@ export function DataTable({
   /** The row's status badge was clicked (e.g. Due / Partial -> take a payment). Return
    *  true when the page acted on it; the badge then shows as a button for that row. */
   onStatusClick?: (rowIndex: number, style: RowStyle | undefined) => boolean | void
+  /** Small buttons in a last column ("Edit", "Delete"); the cell stops the row's
+   *  own click so a button never also selects / opens the row. */
+  rowActions?: (rowIndex: number) => ReactNode
+  rowActionsLabel?: string
 }) {
   const nums = Array.isArray(numericCols)
     ? new Set(numericCols)
@@ -699,13 +809,15 @@ export function DataTable({
     const el = wrapRef.current
     const update = () => {
       setColLayout(
-        distributeFixedColumnWidths(columns, columnWidths, el.clientWidth),
+        distributeFixedColumnWidths(columns, columnWidths, el.clientWidth, nums),
       )
     }
     update()
     const ro = new ResizeObserver(update)
     ro.observe(el)
     return () => ro.disconnect()
+    // `nums` is rebuilt every render; its content follows `columns`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasFixedCols, columns, columnWidths, rows.length])
 
   const resolvedWidths = useMemo(() => {
@@ -756,6 +868,7 @@ export function DataTable({
                 />
               )
             })}
+            {rowActions ? <col className="col-actions" /> : null}
           </colgroup>
         ) : null}
         <thead>
@@ -765,12 +878,18 @@ export function DataTable({
                 {c}
               </th>
             ))}
+            {rowActions ? (
+              <th className="col-actions">{rowActionsLabel}</th>
+            ) : null}
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={Math.max(columns.length, 1)} className="muted">
+              <td
+                colSpan={Math.max(columns.length + (rowActions ? 1 : 0), 1)}
+                className="muted dt-empty"
+              >
                 {empty}
               </td>
             </tr>
@@ -897,6 +1016,15 @@ export function DataTable({
                       </td>
                     )
                   })}
+                  {rowActions ? (
+                    <td
+                      className="col-actions"
+                      onClick={(e) => e.stopPropagation()}
+                      onDoubleClick={(e) => e.stopPropagation()}
+                    >
+                      {rowActions(i)}
+                    </td>
+                  ) : null}
                 </tr>
               )
             })

@@ -19,6 +19,7 @@ import {
   SectionFrame,
   StatusLine,
 } from './pageChrome'
+import '../styles/list-pages.css'
 
 export function GeneralProductsPage() {
   const [q, setQ] = useState('')
@@ -158,7 +159,7 @@ export function GeneralProductsPage() {
   useEffect(() => registerVoicePage('general_products', () => voiceHandlerRef.current), [])
 
   return (
-    <PageRoot>
+    <PageRoot className="lp-page lp-general">
       <StatusLine error={error} loading={loading && !products.length} />
       {note ? <Note>{note}</Note> : null}
 
@@ -167,8 +168,8 @@ export function GeneralProductsPage() {
           Reference rates only — not used in billing, purchase, or stock (same as
           classic General Products).
         </Note>
-        <FilterBar>
-          <Field label="Search">
+        <FilterBar className="lp-filterbar">
+          <Field label="Search" className="lp-f-search">
             <input
               className="settings-input"
               value={q}
@@ -184,7 +185,41 @@ export function GeneralProductsPage() {
         <DataTable
           columns={['Name', 'Rate', 'MRP']}
           rows={rows}
-          empty="No general products"
+          numericCols={[1, 2]}
+          empty={
+            loading
+              ? 'Loading…'
+              : q.trim()
+                ? `No product matches "${q.trim()}".`
+                : 'No general products yet. Add one below.'
+          }
+          // The same two things a click and a right-click on the row do, as
+          // small buttons; left out of the Tab order so the keyboard path
+          // from Search to the form below is unchanged.
+          rowActions={(rowIndex) => {
+            const p = products[rowIndex]
+            if (!p) return null
+            return (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-neutral btn-sm"
+                  tabIndex={-1}
+                  onClick={() => startEdit(p)}
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-neutral btn-sm lp-danger"
+                  tabIndex={-1}
+                  onClick={() => void remove(p)}
+                >
+                  Delete
+                </button>
+              </>
+            )
+          }}
           onRowClick={(rowIndex) => {
             const p = products[rowIndex]
             if (p) startEdit(p)
@@ -198,15 +233,15 @@ export function GeneralProductsPage() {
       </SectionFrame>
 
       <SectionFrame title={editId ? 'Edit product' : 'Add product'}>
-        <FilterBar>
-          <Field label="Name">
+        <FilterBar className="lp-formrow">
+          <Field label="Name" className="lp-f-wide">
             <input
               className="settings-input"
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
           </Field>
-          <Field label="Rate">
+          <Field label="Rate" className="lp-f-qty">
             <input
               className="settings-input"
               type="number"
@@ -215,7 +250,7 @@ export function GeneralProductsPage() {
               onChange={(e) => setRate(e.target.value)}
             />
           </Field>
-          <Field label="MRP">
+          <Field label="MRP" className="lp-f-qty">
             <input
               className="settings-input"
               type="number"
@@ -224,18 +259,19 @@ export function GeneralProductsPage() {
               onChange={(e) => setMrp(e.target.value)}
             />
           </Field>
+          {/* In the row, after MRP: same place in the Tab order as before. */}
+          <ActionBar>
+            <ActionBtn
+              label={editId ? 'Update' : 'Add'}
+              variant="primary"
+              disabled={saving}
+              onClick={() => void save()}
+            />
+            {editId ? (
+              <ActionBtn label="Cancel edit" variant="neutral" onClick={resetForm} />
+            ) : null}
+          </ActionBar>
         </FilterBar>
-        <ActionBar>
-          <ActionBtn
-            label={editId ? 'Update' : 'Add'}
-            variant="primary"
-            disabled={saving}
-            onClick={() => void save()}
-          />
-          {editId ? (
-            <ActionBtn label="Cancel edit" onClick={resetForm} />
-          ) : null}
-        </ActionBar>
       </SectionFrame>
 
       <AlertDialog alert={alert} onClose={() => setAlert(null)} />

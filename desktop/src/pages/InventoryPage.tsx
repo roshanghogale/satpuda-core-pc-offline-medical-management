@@ -30,12 +30,14 @@ import {
   INVENTORY_COLUMN_WIDTHS,
   Field,
   FilterBar,
-  Note,
   PageRoot,
+  Panel,
   SectionFrame,
   StatusLine,
-  SummaryBar,
+  SummaryStrip,
+  numericColumns,
 } from './pageChrome'
+import '../styles/list-pages.css'
 
 /** Fallback for the Sort dropdown. The engine sends the real list as
  *  payload.sort_options (core/list_sort.py INVENTORY_SORT_OPTIONS); this is
@@ -508,10 +510,10 @@ export function InventoryPage({
   }
 
   return (
-    <PageRoot className="list-page">
-      <SectionFrame title="Search & Filter">
-        <FilterBar>
-          <Field label="Search">
+    <PageRoot className="list-page lp-page">
+      <SectionFrame title="Search & Filter" className="lp-filter-panel">
+        <FilterBar className="lp-filterbar">
+          <Field label="Search" className="lp-f-search">
             <ModernCombo
               pageFilter
               value={q}
@@ -532,7 +534,7 @@ export function InventoryPage({
               onEnter={(picked) => void load(picked?.label)}
             />
           </Field>
-          <Field label="Type">
+          <Field label="Type" className="lp-f-select">
             <select
               className="settings-input"
               value={typeFilter}
@@ -546,7 +548,7 @@ export function InventoryPage({
               ))}
             </select>
           </Field>
-          <Field label="Show">
+          <Field label="Show" className="lp-f-select">
             <select
               className="settings-input"
               value={show}
@@ -563,7 +565,7 @@ export function InventoryPage({
               })}
             </select>
           </Field>
-          <Field label="Stock Status">
+          <Field label="Stock Status" className="lp-f-select">
             <select
               className="settings-input"
               value={stockStatus}
@@ -575,7 +577,7 @@ export function InventoryPage({
               <option value="Out of Stock">Out of Stock</option>
             </select>
           </Field>
-          <Field label="Expiry Status">
+          <Field label="Expiry Status" className="lp-f-select">
             <select
               className="settings-input"
               value={expiryStatus}
@@ -586,7 +588,7 @@ export function InventoryPage({
               <option value="Expired">Expired</option>
             </select>
           </Field>
-          <Field label="Sort by">
+          <Field label="Sort by" className="lp-f-sort">
             <select
               className="settings-input"
               value={sortBy}
@@ -602,7 +604,7 @@ export function InventoryPage({
               ))}
             </select>
           </Field>
-          <Field label="Schedule">
+          <Field label="Schedule" className="lp-f-select">
             <select
               className="settings-input"
               value={schedule}
@@ -648,12 +650,14 @@ export function InventoryPage({
             <ActionBtn
               label="Remove zero stock"
               variant="neutral"
+              className="lp-danger"
               onClick={bulkDeleteZero}
               disabled={loading}
             />
             <ActionBtn
               label="Remove expired"
               variant="neutral"
+              className="lp-danger"
               onClick={bulkDeleteExpired}
               disabled={loading}
             />
@@ -666,24 +670,76 @@ export function InventoryPage({
             />
           </ActionBar>
         </FilterBar>
-        <Note>
-          Right-click a medicine to edit every field, view details, or delete.
-          Double-click opens details. Columns follow Settings → Layout &amp;
-          Lists ({summary.total_medicines ?? 0} rows in list, {inventoryRows}{' '}
-          visible).
-        </Note>
       </SectionFrame>
 
       <StatusLine error={error} loading={loading && !data} />
 
-      <SectionFrame title="Inventory — Medicine List" className="list-table-panel">
+      {/* Above the list now (design rule 10): the figures first, then the shelf. */}
+      {showSummary ? (
+        <SummaryStrip
+          title="Inventory Summary"
+          items={[
+            { label: 'Total Medicines', value: summary.total_medicines ?? 0, tone: 'accent' },
+            {
+              label: 'Low Stock',
+              value: summary.low_stock ?? 0,
+              tone: Number(summary.low_stock) > 0 ? 'warning' : undefined,
+            },
+            {
+              label: 'Out of Stock',
+              value: summary.out_of_stock ?? 0,
+              tone: Number(summary.out_of_stock) > 0 ? 'danger' : undefined,
+            },
+            {
+              label: 'Near Expiry',
+              value: summary.near_expiry ?? 0,
+              tone: Number(summary.near_expiry) > 0 ? 'warning' : undefined,
+            },
+            {
+              label: 'Expired',
+              value: summary.expired ?? 0,
+              tone: Number(summary.expired) > 0 ? 'danger' : undefined,
+            },
+            {
+              label: 'Total Value (MRP)',
+              value: `₹${Number(summary.total_value || 0).toLocaleString('en-IN', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}`,
+            },
+          ]}
+        />
+      ) : null}
+
+      <Panel
+        title="Inventory — Medicine List"
+        className="filter-panel list-table-panel"
+        headRight={
+          <span
+            className="lp-hint"
+            title={`Right-click a medicine to edit every field, view details, or delete. Double-click opens details. Columns follow Settings → Layout & Lists (${summary.total_medicines ?? 0} rows in list, ${inventoryRows} visible).`}
+          >
+            Right-click a medicine to edit every field, view details, or delete.
+            Double-click opens details. Columns follow Settings → Layout &amp;
+            Lists ({summary.total_medicines ?? 0} rows in list, {inventoryRows}{' '}
+            visible).
+          </span>
+        }
+      >
         <DataTable
           columns={data?.columns || []}
           rows={view.rows}
           rowStyles={view.styles}
           columnWidths={INVENTORY_COLUMN_WIDTHS}
+          numericCols={numericColumns(data?.columns)}
           visibleRows={inventoryRows}
-          empty={loading ? 'Loading…' : 'No medicines found'}
+          empty={
+            loading
+              ? 'Loading…'
+              : q.trim()
+                ? `No medicine matches "${q.trim()}". Check the spelling, or set Show to All.`
+                : 'No medicines in this view. Change Show / Stock / Expiry above, or press Refresh.'
+          }
           onRowDoubleClick={openView}
           onRowContextMenu={(rowIndex, e) => {
             const id = idAt(rowIndex)
@@ -695,28 +751,7 @@ export function InventoryPage({
             setCtx({ x: e.clientX, y: e.clientY, medicineId: id, name })
           }}
         />
-      </SectionFrame>
-
-      {showSummary ? (
-        <SectionFrame title="Inventory Summary" className="list-summary-panel">
-          <SummaryBar
-            items={[
-              { label: 'Total Medicines', value: summary.total_medicines ?? 0 },
-              { label: 'Low Stock', value: summary.low_stock ?? 0 },
-              { label: 'Out of Stock', value: summary.out_of_stock ?? 0 },
-              { label: 'Near Expiry', value: summary.near_expiry ?? 0 },
-              { label: 'Expired', value: summary.expired ?? 0 },
-              {
-                label: 'Total Value (MRP)',
-                value: `₹${Number(summary.total_value || 0).toLocaleString('en-IN', {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}`,
-              },
-            ]}
-          />
-        </SectionFrame>
-      ) : null}
+      </Panel>
 
       <ExpiredReturnDialog
         open={expiredReturnOpen}
