@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchSettingsBundle, systemAction } from '../settingsApi'
+import { showSavedFile } from '../savedFiles'
 
 type Props = {
   open: boolean
@@ -39,11 +40,16 @@ export function HomeExportDialog({ open, onClose }: Props) {
     setErr('')
     setMsg('')
     try {
-      const res = await systemAction({ action: 'export', kind, format: fmt })
-      if (res.ok === false && res.error) {
-        setErr(String(res.error))
+      // Run it here and wait for the file: in the background the answer came back
+      // with no path and the box said "Export complete." whatever had happened.
+      const res = await systemAction({ action: 'export', kind, format: fmt, _heavy_sync: true })
+      if (res.ok === false) {
+        setErr(String(res.error || 'Export failed.'))
+      } else if (res.path) {
+        setMsg(`Exported: ${String(res.path)}`)
+        showSavedFile({ path: String(res.path) })
       } else {
-        setMsg(String(res.path ? `Exported: ${res.path}` : 'Export complete.'))
+        setErr('The export did not produce a file.')
       }
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))

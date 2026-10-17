@@ -1,3 +1,4 @@
+import { saveFileAndShow } from '../savedFiles'
 import { useEffect, useMemo, useState } from 'react'
 import type { AppNavigate } from '../App'
 import type { StartupAlertTab } from '../pagesApi'
@@ -29,23 +30,6 @@ const TAB_SHORT_LABELS: Record<string, string> = {
 
 function tabShortLabel(title: string): string {
   return TAB_SHORT_LABELS[title] || title
-}
-
-function downloadBase64File(
-  filename: string,
-  mime: string,
-  contentBase64: string,
-) {
-  const bin = atob(contentBase64)
-  const bytes = new Uint8Array(bin.length)
-  for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i)
-  const blob = new Blob([bytes], { type: mime })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
 }
 
 export function StartupAlertsDialog({
@@ -138,7 +122,7 @@ export function StartupAlertsDialog({
         return
       }
       if (res.content_base64 && res.filename) {
-        downloadBase64File(
+        await saveFileAndShow(
           res.filename,
           res.mime || 'application/pdf',
           res.content_base64,

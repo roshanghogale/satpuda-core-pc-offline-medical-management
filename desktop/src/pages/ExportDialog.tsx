@@ -1,5 +1,6 @@
 /** Two-step export dialog + Schedule Report options (mirrors Tk). */
 
+import { saveFileAndShow, showSavedFile } from '../savedFiles'
 import { useEffect, useMemo, useState } from 'react'
 import { getApiBase } from '../api'
 import { exportRowsCsv } from './pageChrome'
@@ -68,23 +69,6 @@ async function runExport(body: Record<string, unknown>) {
     pdf_path?: string
     path?: string
   }
-}
-
-function downloadBase64File(
-  filename: string,
-  mime: string,
-  contentBase64: string,
-) {
-  const bin = atob(contentBase64)
-  const bytes = new Uint8Array(bin.length)
-  for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i)
-  const blob = new Blob([bytes], { type: mime })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
 }
 
 function todayIso() {
@@ -296,11 +280,15 @@ export function ExportDialog({
           setError(data.error)
           return
         }
-        // The engine has always returned where it put the file; the alert
-        // said only that it was "saved" and threw the path away.
-        const savedTo = data.pdf_path || data.path || ''
-        const where = savedTo ? `\n\nSaved to:\n${savedTo}` : ''
-        const what = report === 'schedule_report' ? 'Schedule report' : 'Report'
+        // A Schedule Report printed is also kept in the reports folder; offer it.
+        // Any other report prints from a temporary file, which used to be shown
+        // here as "Saved to:" -- a file the shop could never find again.
+        const isSchedule = report === 'schedule_report'
+        const savedTo = isSchedule ? data.pdf_path || data.path || '' : ''
+        const where = isSchedule
+          ? ''
+          : '\n\nTo keep a copy, use CSV / Excel / PDF in this window.'
+        const what = isSchedule ? 'Schedule report' : 'Report'
         const note =
           (data.printed
             ? `${what} sent to the ${target === 'printer' ? 'printer' : target === 'dot_matrix' ? 'dot matrix' : 'printer (Settings)'}.`
@@ -309,11 +297,18 @@ export function ExportDialog({
               : `${what} saved.`) + where
         setError('')
         window.alert(note)
+        if (savedTo) showSavedFile({ path: savedTo, message: 'A copy of the printed report:' })
+        onClose()
+        return
+      }
+      if (report === 'schedule_report' && data.pdf_path) {
+        // The engine already keeps the Schedule Report PDF in the reports folder.
+        showSavedFile({ path: data.pdf_path })
         onClose()
         return
       }
       if (data.content_base64 && data.filename) {
-        downloadBase64File(
+        await saveFileAndShow(
           data.filename,
           data.mime ||
             (format === 'pdf'
@@ -753,7 +748,7 @@ export function ExportDialog({
             onClick={(e) => e.stopPropagation()}
           >
             <div className="modal-head">
-              <h2>Select Print Style</h2>
+              <h2>{styleAsk.print ? 'Select Print Style' : 'Select Report Style (PDF)'}</h2>
               <button type="button" className="icon-btn" onClick={() => setStyleAsk(null)}>
                 ✕
               </button>

@@ -198,6 +198,110 @@ def fetch_sales_for_print(
     return _narrow(out)
 
 
+def save_bills_pdf(
+    conn,
+    sale_ids: list[int],
+    *,
+    paper: str = "A6",
+    slot: int = PRINT_ALL_SLOT,
+    db_path: str | None = None,
+    copy_label: str = "",
+) -> tuple[str, list[str]]:
+    """Print All's "Save PDF" (owner, 17 Oct 2026): the same pages Print would send,
+    as ONE PDF in the shop's reports folder instead of on paper. Returns (path, failures).
+
+    A5 / A4 are the very sheets print_bills_batch builds; A6 is each bill's own PDF, the
+    one its Print makes. A dot matrix shop gets the standard pages: a PDF of printer
+    codes is no use to anyone.
+    """
+    import pypdfium2 as pdfium
+
+    from core.bill_config import (
+        apply_print_bill_layout,
+        get_print_slot_settings,
+        load_bill_print_settings,
+    )
+    from core.bill_output import _load_sale_data, _try_pdf_via_browser, save_bill_pdf_pages
+    from core.saved_files import reports_dir, remember, safe_filename
+
+    paper_u = (paper or "A6").upper()
+    base = dict(load_bill_print_settings())
+    slot_settings = get_print_slot_settings(base, slot)
+    slot_settings["paper_size"] = paper_u
+    slot_settings["bill_copies"] = 1
+    render_settings = apply_print_bill_layout(slot_settings, print_slot_copies=1)
+    render_settings["paper_size"] = paper_u
+    render_settings["copy_footer_label"] = str(copy_label or "").strip()
+
+    failures: list[str] = []
+    parts: list[str] = []
+    temps: list[str] = []
+    if paper_u == "A6":
+        for sale_id in sale_ids:
+            try:
+                over = dict(base)
+                over.update(render_settings)
+                pages = save_bill_pdf_pages(
+                    conn, sale_id, settings_override=over, print_slot=slot, db_path=db_path,
+                )
+                got = [pdf for _html, pdf in pages if pdf]
+                if not got:
+                    raise RuntimeError("PDF could not be created (install Edge or Chrome).")
+                parts.extend(got)
+            except Exception as exc:
+                failures.append(f"Sale {sale_id}: {exc}")
+    else:
+        from bill_templates.classic import render_classic_bill_html_multi
+
+        for chunk in _chunk_sale_ids_for_print(sale_ids, paper_u):
+            try:
+                contexts = [
+                    _load_sale_data(conn, sid, settings_override=render_settings)[1] for sid in chunk
+                ]
+                html = render_classic_bill_html_multi(contexts, render_settings)
+                fd, html_path = tempfile.mkstemp(suffix=".html", prefix="save_bills_")
+                os.close(fd)
+                pdf_path = html_path.replace(".html", ".pdf")
+                temps += [html_path, pdf_path]
+                with open(html_path, "w", encoding="utf-8") as fh:
+                    fh.write(html)
+                if not _try_pdf_via_browser(html_path, pdf_path):
+                    raise RuntimeError("PDF could not be created (install Edge or Chrome).")
+                parts.append(pdf_path)
+            except Exception as exc:
+                label = ", ".join(str(x) for x in chunk[:4])
+                failures.append(f"Bills [{label}]: {exc}")
+    if not parts:
+        for t in temps:
+            try:
+                os.remove(t)
+            except OSError:
+                pass
+        return "", failures or ["No bill could be turned into a PDF."]
+
+    from datetime import datetime
+
+    name = safe_filename(f"Bills_{paper_u}_{len(sale_ids)}_{datetime.now():%Y%m%d_%H%M%S}.pdf")
+    out_path = os.path.join(reports_dir(), name)
+    merged = pdfium.PdfDocument.new()
+    try:
+        for part in parts:
+            src = pdfium.PdfDocument(part)
+            try:
+                merged.import_pages(src)
+            finally:
+                src.close()
+        merged.save(out_path)
+    finally:
+        merged.close()
+        for t in temps:
+            try:
+                os.remove(t)
+            except OSError:
+                pass
+    return remember(out_path), failures
+
+
 def _chunk_sale_ids_for_print(sale_ids: list[int], paper: str) -> list[list[int]]:
     from core.bill_config import print_all_bills_per_page
 

@@ -18,7 +18,7 @@ _PID_FILE = "desktop_api.pid"
 # events cannot each fire one.
 _CLOSE_BACKUP_DONE = False
 # Bump when routes/payload change so the Tauri shell can replace a stale engine.
-API_REVISION = 66
+API_REVISION = 67
 _server: Optional[ThreadingHTTPServer] = None
 _server_thread: Optional[threading.Thread] = None
 _port = _DEFAULT_PORT
@@ -675,6 +675,9 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                             "/api/sales/bill/preview",
                             "/api/sales/bill/details",
                             "/api/sales/bill/pdf",
+                            "/api/files/save",
+                            "/api/files/open",
+                            "/api/files/reveal",
                             "/api/sales/autosave",
                             "/api/sales/autosave/sessions",
                             "/api/sales/autosave/resume",
@@ -2019,6 +2022,22 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 result = verify_app_login(body)
                 status = 200 if result.get("ok") else 401
                 _json_response(self, status, result)
+                return
+            if path in ("/api/files/save", "/api/files/open", "/api/files/reveal"):
+                # Reports, exports and bill PDFs are written by the engine into the
+                # shop's reports folder and opened from there (core.saved_files).
+                from core import saved_files
+
+                body = _read_json_body(self)
+                if path == "/api/files/save":
+                    result = saved_files.save_base64(
+                        str(body.get("filename") or ""), str(body.get("content_base64") or "")
+                    )
+                elif path == "/api/files/open":
+                    result = saved_files.open_file(str(body.get("path") or ""))
+                else:
+                    result = saved_files.show_in_folder(str(body.get("path") or ""))
+                _json_response(self, 200 if result.get("ok") else 400, result)
                 return
             if path == "/api/sales/bill/pdf":
                 from core.desktop_sales_service import save_bill_pdf

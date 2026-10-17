@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { showSavedFile } from '../savedFiles'
 import { useDebouncedFilterEffect, useFilterEffect } from '../hooks/useLiveFilters'
 import { DayPresetRow } from '../components/DayPresets'
 import { isAllValue, pickOption, presetRange, RANGE_WORDS, registerVoicePage, type VoiceHandler } from '../voice/voiceBus'
@@ -413,11 +414,8 @@ export function SalesHistoryPage({
         })
         return
       }
-      setAlert({
-        title: 'Save PDF',
-        message: res.pdf_path ? `Saved to:\n${res.pdf_path}` : 'PDF saved.',
-        kind: 'info',
-      })
+      if (res.pdf_path) showSavedFile({ path: res.pdf_path })
+      else setAlert({ title: 'Save PDF', message: 'PDF saved.', kind: 'info' })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -537,7 +535,7 @@ export function SalesHistoryPage({
     }
   }
 
-  const runPrintAll = async () => {
+  const runPrintAll = async (saveOnly = false) => {
     // Send the ids that were on screen. Re-querying by date is how the number
     // in the dialog and the paper coming out of the printer stopped agreeing.
     const ids = printAllBills
@@ -553,7 +551,29 @@ export function SalesHistoryPage({
         paper: printAllPaper,
         copy_label: printAllCopy,
         slot: 2,
+        save_pdf: saveOnly,
       })
+      if (saveOnly) {
+        // Print All's "Save PDF" (owner, 17 Oct 2026): one PDF, nothing printed.
+        setPrintAllOpen(false)
+        if (res.ok && res.path) {
+          showSavedFile({
+            path: res.path,
+            file_name: res.file_name,
+            folder: res.folder,
+            message: [res.message, ...(res.failures || [])].filter(Boolean).join('\n'),
+          })
+        } else {
+          setAlert({
+            title: 'Save PDF — errors',
+            message: [res.error || 'Could not save the PDF.', ...(res.failures || [])]
+              .filter(Boolean)
+              .join('\n'),
+            kind: 'warning',
+          })
+        }
+        return
+      }
       // Close either way: leaving all twenty still ticked behind the alert
       // makes "press Print again" the obvious move, and that reprints the ones
       // that already came out.
@@ -1223,6 +1243,15 @@ export function SalesHistoryPage({
               >
                 Print {printAllPicked.size || ''}
               </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={printAllBusy || printAllPicked.size === 0}
+                title="The same pages as one PDF in the reports folder, nothing printed"
+                onClick={() => void runPrintAll(true)}
+              >
+                Save PDF
+              </button>
             </div>
           </div>
         </div>
@@ -1301,6 +1330,9 @@ export function SalesHistoryPage({
         saleId={previewSaleId ?? undefined}
         printing={previewPrinting}
         onPrint={(slot, mode) => void printFromPreview(slot, mode)}
+        onSavePdf={() => {
+          if (previewSaleId) void saveBillPdfAction(previewSaleId)
+        }}
         onClose={() => {
           setPreviewOpen(false)
           setPreviewSaleId(null)

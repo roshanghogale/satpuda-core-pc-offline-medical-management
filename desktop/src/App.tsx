@@ -1,3 +1,4 @@
+import { SavedFileHost } from './components/SavedFileHost'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   fetchMeta,
@@ -867,6 +868,7 @@ export default function App() {
       />
       {/* Voice test build: hold F1 to speak, Ctrl+K to type a command. Only when the
           store's voice switch (admin panel) is on: off, there is no bar and F1 does nothing. */}
+      <SavedFileHost />
       {voiceSwitch.enabled ? <VoiceBar page={page} navigate={navigate} /> : null}
     </div>
     </DesktopUiPrefsProvider>

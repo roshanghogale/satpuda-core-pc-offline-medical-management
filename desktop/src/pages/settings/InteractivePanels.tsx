@@ -1,3 +1,4 @@
+import { saveFileAndShow, saveTextAndShow } from '../../savedFiles'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AppNavigate } from '../../App'
 import type { ReorderPrefill } from '../../pagesApi'
@@ -68,15 +69,8 @@ function downloadCsv(filename: string, headers: string[], rows: unknown[][]) {
     headers.map(esc).join(','),
     ...rows.map((r) => r.map(esc).join(',')),
   ]
-  const blob = new Blob([lines.join('\r\n')], {
-    type: 'text/csv;charset=utf-8',
-  })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
+  // Into the reports folder with Open / Show in folder, not a silent download.
+  void saveTextAndShow(filename, 'text/csv;charset=utf-8', '﻿' + lines.join('\r\n'))
 }
 
 function filterText(q: string, parts: unknown[]) {
@@ -1124,18 +1118,6 @@ const ALERT_SPECS: Record<
 
 const ALERT_ROWS_SHOWN = 1000
 
-function downloadBase64(filename: string, mime: string, b64: string) {
-  const bin = atob(b64)
-  const bytes = new Uint8Array(bin.length)
-  for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i)
-  const url = URL.createObjectURL(new Blob([bytes], { type: mime }))
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
-}
-
 type ExportHow = 'csv' | 'xlsx' | 'pdf' | 'dm_a4' | 'dm_a5' | 'printer'
 const EXPORT_HOW: { key: ExportHow; label: string }[] = [
   { key: 'xlsx', label: 'Excel file' },
@@ -1197,7 +1179,7 @@ function AlertsExportDialog({
         return
       }
       if (res.content_base64 && res.filename) {
-        downloadBase64(res.filename, res.mime || 'application/octet-stream', res.content_base64)
+        await saveFileAndShow(res.filename, res.mime || 'application/octet-stream', res.content_base64)
         onDone(`Saved ${res.filename}`)
       } else {
         onDone(res.message || 'Printed.')
@@ -1359,11 +1341,8 @@ export function AlertsPanel({
   usePageHotkeys({ onSave: () => onRefresh() })
 
   function exportCsv() {
-    try {
-      void systemAction({ action: 'export', kind: 'inventory' })
-    } catch {
-      /* prefer client CSV */
-    }
+    // This also fired a whole-inventory export that nobody saw; it did nothing
+    // while that export was broken, and would now write a stray file.
     downloadCsv(
       `${spec.file}.csv`,
       spec.headers,

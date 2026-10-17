@@ -660,20 +660,21 @@ def downloads_folder() -> str:
     return path
 
 
-def _voice_export_path(default_name: str, fmt: str) -> str:
+def _voice_export_path(default_name: str, fmt: str, folder: str = "") -> str:
     from datetime import datetime
     safe = re.sub(r'[^\w\-]+', '_', (default_name or "export").strip())[:60]
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     ext = fmt if fmt == "pdf" else fmt
     if fmt == "pdf":
         ext = "pdf"
-    return os.path.join(downloads_folder(), f"{safe}_{ts}.{ext}")
+    return os.path.join(folder or downloads_folder(), f"{safe}_{ts}.{ext}")
 
 
-def export_data_direct(parent, title, headers, rows, default_name="export", fmt="csv", *, speak_path=True):
-    """Save export straight to Downloads — used by Satpuda voice."""
+def export_data_direct(parent, title, headers, rows, default_name="export", fmt="csv", *,
+                       speak_path=True, folder: str = ""):
+    """Save export straight to Downloads (or `folder`) — Satpuda voice and Home Export."""
     fmt = (fmt or "csv").lower()
-    path = _voice_export_path(default_name, fmt)
+    path = _voice_export_path(default_name, fmt, folder)
     try:
         if fmt == "csv":
             with open(path, "w", newline="", encoding="utf-8-sig") as f:
@@ -691,7 +692,10 @@ def export_data_direct(parent, title, headers, rows, default_name="export", fmt=
                 for ci, val in enumerate(row, 1):
                     ws.cell(row=ri, column=ci, value=val)
             wb.save(path)
-        else:
+        # CSV and Excel never set this, so both answered "Export failed" after the file
+        # had been written.
+        saved = path
+        if fmt not in ("csv", "xlsx"):
             saved = _save_pdf_to_path(path, title, headers, rows)
         if speak_path:
             return saved, f"Saved to Downloads folder. File name {os.path.basename(saved)}."
@@ -700,10 +704,10 @@ def export_data_direct(parent, title, headers, rows, default_name="export", fmt=
         return None, f"Export failed. {e}"
 
 
-def export_all_combined_direct(parent, sections, fmt="xlsx"):
-    """Combined export to Downloads for voice."""
+def export_all_combined_direct(parent, sections, fmt="xlsx", *, folder: str = ""):
+    """Combined export to Downloads (or `folder`) for voice and Home Export."""
     fmt = (fmt or "xlsx").lower()
-    path = _voice_export_path("export_all", fmt)
+    path = _voice_export_path("export_all", fmt, folder)
     try:
         if fmt == "csv":
             with open(path, "w", newline="", encoding="utf-8-sig") as f:
@@ -726,8 +730,11 @@ def export_all_combined_direct(parent, sections, fmt="xlsx"):
                     for ci, val in enumerate(row, 1):
                         ws.cell(row=ri, column=ci, value=val)
             wb.save(path)
-        else:
+        saved = path    # CSV / Excel never set it: "Export failed" after a good write
+        if fmt not in ("csv", "xlsx"):
             saved = _save_all_pdf_to_path(path, sections)
+        if folder:
+            return saved, f"Saved to:\n{saved}"
         return saved, f"Saved to Downloads folder. File name {os.path.basename(saved)}."
     except Exception as e:
         return None, f"Export failed. {e}"

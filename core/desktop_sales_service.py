@@ -2355,6 +2355,23 @@ def print_all_sales(conn, body: dict[str, Any]) -> dict[str, Any]:
     except Exception:
         pass
 
+    if body.get("save_pdf"):
+        # Print All's "Save PDF": the same pages, one PDF in the reports folder.
+        from core.history_print import save_bills_pdf
+        from core.saved_files import describe
+
+        saved, failures = save_bills_pdf(
+            conn, sale_ids, paper=paper, slot=slot, db_path=db_path, copy_label=copy_label
+        )
+        if not saved:
+            return {"ok": False, "error": "\n".join(failures) or "Could not save the PDF.",
+                    "failures": failures}
+        out = describe(saved, f"Saved {len(sale_ids) - len(failures)} bill(s) as one PDF.")
+        out.update({"total": len(sale_ids), "failures": failures, "saved": True})
+        if failures:
+            out["message"] += f" {len(failures)} could not be added."
+        return out
+
     pages, failures = print_bills_batch(
         conn, sale_ids, paper=paper, slot=slot, db_path=db_path, copy_label=copy_label
     )
@@ -2413,7 +2430,11 @@ def save_bill_pdf(conn, sale_id: int) -> dict[str, Any]:
                 "ok": False,
                 "error": "PDF could not be created. Install Edge or Chrome.",
             }
-        return {"ok": True, "pdf_path": pdf_path}
+        from core.saved_files import describe, remember
+
+        out = describe(remember(pdf_path))
+        out["pdf_path"] = pdf_path
+        return out
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
