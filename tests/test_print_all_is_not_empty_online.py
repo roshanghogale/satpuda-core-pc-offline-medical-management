@@ -413,17 +413,50 @@ class ThePickerOffersWhatTheListShows(unittest.TestCase):
     def test_the_search_box_also_matches_a_name(self):
         self.assertEqual([b["customer"] for b in self._fetch(q="seema")], ["SEEMA"])
 
-    def test_filters_the_picker_cannot_honour_are_named_not_hidden(self):
+    def test_due_medicine_and_batch_keep_only_the_bills_the_list_shows(self):
+        # They used to be named "not applied" and every bill was offered; "Due Only"
+        # printed paid bills too (owner, 17 Oct 2026). The history list decides now.
         from core.desktop_sales_service import list_print_all_candidates
 
         with mock.patch("core.store_query_client.list_sales",
                         return_value={"rows": SERVER_ROWS}), \
-             mock.patch("core.online_mutation_queue.overlay_sales_dicts", return_value=[]):
+             mock.patch("core.online_mutation_queue.overlay_sales_dicts", return_value=[]), \
+             mock.patch("core.desktop_pages_service.list_sales_history",
+                        return_value={"rows": [[1]], "row_ids": [12]}) as hist:
             res = list_print_all_candidates(self.conn, {
                 "from": "2026-09-01", "to": "2026-09-30",
-                "medicine": "AMOXY", "batch": "B1", "due": "due",
+                "medicine": "AMOXY", "batch": "B1", "due": "Due Only",
             })
-        self.assertEqual(res["unapplied_filters"], ["Medicine", "Batch", "Due status"])
+        self.assertEqual(res["unapplied_filters"], [])
+        self.assertEqual([b["sale_id"] for b in res["bills"]], [12])
+        kw = hist.call_args.kwargs
+        self.assertEqual((kw["due"], kw["medicine"], kw["batch"]), ("Due Only", "AMOXY", "B1"))
+        self.assertEqual((kw["from_date"], kw["to_date"]), ("2026-09-01", "2026-09-30"))
+
+    def test_a_list_that_could_not_be_read_is_an_error_not_every_bill(self):
+        from core.desktop_sales_service import list_print_all_candidates
+
+        with mock.patch("core.store_query_client.list_sales",
+                        return_value={"rows": SERVER_ROWS}), \
+             mock.patch("core.online_mutation_queue.overlay_sales_dicts", return_value=[]), \
+             mock.patch("core.desktop_pages_service.list_sales_history",
+                        return_value={"rows": [], "row_ids": [], "server_error": "timed out"}):
+            res = list_print_all_candidates(self.conn, {
+                "from": "2026-09-01", "to": "2026-09-30", "due": "Due Only",
+            })
+        self.assertFalse(res["ok"])
+        self.assertIn("timed out", res["error"])
+
+    def test_no_due_filter_does_not_ask_the_list(self):
+        from core.desktop_sales_service import list_print_all_candidates
+
+        with mock.patch("core.store_query_client.list_sales",
+                        return_value={"rows": SERVER_ROWS}), \
+             mock.patch("core.online_mutation_queue.overlay_sales_dicts", return_value=[]), \
+             mock.patch("core.desktop_pages_service.list_sales_history") as hist:
+            res = list_print_all_candidates(self.conn, {"from": "2026-09-01", "to": "2026-09-30"})
+        hist.assert_not_called()
+        self.assertEqual(len(res["bills"]), 3)
 
     def test_an_absent_server_schedule_is_not_reported_as_non_scheduled(self):
         """"" from the server means UNKNOWN; the picker printed it as a fact."""
