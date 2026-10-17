@@ -52,6 +52,7 @@ import {
   fetchReorderGroupTab,
   type ReorderTabState,
 } from './ReorderMultiTabEditor'
+import { todayLocal } from '../../localDate'
 
 type Contacts = NonNullable<SettingsBundle['contacts']>
 type Shelf = NonNullable<SettingsBundle['shelf']>
@@ -1723,7 +1724,7 @@ export function PaymentPanel({
   const [mode, setMode] = useState('Cash')
   const [cash, setCash] = useState('0')
   const [online, setOnline] = useState('0')
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [date, setDate] = useState(todayLocal())
   const [reference, setReference] = useState('')
   const [note, setNote] = useState('')
   const [err, setErr] = useState('')
@@ -1739,7 +1740,7 @@ export function PaymentPanel({
   const [ticks, setTicks] = useState<Record<number, string>>({})
   /** The amount follows the ticked total until the shop types it. */
   const [amountTyped, setAmountTyped] = useState(false)
-  const today = new Date().toISOString().slice(0, 10)
+  const today = todayLocal()
   const [repFrom, setRepFrom] = useState(today.slice(0, 8) + '01')
   const [repTo, setRepTo] = useState(today)
   const [repParty, setRepParty] = useState<'all' | 'this'>('all')
@@ -2032,7 +2033,7 @@ export function PaymentPanel({
     // A history row keeps the party's NAME, never its id, so there is no click
     // to honour here -- let the name resolve on its own.
     setPartyId(null)
-    setDate(String(r.date ?? new Date().toISOString().slice(0, 10)))
+    setDate(String(r.date ?? todayLocal()))
     setReference(String(r.reference ?? ''))
     if (kind === 'supplier') {
       setAmount(String(r.amount ?? ''))
@@ -2381,7 +2382,7 @@ export function LedgerPanel({
 }) {
   const [party, setParty] = useState('')
   const [from, setFrom] = useState('')
-  const [to, setTo] = useState(new Date().toISOString().slice(0, 10))
+  const [to, setTo] = useState(todayLocal())
   const [data, setData] = useState<LedgerBundle | null>(null)
   const [err, setErr] = useState('')
   const ledgerTableRef = useRef<HTMLDivElement>(null)
@@ -2429,7 +2430,7 @@ export function LedgerPanel({
       const r = presetRange(a.value)
       if (!r) return { ok: false, say: `"${a.value}" he divas samajle nahi` }
       // 'all' is the Reset button's range: engine default From, To = today.
-      const next = r.key === 'all' ? { from: '', to: new Date().toISOString().slice(0, 10) } : r
+      const next = r.key === 'all' ? { from: '', to: todayLocal() } : r
       setFrom(next.from)
       setTo(next.to)
       await load(party, next)
@@ -2438,9 +2439,9 @@ export function LedgerPanel({
     if (cmd.intent === 'page_filter' && a.filter === 'clear') {
       setParty('')
       setFrom('')
-      setTo(new Date().toISOString().slice(0, 10))
+      setTo(todayLocal())
       setData(null)
-      await load('', { from: '', to: new Date().toISOString().slice(0, 10) })
+      await load('', { from: '', to: todayLocal() })
       return { ok: true, say: `${who}: reset kela` }
     }
     if (cmd.intent === 'page_action' && a.action === 'refresh') {
@@ -2552,7 +2553,7 @@ export function LedgerPanel({
           onClick={() => {
             setParty('')
             setFrom('')
-            setTo(new Date().toISOString().slice(0, 10))
+            setTo(todayLocal())
             setData(null)
             setErr('')
             void load('')

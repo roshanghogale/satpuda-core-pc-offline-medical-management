@@ -4,6 +4,7 @@ import { saveFileAndShow, showSavedFile } from '../savedFiles'
 import { useEffect, useMemo, useState } from 'react'
 import { getApiBase } from '../api'
 import { exportRowsCsv } from './pageChrome'
+import { todayLocal } from '../localDate'
 
 export type ExportPage = 'inventory' | 'sales_history' | 'purchase_history'
 
@@ -72,7 +73,7 @@ async function runExport(body: Record<string, unknown>) {
 }
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10)
+  return todayLocal()
 }
 
 function fyBounds(year: number): { from: string; to: string } {

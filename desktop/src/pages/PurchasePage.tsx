@@ -63,6 +63,7 @@ import {
 } from './pageChrome'
 import { BillScanProgressOverlay } from '../components/BillScanProgressOverlay'
 import { dispatchDataChanged } from '../syncRefresh'
+import { todayLocal } from '../localDate'
 
 type LineItem = {
   medicine: string
@@ -217,7 +218,7 @@ function newTab(n: number, purchaseDate = ''): PurchaseTab {
     address: '',
     gstin: '',
     dl: '',
-    purchaseDate: purchaseDate || new Date().toISOString().slice(0, 10),
+    purchaseDate: purchaseDate || todayLocal(),
     billNumber: '',
     gstMethod: 'discount_before_gst',
     prevDue: 0,

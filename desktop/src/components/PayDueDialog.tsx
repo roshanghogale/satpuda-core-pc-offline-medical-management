@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { getApiBase } from '../api'
 import { dispatchPaymentsChanged } from '../syncRefresh'
+import { todayLocal } from '../localDate'
 
 type DueInfo = {
   ok?: boolean
@@ -40,7 +41,7 @@ export function PayDueDialog({
   const [error, setError] = useState('')
   const [amount, setAmount] = useState('')
   const [mode, setMode] = useState<'Cash' | 'Online'>('Cash')
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [date, setDate] = useState(() => todayLocal())
   const [saving, setSaving] = useState(false)
   const amountRef = useRef<HTMLInputElement>(null)
 
@@ -51,7 +52,7 @@ export function PayDueDialog({
     setError('')
     setSaving(false)
     setMode('Cash')
-    setDate(new Date().toISOString().slice(0, 10))
+    setDate(todayLocal())
     fetch(`${getApiBase()}/api/history/bill-due?kind=${kind}&id=${billId}`)
       .then((r) => r.json())
       .then((d: DueInfo) => {
