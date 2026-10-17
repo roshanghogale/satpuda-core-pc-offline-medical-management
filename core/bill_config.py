@@ -54,7 +54,10 @@ DEFAULT_BILL_PRINT_SETTINGS = {
     "show_line_amount": True,
     "show_gst_strip": True,
     "show_total": True,
-    "show_recovery_wish": True,
+    # Off, as on the dot matrix slip since 25 Sep 2026 (owner, 17 Oct 2026: "the new
+    # style ... removing I WISH FOR YOUR SPEEDY RECOVERY should be in the standard too").
+    # The "Recovery wish line" box under Show on Printed Bill brings it back.
+    "show_recovery_wish": False,
     "show_customer_due": False,
     "copies": 1,
     "pdf_save_layout": "two_copies",
@@ -325,6 +328,20 @@ def load_bill_print_settings() -> Dict[str, Any]:
         if paper:
             slot_defaults["paper_size"] = paper
         settings[key] = slot_defaults
+    # One-time: every saved settings file still says show_recovery_wish True, because
+    # that was the default it was saved with. Turn it off once, like the slip; a shop
+    # that ticks it again afterwards keeps it (the flag stops this running twice).
+    try:
+        if not settings.get("recovery_wish_off_migrated"):
+            settings["show_recovery_wish"] = False
+            settings["recovery_wish_off_migrated"] = True
+            if os.path.isfile(SETTINGS_PATH):
+                try:
+                    save_bill_print_settings(settings)
+                except Exception:
+                    pass
+    except Exception:
+        pass
     # One-time legacy fix:
     # older builds used A5 slot-1 with 2 copies by default; when users switch to
     # top/bottom single-copy mode, migrate that legacy default to 1 copy once.
@@ -352,6 +369,9 @@ def save_bill_print_settings(settings: Dict[str, Any]) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     merged = dict(DEFAULT_BILL_PRINT_SETTINGS)
     merged.update(settings or {})
+    # Whatever is saved from here on was chosen with the wish already off by default:
+    # never let the one-time switch-off in load_bill_print_settings undo it.
+    merged["recovery_wish_off_migrated"] = True
     payload = json.dumps(merged, indent=2)
     tmp = path + ".tmp"
     try:
