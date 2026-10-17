@@ -4,6 +4,7 @@
  */
 import { useEffect, useState } from 'react'
 import { getApiBase } from '../../api'
+import '../../styles/interactive-settings.css'
 
 type Gst = { gstin: string; legal_name: string; since: string; state_name: string }
 
@@ -58,8 +59,8 @@ export function CustomerGstRow({ customerId, customerName }: { customerId: numbe
   }
 
   return (
-    <div className="settings-form-row" style={{ alignItems: 'flex-end' }}>
-      <label className="settings-field">
+    <div className="iset-gst-row">
+      <label className="iset-field">
         <span>GSTIN (B2B bill sathi)</span>
         <input
           className="settings-input"
@@ -69,7 +70,7 @@ export function CustomerGstRow({ customerId, customerName }: { customerId: numbe
           onChange={(e) => setGst((g) => ({ ...g, gstin: e.target.value.toUpperCase() }))}
         />
       </label>
-      <label className="settings-field">
+      <label className="iset-field">
         <span>Kadhi pasun (bill tarikh)</span>
         <input
           className="settings-input"
@@ -78,12 +79,18 @@ export function CustomerGstRow({ customerId, customerName }: { customerId: numbe
           onChange={(e) => setGst((g) => ({ ...g, since: e.target.value }))}
         />
       </label>
-      <button type="button" className="settings-action-btn" disabled={busy} onClick={() => void save()}>
+      <button
+        type="button"
+        className="settings-action-btn iset-secondary"
+        style={{ height: 'var(--unit-h)' }}
+        disabled={busy}
+        onClick={() => void save()}
+      >
         {busy ? 'Save hot aahe…' : gst.gstin ? 'GSTIN save kara' : saved ? 'GSTIN kadha' : 'GSTIN save kara'}
       </button>
-      {err ? <span className="vb-warn">{err}</span> : null}
+      {err ? <span className="iset-gst-msg err">{err}</span> : null}
       {!err && saved ? (
-        <span className="settings-hint">
+        <span className="iset-gst-msg">
           {saved} · {gst.state_name} · {gst.since} pasunchi bills GSTR-1 B2B madhe
         </span>
       ) : null}

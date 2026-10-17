@@ -1,0 +1,614 @@
+/* Settings, Phase 3 redesign (18 Oct 2026) — Contacts, Shelf, Payment, Ledger,
+ * Reorder, Alert lists, Shortcuts, Import and Data & System.
+ * Rules: docs/SETTINGS_DESIGN.md. Only theme variables, so light and dark both work.
+ *   .iset-bar        one row of filters / tools: labels above boxes, buttons on the right
+ *   .iset-btn        small row / table buttons (not underlined links); .danger = red outline
+ *   .iset-table-wrap a table that grows with the page (no box that scrolls inside a frame);
+ *                    .capped only for a page's main list (alerts, payment history, ledger)
+ *   .iset-summary    the strip of small figure cards above a list
+ *   .iset-statusbar  what the last action said, kept in sight at the bottom */
+
+/* ── Filter / tool bar ───────────────────────────────────────────────────── */
+.iset-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 12px;
+  margin: 0 0 10px;
+}
+.iset-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.iset-field > span {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.iset-field .settings-input {
+  height: var(--unit-h);
+  min-width: 0;
+}
+.iset-field.grow {
+  flex: 1 1 240px;
+  max-width: 380px;
+}
+.iset-field.date .settings-input {
+  width: 150px;
+}
+.iset-field.short .settings-input {
+  width: 110px;
+}
+.iset-field.mid .settings-input {
+  width: 170px;
+}
+.iset-bar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.iset-bar .settings-action-btn,
+.iset-row .settings-action-btn,
+.iset-bar-actions .settings-action-btn {
+  align-self: auto;
+  height: var(--unit-h);
+}
+/* A plain row of buttons: primary first, same height, gap 8px. */
+.iset-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 6px;
+}
+.iset-row .iset-push {
+  margin-left: auto;
+}
+.iset-row-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
+/* The big buttons in a lighter, secondary dress. */
+.settings-action-btn.iset-secondary {
+  background: var(--surface);
+  color: var(--accent-dark);
+  border-color: var(--accent-soft-border);
+}
+.settings-action-btn.iset-secondary:not(:disabled):hover {
+  background: var(--accent-soft);
+}
+/* Destructive: red outline, never filled, never right beside Save. */
+.settings-action-btn.iset-danger {
+  background: transparent;
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 70%, var(--border));
+}
+.settings-action-btn.iset-danger:not(:disabled):hover {
+  background: var(--danger-soft);
+}
+.settings-action-btn.iset-secondary:disabled,
+.settings-action-btn.iset-danger:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Small buttons in table rows and lists. */
+.iset-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--accent-soft-border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--accent-dark);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.iset-btn:not(:disabled):hover {
+  background: var(--accent-soft);
+}
+.iset-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.iset-btn.primary:not(:disabled):hover {
+  filter: brightness(1.08);
+  background: var(--accent);
+}
+.iset-btn.danger {
+  background: transparent;
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 65%, var(--border));
+}
+.iset-btn.danger:not(:disabled):hover {
+  background: var(--danger-soft);
+}
+.iset-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── Tables ──────────────────────────────────────────────────────────────── */
+/* Grows with the page: no inner scrollbar inside a Settings frame. `clip`
+   keeps the rounded corners without making a scroll box, so the sticky header
+   still sticks to the page while it scrolls. */
+.iset-table-wrap {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: clip;
+  margin: 0 0 8px;
+  background: var(--surface);
+}
+/* Only a page's main list caps its height (and then scrolls inside). */
+.iset-table-wrap.capped {
+  overflow: auto;
+  max-height: max(260px, 62vh);
+}
+.iset-table-wrap > .settings-table {
+  margin: 0;
+}
+.iset-table-wrap .settings-table th {
+  z-index: 1;
+  padding: 7px 8px;
+  white-space: nowrap;
+}
+.iset-table-wrap .settings-table td {
+  padding: 5px 8px;
+  vertical-align: middle;
+}
+.settings-table th.num,
+.settings-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.settings-table td.mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.settings-table th.act,
+.settings-table td.act {
+  text-align: right;
+  white-space: nowrap;
+  width: 1%;
+}
+.settings-table td.act .iset-btn + .iset-btn {
+  margin-left: 6px;
+}
+.settings-table td.wrap {
+  white-space: normal;
+}
+.settings-table tr.iset-total td {
+  font-weight: 700;
+  border-top: 2px solid var(--border);
+  background: color-mix(in srgb, var(--surface-2) 80%, var(--surface));
+}
+.settings-table tr.iset-clickable td {
+  cursor: pointer;
+}
+.settings-table tbody tr.iset-active-row td {
+  background: var(--accent-soft);
+}
+.settings-table td.iset-empty {
+  text-align: center;
+  padding: 18px 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+  background: var(--surface) !important;
+}
+.settings-table td.iset-more {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.settings-table input.iset-cell-input {
+  width: 96px;
+  height: 24px;
+  text-align: right;
+}
+/* A table that stays short and sits in the flow: no sticky header. */
+.iset-table-wrap.plain .settings-table th {
+  position: static;
+}
+
+.iset-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  vertical-align: 1px;
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  border: 1px solid var(--accent-soft-border);
+}
+.iset-badge.ok {
+  background: color-mix(in srgb, var(--success) 14%, var(--surface));
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 40%, var(--border));
+}
+
+/* ── Summary strip ───────────────────────────────────────────────────────── */
+.iset-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+.iset-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 110px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-2) 45%, var(--surface));
+}
+.iset-stat > span {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--text-secondary);
+}
+.iset-stat > strong {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-dark);
+}
+.iset-stat.due > strong {
+  color: var(--danger);
+}
+
+/* ── Forms inside a frame ────────────────────────────────────────────────── */
+/* A light card for the add / edit form above a list. */
+.iset-form-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  margin: 0 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-2) 35%, var(--surface));
+}
+.iset-form-card > h4,
+.iset-subhead {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--text-secondary);
+}
+.iset-form-card .settings-form-row {
+  margin-bottom: 0;
+}
+.iset-form-card.editing {
+  border-color: var(--accent-soft-border);
+  background: var(--accent-soft);
+}
+.iset-hint {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.iset-callout {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--accent-soft-border);
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  font-size: 12px;
+}
+.iset-callout.warn {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+/* The panel's own Save bar inside a frame (Payment form). */
+.iset-form-frame .settings-savebar {
+  margin: 4px -14px -14px;
+  padding: 10px 14px;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+}
+
+/* What the last action said, at the bottom in sight (panels without a Save). */
+.iset-statusbar {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin: 4px -18px 0;
+  padding: 8px 18px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(4px);
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--success, var(--accent-dark));
+  white-space: pre-wrap;
+}
+.iset-statusbar.err {
+  color: var(--danger);
+}
+.iset-statusbar pre {
+  margin: 0;
+  font-weight: 400;
+  color: var(--text-primary);
+  max-height: 40vh;
+  overflow: auto;
+}
+
+/* ── Payment ─────────────────────────────────────────────────────────────── */
+.iset-pay-top {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.6fr) minmax(130px, auto) minmax(180px, 1fr);
+  gap: 10px 14px;
+  align-items: end;
+}
+.iset-pay-top .iset-field .settings-input {
+  width: 100%;
+}
+.iset-pay-due {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 3px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface-2) 45%, var(--surface));
+  min-height: var(--unit-h);
+  justify-content: center;
+}
+.iset-pay-due > span {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--text-secondary);
+}
+.iset-pay-due > strong {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-dark);
+}
+.iset-pay-due.owes > strong {
+  color: var(--danger);
+}
+.iset-pay-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px 14px;
+  align-items: end;
+}
+.iset-pay-fields .iset-field .settings-input {
+  width: 100%;
+}
+.iset-pay-fields .iset-field.amount .settings-input {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+@container (max-width: 640px) {
+  .iset-pay-top {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ── Alert lists ─────────────────────────────────────────────────────────── */
+.iset-alert-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  margin: 0 0 8px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+}
+.iset-alert-actions .iset-push {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+/* ── Shelf ───────────────────────────────────────────────────────────────── */
+.iset-split {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.25fr);
+  gap: 12px;
+  align-items: start;
+}
+.iset-split > * {
+  min-width: 0;
+}
+@container (max-width: 760px) {
+  .iset-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.iset-shelf-add {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 10px;
+  align-items: end;
+}
+.iset-shelf-add .iset-field .settings-input {
+  width: 100%;
+}
+.iset-tree,
+.iset-tree ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.iset-tree ul {
+  margin-left: 16px;
+  padding-left: 8px;
+  border-left: 1px dashed var(--border);
+}
+.iset-tree-node {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+}
+.iset-tree-node:hover {
+  background: color-mix(in srgb, var(--surface-2) 45%, var(--surface));
+}
+.iset-tree-node.selected {
+  background: var(--accent-soft);
+}
+.iset-tree-node .iset-tree-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+  border: none;
+  background: none;
+  padding: 3px 2px;
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+.iset-tree-node .iset-tree-name strong {
+  color: var(--accent-dark);
+}
+.iset-tree-node .iset-btn {
+  height: 20px;
+  padding: 0 7px;
+  font-size: 10.5px;
+}
+.iset-tree-empty {
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 6px 2px;
+}
+
+/* ── Stores (Data & System) ──────────────────────────────────────────────── */
+.iset-create-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 10px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+}
+.iset-create-row .iset-field {
+  flex: 1 1 240px;
+  max-width: 380px;
+}
+.iset-create-row .iset-field .settings-input {
+  width: 100%;
+}
+
+/* ── Danger Zone ─────────────────────────────────────────────────────────── */
+.iset-danger-zone {
+  margin-top: 6px;
+}
+.iset-danger-zone > .settings-labelframe {
+  border-color: color-mix(in srgb, var(--danger) 60%, var(--border));
+  background: color-mix(in srgb, var(--danger) 5%, var(--surface));
+}
+.iset-danger-zone > .settings-labelframe > legend {
+  color: var(--danger);
+}
+
+/* ── Shortcuts ───────────────────────────────────────────────────────────── */
+.iset-shortcuts {
+  columns: 2 440px;
+  column-gap: 14px;
+}
+.iset-shortcuts > .settings-labelframe {
+  break-inside: avoid;
+  display: flex;
+  width: 100%;
+}
+.iset-key {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface-2) 50%, var(--surface));
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ── Import ──────────────────────────────────────────────────────────────── */
+.iset-textarea {
+  width: 100%;
+  min-height: 120px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  resize: vertical;
+}
+
+/* ── Customer GSTIN (Contacts → Customers → Edit) ───────────────────────── */
+.iset-gst-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 12px;
+}
+.iset-gst-row .iset-field .settings-input {
+  width: 190px;
+}
+.iset-gst-row .iset-gst-msg {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.iset-gst-row .iset-gst-msg.err {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+/* ── Home banner width (Appearance) ──────────────────────────────────────── */
+.iset-banner-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.iset-banner-input .settings-input {
+  width: 80px;
+  text-align: right;
+}
+.iset-banner-preview {
+  max-width: 420px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  padding: 4px;
+  margin: 4px 0 8px;
+  background: var(--surface-sunken);
+}
+.iset-banner-preview > img {
+  display: block;
+  height: auto;
+  margin: 0 auto;
+}
+.iset-shelf-add .settings-action-btn {
+  align-self: end;
+  height: var(--unit-h);
+}
+.iset-split > div > .settings-labelframe {
+  margin-bottom: 0;
+}
