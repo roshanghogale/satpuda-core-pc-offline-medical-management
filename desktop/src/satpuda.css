@@ -2782,11 +2782,19 @@ input[readonly] {
    Shown, never edited: they are the return's, not lines of this bill. */
 .sat-table tbody tr.ret-head td,
 .settings-table tbody tr.ret-head td {
-  font-style: italic;
-  font-weight: 600;
+  text-align: center;
+  font-weight: 700;
   color: var(--accent-dark);
-  border-top: 1px dashed var(--accent-soft-border);
+  border-top: 1px solid var(--accent-soft-border);
+  border-bottom: 1px solid var(--accent-soft-border);
   background: var(--accent-soft);
+}
+.sat-table tbody tr.ret-total td,
+.settings-table tbody tr.ret-total td {
+  font-weight: 700;
+  text-align: right;
+  border-top: 1px solid var(--accent-soft-border);
+  background: color-mix(in srgb, var(--accent-soft) 45%, var(--surface));
 }
 .sat-table tbody tr.ret-line td,
 .settings-table tbody tr.ret-line td {

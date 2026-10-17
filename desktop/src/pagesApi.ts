@@ -963,7 +963,7 @@ export type OpenReturn = {
   bill_no: string
   amount: number
   left: number
-  items: { name: string; qty: number; amount: number }[]
+  items: ReturnItem[]
 }
 
 /** A return settled inside a bill: a Return row, then the medicines that came back. */
@@ -975,7 +975,18 @@ export type BillReturn = {
   refund: number
   /** what this bill used of it */
   amount: number
-  items: { name: string; batch_no?: string; qty: number; rate?: number; amount: number }[]
+  items: ReturnItem[]
+}
+
+/** A medicine that came back: shown like an item row (owner, 18 Oct 2026). */
+export type ReturnItem = {
+  name: string
+  batch_no?: string
+  expiry?: string
+  mrp?: number
+  qty: number
+  rate?: number
+  amount: number
 }
 
 /** billId: the tab's autosaved bill, which is already in the ledger -- left out. */

@@ -147,7 +147,9 @@ def open_returns(conn: sqlite3.Connection, kind: str, party_id: int, *,
             continue
         out.append({"return_id": rid, "return_no": row["return_no"], "return_date": row["return_date"],
                     "bill_no": row["bill_no"], "amount": row["refund"], "left": rest,
-                    "items": [{"name": it["name"], "qty": it["qty"], "amount": it["amount"]}
+                    "items": [{"name": it["name"], "qty": it["qty"], "amount": it["amount"],
+                               "batch_no": it.get("batch_no", ""), "expiry": it.get("expiry", ""),
+                               "mrp": it.get("mrp", 0)}
                               for it in row["items"]]})
     return _by_date(out)
 

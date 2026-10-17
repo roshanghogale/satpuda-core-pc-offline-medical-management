@@ -28,11 +28,26 @@ export function fmtReturnDate(raw: string) {
   return p.length === 3 && p[0].length === 4 ? `${p[2]}-${p[1]}-${p[0]}` : s
 }
 
-export function returnRowLabel(r: { return_no: string; return_date: string; amount: number; refund: number }) {
+/** The centred row that opens a return in a bill: "Return SR1-7 17-10-2026", and on a
+ *  purchase the supplier's name on the same row (owner, 18 Oct 2026). Never the customer. */
+export function returnRowLabel(r: { return_no: string; return_date: string }, party = '') {
   const head = `Return ${r.return_no} ${fmtReturnDate(r.return_date)}`
+  return party.trim() ? `${head} · ${party.trim().toUpperCase()}` : head
+}
+
+/** The row closing a return under its medicines, with "(₹5 of ₹10 used in this bill)" when
+ *  part of it went to other bills. */
+export function returnTotalLabel(r: { amount: number; refund: number }) {
   return r.refund > r.amount + 0.009
-    ? `${head} (${money(r.amount)} of ${money(r.refund)} used in this bill)`
-    : head
+    ? `Return total (${money(r.amount)} of ${money(r.refund)} used in this bill)`
+    : 'Return total'
+}
+
+/** "2028-12-01" or "12/28" -> "12/28", as the bill's Exp column. */
+function fmtExp(raw?: string) {
+  const s = String(raw || '').trim()
+  const m = /^(\d{4})-(\d{2})/.exec(s)
+  return m ? `${m[2]}/${m[1].slice(2)}` : s
 }
 
 /** The ticked open returns as they will sit in this bill: each gives what it has left, never
@@ -58,33 +73,56 @@ export function returnsForScreen(open: OpenReturn[], picked: number[], room: num
   return out
 }
 
-/** `cols` = the table's column keys in order; 'name', 'qty' and 'amount' are filled, every
- *  other column is left empty. The Return row's label runs across the columns before Amount. */
-export function ReturnTableRows({ returns, cols }: { returns: BillReturn[]; cols: string[] }) {
+/** `cols` = the table's column keys in order. Each return is a block (owner, 18 Oct 2026):
+ *  a centred "Return SR1-7 17-10-2026" row across the table (the supplier's name too on a
+ *  purchase), the medicines that came back one per row like the items (batch, expiry, qty,
+ *  MRP, minus amount), then the return's total. */
+export function ReturnTableRows({
+  returns,
+  cols,
+  party = '',
+}: {
+  returns: BillReturn[]
+  cols: string[]
+  /** a purchase's supplier, shown on the Return row */
+  party?: string
+}) {
   if (!returns.length) return null
   const amountAt = cols.indexOf('amount')
   const span = amountAt >= 0 ? amountAt : cols.length
   const tail = amountAt >= 0 ? cols.length - amountAt - 1 : 0
+  const cell = (c: string, it: BillReturn['items'][number], j: number) => {
+    if (c === 'name') return `${j + 1}. ${it.name}`
+    if (c === 'batch') return it.batch_no || ''
+    if (c === 'expiry') return fmtExp(it.expiry)
+    if (c === 'qty') return it.qty
+    if (c === 'mrp') return Number(it.mrp) ? Number(it.mrp).toFixed(2) : ''
+    if (c === 'amount') return `− ${Number(it.amount).toFixed(2)}`
+    return ''
+  }
   return (
     <>
       {returns.map((r) => [
         <tr key={`ret-${r.return_id}`} className="ret-head" data-return-row="1">
-          <td colSpan={Math.max(1, span)}>{returnRowLabel(r)}</td>
-          {amountAt >= 0 ? <td className="num mono">− {Number(r.amount).toFixed(2)}</td> : null}
-          {tail > 0 ? <td colSpan={tail} /> : null}
+          <td colSpan={cols.length}>{returnRowLabel(r, party)}</td>
         </tr>,
         ...(r.items || []).map((it, j) => (
           <tr key={`ret-${r.return_id}-${j}`} className="ret-line">
             {cols.map((c, k) => (
               <td
                 key={k}
-                className={c === 'qty' ? 'numsm mono' : c === 'amount' ? 'num mono' : undefined}
+                className={c === 'qty' ? 'numsm mono' : c === 'amount' || c === 'mrp' ? 'num mono' : undefined}
               >
-                {c === 'name' ? `↩ ${it.name}` : c === 'qty' ? it.qty : c === 'amount' ? `− ${Number(it.amount).toFixed(2)}` : ''}
+                {cell(c, it, j)}
               </td>
             ))}
           </tr>
         )),
+        <tr key={`ret-${r.return_id}-t`} className="ret-total">
+          <td colSpan={Math.max(1, span)}>{returnTotalLabel(r)}</td>
+          {amountAt >= 0 ? <td className="num mono">− {Number(r.amount).toFixed(2)}</td> : null}
+          {tail > 0 ? <td colSpan={tail} /> : null}
+        </tr>,
       ])}
     </>
   )

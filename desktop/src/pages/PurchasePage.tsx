@@ -3263,6 +3263,7 @@ export function PurchasePage({
               {tab.items.length ? (
                 <ReturnTableRows
                   returns={screenReturns}
+                  party={tab.supplier}
                   cols={[
                     ...(showCol.medicine ? ['name'] : []),
                     ...(showCol.type ? ['type'] : []),
