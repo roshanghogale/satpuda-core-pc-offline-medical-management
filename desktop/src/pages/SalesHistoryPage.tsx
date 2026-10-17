@@ -34,12 +34,14 @@ import {
   SALES_HISTORY_COLUMN_WIDTHS,
   Field,
   FilterBar,
-  Note,
   PageRoot,
+  Panel,
   SectionFrame,
   StatusLine,
-  SummaryBar,
+  SummaryStrip,
+  numericColumns,
 } from './pageChrome'
+import '../styles/list-pages.css'
 
 const DUE_OPTIONS = [
   { value: '', label: 'All' },
@@ -65,6 +67,11 @@ function money(n: number | string | undefined) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`
+}
+
+/** A summary card turns red / green only when there is something to see. */
+function toneIf(n: number | string | undefined, tone: 'danger' | 'success') {
+  return Number(n) > 0 ? tone : undefined
 }
 
 export function SalesHistoryPage({
@@ -743,8 +750,8 @@ export function SalesHistoryPage({
   useEffect(() => registerVoicePage('sales_history', () => voiceHandlerRef.current), [])
 
   return (
-    <PageRoot className="list-page">
-      <SectionFrame title="Filter Options">
+    <PageRoot className="list-page lp-page">
+      <SectionFrame title="Filter Options" className="lp-filter-panel">
         <DayPresetRow
           from={from}
           to={to}
@@ -764,8 +771,8 @@ export function SalesHistoryPage({
             setTo(t2)
           }}
         />
-        <FilterBar>
-          <Field label="Search">
+        <FilterBar className="lp-filterbar">
+          <Field label="Search" className="lp-f-search">
             <input
               className="settings-input"
               value={q}
@@ -777,7 +784,7 @@ export function SalesHistoryPage({
               data-voice-field="search"
             />
           </Field>
-          <Field label="Medicine Name">
+          <Field label="Medicine Name" className="lp-f-combo">
             <ModernCombo
               value={medicine}
               onChange={setMedicine}
@@ -799,7 +806,7 @@ export function SalesHistoryPage({
               voiceField="medicine"
             />
           </Field>
-          <Field label="Batch Number">
+          <Field label="Batch Number" className="lp-f-text">
             <input
               className="settings-input"
               value={batch}
@@ -810,7 +817,7 @@ export function SalesHistoryPage({
               placeholder="Search by batch on bill"
             />
           </Field>
-          <Field label="Customer">
+          <Field label="Customer" className="lp-f-combo">
             <ModernCombo
               value={customer}
               onChange={setCustomer}
@@ -833,7 +840,7 @@ export function SalesHistoryPage({
               voiceField="customer"
             />
           </Field>
-          <Field label="From Date">
+          <Field label="From Date" className="lp-f-date">
             <input
               className="settings-input"
               type="date"
@@ -841,7 +848,7 @@ export function SalesHistoryPage({
               onChange={(e) => setFrom(e.target.value)}
             />
           </Field>
-          <Field label="To Date">
+          <Field label="To Date" className="lp-f-date">
             <input
               className="settings-input"
               type="date"
@@ -849,7 +856,7 @@ export function SalesHistoryPage({
               onChange={(e) => setTo(e.target.value)}
             />
           </Field>
-          <Field label="Due Status">
+          <Field label="Due Status" className="lp-f-select">
             <select
               className="settings-input"
               value={due}
@@ -862,7 +869,7 @@ export function SalesHistoryPage({
               ))}
             </select>
           </Field>
-          <Field label="Schedule">
+          <Field label="Schedule" className="lp-f-select">
             <select
               className="settings-input"
               value={schedule}
@@ -876,7 +883,7 @@ export function SalesHistoryPage({
               ))}
             </select>
           </Field>
-          <Field label="Sort">
+          <Field label="Sort" className="lp-f-sort">
             <select
               className="settings-input"
               value={sort}
@@ -918,24 +925,59 @@ export function SalesHistoryPage({
             />
           </ActionBar>
         </FilterBar>
-        <Note>
-          Click a row, then F7/F8/F9 to print or Delete to remove. Double-click or
-          right-click → Edit opens Sales with the bill loaded.
-        </Note>
       </SectionFrame>
 
       <StatusLine error={error} loading={loading && !data} />
 
-      <SectionFrame title="Sales History — Bills List" className="list-table-panel">
+      {/* Above the list now (design rule 10): the figures first, then the bills. */}
+      {showSummary ? (
+        <SummaryStrip
+          title="Sales Summary"
+          items={[
+            { label: 'Bills', value: summary.bills ?? 0, tone: 'accent' },
+            { label: 'Total Sales', value: money(summary.total) },
+            { label: 'Discount', value: money(summary.discount) },
+            { label: 'Amount Paid', value: money(summary.paid) },
+            { label: 'Bill Due', value: money(summary.due), tone: toneIf(summary.due, 'danger') },
+            {
+              label: 'Customer Due',
+              value: money(summary.customer_due),
+              tone: toneIf(summary.customer_due, 'danger'),
+            },
+            { label: 'Profit', value: money(summary.profit), tone: toneIf(summary.profit, 'success') },
+            { label: 'Returns', value: money(summary.returns) },
+            { label: 'Today Revenue', value: money(summary.today_revenue) },
+            { label: 'Today Cash', value: money(summary.today_cash) },
+            { label: 'Today Online', value: money(summary.today_online) },
+            { label: 'Month Revenue', value: money(summary.month_revenue) },
+          ]}
+        />
+      ) : null}
+
+      <Panel
+        title="Sales History — Bills List"
+        className="filter-panel list-table-panel"
+        headRight={
+          <span className="lp-hint" title="Click a row, then F7/F8/F9 to print or Delete to remove. Double-click or right-click → Edit opens Sales with the bill loaded.">
+            Click a row, then F7/F8/F9 to print or Delete to remove. Double-click or
+            right-click → Edit opens Sales with the bill loaded.
+          </span>
+        }
+      >
         {/* More bills in the range than the list holds: say so, never total a slice quietly. */}
-        {data?.rows_note ? <Note>{data.rows_note}</Note> : null}
+        {data?.rows_note ? <p className="lp-rows-note">{data.rows_note}</p> : null}
         <DataTable
           columns={data?.columns || []}
           rows={data?.rows || []}
           rowStyles={data?.row_styles}
           columnWidths={SALES_HISTORY_COLUMN_WIDTHS}
+          numericCols={numericColumns(data?.columns)}
           visibleRows={historyRows}
-          empty={loading ? 'Loading…' : 'No sales bills'}
+          empty={
+            loading
+              ? 'Loading…'
+              : 'No sales bills in these dates and filters. Try Today / This month above, or Clear Filter.'
+          }
           onRowDoubleClick={(rowIndex) => {
             const id = idAt(rowIndex)
             if (id) void viewBillDetails(id)
@@ -949,28 +991,7 @@ export function SalesHistoryPage({
             setCtx({ x: e.clientX, y: e.clientY, saleId: id })
           }}
         />
-      </SectionFrame>
-
-      {showSummary ? (
-        <SectionFrame title="Sales Summary" className="list-summary-panel">
-          <SummaryBar
-            items={[
-              { label: 'Bills', value: summary.bills ?? 0 },
-              { label: 'Total Sales', value: money(summary.total) },
-              { label: 'Discount', value: money(summary.discount) },
-              { label: 'Amount Paid', value: money(summary.paid) },
-              { label: 'Bill Due', value: money(summary.due) },
-              { label: 'Customer Due', value: money(summary.customer_due) },
-              { label: 'Profit', value: money(summary.profit) },
-              { label: 'Returns', value: money(summary.returns) },
-              { label: 'Today Revenue', value: money(summary.today_revenue) },
-              { label: 'Today Cash', value: money(summary.today_cash) },
-              { label: 'Today Online', value: money(summary.today_online) },
-              { label: 'Month Revenue', value: money(summary.month_revenue) },
-            ]}
-          />
-        </SectionFrame>
-      ) : null}
+      </Panel>
 
       <ExportDialog
         page="sales_history"

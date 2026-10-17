@@ -19,12 +19,14 @@ import {
   PURCHASE_HISTORY_COLUMN_WIDTHS,
   Field,
   FilterBar,
-  Note,
   PageRoot,
+  Panel,
   SectionFrame,
   StatusLine,
-  SummaryBar,
+  SummaryStrip,
+  numericColumns,
 } from './pageChrome'
+import '../styles/list-pages.css'
 
 const DUE_OPTIONS = [
   { value: '', label: 'All' },
@@ -49,6 +51,11 @@ function money(n: number | string | undefined) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`
+}
+
+/** A summary card turns red / green only when there is something to see. */
+function toneIf(n: number | string | undefined, tone: 'danger' | 'success') {
+  return Number(n) > 0 ? tone : undefined
 }
 
 export function PurchaseHistoryPage({
@@ -418,8 +425,8 @@ export function PurchaseHistoryPage({
   useEffect(() => registerVoicePage('purchase_history', () => voiceHandlerRef.current), [])
 
   return (
-    <PageRoot className="list-page">
-      <SectionFrame title="Filter Options">
+    <PageRoot className="list-page lp-page">
+      <SectionFrame title="Filter Options" className="lp-filter-panel">
         <DayPresetRow
           from={from}
           to={to}
@@ -439,8 +446,8 @@ export function PurchaseHistoryPage({
             setTo(t2)
           }}
         />
-        <FilterBar>
-          <Field label="Search">
+        <FilterBar className="lp-filterbar">
+          <Field label="Search" className="lp-f-search">
             <input
               className="settings-input"
               value={q}
@@ -452,7 +459,7 @@ export function PurchaseHistoryPage({
               data-voice-field="search"
             />
           </Field>
-          <Field label="Supplier">
+          <Field label="Supplier" className="lp-f-combo">
             <ModernCombo
               value={supplier}
               onChange={setSupplier}
@@ -475,7 +482,7 @@ export function PurchaseHistoryPage({
               voiceField="supplier"
             />
           </Field>
-          <Field label="Medicine Name">
+          <Field label="Medicine Name" className="lp-f-combo">
             <ModernCombo
               value={medicine}
               onChange={setMedicine}
@@ -497,7 +504,7 @@ export function PurchaseHistoryPage({
               voiceField="medicine"
             />
           </Field>
-          <Field label="Batch Number">
+          <Field label="Batch Number" className="lp-f-text">
             <input
               className="settings-input"
               value={batch}
@@ -508,7 +515,7 @@ export function PurchaseHistoryPage({
               placeholder="Batch on purchase"
             />
           </Field>
-          <Field label="From Date">
+          <Field label="From Date" className="lp-f-date">
             <input
               className="settings-input"
               type="date"
@@ -516,7 +523,7 @@ export function PurchaseHistoryPage({
               onChange={(e) => setFrom(e.target.value)}
             />
           </Field>
-          <Field label="To Date">
+          <Field label="To Date" className="lp-f-date">
             <input
               className="settings-input"
               type="date"
@@ -524,7 +531,7 @@ export function PurchaseHistoryPage({
               onChange={(e) => setTo(e.target.value)}
             />
           </Field>
-          <Field label="Due Status">
+          <Field label="Due Status" className="lp-f-select">
             <select
               className="settings-input"
               value={due}
@@ -537,7 +544,7 @@ export function PurchaseHistoryPage({
               ))}
             </select>
           </Field>
-          <Field label="Schedule">
+          <Field label="Schedule" className="lp-f-select">
             <select
               className="settings-input"
               value={schedule}
@@ -551,7 +558,7 @@ export function PurchaseHistoryPage({
               ))}
             </select>
           </Field>
-          <Field label="Sort">
+          <Field label="Sort" className="lp-f-sort">
             <select
               className="settings-input"
               value={sort}
@@ -584,26 +591,62 @@ export function PurchaseHistoryPage({
             />
           </ActionBar>
         </FilterBar>
-        <Note>
-          Double-click or right-click → Edit opens the full Purchase page with
-          the bill loaded — same add/edit/remove medicines and Update flow as
-          Purchase entry.
-        </Note>
       </SectionFrame>
 
       <StatusLine error={error} loading={loading && !data} />
 
-      <SectionFrame title="Purchase History — Bills List" className="list-table-panel">
+      {/* Above the list now (design rule 10): the figures first, then the bills. */}
+      {showSummary ? (
+        <SummaryStrip
+          title="Purchase Summary"
+          items={[
+            { label: 'Bills', value: summary.bills ?? 0, tone: 'accent' },
+            { label: 'Final Amount', value: money(summary.total) },
+            { label: 'Paid at Entry', value: money(summary.paid) },
+            { label: 'Entry Due', value: money(summary.due), tone: toneIf(summary.due, 'danger') },
+            {
+              label: 'Supplier Due',
+              value: money(summary.supplier_due),
+              tone: toneIf(summary.supplier_due, 'danger'),
+            },
+            {
+              label: 'Supplier Credit',
+              value: money(summary.supplier_credit),
+              tone: toneIf(summary.supplier_credit, 'success'),
+            },
+          ]}
+        />
+      ) : null}
+
+      <Panel
+        title="Purchase History — Bills List"
+        className="filter-panel list-table-panel"
+        headRight={
+          <span
+            className="lp-hint"
+            title="Double-click or right-click → Edit opens the full Purchase page with the bill loaded — same add/edit/remove medicines and Update flow as Purchase entry."
+          >
+            Double-click or right-click → Edit opens the full Purchase page with
+            the bill loaded — same add/edit/remove medicines and Update flow as
+            Purchase entry.
+          </span>
+        }
+      >
         {/* Same line as Sales History: a capped range, or a financial year that
             held nothing and was widened to every date. */}
-        {data?.rows_note ? <Note>{data.rows_note}</Note> : null}
+        {data?.rows_note ? <p className="lp-rows-note">{data.rows_note}</p> : null}
         <DataTable
           columns={data?.columns || []}
           rows={data?.rows || []}
           rowStyles={data?.row_styles}
           columnWidths={PURCHASE_HISTORY_COLUMN_WIDTHS}
+          numericCols={numericColumns(data?.columns)}
           visibleRows={historyRows}
-          empty={loading ? 'Loading…' : 'No purchase bills'}
+          empty={
+            loading
+              ? 'Loading…'
+              : 'No purchase bills in these dates and filters. Try This month above, or Clear Filter.'
+          }
           onRowDoubleClick={openPurchaseEdit}
           onRowClick={(i) => setSelectedRow(i)}
           selectedRowIndex={selectedRow}
@@ -614,25 +657,7 @@ export function PurchaseHistoryPage({
             setCtx({ x: e.clientX, y: e.clientY, purchaseId: id })
           }}
         />
-      </SectionFrame>
-
-      {showSummary ? (
-        <SectionFrame title="Purchase Summary" className="list-summary-panel">
-          <SummaryBar
-            items={[
-              { label: 'Bills', value: summary.bills ?? 0 },
-              { label: 'Final Amount', value: money(summary.total) },
-              { label: 'Paid at Entry', value: money(summary.paid) },
-              { label: 'Entry Due', value: money(summary.due) },
-              { label: 'Supplier Due', value: money(summary.supplier_due) },
-              {
-                label: 'Supplier Credit',
-                value: money(summary.supplier_credit),
-              },
-            ]}
-          />
-        </SectionFrame>
-      ) : null}
+      </Panel>
 
       <ExportDialog
         page="purchase_history"

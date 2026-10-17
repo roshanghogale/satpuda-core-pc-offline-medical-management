@@ -57,8 +57,11 @@ import {
   PageRoot,
   SectionFrame,
   StatusLine,
-  SummaryBar,
+  SummaryStrip,
+  EmptyState,
+  numericColumns,
 } from './pageChrome'
+import '../styles/list-pages.css'
 
 type Tab = 'sales' | 'purchase' | 'disposal' | 'bulk'
 
@@ -1580,27 +1583,37 @@ export function ReturnsPage({
   useEffect(() => setVoicePlace('returns', tab), [tab])
 
   return (
-    <PageRoot className="returns-page">
-      <div className="page-toggle-bar settings-inline-actions">
-        <ActionBtn
-          label="Sales Return"
-          variant={tab === 'sales' ? 'primary' : 'neutral'}
-          onClick={() => setTab('sales')}
-        />
-        <ActionBtn
-          label="Purchase Return"
-          variant={tab === 'purchase' ? 'primary' : 'neutral'}
-          onClick={() => setTab('purchase')}
-        />
-        <ActionBtn
-          label="Write-off"
-          variant={tab === 'disposal' ? 'primary' : 'neutral'}
-          onClick={() => setTab('disposal')}
-        />
-        <ActionBtn
-          label="Bulk Purchase Return"
-          variant={tab === 'bulk' ? 'primary' : 'neutral'}
-          onClick={() => setTab('bulk')}
+    <PageRoot className="returns-page lp-page lp-returns">
+      {/* The four kinds of return as one switch, the counts beside it. */}
+      <div className="lp-returns-head">
+        <div className="page-toggle-bar settings-inline-actions lp-tabs">
+          <ActionBtn
+            label="Sales Return"
+            variant={tab === 'sales' ? 'primary' : 'neutral'}
+            onClick={() => setTab('sales')}
+          />
+          <ActionBtn
+            label="Purchase Return"
+            variant={tab === 'purchase' ? 'primary' : 'neutral'}
+            onClick={() => setTab('purchase')}
+          />
+          <ActionBtn
+            label="Write-off"
+            variant={tab === 'disposal' ? 'primary' : 'neutral'}
+            onClick={() => setTab('disposal')}
+          />
+          <ActionBtn
+            label="Bulk Purchase Return"
+            variant={tab === 'bulk' ? 'primary' : 'neutral'}
+            onClick={() => setTab('bulk')}
+          />
+        </div>
+        <SummaryStrip
+          items={[
+            { label: 'Sales returns', value: salesCount },
+            { label: 'Purchase returns', value: purchaseCount },
+            { label: 'Write-offs', value: writeCount },
+          ]}
         />
       </div>
 
@@ -1610,19 +1623,11 @@ export function ReturnsPage({
       />
       {note ? <Note>{note}</Note> : null}
 
-      <SummaryBar
-        items={[
-          { label: 'Sales returns', value: salesCount },
-          { label: 'Purchase returns', value: purchaseCount },
-          { label: 'Write-offs', value: writeCount },
-        ]}
-      />
-
       {tab === 'sales' && (
         <>
-          <SectionFrame title="Step 1 — Find original bill">
+          <SectionFrame title="Step 1 — Find original bill" className="lp-step">
             <div ref={salesBillListRef}>
-            <FilterBar>
+            <FilterBar className="lp-formrow">
               <Field label="Bill No / Customer" className="field-bill-search">
                 <ModernCombo
                   value={salesQuery}
@@ -1688,11 +1693,11 @@ export function ReturnsPage({
             {salesBillInfo ? <Note>{salesBillInfo}</Note> : null}
           </SectionFrame>
 
-          <SectionFrame title="Step 2 — Add return (pick medicine → qty → Enter)">
+          <SectionFrame title="Step 2 — Add return (pick medicine → qty → Enter)" className="lp-step">
             {salesBill ? (
               <>
-                <FilterBar>
-                  <Field label="Medicine in bill">
+                <FilterBar className="lp-formrow">
+                  <Field label="Medicine in bill" className="lp-f-wide">
                     <ModernCombo
                       value={salesBillMedPick}
                       placeholder="Pick medicine from bill…"
@@ -1729,7 +1734,7 @@ export function ReturnsPage({
                       onEnter={addSalesReturnItem}
                     />
                   </Field>
-                  <Field label="Return Qty">
+                  <Field label="Return Qty" className="lp-f-qty">
                     <input
                       className="settings-input"
                       type="number"
@@ -1769,14 +1774,14 @@ export function ReturnsPage({
                   tabIndex={-1}
                   data-return-focus="qty"
                 >
-                  <table className="settings-table">
+                  <table className="settings-table lp-pick-table">
                     <thead>
                       <tr>
                         <th>Medicine</th>
                         <th>Batch</th>
-                        <th>Qty Sold</th>
-                        <th>Returnable</th>
-                        <th>Rate</th>
+                        <th className="num">Qty Sold</th>
+                        <th className="num">Returnable</th>
+                        <th className="num">Rate</th>
                         <th>Type</th>
                       </tr>
                     </thead>
@@ -1802,14 +1807,14 @@ export function ReturnsPage({
                         >
                           <td>{it.name}</td>
                           <td>{it.batch}</td>
-                          <td>{it.orig_qty}</td>
-                          <td>
+                          <td className="num">{it.orig_qty}</td>
+                          <td className="num">
                             {salesRemainingQty(
                               it.medicine_id,
                               it.remaining_qty,
                             )}
                           </td>
-                          <td>{money(it.rate || 0)}</td>
+                          <td className="num">{money(it.rate || 0)}</td>
                           <td>{it.type || '—'}</td>
                         </tr>
                       ))}
@@ -1818,11 +1823,11 @@ export function ReturnsPage({
                 </div>
               </>
             ) : (
-              <Note>Load a bill, then pick a medicine from the loaded bill.</Note>
+              <EmptyState>Load a bill, then pick a medicine from the loaded bill.</EmptyState>
             )}
           </SectionFrame>
 
-          <SectionFrame title="Step 3 — Items to return">
+          <SectionFrame title="Step 3 — Items to return" className="lp-step">
             {salesReturnItems.length ? (
               <div className="settings-table-wrap">
                 <table className="settings-table">
@@ -1830,10 +1835,10 @@ export function ReturnsPage({
                     <tr>
                       <th>Medicine</th>
                       <th>Batch</th>
-                      <th>Return Qty</th>
-                      <th>Rate</th>
-                      <th>Amount</th>
-                      <th />
+                      <th className="num">Return Qty</th>
+                      <th className="num">Rate</th>
+                      <th className="num">Amount</th>
+                      <th className="col-actions" />
                     </tr>
                   </thead>
                   <tbody>
@@ -1841,13 +1846,14 @@ export function ReturnsPage({
                       <tr key={it.medicine_id}>
                         <td>{it.name}</td>
                         <td>{it.batch}</td>
-                        <td>{tabletCountNote(it.qty, it.is_tablet, it.tablets_per_stripe, 'tablet') || it.qty}</td>
-                        <td>{money(it.rate)}</td>
-                        <td>{money(it.amount)}</td>
-                        <td>
+                        <td className="num">{tabletCountNote(it.qty, it.is_tablet, it.tablets_per_stripe, 'tablet') || it.qty}</td>
+                        <td className="num">{money(it.rate)}</td>
+                        <td className="num">{money(it.amount)}</td>
+                        <td className="col-actions">
                           <ActionBtn
                             label="Remove"
                             variant="neutral"
+                            small
                             onClick={() => removeSalesReturnItem(it.medicine_id)}
                           />
                         </td>
@@ -1857,13 +1863,13 @@ export function ReturnsPage({
                 </table>
               </div>
             ) : (
-              <Note>No items added yet.</Note>
+              <EmptyState>No items added yet. Pick a medicine in Step 2, enter the qty and press Enter.</EmptyState>
             )}
           </SectionFrame>
 
-          <SectionFrame title="Step 4 — Confirm & save">
-            <FilterBar>
-              <Field label="Discount %">
+          <SectionFrame title="Step 4 — Confirm & save" className="lp-step">
+            <FilterBar className="lp-formrow">
+              <Field label="Discount %" className="lp-f-qty">
                 <input
                   className="settings-input"
                   type="number"
@@ -1871,7 +1877,7 @@ export function ReturnsPage({
                   onChange={(e) => setSalesDisc(e.target.value)}
                 />
               </Field>
-              <Field label="Reason">
+              <Field label="Reason" className="lp-f-wide">
                 <input
                   className="settings-input"
                   value={salesReason}
@@ -1902,7 +1908,7 @@ export function ReturnsPage({
                 </select>
               </Field>
             </div>
-            <Note>Estimated refund: {money(salesRefundPreview)}</Note>
+            <p className="settings-note lp-total">Estimated refund: <strong>{money(salesRefundPreview)}</strong></p>
             {salesSettleHint ? <Note>{salesSettleHint}</Note> : null}
             <ActionBar>
               {/* The key was always bound and never shown. The one button on
@@ -1924,6 +1930,7 @@ export function ReturnsPage({
               <ActionBtn
                 label="Delete Return"
                 variant="warning"
+                className="lp-danger"
                 disabled={saving || salesHistSel == null}
                 onClick={() => void deleteSelectedSalesReturn()}
               />
@@ -1936,6 +1943,7 @@ export function ReturnsPage({
                     : ['Return No', 'Date', 'Bill No', 'Customer', 'Refund', 'Reason']
                 }
                 rows={data?.sales_returns.rows || []}
+                numericCols={numericColumns(data?.sales_returns.columns)}
                 empty="No recent sales returns"
                 selectedRowIndex={salesHistSel}
                 onRowClick={setSalesHistSel}
@@ -1947,10 +1955,10 @@ export function ReturnsPage({
 
       {tab === 'purchase' && (
         <>
-          <SectionFrame title="Step 1 — Find original purchase">
+          <SectionFrame title="Step 1 — Find original purchase" className="lp-step">
             <div ref={purchaseBillListRef}>
-            <FilterBar>
-              <Field label="Purchase No / Supplier">
+            <FilterBar className="lp-formrow">
+              <Field label="Purchase No / Supplier" className="field-bill-search">
                 <ModernCombo
                   value={purchaseQuery}
                   placeholder="Search purchase…"
@@ -1995,11 +2003,11 @@ export function ReturnsPage({
             {purchaseBillInfo ? <Note>{purchaseBillInfo}</Note> : null}
           </SectionFrame>
 
-          <SectionFrame title="Step 2 — Add return (pick medicine → qty → Enter)">
+          <SectionFrame title="Step 2 — Add return (pick medicine → qty → Enter)" className="lp-step">
             {purchaseBill ? (
               <>
-                <FilterBar>
-                  <Field label="Medicine in purchase">
+                <FilterBar className="lp-formrow">
+                  <Field label="Medicine in purchase" className="lp-f-wide">
                     <ModernCombo
                       value={purchaseBillMedPick}
                       placeholder="Pick medicine from purchase…"
@@ -2036,7 +2044,7 @@ export function ReturnsPage({
                       onEnter={addPurchaseReturnItem}
                     />
                   </Field>
-                  <Field label="Return Qty">
+                  <Field label="Return Qty" className="lp-f-qty">
                     <input
                       className="settings-input"
                       type="number"
@@ -2078,14 +2086,14 @@ export function ReturnsPage({
                   tabIndex={-1}
                   data-return-focus="qty"
                 >
-                  <table className="settings-table">
+                  <table className="settings-table lp-pick-table">
                     <thead>
                       <tr>
                         <th>Medicine</th>
                         <th>Batch</th>
-                        <th>Qty Purchased</th>
-                        <th>Returnable</th>
-                        <th>Rate</th>
+                        <th className="num">Qty Purchased</th>
+                        <th className="num">Returnable</th>
+                        <th className="num">Rate</th>
                         <th>Type</th>
                       </tr>
                     </thead>
@@ -2110,14 +2118,14 @@ export function ReturnsPage({
                         >
                           <td>{it.name}</td>
                           <td>{it.batch}</td>
-                          <td>{it.orig_qty}</td>
-                          <td>
+                          <td className="num">{it.orig_qty}</td>
+                          <td className="num">
                             {purchaseRemainingQty(
                               it.medicine_id,
                               it.remaining_qty,
                             )}
                           </td>
-                          <td>{money(it.rate || 0)}</td>
+                          <td className="num">{money(it.rate || 0)}</td>
                           <td>{it.type || '—'}</td>
                         </tr>
                       ))}
@@ -2126,13 +2134,13 @@ export function ReturnsPage({
                 </div>
               </>
             ) : (
-              <Note>
+              <EmptyState>
                 Load a purchase, then pick a medicine from the loaded bill.
-              </Note>
+              </EmptyState>
             )}
           </SectionFrame>
 
-          <SectionFrame title="Step 3 — Items to return">
+          <SectionFrame title="Step 3 — Items to return" className="lp-step">
             {purchaseReturnItems.length ? (
               <div className="settings-table-wrap">
                 <table className="settings-table">
@@ -2140,10 +2148,10 @@ export function ReturnsPage({
                     <tr>
                       <th>Medicine</th>
                       <th>Batch</th>
-                      <th>Return Qty</th>
-                      <th>Rate</th>
-                      <th>Amount</th>
-                      <th />
+                      <th className="num">Return Qty</th>
+                      <th className="num">Rate</th>
+                      <th className="num">Amount</th>
+                      <th className="col-actions" />
                     </tr>
                   </thead>
                   <tbody>
@@ -2151,13 +2159,14 @@ export function ReturnsPage({
                       <tr key={it.medicine_id}>
                         <td>{it.name}</td>
                         <td>{it.batch}</td>
-                        <td>{tabletCountNote(it.qty, it.is_tablet, it.tablets_per_stripe) || it.qty}</td>
-                        <td>{money(it.rate)}</td>
-                        <td>{money(it.amount)}</td>
-                        <td>
+                        <td className="num">{tabletCountNote(it.qty, it.is_tablet, it.tablets_per_stripe) || it.qty}</td>
+                        <td className="num">{money(it.rate)}</td>
+                        <td className="num">{money(it.amount)}</td>
+                        <td className="col-actions">
                           <ActionBtn
                             label="Remove"
                             variant="neutral"
+                            small
                             onClick={() =>
                               removePurchaseReturnItem(it.medicine_id)
                             }
@@ -2169,13 +2178,13 @@ export function ReturnsPage({
                 </table>
               </div>
             ) : (
-              <Note>No items added yet.</Note>
+              <EmptyState>No items added yet. Pick a medicine in Step 2, enter the qty and press Enter.</EmptyState>
             )}
           </SectionFrame>
 
-          <SectionFrame title="Step 4 — Confirm & save">
-            <FilterBar>
-              <Field label="Discount">
+          <SectionFrame title="Step 4 — Confirm & save" className="lp-step">
+            <FilterBar className="lp-formrow">
+              <Field label="Discount" className="lp-f-qty">
                 <input
                   className="settings-input"
                   type="number"
@@ -2183,7 +2192,7 @@ export function ReturnsPage({
                   onChange={(e) => setPurchaseDisc(e.target.value)}
                 />
               </Field>
-              <Field label="Reason">
+              <Field label="Reason" className="lp-f-wide">
                 <input
                   className="settings-input"
                   value={purchaseReason}
@@ -2191,7 +2200,7 @@ export function ReturnsPage({
                 />
               </Field>
             </FilterBar>
-            <Note>Estimated credit to supplier: {money(purchaseRefundPreview)}</Note>
+            <p className="settings-note lp-total">Estimated credit to supplier: <strong>{money(purchaseRefundPreview)}</strong></p>
             <ActionBar>
               <ActionBtn
                 label={
@@ -2242,6 +2251,7 @@ export function ReturnsPage({
               <ActionBtn
                 label="Delete Return"
                 variant="warning"
+                className="lp-danger"
                 disabled={saving || purchaseHistSel == null}
                 onClick={() => void deleteSelectedPurchaseReturn()}
               />
@@ -2261,6 +2271,7 @@ export function ReturnsPage({
                       ]
                 }
                 rows={data?.purchase_returns.rows || []}
+                numericCols={numericColumns(data?.purchase_returns.columns)}
                 empty="No recent purchase returns"
                 selectedRowIndex={purchaseHistSel}
                 onRowClick={setPurchaseHistSel}
@@ -2272,9 +2283,9 @@ export function ReturnsPage({
 
       {tab === 'disposal' && (
         <>
-          <SectionFrame title="Return / Write-off">
-            <FilterBar>
-              <Field label="Medicine">
+          <SectionFrame title="Return / Write-off" className="lp-step">
+            <FilterBar className="lp-formrow">
+              <Field label="Medicine" className="lp-f-wide">
                 <ModernCombo
                   value={dispMed}
                   filterLocal
@@ -2305,7 +2316,7 @@ export function ReturnsPage({
                   onChange={(e) => setDispBatch(e.target.value)}
                 />
               </Field>
-              <Field label="Qty">
+              <Field label="Qty" className="lp-f-qty">
                 <input
                   className="settings-input"
                   type="number"
@@ -2327,7 +2338,7 @@ export function ReturnsPage({
                   <option value="return">Purchase return (disposal)</option>
                 </select>
               </Field>
-              <Field label="Reason">
+              <Field label="Reason" className="lp-f-wide">
                 <input
                   className="settings-input"
                   value={dispReason}
@@ -2358,6 +2369,7 @@ export function ReturnsPage({
                     : ['Disposal No', 'Date', 'Qty', 'Reason']
                 }
                 rows={data?.writeoffs.rows || []}
+                numericCols={numericColumns(data?.writeoffs.columns)}
                 empty="No recent write-offs"
               />
             </div>
@@ -2367,7 +2379,7 @@ export function ReturnsPage({
 
       {tab === 'bulk' && (
         <>
-          <SectionFrame title="Near / Expiry — grouped by purchase bill">
+          <SectionFrame title="Near / Expiry — grouped by purchase bill" className="lp-step">
             <Note>
               Same flow as classic Bulk Purchase Return: one tab per purchase
               bill, then write-offs for stock with no purchase record.
@@ -2393,8 +2405,8 @@ export function ReturnsPage({
             </ActionBar>
             {bulkGroups.length ? (
               <>
-                <FilterBar>
-                  <Field label="Purchase bill">
+                <FilterBar className="lp-formrow">
+                  <Field label="Purchase bill" className="lp-f-wide">
                     <select
                       className="settings-input"
                       value={bulkIdx}
@@ -2427,8 +2439,8 @@ export function ReturnsPage({
                           <tr>
                             <th>Medicine</th>
                             <th>Batch</th>
-                            <th>Return qty</th>
-                            <th>Rate</th>
+                            <th className="num">Return qty</th>
+                            <th className="num">Rate</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -2436,8 +2448,8 @@ export function ReturnsPage({
                             <tr key={`${it.medicine_id}-${it.batch}`}>
                               <td>{it.name}</td>
                               <td>{it.batch}</td>
-                              <td>{it.qty ?? it.remaining_qty}</td>
-                              <td>{money(it.rate || 0)}</td>
+                              <td className="num">{it.qty ?? it.remaining_qty}</td>
+                              <td className="num">{money(it.rate || 0)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -2447,10 +2459,10 @@ export function ReturnsPage({
                 ) : null}
               </>
             ) : (
-              <Note>No bulk return data loaded.</Note>
+              <EmptyState>No bulk return data loaded. Press Load candidates.</EmptyState>
             )}
             {bulkWriteoffs.length ? (
-              <SectionFrame title="Write-off (no purchase record)">
+              <SectionFrame title="Write-off (no purchase record)" className="lp-step">
                 <div
                   ref={bulkWriteoffRef}
                   className="settings-table-wrap"
@@ -2462,7 +2474,7 @@ export function ReturnsPage({
                       <tr>
                         <th>Medicine</th>
                         <th>Batch</th>
-                        <th>Qty</th>
+                        <th className="num">Qty</th>
                         <th>Tag</th>
                       </tr>
                     </thead>
@@ -2471,7 +2483,7 @@ export function ReturnsPage({
                         <tr key={`${line.medicine_id}-${i}`}>
                           <td>{line.medicine_name}</td>
                           <td>{line.batch_no}</td>
-                          <td>{line.quantity}</td>
+                          <td className="num">{line.quantity}</td>
                           <td>{line.reason_tag}</td>
                         </tr>
                       ))}
@@ -2502,9 +2514,9 @@ export function ReturnsPage({
                   <tr>
                     <th>Medicine</th>
                     <th>Batch</th>
-                    <th>Qty</th>
-                    <th>Rate</th>
-                    <th>Amount</th>
+                    <th className="num">Qty</th>
+                    <th className="num">Rate</th>
+                    <th className="num">Amount</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2512,9 +2524,9 @@ export function ReturnsPage({
                     <tr key={`${it.name}-${i}`}>
                       <td>{it.name}</td>
                       <td>{it.batch || '—'}</td>
-                      <td>{it.qty.toFixed(2)}</td>
-                      <td>{it.rate.toFixed(2)}</td>
-                      <td>{it.amount.toFixed(2)}</td>
+                      <td className="num">{it.qty.toFixed(2)}</td>
+                      <td className="num">{it.rate.toFixed(2)}</td>
+                      <td className="num">{it.amount.toFixed(2)}</td>
                     </tr>
                   ))}
                   {!purchaseDetail.items.length ? (
