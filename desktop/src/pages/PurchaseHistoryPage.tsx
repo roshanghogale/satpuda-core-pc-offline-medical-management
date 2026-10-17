@@ -196,10 +196,15 @@ export function PurchaseHistoryPage({
   // (17 Oct 2026). A change made while the page was hidden is loaded the moment it
   // is opened again. (Do not skip while a prior load is running.)
   const seenSyncNonce = useRef(0)
+  const wasActiveRef = useRef(active)
   useEffect(() => {
+    const justShown = active && !wasActiveRef.current
+    wasActiveRef.current = active
     if (!syncRefreshNonce || !active) return
     if (seenSyncNonce.current === syncRefreshNonce) return
     seenSyncNonce.current = syncRefreshNonce
+    // Coming back to the page reloads it already (the [active] effect): one load, not two.
+    if (justShown) return
     void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [syncRefreshNonce, active])
