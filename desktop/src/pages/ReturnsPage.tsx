@@ -1,3 +1,4 @@
+import { showSavedFile } from '../savedFiles'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { norm, pickOption, registerVoicePage, setVoicePlace, type VoiceHandler } from '../voice/voiceBus'
 import { focusTableSection, usePageHotkeys } from '../hooks/usePageHotkeys'
@@ -704,6 +705,8 @@ export function ReturnsPage({
         return
       }
       setNote(`PDF saved: ${res.path || res.pdf_path || res.return_no || ''}`)
+      const savedPath = String(res.path || res.pdf_path || '')
+      if (savedPath) showSavedFile({ path: savedPath })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {

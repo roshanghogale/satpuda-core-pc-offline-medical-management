@@ -8,6 +8,8 @@ type Props = {
   printing?: boolean
   onClose: () => void
   onPrint?: (slot: 1 | 2, mode: 'slot' | 'silent') => void
+  /** Keep the bill as a PDF instead of printing it (owner, 17 Oct 2026). */
+  onSavePdf?: () => void
 }
 
 export function BillPreviewDialog({
@@ -20,6 +22,7 @@ export function BillPreviewDialog({
   printing,
   onClose,
   onPrint,
+  onSavePdf,
 }: Props) {
   if (!open) return null
   const canPrint = Boolean(saleId && onPrint && !loading && !error)
@@ -77,6 +80,16 @@ export function BillPreviewDialog({
                 Silent Reprint (F9)
               </button>
             </>
+          ) : null}
+          {saleId && onSavePdf && !loading && !error ? (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={printing}
+              onClick={onSavePdf}
+            >
+              Save PDF
+            </button>
           ) : null}
           <button type="button" className="btn btn-primary" onClick={onClose}>
             Close

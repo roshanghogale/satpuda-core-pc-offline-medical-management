@@ -6,6 +6,7 @@
  *  cannot be sure of (a rate taken from the medicine master, no HSN code ...) are listed under
  *  "Checks", never guessed.
  */
+import { saveFileAndShow } from '../savedFiles'
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { getApiBase } from '../api'
@@ -433,18 +434,6 @@ function currentFy(): number {
   return d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1
 }
 
-function downloadBase64(filename: string, mime: string, b64: string) {
-  const bin = atob(b64)
-  const bytes = new Uint8Array(bin.length)
-  for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i)
-  const url = URL.createObjectURL(new Blob([bytes], { type: mime }))
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
-}
-
 const money = (v: unknown) =>
   typeof v === 'number' ? v.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : String(v ?? '')
 
@@ -516,8 +505,8 @@ export function GstReportsDialog({ open, onClose }: { open: boolean; onClose: ()
       }
       if (!res.ok || data.ok === false) throw new Error(data.error || `HTTP ${res.status}`)
       if (data.content_base64 && data.filename) {
-        downloadBase64(data.filename, data.mime || 'application/octet-stream', data.content_base64)
-        setMsg(`${data.filename} save zali (Downloads)`)
+        const saved = await saveFileAndShow(data.filename, data.mime || 'application/octet-stream', data.content_base64)
+        setMsg(saved ? `${data.filename} save zali: ${saved.folder || ''}` : `${data.filename} save zali (Downloads)`)
       } else {
         setMsg(data.message || 'Print la pathavle')
       }

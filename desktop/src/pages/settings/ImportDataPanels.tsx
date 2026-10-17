@@ -1,5 +1,6 @@
 /** Import + Data & System settings — mirrors Tk Import / Database tabs. */
 
+import { showSavedFile } from '../../savedFiles'
 import { useEffect, useRef, useState } from 'react'
 import { expiryProblem, formatExpiryMmYy } from '../../expiryText'
 import {
@@ -2262,7 +2263,12 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
                 type="button"
                 className="settings-action-btn"
                 disabled={busy}
-                onClick={() => run('export', { kind, format: fmt })}
+                onClick={() =>
+                  void run('export', { kind, format: fmt }).then((res) => {
+                    const p = String((res as Record<string, unknown> | null)?.path || '')
+                    if (p) showSavedFile({ path: p })
+                  })
+                }
               >
                 {label}
               </button>

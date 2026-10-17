@@ -5131,76 +5131,58 @@ def system_action(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, A
         fmt = str(data.get("format") or load_default_export_format() or "csv").lower()
 
         def _export(work_conn: sqlite3.Connection, progress: ProgressCb) -> dict[str, Any]:
+            # Home -> Export Data used to import an ExportManager class that does not
+            # exist, so Offline it saved nothing while the dialog said "Export
+            # complete"; Online it wrote a bare CSV into %TEMP%. Now it exports what the
+            # Sales History, Purchase History and Inventory screens list, in either
+            # mode, into the shop's reports folder, and says where (owner, 17 Oct 2026).
             try:
-                from core.sync_prefs import is_online_mode
+                from core import desktop_pages_service as pages
+                from core.export_manager import export_all_combined_direct, export_data_direct
+                from core.saved_files import describe, remember, reports_dir
 
-                if is_online_mode():
-                    import csv
-                    import tempfile
-                    from core import store_query_client as sq
+                def _cell(v):
+                    return v if v is None or isinstance(v, (int, float, str)) else str(v)
 
+                def _section(which: str):
                     if progress:
-                        progress(f"Fetching {kind} from server…")
-                    if kind == "sales":
-                        data = sq.list_sales(limit=5000) or {}
-                        rows = data.get("rows") or data.get("sales") or []
-                        headers = ["id", "bill_no", "bill_date", "customer_name", "total_amount", "amount_paid"]
-                    elif kind == "purchases":
-                        data = sq.list_purchases(limit=5000) or {}
-                        rows = data.get("rows") or data.get("purchases") or []
-                        headers = ["id", "purchase_no", "purchase_date", "supplier_name", "final_amount"]
-                    elif kind == "inventory":
-                        data = sq.list_inventory(limit=10000) or {}
-                        rows = data.get("rows") or data.get("medicines") or []
-                        headers = ["id", "name", "batch_no", "stock_qty", "mrp", "rate"]
+                        progress(f"Reading {which}…")
+                    if which == "sales":
+                        title, got = "Sales", pages.list_sales_history(work_conn)
+                    elif which == "purchases":
+                        title, got = "Purchases", pages.list_purchase_history(work_conn, limit=100000)
                     else:
-                        return {
-                            "ok": False,
-                            "error": "Online export supports sales, purchases, or inventory.",
-                        }
-                    fd, path = tempfile.mkstemp(prefix=f"satpuda_{kind}_", suffix=".csv")
-                    import os
-                    os.close(fd)
-                    with open(path, "w", newline="", encoding="utf-8") as fh:
-                        w = csv.DictWriter(fh, fieldnames=headers, extrasaction="ignore")
-                        w.writeheader()
-                        for r in rows:
-                            if isinstance(r, dict):
-                                w.writerow({h: r.get(h, r.get("local_id") if h == "id" else "") for h in headers})
-                    return {
-                        "ok": True,
-                        "path": path,
-                        "kind": kind,
-                        "format": "csv",
-                        "message": f"Exported from server: {path}",
-                    }
+                        title, got = "Inventory", pages.list_inventory(work_conn, limit=100000)
+                    if got.get("server_error"):
+                        raise RuntimeError(str(got["server_error"]))
+                    headers = [str(c) for c in (got.get("columns") or [])]
+                    rows = [[_cell(v) for v in r] for r in (got.get("rows") or [])]
+                    return title, headers, rows
 
-                from core.export_manager import ExportManager
-
+                if kind not in ("sales", "purchases", "inventory", "all"):
+                    return {"ok": False, "error": f"Unknown export: {kind}"}
+                folder = reports_dir()
                 if progress:
                     progress(f"Exporting {kind} ({fmt})…")
-                em = ExportManager(work_conn)
-                path = None
-                if kind == "sales" and hasattr(em, "export_sales"):
-                    path = em.export_sales(fmt)
-                elif kind == "purchases" and hasattr(em, "export_purchases"):
-                    path = em.export_purchases(fmt)
-                elif kind == "inventory" and hasattr(em, "export_inventory"):
-                    path = em.export_inventory(fmt)
-                elif kind == "all" and hasattr(em, "export_all"):
-                    path = em.export_all(fmt)
-                return {
-                    "ok": True,
-                    "path": path,
-                    "kind": kind,
-                    "format": fmt,
-                    "message": f"Exported: {path}" if path else "Export finished.",
-                }
+                if kind == "all":
+                    sections = [_section(k) for k in ("sales", "purchases", "inventory")]
+                    saved, msg = export_all_combined_direct(None, sections, fmt, folder=folder)
+                else:
+                    title, headers, rows = _section(kind)
+                    saved, msg = export_data_direct(
+                        None, title, headers, rows, default_name=f"{kind}_export", fmt=fmt,
+                        speak_path=False, folder=folder,
+                    )
+                if not saved:
+                    return {"ok": False, "error": msg or "Export failed."}
+                out = describe(remember(saved), msg)
+                out.update({"kind": kind, "format": fmt})
+                return out
             except Exception as exc:
                 return {
                     "ok": False,
                     "error": str(exc),
-                    "message": f"Export '{kind}' as {fmt} — open classic app if this fails.",
+                    "message": f"Export '{kind}' as {fmt} failed.",
                 }
 
         return _begin_heavy(

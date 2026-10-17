@@ -1626,9 +1626,14 @@ export function printAllSalesBills(body: {
   /** '' | 'customer' | 'store' -- printed under each bill (standard print). */
   copy_label?: string
   slot?: number
+  /** Save the same pages as one PDF in the reports folder instead of printing. */
+  save_pdf?: boolean
 }) {
   return postJson<{
     ok: boolean
+    path?: string
+    file_name?: string
+    folder?: string
     pages?: number
     total?: number
     failures?: string[]
