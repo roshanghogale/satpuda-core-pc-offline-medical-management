@@ -1263,13 +1263,17 @@ def _compact_footer(ctx, settings: dict) -> list[str]:
 
 
 def _build_footer(ctx, settings: dict) -> list[str]:
-    # Both slips end the same way now: the nice line, the signature in the middle and
-    # the money on the right, one block. The old slip's separate "I WISH FOR YOUR
-    # SPEEDY RECOVERY" block is gone -- the shop asked for that room back.
+    # The new footer (default): the nice line, the signature in the middle and the money
+    # on the right, one block. The old one -- money first, then "For SHOP" and the
+    # signature on the right under it -- is the shop's other choice (owner, 18 Oct 2026:
+    # "two printing styles, the first one and the new one"), the same setting as the
+    # standard bill's (signature_position).
+    if str(settings.get("signature_position") or "center").strip().lower() == "right":
+        return _build_footer_classic(ctx, settings)
     return _compact_footer(ctx, settings)
 
 
-def _build_footer_classic_unused(ctx, settings: dict) -> list[str]:
+def _build_footer_classic(ctx, settings: dict) -> list[str]:
     continued = bool(getattr(ctx, "is_continued", False))
     out: list[str] = []
 

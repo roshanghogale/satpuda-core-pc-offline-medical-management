@@ -30,6 +30,10 @@ DEFAULT_BILL_PRINT_SETTINGS = {
     "show_doctor": True,
     "show_terms": True,
     "show_signature": True,
+    # "center": signature box between the messages and the totals, no "For SHOP" (new,
+    # 18 Oct 2026); "right": the old place, under the totals with "For SHOP". Standard
+    # bills and dot matrix slips alike.
+    "signature_position": "center",
     "print_signature_image": True,
     "show_gross_total": False,
     "show_store_name": True,
@@ -559,6 +563,11 @@ def get_print_slot_settings(settings: Dict[str, Any] | None, slot: int) -> Dict[
         ):
             if field in slot_cfg and slot_cfg[field] is not None:
                 base[field] = slot_cfg[field]
+        # The footer style per button: blank inherits the Bill Template choice, so Print
+        # Sales 1 can print the old footer and Print Sales 2 the new one (18 Oct 2026).
+        sig_pos = str(slot_cfg.get("signature_position") or "").strip().lower()
+        if sig_pos in ("center", "right"):
+            base["signature_position"] = sig_pos
         # Only an explicit dot-matrix choice on the slot overrides the global default.
         # Slots saved as "Full size" inherit Paper & Copies bill size (dot matrix, shrink %).
         # Three states, not two. ABSENT (or blank) means inherit Paper & Copies;
