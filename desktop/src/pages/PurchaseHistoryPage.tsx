@@ -615,29 +615,6 @@ export function PurchaseHistoryPage({
       <StatusLine error={error} loading={loading && !data} />
       {payMsg ? <Note>{payMsg}</Note> : null}
 
-      {/* Above the list now (design rule 10): the figures first, then the bills. */}
-      {showSummary ? (
-        <SummaryStrip
-          title="Purchase Summary"
-          items={[
-            { label: 'Bills', value: summary.bills ?? 0, tone: 'accent' },
-            { label: 'Final Amount', value: money(summary.total) },
-            { label: 'Paid at Entry', value: money(summary.paid) },
-            { label: 'Entry Due', value: money(summary.due), tone: toneIf(summary.due, 'danger') },
-            {
-              label: 'Supplier Due',
-              value: money(summary.supplier_due),
-              tone: toneIf(summary.supplier_due, 'danger'),
-            },
-            {
-              label: 'Supplier Credit',
-              value: money(summary.supplier_credit),
-              tone: toneIf(summary.supplier_credit, 'success'),
-            },
-          ]}
-        />
-      ) : null}
-
       <Panel
         title="Purchase History — Bills List"
         className="filter-panel list-table-panel"
@@ -689,6 +666,29 @@ export function PurchaseHistoryPage({
           }}
         />
       </Panel>
+
+      {/* Under the list, where the shop looks for them (owner, 18 Oct 2026). */}
+      {showSummary ? (
+        <SummaryStrip
+          title="Purchase Summary"
+          items={[
+            { label: 'Bills', value: summary.bills ?? 0, tone: 'accent' },
+            { label: 'Final Amount', value: money(summary.total) },
+            { label: 'Paid at Entry', value: money(summary.paid) },
+            { label: 'Entry Due', value: money(summary.due), tone: toneIf(summary.due, 'danger') },
+            {
+              label: 'Supplier Due',
+              value: money(summary.supplier_due),
+              tone: toneIf(summary.supplier_due, 'danger'),
+            },
+            {
+              label: 'Supplier Credit',
+              value: money(summary.supplier_credit),
+              tone: toneIf(summary.supplier_credit, 'success'),
+            },
+          ]}
+        />
+      ) : null}
 
       <PayDueDialog
         kind="purchase"

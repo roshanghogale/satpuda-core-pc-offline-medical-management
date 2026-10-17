@@ -95,7 +95,6 @@ export const SETTINGS_TABS: TabDef[] = [
       { id: 'med_types', label: 'Medicine Types' },
       { id: 'units', label: 'Medicine Units' },
       { id: 'schedules', label: 'Schedules' },
-      { id: 'thresholds', label: 'Thresholds & Reorder' },
       { id: 'sales_margin', label: 'Sales Margin Display' },
       { id: 'record_indicators', label: 'Record Indicators' },
       { id: 'app_mode', label: 'App Mode' },

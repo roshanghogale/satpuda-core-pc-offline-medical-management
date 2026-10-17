@@ -674,43 +674,6 @@ export function InventoryPage({
 
       <StatusLine error={error} loading={loading && !data} />
 
-      {/* Above the list now (design rule 10): the figures first, then the shelf. */}
-      {showSummary ? (
-        <SummaryStrip
-          title="Inventory Summary"
-          items={[
-            { label: 'Total Medicines', value: summary.total_medicines ?? 0, tone: 'accent' },
-            {
-              label: 'Low Stock',
-              value: summary.low_stock ?? 0,
-              tone: Number(summary.low_stock) > 0 ? 'warning' : undefined,
-            },
-            {
-              label: 'Out of Stock',
-              value: summary.out_of_stock ?? 0,
-              tone: Number(summary.out_of_stock) > 0 ? 'danger' : undefined,
-            },
-            {
-              label: 'Near Expiry',
-              value: summary.near_expiry ?? 0,
-              tone: Number(summary.near_expiry) > 0 ? 'warning' : undefined,
-            },
-            {
-              label: 'Expired',
-              value: summary.expired ?? 0,
-              tone: Number(summary.expired) > 0 ? 'danger' : undefined,
-            },
-            {
-              label: 'Total Value (MRP)',
-              value: `₹${Number(summary.total_value || 0).toLocaleString('en-IN', {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}`,
-            },
-          ]}
-        />
-      ) : null}
-
       <Panel
         title="Inventory — Medicine List"
         className="filter-panel list-table-panel"
@@ -752,6 +715,43 @@ export function InventoryPage({
           }}
         />
       </Panel>
+
+      {/* Under the list, where the shop looks for them (owner, 18 Oct 2026). */}
+      {showSummary ? (
+        <SummaryStrip
+          title="Inventory Summary"
+          items={[
+            { label: 'Total Medicines', value: summary.total_medicines ?? 0, tone: 'accent' },
+            {
+              label: 'Low Stock',
+              value: summary.low_stock ?? 0,
+              tone: Number(summary.low_stock) > 0 ? 'warning' : undefined,
+            },
+            {
+              label: 'Out of Stock',
+              value: summary.out_of_stock ?? 0,
+              tone: Number(summary.out_of_stock) > 0 ? 'danger' : undefined,
+            },
+            {
+              label: 'Near Expiry',
+              value: summary.near_expiry ?? 0,
+              tone: Number(summary.near_expiry) > 0 ? 'warning' : undefined,
+            },
+            {
+              label: 'Expired',
+              value: summary.expired ?? 0,
+              tone: Number(summary.expired) > 0 ? 'danger' : undefined,
+            },
+            {
+              label: 'Total Value (MRP)',
+              value: `₹${Number(summary.total_value || 0).toLocaleString('en-IN', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}`,
+            },
+          ]}
+        />
+      ) : null}
 
       <ExpiredReturnDialog
         open={expiredReturnOpen}
