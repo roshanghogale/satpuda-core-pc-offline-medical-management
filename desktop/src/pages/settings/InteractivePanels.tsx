@@ -43,6 +43,7 @@ import {
   Frame,
   Note,
   PanelTitle,
+  SaveBar,
   SaveBtn,
 } from './SettingsChrome'
 import { CappedTableWrap } from '../pageChrome'
@@ -3821,88 +3822,115 @@ export function ThresholdsPanel({
     }
   }
 
+  const [filter, setFilter] = useState('')
+  const types = local.med_types.filter((mt) =>
+    mt.toLowerCase().includes(filter.trim().toLowerCase()),
+  )
+
   return (
     <>
       <PanelTitle>Thresholds &amp; Reorder</PanelTitle>
-      {err ? <p className="error">{err}</p> : null}
-      {msg ? <Note>{msg}</Note> : null}
-      <h4>Low Stock</h4>
-      <div className="settings-grid-3">
-        {local.med_types.map((mt) => {
-          const key = mt.toLowerCase()
-          return (
-            <Field key={`low-${mt}`} label={mt}>
-              <input
-                className="settings-input"
-                value={local.low_stock[key] ?? '10'}
-                onChange={(e) =>
-                  setLocal((t) => ({
-                    ...t,
-                    low_stock: { ...t.low_stock, [key]: e.target.value },
-                  }))
-                }
-              />
-            </Field>
-          )
-        })}
-      </div>
-      <h4>Near Expiry (months)</h4>
-      <div className="settings-grid-3">
-        {local.med_types.map((mt) => {
-          const key = mt.toLowerCase()
-          return (
-            <Field key={`near-${mt}`} label={mt}>
-              <input
-                className="settings-input"
-                value={local.near_expiry[key] ?? '3'}
-                onChange={(e) =>
-                  setLocal((t) => ({
-                    ...t,
-                    near_expiry: { ...t.near_expiry, [key]: e.target.value },
-                  }))
-                }
-              />
-            </Field>
-          )
-        })}
-      </div>
-      <Field label="Minimum Due Amount (Rs)">
-        <input
-          className="settings-input"
-          value={local.customer_due_min_amount}
-          onChange={(e) =>
-            setLocal((t) => ({
-              ...t,
-              customer_due_min_amount: e.target.value,
-            }))
-          }
-        />
-      </Field>
-      <Field label="Minimum Due Days">
-        <input
-          className="settings-input"
-          value={local.customer_due_min_days}
-          onChange={(e) =>
-            setLocal((t) => ({
-              ...t,
-              customer_due_min_days: e.target.value,
-            }))
-          }
-        />
-      </Field>
-      <Field label="Default reorder qty">
-        <input
-          className="settings-input"
-          value={local.reorder_default_qty}
-          onChange={(e) =>
-            setLocal((t) => ({
-              ...t,
-              reorder_default_qty: e.target.value,
-            }))
-          }
-        />
-      </Field>
-      <SaveBtn label="Save Thresholds" saving={saving} onClick={save} />
+      <Frame title="Low stock and near expiry, per medicine type">
+        <Note>
+          Low stock: alert when the total stock of a medicine (all batches, in the
+          units the inventory shows) is below this number. Near expiry: alert this
+          many months before a batch expires.
+        </Note>
+        {local.med_types.length > 12 ? (
+          <input
+            className="settings-input settings-type-filter"
+            placeholder="Find a medicine type…"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+          />
+        ) : null}
+        <table className="settings-type-table">
+          <thead>
+            <tr>
+              <th>Medicine type</th>
+              <th>Low stock below</th>
+              <th>Near expiry within (months)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {types.map((mt) => {
+              const key = mt.toLowerCase()
+              return (
+                <tr key={mt}>
+                  <td>{mt}</td>
+                  <td>
+                    <input
+                      className="settings-input"
+                      inputMode="numeric"
+                      aria-label={`${mt} low stock below`}
+                      value={local.low_stock[key] ?? '10'}
+                      onChange={(e) =>
+                        setLocal((t) => ({
+                          ...t,
+                          low_stock: { ...t.low_stock, [key]: e.target.value },
+                        }))
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="settings-input"
+                      inputMode="numeric"
+                      aria-label={`${mt} near expiry months`}
+                      value={local.near_expiry[key] ?? '3'}
+                      onChange={(e) =>
+                        setLocal((t) => ({
+                          ...t,
+                          near_expiry: { ...t.near_expiry, [key]: e.target.value },
+                        }))
+                      }
+                    />
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </Frame>
+      <Frame title="Customer dues and reorder">
+        <Field label="Minimum due amount (Rs)">
+          <input
+            className="settings-input"
+            value={local.customer_due_min_amount}
+            onChange={(e) =>
+              setLocal((t) => ({
+                ...t,
+                customer_due_min_amount: e.target.value,
+              }))
+            }
+          />
+        </Field>
+        <Field label="Minimum due days">
+          <input
+            className="settings-input"
+            value={local.customer_due_min_days}
+            onChange={(e) =>
+              setLocal((t) => ({
+                ...t,
+                customer_due_min_days: e.target.value,
+              }))
+            }
+          />
+        </Field>
+        <Field label="Default reorder qty">
+          <input
+            className="settings-input"
+            value={local.reorder_default_qty}
+            onChange={(e) =>
+              setLocal((t) => ({
+                ...t,
+                reorder_default_qty: e.target.value,
+              }))
+            }
+          />
+        </Field>
+      </Frame>
+      <SaveBar label="Save Thresholds" saving={saving} onClick={save} msg={msg} err={err} />
     </>
   )
 }

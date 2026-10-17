@@ -17,6 +17,7 @@ import {
   Frame,
   Note,
   PanelTitle,
+  SaveBar,
   SaveBtn,
 } from './SettingsChrome'
 
@@ -518,11 +519,7 @@ export function LayoutListsPanel({
   }
 
   const saveBtn = (
-    <SaveBtn
-      label="Save Layout & Lists"
-      saving={saving}
-      onClick={onSaveLayout}
-    />
+    <SaveBar label="Save Layout & Lists" saving={saving} onClick={onSaveLayout} />
   )
 
   if (sectionId === 'columns') {
@@ -706,58 +703,64 @@ export function LayoutListsPanel({
   }
 
   if (sectionId === 'units') {
+    const units = (layoutLists.units || {}) as Record<
+      string,
+      { unit?: string; default_qty?: number }
+    >
+    const setUnit = (mt: string, patch: { unit?: string; default_qty?: number }) =>
+      setLayoutLists((l) => ({
+        ...l,
+        units: {
+          ...((l.units as object) || {}),
+          [mt]: { ...(units[mt] || { unit: '', default_qty: 0 }), ...patch },
+        },
+      }))
     return (
       <>
         <PanelTitle>Medicine Units</PanelTitle>
-        <Frame title="Units & default qty">
-          <div className="settings-grid-3">
-            {((layoutLists.med_types as string[]) || []).map((mt) => {
-              const units = (layoutLists.units || {}) as Record<
-                string,
-                { unit?: string; default_qty?: number }
-              >
-              const cfg = units[mt] || { unit: '', default_qty: 0 }
-              return (
-                <div key={mt} className="settings-unit-card">
-                  <strong>{mt}</strong>
-                  <Field label="Unit">
-                    <input
-                      className="settings-input"
-                      value={cfg.unit || ''}
-                      onChange={(e) =>
-                        setLayoutLists((l) => ({
-                          ...l,
-                          units: {
-                            ...((l.units as object) || {}),
-                            [mt]: { ...cfg, unit: e.target.value },
-                          },
-                        }))
-                      }
-                    />
-                  </Field>
-                  <Field label="Default qty">
-                    <input
-                      className="settings-input"
-                      type="number"
-                      value={cfg.default_qty ?? 0}
-                      onChange={(e) =>
-                        setLayoutLists((l) => ({
-                          ...l,
-                          units: {
-                            ...((l.units as object) || {}),
-                            [mt]: {
-                              ...cfg,
-                              default_qty: Number(e.target.value),
-                            },
-                          },
-                        }))
-                      }
-                    />
-                  </Field>
-                </div>
-              )
-            })}
-          </div>
+        <Frame title="Unit and default quantity, per medicine type">
+          <Note>
+            The unit shown beside the quantity on bills and lists, and the quantity a
+            new line starts with (0 = empty).
+          </Note>
+          <table className="settings-type-table">
+            <thead>
+              <tr>
+                <th>Medicine type</th>
+                <th>Unit</th>
+                <th>Default qty</th>
+              </tr>
+            </thead>
+            <tbody>
+              {((layoutLists.med_types as string[]) || []).map((mt) => {
+                const cfg = units[mt] || { unit: '', default_qty: 0 }
+                return (
+                  <tr key={mt}>
+                    <td>{mt}</td>
+                    <td>
+                      <input
+                        className="settings-input wide"
+                        aria-label={`${mt} unit`}
+                        value={cfg.unit || ''}
+                        onChange={(e) => setUnit(mt, { unit: e.target.value })}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        className="settings-input"
+                        type="number"
+                        aria-label={`${mt} default qty`}
+                        value={cfg.default_qty ?? 0}
+                        onChange={(e) =>
+                          setUnit(mt, { default_qty: Number(e.target.value) })
+                        }
+                      />
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </Frame>
         {saveBtn}
       </>

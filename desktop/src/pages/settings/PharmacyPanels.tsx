@@ -15,7 +15,9 @@ import {
   Field,
   Frame,
   Note,
+  Help,
   PanelTitle,
+  SaveBar,
   SaveBtn,
 } from './SettingsChrome'
 
@@ -710,7 +712,7 @@ export function PharmacyPanel(props: Props) {
           {sigMsg ? <Note>{sigMsg}</Note> : null}
         </Frame>
 
-        <SaveBtn
+        <SaveBar
           label="Save Profile"
           saving={saving}
           onClick={saveProfile}
@@ -791,7 +793,7 @@ export function PharmacyPanel(props: Props) {
             receipt.
           </Note>
         </Frame>
-        <SaveBtn
+        <SaveBar
           label="Save Bill Print Style"
           saving={saving}
           onClick={() => onSave({ bill })}
@@ -841,7 +843,7 @@ export function PharmacyPanel(props: Props) {
           the classic Pharmacy Profile → Bill Fields checkboxes (same saved
           keys).
         </Note>
-        <SaveBtn
+        <SaveBar
           label="Save Bill Print Style"
           saving={saving}
           onClick={() => onSave({ bill })}
@@ -901,7 +903,7 @@ export function PharmacyPanel(props: Props) {
             under Bill Fields → Invoice header.
           </Note>
         </Frame>
-        <SaveBtn
+        <SaveBar
           label="Save Bill Print Style"
           saving={saving}
           onClick={() => onSave({ bill })}
@@ -983,7 +985,7 @@ export function PharmacyPanel(props: Props) {
           </Note>
           {logoPath ? <LogoPreview path={logoPath} stamp={logoStamp} /> : null}
         </Frame>
-        <SaveBtn
+        <SaveBar
           label="Save Bill Print Style"
           saving={saving}
           onClick={() => onSave({ bill })}
@@ -1366,7 +1368,7 @@ export function PharmacyPanel(props: Props) {
             Shrink % fits the bill on A5/A6 without clipping borders.
           </Note>
         </Frame>
-        <SaveBtn
+        <SaveBar
           label="Save Bill Print Style"
           saving={saving}
           onClick={() => onSave({ bill })}
@@ -1405,14 +1407,14 @@ export function PharmacyPanel(props: Props) {
               setBill((b) => ({ ...b, print_slot_2_key: v }))
             }
           />
-          <Note>
+          <Help>
             Bill copies = identical slips of the same bill on one sheet (A5:
             1–2, A6: 1, A4: 1–4). Long bills (12+ lines) become multiple pages —
             one sheet per 12 medicines; copies duplicates that page only. e.g.
             36 lines → 3 sheets; A5×2 = 3 A5 pages with 2 identical slips each.
             Non-final pages show Continued...; last page shows Total. Half
             position = A5/A6 single-copy placement.
-          </Note>
+          </Help>
           <Field label="Enter on Online (Cash mode)">
             <select
               className="settings-input"
@@ -1454,7 +1456,7 @@ export function PharmacyPanel(props: Props) {
             page.
           </Note>
         </Frame>
-        <SaveBtn
+        <SaveBar
           label="Save Bill Print Style"
           saving={saving}
           onClick={() => onSave({ bill })}
