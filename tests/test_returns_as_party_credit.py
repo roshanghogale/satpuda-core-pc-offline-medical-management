@@ -143,7 +143,8 @@ class TheReturnIsCredit(_Shop):
         self.assertEqual(len(offered), 1)
         self.assertEqual(offered[0]["left"], 10.0)
         self.assertEqual(offered[0]["amount"], 10.0)
-        self.assertEqual(offered[0]["items"], [{"name": "COUGH SYRUP", "qty": 1, "amount": 10.0}])
+        self.assertEqual(offered[0]["items"], [{"name": "COUGH SYRUP", "qty": 1, "amount": 10.0,
+                                                "batch_no": "B1", "expiry": "2028-12-01", "mrp": 10.0}])
         self.assertTrue(offered[0]["bill_no"].startswith("SCB"))
         # the engine route the popup reads
         via_route = return_credit.open_returns_for_party(self.conn, "customer", party=CUSTOMER)
