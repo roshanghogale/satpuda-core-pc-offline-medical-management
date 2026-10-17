@@ -41,7 +41,8 @@ class ATaxInvoiceShowsItsTax(unittest.TestCase):
             gst_invoice = render_bill_html(ctx, _settings("classic"))
         self.assertIn('<div class="inv-title">TAX INVOICE</div>', tax_invoice)
         self.assertIn('<tr><td>GST</td><td class="r">26.78</td></tr>', tax_invoice)
-        self.assertIn("GST 223.22*6+6%=13.38SGST+13.40CGST", tax_invoice)
+        # the new one-row footer (18 Oct 2026) states the GST working on its own line
+        self.assertIn("Taxable 223.22 | SGST 6% 13.38 | CGST 6% 13.40", tax_invoice)
         self.assertEqual(tax_invoice.replace("TAX INVOICE", "GST INVOICE"), gst_invoice)
 
     def test_the_dot_matrix_slip_too(self):

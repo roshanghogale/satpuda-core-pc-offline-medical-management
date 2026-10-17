@@ -36,14 +36,36 @@ def _slip(**over) -> str:
 class StandardBill(unittest.TestCase):
     def test_new_is_the_default(self):
         body = _standard()
-        self.assertIn("bottom-zone-sign-center", body)
+        self.assertIn("bottom-zone-one-row", body)
         self.assertNotIn("For SATPUDA MEDICAL", body)
         self.assertIn("SIGN OF Q.P.", body)
 
     def test_old_keeps_for_shop_on_the_right(self):
         body = _standard(signature_position="right")
-        self.assertNotIn("bottom-zone-sign-center", body)
+        self.assertNotIn("bottom-zone-one-row", body)
         self.assertIn("For SATPUDA MEDICAL", body)
+
+
+class TheNewFooterIsOneRow(unittest.TestCase):
+    """Owner, 18 Oct 2026: no empty row under HAVE A NICE DAY -- that height goes to the
+    medicine table, so more medicines fit; GST working on its own line, the nice line under it."""
+
+    def test_one_row_no_empty_second_row(self):
+        body = _standard()
+        zone = body[body.index('bottom-zone-one-row'):]
+        self.assertNotIn('terms-cell', zone.split('</section>')[0])
+        self.assertIn('footer-one-row', body)
+        gst = zone.index('class="ft-gst"')
+        nice = zone.index('class="ft-nice"')
+        self.assertLess(gst, nice)
+
+    def test_more_medicines_per_page(self):
+        from core.bill_config import get_items_per_bill_page
+
+        self.assertEqual(get_items_per_bill_page({"items_per_bill_page": 10, "paper_size": "A5"}), 13)
+        self.assertEqual(get_items_per_bill_page({"items_per_bill_page": 10, "paper_size": "A6"}), 12)
+        self.assertEqual(get_items_per_bill_page({"items_per_bill_page": 10, "signature_position": "right"}), 10)
+        self.assertEqual(get_items_per_bill_page({"items_per_bill_page": 10}, dot_matrix=True), 10)
 
 
 class DotMatrixSlip(unittest.TestCase):

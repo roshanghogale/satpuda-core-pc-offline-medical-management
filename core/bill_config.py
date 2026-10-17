@@ -161,7 +161,23 @@ def get_items_per_bill_page(settings: Dict[str, Any] | None = None, *, dot_matri
     n = max(1, min(50, n))
     if dot_matrix:
         n = max(1, min(15, n))
+    else:
+        n = min(50, n + one_row_footer_bonus(settings))
     return n
+
+
+def one_row_footer_bonus(settings: Dict[str, Any] | None) -> int:
+    """Medicines more per page with the new one-row footer (owner, 18 Oct 2026: the empty
+    row under HAVE A NICE DAY goes to the table, so more medicines fit). About 3 rows on A5
+    and A4 copies, 2 on A6. The old footer and dot matrix slips keep the shop's number."""
+    settings = settings or {}
+    if str(settings.get("signature_position") or "center").strip().lower() == "right":
+        return 0
+    if not settings.get("show_signature", True) or settings.get("compact_supplier_footer"):
+        return 0
+    if str(settings.get("bill_size_mode") or "").lower() == BILL_SIZE_DOT_MATRIX:
+        return 0
+    return 2 if str(settings.get("paper_size") or "A5").upper() == "A6" else 3
 
 
 BILL_SIZE_NORMAL = "normal"
