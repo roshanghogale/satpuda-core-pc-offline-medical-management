@@ -123,7 +123,7 @@ class OnTheBill(unittest.TestCase):
         # Owner, 18 Oct 2026: the box sits between the messages and the totals, too narrow
         # for "For SHOP"; the picture above the caption.
         body = self.render(uri=self.URI)
-        self.assertIn("bottom-zone-sign-center", body)
+        self.assertIn("bottom-zone-one-row", body)
         cell = body[body.index('class="signature-cell"'):]
         cell = cell[:cell.index("</div>\n      </div>") if "</div>\n      </div>" in cell else len(cell)]
         self.assertNotIn("For SATPUDA MEDICAL", body)

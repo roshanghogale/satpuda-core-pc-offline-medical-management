@@ -19,7 +19,9 @@ from core.bill_print_settings import load_bill_print_settings
 from core.bill_render_utils import esc, fmt_expiry_mm_yy, bill_due_display, total_due_display
 
 
-def _density_class(count: int) -> str:
+def _density_class(count: int, bonus: int = 0) -> str:
+    # The new footer gives the table the rows it frees: the type shrinks that much later.
+    count -= max(0, bonus)
     if count >= 18:
         return "density-max"
     if count >= 12:
@@ -412,7 +414,7 @@ def _bottom_zone_markup(ctx, settings, layout: dict, *, upright: bool = False) -
     upi = _has_upi_qr(ctx)
     zone_class = "bottom-zone bottom-zone-has-upi" if upi else "bottom-zone"
     if _sign_centred(settings) and settings.get("show_signature", True):
-        zone_class += " bottom-zone-sign-center"
+        return _one_row_footer(ctx, settings, layout, totals_rows, sum_class, upi, upright=upright)
 
     if upi:
         gst_only = _gst_calc_line(ctx, settings)
@@ -451,6 +453,63 @@ def _bottom_zone_markup(ctx, settings, layout: dict, *, upright: bool = False) -
           {_terms_zone_content(ctx, settings)}
         </div>
         <div class="signature-cell">{_signature(ctx, settings)}</div>
+      </div>"""
+
+
+def _gst_detail_line(ctx, settings) -> str:
+    """The GST working for the new footer: "Taxable 35.71 | SGST 6% 2.14 | CGST 6% 2.15"."""
+    if not _show_gst_details(settings) or not ctx.gst_enabled or ctx.gst_amount <= 0:
+        return ""
+    taxable, cgst, sgst = gst_strip_figures(ctx)
+    rates = sorted({float(item.gst_percent or 0) for item in ctx.items if item.gst_percent})
+    if len(rates) == 1 and rates[0] > 0:
+        half = f"{rates[0] / 2:g}%"
+        return f"Taxable {taxable:.2f} | SGST {half} {sgst:.2f} | CGST {half} {cgst:.2f}"
+    return f"Taxable {taxable:.2f} | SGST {sgst:.2f} | CGST {cgst:.2f}"
+
+
+def one_row_footer_mm(ctx, settings, layout: dict, *, upright: bool = False) -> float:
+    """Height of the new footer: what the totals need, at least room for a signature
+    (and the UPI code when there is one). The rest of the old footer goes to the table."""
+    need = _bottom_row1_mm(ctx, settings, layout, upright=upright)
+    need = max(need, 12.0 if upright else 11.0)
+    if _has_upi_qr(ctx):
+        need = max(need, 21.0)
+    return round(need, 2)
+
+
+def _one_row_footer(ctx, settings, layout, totals_rows, sum_class, upi, *, upright=False) -> str:
+    """The new footer (owner, 18 Oct 2026): ONE row -- the GST working with HAVE A NICE DAY
+    under it | the signature box | the totals. No empty second row: that height is given
+    to the medicine table, which is why the signature moved to the middle."""
+    continued = bool(getattr(ctx, "is_continued", False))
+    msgs = []
+    if not continued and settings.get("show_gst_strip", True):
+        custom = (getattr(ctx, "footer_strip_line", None) or settings.get("footer_strip_line") or "").strip()
+        if custom:
+            msgs.append(f'<div class="ft-nice">{esc(custom)}</div>')
+        else:
+            gst = _gst_detail_line(ctx, settings)
+            if gst:
+                msgs.append(f'<div class="ft-gst"><b>GST</b> {esc(gst)}</div>')
+            msgs.append(f'<div class="ft-nice">{esc(_nice_day_line(settings))}</div>')
+    if not continued:
+        wish = _wish_markup(ctx, settings)
+        if wish:
+            msgs.append(wish)
+    left = f'<div class="ft-msgs">{"".join(msgs)}</div>'
+    if upi:
+        left = f'<div class="ft-msgs-upi">{left}<div class="upi-qr-cell">{_upi_qr_block(ctx)}</div></div>'
+    height = one_row_footer_mm(ctx, settings, layout, upright=upright)
+    return f"""
+      <div class="bottom-zone bottom-zone-one-row" style="height: {height:.2f}mm;">
+        <div class="ft-left">{left}</div>
+        <div class="signature-cell">{_signature(ctx, settings)}</div>
+        <div class="totals-cell">
+          <table class="{sum_class}">
+            {totals_rows}
+          </table>
+        </div>
       </div>"""
 
 
@@ -586,6 +645,8 @@ def _bill_copy(ctx, copy_label: str, settings, *, upright: bool = False, layout:
     )
     logo_html = _logo_markup(ctx, settings)
     inv_class = "upright-invoice" if upright else "rotated-invoice"
+    if _sign_centred(settings) and settings.get("show_signature", True) and not settings.get("compact_supplier_footer"):
+        inv_class += " footer-one-row"
     layout = layout or {}
     if settings.get("compact_supplier_footer"):
         bottom_zone = _compact_supplier_bottom(ctx, settings, layout, upright=upright)
@@ -800,7 +861,8 @@ def render_classic_html(ctx: BillContext, settings: Dict[str, Any] | None = None
     grid_border = round(max(0.65, border * 0.9), 2)
     logo_tr_top = max(0.0, min(25.0, float(settings.get("logo_top_right_margin_top", 1.2) or 1.2)))
     logo_tr_right = max(0.0, min(25.0, float(settings.get("logo_top_right_margin_right", 1.5) or 1.5)))
-    density = _density_class(len(ctx.items))
+    from core.bill_config import one_row_footer_bonus
+    density = _density_class(len(ctx.items), one_row_footer_bonus(settings))
     batch_body = settings.get("_batch_body_override")
     if batch_body:
         body_content = batch_body
@@ -1511,29 +1573,60 @@ def render_classic_html(ctx: BillContext, settings: Dict[str, Any] | None = None
   .sign-label {{
     font-size: {8.8 * font_scale:.2f}pt;
   }}
-  /* Signature in the middle (owner, 18 Oct 2026): messages | signature | totals, the
-     signature and the totals each the full height of the footer. */
-  .bottom-zone.bottom-zone-sign-center {{
-    grid-template-columns: 1fr calc({layout["totals_col"]} * 0.72) {layout["totals_col"]};
+  /* The new footer (owner, 18 Oct 2026): one row -- messages | signature | totals --
+     as tall as the totals need; the medicine table grows into the height it frees. */
+  .footer-one-row .table-zone {{
+    height: auto;
+    flex: 1 1 auto;
+    min-height: {layout["table_h"]};
   }}
-  .bottom-zone-sign-center .gst-strip {{ grid-column: 1 / 2; grid-row: 1 / 2; }}
-  .bottom-zone-sign-center .terms-cell,
-  .bottom-zone-sign-center .footer-left-panel {{ grid-column: 1 / 2; grid-row: 2 / 3; }}
-  .bottom-zone-sign-center .footer-left-panel.footer-left-full {{ grid-row: 1 / 3; }}
-  .bottom-zone-sign-center .signature-cell {{
-    grid-column: 2 / 3;
-    grid-row: 1 / 3;
+  .bottom-zone.bottom-zone-one-row {{
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: 1fr calc({layout["totals_col"]} * 0.72) {layout["totals_col"]};
+    grid-template-rows: 1fr;
+  }}
+  .bottom-zone-one-row .ft-left {{
     border-right: {grid_border:.2f}pt solid #000;
-    padding: 1.6mm 1mm 0.6mm;
+    padding: 1mm 1.4mm;
+    overflow: hidden;
+    min-width: 0;
+  }}
+  .bottom-zone-one-row .ft-msgs {{
+    display: flex;
+    flex-direction: column;
+    gap: 0.8mm;
+    height: 100%;
+  }}
+  .bottom-zone-one-row .ft-gst {{
+    font-size: {6.2 * font_scale:.2f}pt;
+    line-height: 1.15;
+  }}
+  .bottom-zone-one-row .ft-nice {{
+    font-size: {7.6 * font_scale:.2f}pt;
+    font-weight: 900;
+    letter-spacing: 0.02em;
+  }}
+  .bottom-zone-one-row .wish {{ margin: 0; }}
+  .bottom-zone-one-row .ft-msgs-upi {{
+    display: grid;
+    grid-template-columns: 1fr 20mm;
+    height: 100%;
+  }}
+  .bottom-zone-one-row .signature-cell {{
+    grid-column: auto;
+    grid-row: auto;
+    border-right: {grid_border:.2f}pt solid #000;
+    padding: 1mm 1mm 0.6mm;
     justify-content: flex-end;
   }}
-  .bottom-zone-sign-center .signature-cell .sign-stack {{ height: 100%; }}
-  .bottom-zone-sign-center .totals-cell {{
-    grid-column: 3 / 4;
-    grid-row: 1 / 3;
+  .bottom-zone-one-row .signature-cell .sign-stack {{ height: 100%; }}
+  .bottom-zone-one-row .totals-cell {{
+    grid-column: auto;
+    grid-row: auto;
     border-bottom: 0;
   }}
-  .bottom-zone-sign-center .sum-table {{ height: auto; }}
+  .bottom-zone-one-row .sum-table {{ height: auto; }}
   .for-shop.for-shop-signed {{
     margin-bottom: 0;
   }}
