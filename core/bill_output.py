@@ -642,11 +642,26 @@ def _try_pdf_via_browser(
     paper_height_mm: float | None = None,
 ) -> bool:
     uri = 'file:///' + os.path.abspath(html_path).replace('\\', '/')
+    attempts = _pdf_browser_attempts()
+    # One headless browser kept running (core.pdf_browser): ~0.4 s a PDF instead of a
+    # browser start (~1 s) for every bill. Same pages, pixel for pixel; anything wrong
+    # with it falls through to the one-browser-per-PDF way below (17 Oct 2026).
+    if attempts:
+        try:
+            from core import pdf_browser
+
+            if pdf_browser.html_to_pdf(
+                html_path, pdf_path, attempts[0][0],
+                paper_width_mm=paper_width_mm, paper_height_mm=paper_height_mm,
+            ) and os.path.isfile(pdf_path) and os.path.getsize(pdf_path) > 500:
+                return True
+        except Exception as exc:
+            _log_pdf_browser(f'kept-running browser failed: {exc}')
     # The browser that worked last time goes first, and with a short timeout:
     # every bill pays for this conversion, so a browser that is slow to start,
     # blocked by antivirus or mid-update must not hold the counter up for a
     # minute per attempt before the next one is tried.
-    for exe, headless_flag, timeout_s in _pdf_browser_attempts():
+    for exe, headless_flag, timeout_s in attempts:
         try:
             if os.path.isfile(pdf_path):
                 os.remove(pdf_path)

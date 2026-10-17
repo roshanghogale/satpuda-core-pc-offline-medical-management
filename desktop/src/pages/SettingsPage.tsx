@@ -258,8 +258,15 @@ export function SettingsPage({
     reload()
   }, [reload])
 
+  // Only while this page is on screen: it stays mounted behind the others, and every
+  // bill saved on the Sales page used to reload the Payments lists here unseen --
+  // party dues included -- on the shop's mobile data (17 Oct 2026). A change that
+  // happens while hidden is picked up the moment the page is opened again.
+  const paymentsSeenNonce = useRef(0)
   useEffect(() => {
-    if (!syncRefreshNonce) return
+    if (!syncRefreshNonce || !active) return
+    if (paymentsSeenNonce.current === syncRefreshNonce) return
+    paymentsSeenNonce.current = syncRefreshNonce
     let cancelled = false
     void (async () => {
       try {
@@ -286,7 +293,7 @@ export function SettingsPage({
     return () => {
       cancelled = true
     }
-  }, [syncRefreshNonce, tabId, toggleId])
+  }, [syncRefreshNonce, tabId, toggleId, active])
 
   // Lazy-load heavy Settings tabs (contacts / payments / alerts / shelf / reorder).
   useEffect(() => {

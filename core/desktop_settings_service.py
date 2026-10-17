@@ -1986,6 +1986,27 @@ def _live_party_due_map(kind: str) -> dict[int, float] | None:
         from core import store_query_client as sq
         from core.online_mutation_queue import merge_server_rows
 
+        if kind == "customer" and not _queued_customer_ledger():
+            # The server's customer rows carry the ledger due (partyDueCascade runs with
+            # every bill, receipt and return; equal to the rebuild below for every live
+            # customer, 17 Oct 2026). Rebuilding it read EVERY bill of the store -- 2.2 MB
+            # at Vaibhav -- each time Contacts or Payments refreshed. Suppliers keep the
+            # rebuild: their stored figure can include an opening balance, and their
+            # ledger is small.
+            from core.online_catalog import customers_fresh
+
+            dues = {}
+            for c in customers_fresh():
+                try:
+                    cid = int(c.get("id") or c.get("local_id") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if cid > 0:
+                    # every customer, cleared ones as 0, so a list built earlier never
+                    # keeps showing a due that has since been paid
+                    dues[cid] = round(max(0.0, float(c.get("total_due") or 0)), 2)
+            return dues
+
         if kind == "customer":
             from core.due_fifo import fifo_sales_remaining_by_bill
             from core.online_mutation_queue import (
@@ -2964,6 +2985,95 @@ def online_supplier_remaining_due(supplier_id: int = 0, supplier_name: str = "")
 
 
 def online_customer_remaining_due(customer_id: int = 0, customer_name: str = "") -> float | None:
+    """The customer's remaining due, Online -- from the server's own customer row.
+
+    The server recomputes customers.total_due from the ledger (bills, receipts, returns) in
+    the same transaction as every bill, payment and return (partyDueCascade), and on the
+    live data it equals the oldest-bill-first sum below for every customer checked (17 Oct
+    2026). This used to rebuild that sum here on every customer pick and again on save: the
+    customer's bills plus EVERY receipt and EVERY return of the store, twice per bill --
+    over half a megabyte a bill on a shop's mobile data. One small request now.
+
+    The full rebuild is kept for one case: something of this customer's is still queued on
+    this PC (saved while the server could not be reached), which the server cannot know yet.
+    """
+    cid = int(customer_id or 0)
+    name = str(customer_name or "").strip()
+    if cid <= 0 and not name:
+        return None
+    try:
+        if _has_queued_for_customer(cid, name):
+            return _online_customer_remaining_due_ledger(cid, name)
+    except Exception:
+        pass
+    try:
+        from core import server_api as api
+        from core.server_live import _token
+
+        if cid <= 0:
+            from core.online_catalog import fresh_customer_by_name
+
+            found = fresh_customer_by_name(name) or {}
+            cid = int(found.get("id") or found.get("local_id") or 0)
+            if cid <= 0:
+                return None
+        res = api._request("GET", f"/api/sync/customers/{cid}", token=_token(), timeout=15)
+        doc = (res.get("data") if isinstance(res, dict) and res.get("ok") else None) or {}
+        if not isinstance(doc, dict) or doc.get("deleted") or "total_due" not in doc:
+            return _online_customer_remaining_due_ledger(cid, name)
+        try:
+            from core.online_catalog import patch_customer_cache
+
+            patch_customer_cache({**doc, "id": cid})
+        except Exception:
+            pass
+        return round(max(0.0, float(doc.get("total_due") or 0)), 2)
+    except Exception:
+        return None
+
+
+def _queued_customer_ledger() -> bool:
+    """Any bill, receipt or return saved on this PC that the server has not got yet."""
+    from core.online_mutation_queue import (
+        overlay_customer_payment_dicts,
+        overlay_sales_dicts,
+        overlay_sales_return_dicts,
+    )
+
+    return any(
+        any(isinstance(r, dict) for r in (rows or []))
+        for rows in (overlay_sales_dicts(), overlay_customer_payment_dicts(), overlay_sales_return_dicts())
+    )
+
+
+def _has_queued_for_customer(cid: int, name: str) -> bool:
+    """A bill, receipt or return of this customer saved here but not on the server yet."""
+    from core.online_mutation_queue import (
+        overlay_customer_payment_dicts,
+        overlay_sales_dicts,
+        overlay_sales_return_dicts,
+    )
+
+    name_u = (name or "").strip().upper()
+    for rows in (overlay_sales_dicts(), overlay_customer_payment_dicts(), overlay_sales_return_dicts()):
+        for r in rows or []:
+            if not isinstance(r, dict):
+                continue
+            try:
+                rcid = int(r.get("customer_id") or 0)
+            except (TypeError, ValueError):
+                rcid = 0
+            if (cid and rcid == cid) or (
+                name_u and str(r.get("customer_name") or "").strip().upper() == name_u
+            ):
+                return True
+            if not rcid and not r.get("customer_name"):
+                # a return carries only its bill: be safe, rebuild from the ledger
+                return True
+    return False
+
+
+def _online_customer_remaining_due_ledger(customer_id: int = 0, customer_name: str = "") -> float | None:
     """Live remaining due from sales + customer_payments (same FIFO as Sales History)."""
     from core import store_query_client as sq
     from core.due_fifo import fifo_sales_remaining_by_bill

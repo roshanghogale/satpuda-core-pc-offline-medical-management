@@ -248,8 +248,15 @@ export function HomePage({ onNavigate, syncRefreshNonce = 0, active }: Props) {
     return () => ro.disconnect()
   }, [])
 
+  // Only while Home is on screen. It stays mounted behind the Sales page, and every
+  // bill saved there re-read the year's bills and receipts for these tiles, unseen,
+  // on the shop's mobile data (17 Oct 2026). A change made while Home was hidden is
+  // shown the moment Home is opened again.
+  const dashSeenNonce = useRef(0)
   useEffect(() => {
-    if (!syncRefreshNonce) return
+    if (!syncRefreshNonce || !active) return
+    if (dashSeenNonce.current === syncRefreshNonce) return
+    dashSeenNonce.current = syncRefreshNonce
     void (async () => {
       try {
         const dash = await fetchDashboard()
@@ -259,7 +266,7 @@ export function HomePage({ onNavigate, syncRefreshNonce = 0, active }: Props) {
         /* ignore background refresh */
       }
     })()
-  }, [syncRefreshNonce])
+  }, [syncRefreshNonce, active])
 
   // ── Voice (test build): "export ughad", "dashboard refresh" ──
   const voiceHandlerRef = useRef<VoiceHandler>(async () => null)

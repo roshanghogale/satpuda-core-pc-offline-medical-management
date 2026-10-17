@@ -186,11 +186,19 @@ export function PurchaseHistoryPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Only while this page is on screen. Every page stays mounted behind the others,
+  // and every bill saved on the Sales page re-read this whole list unseen -- the
+  // inventory or the year's bills, hundreds of KB each, on a shop's mobile data
+  // (17 Oct 2026). A change made while the page was hidden is loaded the moment it
+  // is opened again. (Do not skip while a prior load is running.)
+  const seenSyncNonce = useRef(0)
   useEffect(() => {
-    if (!syncRefreshNonce) return
+    if (!syncRefreshNonce || !active) return
+    if (seenSyncNonce.current === syncRefreshNonce) return
+    seenSyncNonce.current = syncRefreshNonce
     void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [syncRefreshNonce])
+  }, [syncRefreshNonce, active])
 
   // Coming back to the page after the scope was changed in Settings: re-seed
   // from the new scope rather than showing the old one's range for ever.

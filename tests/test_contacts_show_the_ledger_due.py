@@ -137,6 +137,18 @@ class _Online(unittest.TestCase):
 
 
 class ContactsCustomerDueIsTheLedgerDue(_Online):
+    """With something of the customers still queued on this PC, the server's figure cannot
+    know it, so the due is rebuilt from the ledger (bills, receipts, returns) as before.
+    Without a queue the server's own customer row is read -- see ContactsReadTheServersDue.
+    """
+
+    def setUp(self):
+        super().setUp()
+        for p in (mock.patch.object(dss, "_queued_customer_ledger", return_value=True),
+                  mock.patch.object(dss, "_has_queued_for_customer", return_value=True)):
+            p.start()
+            self.addCleanup(p.stop)
+
     def test_each_customer_shows_the_ledger_due(self):
         got = {c["id"]: c["total_due"] for c in self.contacts()["customers"]}
         self.assertEqual(got, WANT)
@@ -151,6 +163,54 @@ class ContactsCustomerDueIsTheLedgerDue(_Online):
             "customer", [{"id": c["id"], "name": c["name"], "due": c["total_due"]}
                          for c in CUSTOMERS])
         self.assertEqual(parties[2]["due"], 75.0, "the shop's oldest bill was not read")
+
+
+class ContactsReadTheServersDue(_Online):
+    """Nothing queued: the server's customer rows carry the ledger due (partyDueCascade runs
+    with every bill, receipt and return; equal to the rebuild for every live customer on
+    17 Oct 2026). Rebuilding it read every bill of the store -- 2.2 MB at Vaibhav -- on each
+    Contacts / Payments refresh and twice per bill on the Sales page (owner: "saving bills
+    is very slow"). Here the catalog plays the server, already up to date."""
+
+    SERVER = {1: 450.0, 2: 120.0, 3: 75.0, 4: 0.0}
+
+    def setUp(self):
+        super().setUp()
+        fresh = [dict(c, total_due=self.SERVER[c["id"]]) for c in CUSTOMERS]
+        # online_customer_remaining_due merges the row it read into the real catalog
+        # cache; leave nothing behind for the next test.
+        from core import online_catalog
+
+        self.addCleanup(online_catalog.invalidate)
+        self.list_sales = mock.patch("core.store_query_client.list_sales",
+                                     side_effect=AssertionError("read every bill")).start()
+        self.addCleanup(mock.patch.stopall)
+        mock.patch("core.online_catalog.customers_fresh", return_value=fresh).start()
+
+        def fake_request(method, path, **kw):
+            cid = int(path.rsplit("/", 1)[1])
+            return {"ok": True, "data": dict(next(c for c in fresh if c["id"] == cid))}
+
+        self.request = mock.patch("core.server_api._request", side_effect=fake_request).start()
+        mock.patch("core.server_live._token", return_value="t").start()
+
+    def test_contacts_shows_the_servers_due_without_reading_the_bills(self):
+        got = {c["id"]: c["total_due"] for c in self.contacts()["customers"]}
+        self.assertEqual(got, WANT)
+        self.list_sales.assert_not_called()
+
+    def test_sales_previous_due_is_one_small_request(self):
+        self.assertEqual(dss.online_customer_remaining_due(1, "A K PAWAR"), 450.0)
+        self.request.assert_called_once()
+        self.assertEqual(self.request.call_args.args[:2], ("GET", "/api/sync/customers/1"))
+        self.list_sales.assert_not_called()
+
+    def test_payments_list_uses_it_too(self):
+        parties = dss._apply_live_party_dues(
+            "customer", [{"id": c["id"], "name": c["name"], "due": c["total_due"]}
+                         for c in CUSTOMERS])
+        self.assertEqual([p["due"] for p in parties], [450.0, 120.0, 75.0, 0.0])
+        self.list_sales.assert_not_called()
 
 
 class ContactsSupplierDueIsTheLedgerDue(_Online):
