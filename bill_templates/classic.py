@@ -334,22 +334,32 @@ def _terms(settings) -> str:
     return ""
 
 
+def _sign_centred(settings) -> bool:
+    """The signature box sits between the messages and the totals (owner, 18 Oct 2026);
+    "right" keeps the old place under the totals."""
+    return str(settings.get("signature_position") or "center").strip().lower() != "right"
+
+
 def _signature(ctx, settings) -> str:
     if not settings.get("show_signature", True):
         return ""
     sign_caption = (settings.get("signature_caption") or "SIGN OF Q.P.").strip()
+    # In the middle the box is narrow: no "For SHOP" line, the shop's name is on the bill's
+    # head anyway (owner, 18 Oct 2026).
+    centred = _sign_centred(settings)
+    shop = esc(ctx.store_name.upper())
     # The uploaded signature sits in the gap left for a hand signature, between
     # "For SHOP" and the caption (owner, 17 Oct 2026).
     sig_src = str(getattr(ctx, "signature_src", "") or "")
     if sig_src.startswith("data:image/") and settings.get("print_signature_image", True):
         return f"""
         <div class="sign-stack">
-        <div class="for-shop for-shop-signed">For {esc(ctx.store_name.upper())}</div>
+        {"" if centred else f'<div class="for-shop for-shop-signed">For {shop}</div>'}
         <div class="sign-img-wrap"><img class="sign-img" src="{sig_src}" alt=""></div>
         <div class="sign-label">{esc(sign_caption)}</div>
         </div>"""
     return f"""
-        <div class="for-shop">For {esc(ctx.store_name.upper())}</div>
+        {"" if centred else f'<div class="for-shop">For {shop}</div>'}
         <div class="sign-label">{esc(sign_caption)}</div>"""
 
 
@@ -467,6 +477,8 @@ def _bottom_zone_markup(ctx, settings, layout: dict, *, upright: bool = False) -
     sum_class = "sum-table sum-dense" if _sum_table_row_count(ctx, settings) >= 4 else "sum-table"
     upi = _has_upi_qr(ctx)
     zone_class = "bottom-zone bottom-zone-has-upi" if upi else "bottom-zone"
+    if _sign_centred(settings) and settings.get("show_signature", True):
+        zone_class += " bottom-zone-sign-center"
 
     if upi:
         gst_only = _gst_calc_line(ctx, settings)
@@ -1569,6 +1581,29 @@ def render_classic_html(ctx: BillContext, settings: Dict[str, Any] | None = None
   .sign-label {{
     font-size: {8.8 * font_scale:.2f}pt;
   }}
+  /* Signature in the middle (owner, 18 Oct 2026): messages | signature | totals, the
+     signature and the totals each the full height of the footer. */
+  .bottom-zone.bottom-zone-sign-center {{
+    grid-template-columns: 1fr calc({layout["totals_col"]} * 0.72) {layout["totals_col"]};
+  }}
+  .bottom-zone-sign-center .gst-strip {{ grid-column: 1 / 2; grid-row: 1 / 2; }}
+  .bottom-zone-sign-center .terms-cell,
+  .bottom-zone-sign-center .footer-left-panel {{ grid-column: 1 / 2; grid-row: 2 / 3; }}
+  .bottom-zone-sign-center .footer-left-panel.footer-left-full {{ grid-row: 1 / 3; }}
+  .bottom-zone-sign-center .signature-cell {{
+    grid-column: 2 / 3;
+    grid-row: 1 / 3;
+    border-right: {grid_border:.2f}pt solid #000;
+    padding: 1.6mm 1mm 0.6mm;
+    justify-content: flex-end;
+  }}
+  .bottom-zone-sign-center .signature-cell .sign-stack {{ height: 100%; }}
+  .bottom-zone-sign-center .totals-cell {{
+    grid-column: 3 / 4;
+    grid-row: 1 / 3;
+    border-bottom: 0;
+  }}
+  .bottom-zone-sign-center .sum-table {{ height: auto; }}
   .for-shop.for-shop-signed {{
     margin-bottom: 0;
   }}
