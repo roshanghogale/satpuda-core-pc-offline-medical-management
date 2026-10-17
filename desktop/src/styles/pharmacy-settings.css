@@ -1,0 +1,180 @@
+/* ─── Settings → Pharmacy Profile tab, 18 Oct 2026 redesign ────────────────
+ * Owner's screenshots: the profile was a long ladder of label | box rows,
+ * Paper & Copies was twenty dot matrix boxes and a paragraph wall, Printer
+ * Setup mixed the printers with Sumatra paths and debug notes.
+ * Rules (docs/SETTINGS_DESIGN.md): common settings first, expert ones folded
+ * under "Advanced", short number boxes, labels above the box in a grid,
+ * checkboxes in a 3-column grid, theme variables only.
+ * Every class here starts with .ph- and is used by PharmacyPanels.tsx only. */
+
+/* Fields in a grid: label above the box (rule 2). */
+.ph-grid-2,
+.ph-grid-3,
+.ph-fields {
+  display: grid;
+  gap: 10px 16px;
+  align-items: end;
+  min-width: 0;
+}
+.ph-grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-width: 780px;
+}
+.ph-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  max-width: 780px;
+}
+.ph-fields {
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  max-width: 900px;
+}
+.ph-span-all {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+.ph-grid-2 .settings-field,
+.ph-grid-3 .settings-field,
+.ph-fields .settings-field {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 3px;
+  min-width: 0;
+}
+.ph-grid-2 .settings-input,
+.ph-grid-3 .settings-input,
+.ph-fields .settings-input {
+  min-width: 0;
+}
+
+/* Numbers are short boxes, right aligned (rule 2). */
+.settings-input.ph-num {
+  width: 96px;
+  max-width: 100%;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A text box with its own "Print on bill" tick under it. */
+.ph-input-check {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+/* A box with its buttons beside it (printer + Refresh, Sumatra path + Refresh
+   + Browse): give that field a little more room than a plain box. */
+.ph-select-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.ph-select-btn > .settings-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ph-select-btn > .settings-action-btn {
+  flex: none;
+  align-self: auto;
+}
+.settings-field:has(> .ph-select-btn) {
+  grid-template-columns: 210px minmax(180px, 540px);
+}
+
+/* Buttons in a row: primary first, same height, 8px apart (rule 8). */
+.ph-btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.ph-btn-row > .settings-action-btn {
+  align-self: auto;
+}
+.settings-action-btn.ph-btn-remove {
+  background: transparent;
+  color: var(--danger);
+  border-color: var(--danger);
+  margin-left: 8px;
+}
+.settings-action-btn.ph-btn-remove:not(:disabled):hover {
+  background: var(--danger-soft, transparent);
+}
+.settings-action-btn.ph-btn-secondary {
+  background: transparent;
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.ph-inline-msg {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* Bill Logo and Bill Signature side by side on a wide screen. */
+.ph-media-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 0 14px;
+  align-items: start;
+  margin: 0 0 14px;
+}
+.ph-media-pair > .settings-labelframe {
+  margin: 0;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+/* Bill Fields: a small heading per group, one frame (rule 4). */
+.ph-check-group + .ph-check-group {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border);
+}
+
+/* "Advanced": the frame's body folded, common settings above it (rule 6). */
+.ph-advanced > summary {
+  cursor: pointer;
+  list-style: none;
+  width: fit-content;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.ph-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+.ph-advanced > summary::before {
+  content: '▸ ';
+}
+.ph-advanced[open] > summary::before {
+  content: '▾ ';
+}
+.ph-advanced-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+.ph-advanced-body > h4:first-child {
+  margin-top: 0;
+}
+
+/* The long help, as a list instead of one paragraph. */
+.ph-help-list {
+  margin: 0;
+  padding-left: 18px;
+}
+.ph-help-list > li {
+  margin: 0 0 4px;
+}
+
+/* Narrow panel: one column. */
+@container (max-width: 640px) {
+  .ph-grid-2,
+  .ph-grid-3 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .settings-field:has(> .ph-select-btn) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

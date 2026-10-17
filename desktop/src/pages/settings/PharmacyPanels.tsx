@@ -20,6 +20,7 @@ import {
   SaveBar,
   SaveBtn,
 } from './SettingsChrome'
+import '../../styles/pharmacy-settings.css'
 
 type Opt = { value: string; label: string }
 
@@ -510,72 +511,82 @@ export function PharmacyPanel(props: Props) {
       <>
         <PanelTitle>Pharmacy Profile</PanelTitle>
         <Frame title="Pharmacy Information">
-          <Field label="Pharmacy Name">
-            <input
-              className="settings-input"
-              value={String(profile.name ?? '')}
-              onChange={(e) =>
-                setProfile((p) => ({ ...p, name: e.target.value }))
-              }
-            />
-          </Field>
-          <Field label="Address">
-            <textarea
-              className="settings-input settings-textarea"
-              rows={3}
-              value={String(profile.address ?? '')}
-              onChange={(e) =>
-                setProfile((p) => ({ ...p, address: e.target.value }))
-              }
-            />
-          </Field>
-          <Field label="Phone">
-            <input
-              className="settings-input"
-              value={String(profile.phone ?? '')}
-              onChange={(e) =>
-                setProfile((p) => ({ ...p, phone: e.target.value }))
-              }
-            />
-          </Field>
-          <Field label="Email">
-            <input
-              className="settings-input"
-              value={String(profile.email ?? '')}
-              onChange={(e) =>
-                setProfile((p) => ({ ...p, email: e.target.value }))
-              }
-            />
-          </Field>
-          <Field label="GSTIN">
-            <input
-              className="settings-input"
-              value={String(profile.gstin ?? '')}
-              onChange={(e) =>
-                setProfile((p) => ({ ...p, gstin: e.target.value }))
-              }
-            />
-          </Field>
-          <Field label="DL Number">
-            <input
-              className="settings-input"
-              value={String(profile.dl_number ?? '')}
-              onChange={(e) =>
-                setProfile((p) => ({ ...p, dl_number: e.target.value }))
-              }
-            />
-          </Field>
-          <Field label="FSSAI Number">
-            <input
-              className="settings-input"
-              value={String(profile.fssai_number ?? '')}
-              onChange={(e) =>
-                setProfile((p) => ({ ...p, fssai_number: e.target.value }))
-              }
-            />
-          </Field>
+          {/* Two columns, label above the box: seven label | box rows made a
+              long ladder (owner's screenshots, 18 Oct 2026). */}
+          <div className="ph-grid-2">
+            <div className="ph-span-all">
+              <Field label="Pharmacy Name">
+                <input
+                  className="settings-input"
+                  value={String(profile.name ?? '')}
+                  onChange={(e) =>
+                    setProfile((p) => ({ ...p, name: e.target.value }))
+                  }
+                />
+              </Field>
+            </div>
+            <div className="ph-span-all">
+              <Field label="Address">
+                <textarea
+                  className="settings-input settings-textarea"
+                  rows={3}
+                  value={String(profile.address ?? '')}
+                  onChange={(e) =>
+                    setProfile((p) => ({ ...p, address: e.target.value }))
+                  }
+                />
+              </Field>
+            </div>
+            <Field label="Phone">
+              <input
+                className="settings-input"
+                value={String(profile.phone ?? '')}
+                onChange={(e) =>
+                  setProfile((p) => ({ ...p, phone: e.target.value }))
+                }
+              />
+            </Field>
+            <Field label="Email">
+              <input
+                className="settings-input"
+                value={String(profile.email ?? '')}
+                onChange={(e) =>
+                  setProfile((p) => ({ ...p, email: e.target.value }))
+                }
+              />
+            </Field>
+            <Field label="GSTIN">
+              <input
+                className="settings-input"
+                value={String(profile.gstin ?? '')}
+                onChange={(e) =>
+                  setProfile((p) => ({ ...p, gstin: e.target.value }))
+                }
+              />
+            </Field>
+            <Field label="DL Number">
+              <input
+                className="settings-input"
+                value={String(profile.dl_number ?? '')}
+                onChange={(e) =>
+                  setProfile((p) => ({ ...p, dl_number: e.target.value }))
+                }
+              />
+            </Field>
+            <Field label="FSSAI Number">
+              <input
+                className="settings-input"
+                value={String(profile.fssai_number ?? '')}
+                onChange={(e) =>
+                  setProfile((p) => ({ ...p, fssai_number: e.target.value }))
+                }
+              />
+            </Field>
+          </div>
+        </Frame>
 
-          <Field label="FSSAI on bill">
+        <Frame title="Show on Printed Bill">
+          <div className="settings-check-grid-3">
             <Check
               label="Print FSSAI on sale bills"
               checked={Boolean(profile.show_fssai_on_bill)}
@@ -583,8 +594,6 @@ export function PharmacyPanel(props: Props) {
                 setProfile((p) => ({ ...p, show_fssai_on_bill: v }))
               }
             />
-          </Field>
-          <Field label="GST on bill">
             <Check
               label="Print GST amount on sale bills"
               checked={Boolean(
@@ -592,8 +601,6 @@ export function PharmacyPanel(props: Props) {
               )}
               onChange={(v) => setBill((b) => ({ ...b, show_gst: v }))}
             />
-          </Field>
-          <Field label="Discount on bill">
             <Check
               label="Print applied discount on sale bills"
               checked={Boolean(
@@ -601,20 +608,21 @@ export function PharmacyPanel(props: Props) {
               )}
               onChange={(v) => setBill((b) => ({ ...b, show_discount: v }))}
             />
-          </Field>
-          <Field label="Enable GST">
+          </div>
+          <h4>GST</h4>
+          <div className="settings-check-grid-3">
             <Check
               label="Calculate GST on sale items"
               checked={Boolean(profile.gst_enabled)}
               onChange={(v) => setProfile((p) => ({ ...p, gst_enabled: v }))}
             />
-          </Field>
+          </div>
+        </Frame>
 
-          <Field label="Bill Logo">
-            <div className="settings-inline-row">
-              <span className="settings-note" style={{ flex: 1, margin: 0 }}>
-                {logoPath || 'No logo selected'}
-              </span>
+        <div className="ph-media-pair">
+          <Frame title="Bill Logo">
+            <LogoPreview path={logoPath} stamp={logoStamp} />
+            <div className="ph-btn-row">
               <button
                 type="button"
                 className="settings-action-btn"
@@ -626,13 +634,15 @@ export function PharmacyPanel(props: Props) {
               >
                 Choose Image
               </button>
-              <button
-                type="button"
-                className="settings-link-btn"
-                onClick={removeLogo}
-              >
-                Remove
-              </button>
+              {logoPath ? (
+                <button
+                  type="button"
+                  className="settings-action-btn ph-btn-remove"
+                  onClick={removeLogo}
+                >
+                  Remove
+                </button>
+              ) : null}
               <input
                 ref={logoInputRef}
                 type="file"
@@ -646,14 +656,31 @@ export function PharmacyPanel(props: Props) {
                 }}
               />
             </div>
-          </Field>
-          <LogoPreview path={logoPath} stamp={logoStamp} />
+            <Note>Where it prints is set under Bill Logo.</Note>
+          </Frame>
 
-          <Field label="Bill Signature">
-            <div className="settings-inline-row">
-              <span className="settings-note" style={{ flex: 1, margin: 0 }}>
-                {sigUri ? 'Signature uploaded' : 'No signature — the box stays empty for a hand signature'}
-              </span>
+          <Frame title="Bill Signature">
+            {sigUri ? (
+              <div className="settings-logo-preview">
+                <img
+                  src={sigUri}
+                  alt="Bill signature"
+                  style={{
+                    maxHeight: 70,
+                    maxWidth: 260,
+                    display: 'block',
+                    marginBottom: 6,
+                    // a checkerboard shows whether the background is transparent
+                    backgroundImage:
+                      'repeating-conic-gradient(#ddd 0% 25%, #fff 0% 50%)',
+                    backgroundSize: '12px 12px',
+                  }}
+                />
+              </div>
+            ) : (
+              <Note>No signature — the box stays empty for a hand signature</Note>
+            )}
+            <div className="ph-btn-row">
               <button
                 type="button"
                 className="settings-action-btn"
@@ -665,7 +692,7 @@ export function PharmacyPanel(props: Props) {
               {sigUri ? (
                 <button
                   type="button"
-                  className="settings-link-btn"
+                  className="settings-action-btn ph-btn-remove"
                   disabled={busy}
                   onClick={() => void removeSignature()}
                 >
@@ -684,39 +711,16 @@ export function PharmacyPanel(props: Props) {
                 }}
               />
             </div>
-          </Field>
-          <Note>
-            Use a PNG with a transparent background. It prints in the signature
-            box (between "For {String(profile.name || 'shop')}" and the caption)
-            on every standard bill, not on dot matrix slips. Turn it off for a
-            while with "Signature picture" under Show on Printed Bill.
-          </Note>
-          {sigUri ? (
-            <div className="settings-logo-preview">
-              <img
-                src={sigUri}
-                alt="Bill signature"
-                style={{
-                  maxHeight: 70,
-                  maxWidth: 260,
-                  display: 'block',
-                  marginBottom: 6,
-                  // a checkerboard shows whether the background is transparent
-                  backgroundImage:
-                    'repeating-conic-gradient(#ddd 0% 25%, #fff 0% 50%)',
-                  backgroundSize: '12px 12px',
-                }}
-              />
-            </div>
-          ) : null}
-          {sigMsg ? <Note>{sigMsg}</Note> : null}
-        </Frame>
-
-        <SaveBar
-          label="Save Profile"
-          saving={saving}
-          onClick={saveProfile}
-        />
+            {sigMsg ? <Note>{sigMsg}</Note> : null}
+            <Note>Use a PNG with a transparent background.</Note>
+            <Help>
+              It prints in the signature box (between &quot;For{' '}
+              {String(profile.name || 'shop')}&quot; and the caption) on every
+              standard bill, not on dot matrix slips. Turn it off for a while
+              with &quot;Signature picture&quot; under Show on Printed Bill.
+            </Help>
+          </Frame>
+        </div>
 
         <Frame title="App Login">
           <Note>
@@ -728,41 +732,51 @@ export function PharmacyPanel(props: Props) {
             checked={Boolean(login.enabled)}
             onChange={(v) => setLogin((l) => ({ ...l, enabled: v }))}
           />
-          <Field label="Username">
-            <input
-              className="settings-input"
-              disabled={!login.enabled}
-              value={String(login.username ?? '')}
-              onChange={(e) =>
-                setLogin((l) => ({ ...l, username: e.target.value }))
-              }
-            />
-          </Field>
-          <Field label="Password">
-            <input
-              className="settings-input"
-              type="password"
-              disabled={!login.enabled}
-              value={String(login.password ?? '')}
-              onChange={(e) =>
-                setLogin((l) => ({ ...l, password: e.target.value }))
-              }
-            />
-          </Field>
-          <Field label="Confirm Password">
-            <input
-              className="settings-input"
-              type="password"
-              disabled={!login.enabled}
-              value={confirmPwd}
-              onChange={(e) => setConfirmPwd(e.target.value)}
-            />
-          </Field>
+          <div className="ph-grid-3">
+            <Field label="Username">
+              <input
+                className="settings-input"
+                disabled={!login.enabled}
+                value={String(login.username ?? '')}
+                onChange={(e) =>
+                  setLogin((l) => ({ ...l, username: e.target.value }))
+                }
+              />
+            </Field>
+            <Field label="Password">
+              <input
+                className="settings-input"
+                type="password"
+                disabled={!login.enabled}
+                value={String(login.password ?? '')}
+                onChange={(e) =>
+                  setLogin((l) => ({ ...l, password: e.target.value }))
+                }
+              />
+            </Field>
+            <Field label="Confirm Password">
+              <input
+                className="settings-input"
+                type="password"
+                disabled={!login.enabled}
+                value={confirmPwd}
+                onChange={(e) => setConfirmPwd(e.target.value)}
+              />
+            </Field>
+          </div>
           <Note>
             Leave password blank when saving to keep the current password.
           </Note>
         </Frame>
-        {profileErr ? <p className="error">{profileErr}</p> : null}
+
+        {/* One Save for everything on this page (profile, bill checks, login),
+            so it sits under the last frame, with the password error beside it. */}
+        <SaveBar
+          label="Save Profile"
+          saving={saving}
+          onClick={saveProfile}
+          err={profileErr}
+        />
       </>
     )
   }
@@ -808,9 +822,12 @@ export function PharmacyPanel(props: Props) {
       <>
         <PanelTitle>Bill Fields</PanelTitle>
         <Frame title="Show on Printed Bill">
+          {/* One frame, a small heading per group: a frame per group inside
+              this frame was a box in a box. */}
           {groups.length ? (
             groups.map((g) => (
-              <Frame key={g.group} title={g.group}>
+              <div key={g.group} className="ph-check-group">
+                <h4>{g.group}</h4>
                 <div className="settings-check-grid-3">
                   {g.items.map((f) => {
                     const fallback =
@@ -829,7 +846,7 @@ export function PharmacyPanel(props: Props) {
                     )
                   })}
                 </div>
-              </Frame>
+              </div>
             ))
           ) : (
             <Note>
@@ -837,12 +854,12 @@ export function PharmacyPanel(props: Props) {
               local engine refreshes.
             </Note>
           )}
+          <Help>
+            Store header, Invoice header, Medicine table, and Totals/footer
+            match the classic Pharmacy Profile → Bill Fields checkboxes (same
+            saved keys).
+          </Help>
         </Frame>
-        <Note>
-          Store header, Invoice header, Medicine table, and Totals/footer match
-          the classic Pharmacy Profile → Bill Fields checkboxes (same saved
-          keys).
-        </Note>
         <SaveBar
           label="Save Bill Print Style"
           saving={saving}
@@ -859,7 +876,7 @@ export function PharmacyPanel(props: Props) {
         <PanelTitle>Bill Text Lines</PanelTitle>
         <Frame title="Bill Text Lines">
           <Field label="Blessing line (top)">
-            <div className="settings-inline-row">
+            <div className="ph-input-check">
               <input
                 className="settings-input"
                 value={String(bill.blessing_line ?? 'SHREE GANESHAY NAMAH')}
@@ -918,6 +935,13 @@ export function PharmacyPanel(props: Props) {
       <>
         <PanelTitle>Bill Logo</PanelTitle>
         <Frame title="Bill Logo (from Pharmacy Profile)">
+          <Note>
+            Upload the logo image under Pharmacy Profile. You can enable one or
+            both positions.
+          </Note>
+          {logoPath ? <LogoPreview path={logoPath} stamp={logoStamp} /> : null}
+
+          <h4>Top right</h4>
           <Check
             label="Small logo — top right of invoice"
             checked={Boolean(bill.show_logo_top_right)}
@@ -925,38 +949,42 @@ export function PharmacyPanel(props: Props) {
               setBill((b) => ({ ...b, show_logo_top_right: v }))
             }
           />
-          <Field label="Top margin (mm)">
-            <input
-              className="settings-input"
-              type="number"
-              step={0.5}
-              min={0}
-              max={25}
-              value={Number(bill.logo_top_right_margin_top ?? 1.2)}
-              onChange={(e) =>
-                setBill((b) => ({
-                  ...b,
-                  logo_top_right_margin_top: Number(e.target.value),
-                }))
-              }
-            />
-          </Field>
-          <Field label="Right margin (mm)">
-            <input
-              className="settings-input"
-              type="number"
-              step={0.5}
-              min={0}
-              max={25}
-              value={Number(bill.logo_top_right_margin_right ?? 1.5)}
-              onChange={(e) =>
-                setBill((b) => ({
-                  ...b,
-                  logo_top_right_margin_right: Number(e.target.value),
-                }))
-              }
-            />
-          </Field>
+          <div className="ph-fields">
+            <Field label="Top margin (mm)">
+              <input
+                className="settings-input ph-num"
+                type="number"
+                step={0.5}
+                min={0}
+                max={25}
+                value={Number(bill.logo_top_right_margin_top ?? 1.2)}
+                onChange={(e) =>
+                  setBill((b) => ({
+                    ...b,
+                    logo_top_right_margin_top: Number(e.target.value),
+                  }))
+                }
+              />
+            </Field>
+            <Field label="Right margin (mm)">
+              <input
+                className="settings-input ph-num"
+                type="number"
+                step={0.5}
+                min={0}
+                max={25}
+                value={Number(bill.logo_top_right_margin_right ?? 1.5)}
+                onChange={(e) =>
+                  setBill((b) => ({
+                    ...b,
+                    logo_top_right_margin_right: Number(e.target.value),
+                  }))
+                }
+              />
+            </Field>
+          </div>
+
+          <h4>Watermark</h4>
           <Check
             label="Center watermark behind medicines"
             checked={Boolean(bill.show_logo_center_watermark)}
@@ -964,26 +992,23 @@ export function PharmacyPanel(props: Props) {
               setBill((b) => ({ ...b, show_logo_center_watermark: v }))
             }
           />
-          <Field label="Watermark transparency %">
-            <input
-              className="settings-input"
-              type="number"
-              min={5}
-              max={80}
-              value={Number(bill.logo_watermark_opacity ?? 15)}
-              onChange={(e) =>
-                setBill((b) => ({
-                  ...b,
-                  logo_watermark_opacity: Number(e.target.value),
-                }))
-              }
-            />
-          </Field>
-          <Note>
-            Upload the logo image under Pharmacy Profile. You can enable one or
-            both positions.
-          </Note>
-          {logoPath ? <LogoPreview path={logoPath} stamp={logoStamp} /> : null}
+          <div className="ph-fields">
+            <Field label="Watermark transparency %">
+              <input
+                className="settings-input ph-num"
+                type="number"
+                min={5}
+                max={80}
+                value={Number(bill.logo_watermark_opacity ?? 15)}
+                onChange={(e) =>
+                  setBill((b) => ({
+                    ...b,
+                    logo_watermark_opacity: Number(e.target.value),
+                  }))
+                }
+              />
+            </Field>
+          </div>
         </Frame>
         <SaveBar
           label="Save Bill Print Style"
@@ -1010,363 +1035,436 @@ export function PharmacyPanel(props: Props) {
             under Print Sales 1 / Print Sales 2 — the slot always decides what
             comes out of the printer.
           </Note>
+          <div className="ph-fields">
+            <Field label="Page copies (Print Bill)">
+              <input
+                className="settings-input ph-num"
+                type="number"
+                min={1}
+                max={10}
+                value={Number(bill.copies ?? 1)}
+                onChange={(e) =>
+                  setBill((b) => ({ ...b, copies: Number(e.target.value) }))
+                }
+              />
+            </Field>
+            <Field label="Bill size">
+              <select
+                className="settings-input"
+                value={String(bill.bill_size_mode || 'normal')}
+                onChange={(e) =>
+                  setBill((b) => ({ ...b, bill_size_mode: e.target.value }))
+                }
+              >
+                {sizeModes.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Medicines per bill page">
+              <input
+                className="settings-input ph-num"
+                type="number"
+                min={1}
+                max={50}
+                value={Number(bill.items_per_bill_page ?? 10)}
+                onChange={(e) =>
+                  setBill((b) => ({
+                    ...b,
+                    items_per_bill_page: Number(e.target.value),
+                  }))
+                }
+              />
+            </Field>
+            <Field label="A4 single-copy position">
+              <select
+                className="settings-input"
+                value={String(bill.a4_single_copy_position || 'bottom')}
+                onChange={(e) =>
+                  setBill((b) => ({
+                    ...b,
+                    a4_single_copy_position: e.target.value,
+                  }))
+                }
+              >
+                {opts.half_positions.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
           {/* This number is real, but only on the direct Print Bill path.
               F7/F8/F9 go through a Print Sales slot, and the slot deliberately
               ignores it so 2 bill copies cannot silently become 4 sheets — see
               get_print_slot_page_copies. Saying so is better than a control
               that looks global and is not. */}
-          <Note>
-            Page copies: how many times each sheet is sent to the printer on the
-            direct <b>Print Bill</b> path. F7 / F8 / F9 use the copies set on
-            their own Print Sales slot instead.
-          </Note>
-          <Field label="Page copies (Print Bill)">
-            <input
-              className="settings-input"
-              type="number"
-              min={1}
-              max={10}
-              value={Number(bill.copies ?? 1)}
-              onChange={(e) =>
-                setBill((b) => ({ ...b, copies: Number(e.target.value) }))
-              }
-            />
-          </Field>
-          <Field label="Bill size">
-            <select
-              className="settings-input"
-              value={String(bill.bill_size_mode || 'normal')}
-              onChange={(e) =>
-                setBill((b) => ({ ...b, bill_size_mode: e.target.value }))
-              }
-            >
-              {sizeModes.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Shrink % (dot matrix)">
-            <input
-              className="settings-input"
-              type="number"
-              min={85}
-              max={98}
-              disabled={!isDotMatrix}
-              value={Number(bill.bill_size_pct ?? 92)}
-              onChange={(e) =>
-                setBill((b) => ({
-                  ...b,
-                  bill_size_pct: Number(e.target.value),
-                }))
-              }
-            />
-          </Field>
-          {!isDotMatrix ? (
-            <Note>Shrink % applies only when Bill size is Dot matrix.</Note>
-          ) : null}
-          <Field label="Medicines per bill page">
-            <input
-              className="settings-input"
-              type="number"
-              min={1}
-              max={50}
-              value={Number(bill.items_per_bill_page ?? 10)}
-              onChange={(e) =>
-                setBill((b) => ({
-                  ...b,
-                  items_per_bill_page: Number(e.target.value),
-                }))
-              }
-            />
-          </Field>
-          <Field label="Dot matrix line spacing">
-            <input
-              className="settings-input"
-              type="number"
-              min={22}
-              max={32}
-              value={Number(bill.dot_matrix_line_spacing ?? 30)}
-              onChange={(e) =>
-                setBill((b) => ({
-                  ...b,
-                  dot_matrix_line_spacing: Number(e.target.value),
-                }))
-              }
-            />
-          </Field>
-          <Field label="Dot matrix top margin (cm)">
-            <input
-              className="settings-input"
-              type="number"
-              step={0.1}
-              min={0}
-              max={3}
-              value={Number(bill.dot_matrix_top_offset_cm ?? 0.8)}
-              onChange={(e) =>
-                setBill((b) => ({
-                  ...b,
-                  dot_matrix_top_offset_cm: Number(e.target.value),
-                }))
-              }
-            />
-          </Field>
-          <Field label="Dot matrix paper (slip height)">
-            {/* Continuous paper is made in inches. Every bill moves the paper by
-                this height, so a few mm off puts every next bill a few mm lower. */}
-            <select
-              className="settings-input"
-              value={
-                SLIP_PRESETS.find(
-                  (p) => Math.abs(p.cm - Number(bill.dot_matrix_slip_height_cm ?? 0)) < 0.005,
-                )?.cm.toString() ?? 'custom'
-              }
-              onChange={(e) => {
-                if (e.target.value === 'custom') return
-                setBill((b) => ({
-                  ...b,
-                  dot_matrix_slip_height_cm: Number(e.target.value),
-                }))
-              }}
-            >
-              {SLIP_PRESETS.map((p) => (
-                <option key={p.cm} value={p.cm.toString()}>
-                  {p.label}
-                </option>
-              ))}
-              <option value="custom">Other (type cm below)</option>
-            </select>
-          </Field>
-          <Field label="Dot matrix slip height (cm)">
-            <input
-              className="settings-input"
-              type="number"
-              step={0.01}
-              min={0}
-              max={30}
-              value={Number(bill.dot_matrix_slip_height_cm ?? 0)}
-              onChange={(e) =>
-                setBill((b) => ({
-                  ...b,
-                  dot_matrix_slip_height_cm: Number(e.target.value),
-                }))
-              }
-            />
-          </Field>
-          <Field label="Dot matrix bottom margin (cm)">
-            <input
-              className="settings-input"
-              type="number"
-              step={0.1}
-              min={0}
-              max={5}
-              value={Number(bill.dot_matrix_bottom_margin_cm ?? 1.0)}
-              onChange={(e) =>
-                setBill((b) => ({
-                  ...b,
-                  dot_matrix_bottom_margin_cm: Number(e.target.value),
-                }))
-              }
-            />
-          </Field>
-          <Field label="Dot matrix print width (cm)">
-            <input
-              className="settings-input"
-              type="number"
-              step={0.1}
-              min={5}
-              max={20}
-              value={Number(bill.dot_matrix_print_width_cm ?? 12.9)}
-              onChange={(e) =>
-                setBill((b) => ({
-                  ...b,
-                  dot_matrix_print_width_cm: Number(e.target.value),
-                }))
-              }
-            />
-          </Field>
-          <Field label="Dot matrix tear-off handled by">
-            <select
-              className="settings-input"
-              disabled={Number(bill.dot_matrix_slip_height_cm ?? 0) <= 0}
-              value={String(bill.dot_matrix_tear_mode || 'software')}
-              onChange={(e) =>
-                setBill((b) => ({ ...b, dot_matrix_tear_mode: e.target.value }))
-              }
-            >
-              {(opts.dot_matrix_tear_modes || [
-                { value: 'software', label: 'Satpuda (recommended)' },
-                { value: 'printer', label: "Printer's own auto tear-off" },
-              ]).map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Dot matrix tear-off eject (cm)">
-            <input
-              className="settings-input"
-              type="number"
-              step={0.1}
-              min={0}
-              max={8}
-              disabled={
-                Number(bill.dot_matrix_slip_height_cm ?? 0) <= 0 ||
-                String(bill.dot_matrix_tear_mode || 'software') !== 'software'
-              }
-              value={Number(bill.dot_matrix_tear_gap_cm ?? 4.0)}
-              onChange={(e) =>
-                setBill((b) => ({
-                  ...b,
-                  dot_matrix_tear_gap_cm: Number(e.target.value),
-                }))
-              }
-            />
-          </Field>
-          <Field label="Dot matrix left offset (cm)">
-            <input
-              className="settings-input"
-              type="number"
-              step={0.1}
-              min={0}
-              max={5}
-              value={Number(bill.dot_matrix_left_offset_cm ?? 0)}
-              onChange={(e) =>
-                setBill((b) => ({
-                  ...b,
-                  dot_matrix_left_offset_cm: Number(e.target.value),
-                }))
-              }
-            />
-          </Field>
-          <Field label="Dot matrix tear feed (cm)">
-            <input
-              className="settings-input"
-              type="number"
-              step={0.1}
-              min={0}
-              max={6}
-              disabled={Number(bill.dot_matrix_slip_height_cm ?? 0) > 0}
-              value={Number(bill.dot_matrix_tear_feed_cm ?? 2.5)}
-              onChange={(e) =>
-                setBill((b) => ({
-                  ...b,
-                  dot_matrix_tear_feed_cm: Number(e.target.value),
-                }))
-              }
-            />
-          </Field>
-          <Field label="Dot matrix alignment">
-            <button
-              type="button"
-              className="settings-action-btn"
-              disabled={aligning}
-              onClick={() => void onAlignmentTest()}
-            >
-              {aligning ? 'Printing…' : 'Print alignment test'}
-            </button>
-          </Field>
-          {alignMsg ? <Note>{alignMsg}</Note> : null}
-          <Field label="Dot matrix bill style">
-            <select
-              className="settings-input"
-              value={String(bill.dot_matrix_style || 'compact')}
-              onChange={(e) =>
-                setBill((b) => ({ ...b, dot_matrix_style: e.target.value }))
-              }
-            >
-              <option value="compact">New slip (no blessing, no GST, more medicines)</option>
-              <option value="classic">Old slip (blessing, GST INVOICE, GST, wish line)</option>
-            </select>
-          </Field>
-          <Field label="Dot matrix slip extras">
-            <Check
-              label="Total printed bold (printer strikes the line twice)"
-              checked={Boolean(bill.dot_matrix_bold_total ?? true)}
-              onChange={(v) => setBill((b) => ({ ...b, dot_matrix_bold_total: v }))}
-            />
-            <Check
-              label="Whole bill printed bold (darker, prints a little slower)"
-              checked={Boolean(bill.dot_matrix_bold_all ?? false)}
-              onChange={(v) => setBill((b) => ({ ...b, dot_matrix_bold_all: v }))}
-            />
-            <Check
-              label='Item count line ("8 aushadhe, 59 nag")'
-              checked={Boolean(bill.dot_matrix_item_count ?? true)}
-              onChange={(v) => setBill((b) => ({ ...b, dot_matrix_item_count: v }))}
-            />
-            <Check
-              label="Show the customer's due on the slip when money is owed"
-              checked={Boolean(bill.dot_matrix_due_lines ?? true)}
-              onChange={(v) => setBill((b) => ({ ...b, dot_matrix_due_lines: v }))}
-            />
-          </Field>
-          <Field label="Dot matrix table borders">
-            <Check
-              label="Show vertical | borders (off = horizontal lines only)"
-              checked={
-                String(bill.dot_matrix_style || 'compact') === 'compact'
-                  ? false
-                  : Boolean(bill.dot_matrix_vertical_borders ?? true)
-              }
-              disabled={String(bill.dot_matrix_style || 'compact') === 'compact'}
-              onChange={(v) =>
-                setBill((b) => ({ ...b, dot_matrix_vertical_borders: v }))
-              }
-            />
-          </Field>
-          <Field label="A4 single-copy position">
-            <select
-              className="settings-input"
-              value={String(bill.a4_single_copy_position || 'bottom')}
-              onChange={(e) =>
-                setBill((b) => ({
-                  ...b,
-                  a4_single_copy_position: e.target.value,
-                }))
-              }
-            >
-              {opts.half_positions.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Note>
-            Medicines per bill page: max lines on one printed bill; extra
-            medicines continue on the next page/slip (Continued…). For A6 dot
-            matrix use 8–10 so lines fit on paper. Dot matrix line spacing
-            28–32 = more space between lines (default 30). Top offset cm:
-            reverse-feed before print to start bill higher on A6 slip (default
-            0.8). Slip height cm: measure one slip from perforation to
-            perforation; every bill then moves the paper by exactly one slip
-            (0 = off) - measure one slip from perforation to perforation.
-            Top and bottom margin cm: blank space kept at the top and bottom of
-            every slip; the medicine table always fills whatever is left, so the
-            bill is the same shape on every slip. Print width cm: the paper
-            width minus the tractor holes (14.5 cm slip - 0.8 cm each side =
-            12.9). Tear-off handled by Satpuda: after each bill the slip is
-            fed out by Tear-off eject cm so the perforation clears the tear
-            edge, and the next bill pulls back exactly that same distance - no
-            more - so it starts on the top of the next slip. Raise Tear-off
-            eject until the slip is fully out past the tear bar (4 cm to start,
-            up to 8); it cannot drift, because both ends use the one number.
-            Turn the printer's own Auto tear off OFF, or the two fight each
-            other - it is in the printer's Default Setting mode, the app cannot
-            change it. Top margin cm: how far BELOW
-            the perforation the first line prints. Left offset cm: moves the
-            whole bill right of the
-            printer&apos;s first column (nothing prints left of it - if the bill
-            is too far right at 0, move the paper left in the printer). Tear
-            feed cm: how far the paper moves up after a bill when no slip height
-            is set. Print alignment test uses the values on screen, so try a
-            value, print, and save once it lands right. Turn off vertical
-            borders for horizontal-rule-only bills.
-            Shrink % fits the bill on A5/A6 without clipping borders.
-          </Note>
+          <Help>
+            <ul className="ph-help-list">
+              <li>
+                Page copies: how many times each sheet is sent to the printer on
+                the direct <b>Print Bill</b> path. F7 / F8 / F9 use the copies
+                set on their own Print Sales slot instead.
+              </li>
+              <li>
+                Medicines per bill page: max lines on one printed bill; extra
+                medicines continue on the next page/slip (Continued…). For A6
+                dot matrix use 8–10 so lines fit on paper.
+              </li>
+              <li>
+                Bill size Dot matrix shrinks the bill by Shrink % (under
+                Advanced — dot matrix); Shrink % fits the bill on A5/A6 without
+                clipping borders.
+              </li>
+            </ul>
+          </Help>
+        </Frame>
+
+        {/* Expert settings for continuous dot matrix paper, folded so the
+            common settings above come first (owner, 18 Oct 2026). It opens by
+            itself when Bill size is Dot matrix. */}
+        <Frame title="Advanced — dot matrix">
+          <details className="ph-advanced" open={isDotMatrix}>
+            <summary>Dot matrix slip, margins, tear-off and slip style</summary>
+            <div className="ph-advanced-body">
+              <h4>Bill size</h4>
+              <div className="ph-fields">
+                <Field label="Shrink % (dot matrix)">
+                  <input
+                    className="settings-input ph-num"
+                    type="number"
+                    min={85}
+                    max={98}
+                    disabled={!isDotMatrix}
+                    value={Number(bill.bill_size_pct ?? 92)}
+                    onChange={(e) =>
+                      setBill((b) => ({
+                        ...b,
+                        bill_size_pct: Number(e.target.value),
+                      }))
+                    }
+                  />
+                </Field>
+              </div>
+              {!isDotMatrix ? (
+                <Note>Shrink % applies only when Bill size is Dot matrix.</Note>
+              ) : null}
+
+              <h4>Slip and margins</h4>
+              <div className="ph-fields">
+                <Field label="Dot matrix paper (slip height)">
+                  {/* Continuous paper is made in inches. Every bill moves the paper by
+                      this height, so a few mm off puts every next bill a few mm lower. */}
+                  <select
+                    className="settings-input"
+                    value={
+                      SLIP_PRESETS.find(
+                        (p) => Math.abs(p.cm - Number(bill.dot_matrix_slip_height_cm ?? 0)) < 0.005,
+                      )?.cm.toString() ?? 'custom'
+                    }
+                    onChange={(e) => {
+                      if (e.target.value === 'custom') return
+                      setBill((b) => ({
+                        ...b,
+                        dot_matrix_slip_height_cm: Number(e.target.value),
+                      }))
+                    }}
+                  >
+                    {SLIP_PRESETS.map((p) => (
+                      <option key={p.cm} value={p.cm.toString()}>
+                        {p.label}
+                      </option>
+                    ))}
+                    <option value="custom">Other (type cm below)</option>
+                  </select>
+                </Field>
+                <Field label="Dot matrix slip height (cm)">
+                  <input
+                    className="settings-input ph-num"
+                    type="number"
+                    step={0.01}
+                    min={0}
+                    max={30}
+                    value={Number(bill.dot_matrix_slip_height_cm ?? 0)}
+                    onChange={(e) =>
+                      setBill((b) => ({
+                        ...b,
+                        dot_matrix_slip_height_cm: Number(e.target.value),
+                      }))
+                    }
+                  />
+                </Field>
+                <Field label="Dot matrix top margin (cm)">
+                  <input
+                    className="settings-input ph-num"
+                    type="number"
+                    step={0.1}
+                    min={0}
+                    max={3}
+                    value={Number(bill.dot_matrix_top_offset_cm ?? 0.8)}
+                    onChange={(e) =>
+                      setBill((b) => ({
+                        ...b,
+                        dot_matrix_top_offset_cm: Number(e.target.value),
+                      }))
+                    }
+                  />
+                </Field>
+                <Field label="Dot matrix bottom margin (cm)">
+                  <input
+                    className="settings-input ph-num"
+                    type="number"
+                    step={0.1}
+                    min={0}
+                    max={5}
+                    value={Number(bill.dot_matrix_bottom_margin_cm ?? 1.0)}
+                    onChange={(e) =>
+                      setBill((b) => ({
+                        ...b,
+                        dot_matrix_bottom_margin_cm: Number(e.target.value),
+                      }))
+                    }
+                  />
+                </Field>
+                <Field label="Dot matrix print width (cm)">
+                  <input
+                    className="settings-input ph-num"
+                    type="number"
+                    step={0.1}
+                    min={5}
+                    max={20}
+                    value={Number(bill.dot_matrix_print_width_cm ?? 12.9)}
+                    onChange={(e) =>
+                      setBill((b) => ({
+                        ...b,
+                        dot_matrix_print_width_cm: Number(e.target.value),
+                      }))
+                    }
+                  />
+                </Field>
+                <Field label="Dot matrix left offset (cm)">
+                  <input
+                    className="settings-input ph-num"
+                    type="number"
+                    step={0.1}
+                    min={0}
+                    max={5}
+                    value={Number(bill.dot_matrix_left_offset_cm ?? 0)}
+                    onChange={(e) =>
+                      setBill((b) => ({
+                        ...b,
+                        dot_matrix_left_offset_cm: Number(e.target.value),
+                      }))
+                    }
+                  />
+                </Field>
+                <Field label="Dot matrix line spacing">
+                  <input
+                    className="settings-input ph-num"
+                    type="number"
+                    min={22}
+                    max={32}
+                    value={Number(bill.dot_matrix_line_spacing ?? 30)}
+                    onChange={(e) =>
+                      setBill((b) => ({
+                        ...b,
+                        dot_matrix_line_spacing: Number(e.target.value),
+                      }))
+                    }
+                  />
+                </Field>
+              </div>
+
+              <h4>Tear-off</h4>
+              <div className="ph-fields">
+                <Field label="Dot matrix tear-off handled by">
+                  <select
+                    className="settings-input"
+                    disabled={Number(bill.dot_matrix_slip_height_cm ?? 0) <= 0}
+                    value={String(bill.dot_matrix_tear_mode || 'software')}
+                    onChange={(e) =>
+                      setBill((b) => ({ ...b, dot_matrix_tear_mode: e.target.value }))
+                    }
+                  >
+                    {(opts.dot_matrix_tear_modes || [
+                      { value: 'software', label: 'Satpuda (recommended)' },
+                      { value: 'printer', label: "Printer's own auto tear-off" },
+                    ]).map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Dot matrix tear-off eject (cm)">
+                  <input
+                    className="settings-input ph-num"
+                    type="number"
+                    step={0.1}
+                    min={0}
+                    max={8}
+                    disabled={
+                      Number(bill.dot_matrix_slip_height_cm ?? 0) <= 0 ||
+                      String(bill.dot_matrix_tear_mode || 'software') !== 'software'
+                    }
+                    value={Number(bill.dot_matrix_tear_gap_cm ?? 4.0)}
+                    onChange={(e) =>
+                      setBill((b) => ({
+                        ...b,
+                        dot_matrix_tear_gap_cm: Number(e.target.value),
+                      }))
+                    }
+                  />
+                </Field>
+                <Field label="Dot matrix tear feed (cm)">
+                  <input
+                    className="settings-input ph-num"
+                    type="number"
+                    step={0.1}
+                    min={0}
+                    max={6}
+                    disabled={Number(bill.dot_matrix_slip_height_cm ?? 0) > 0}
+                    value={Number(bill.dot_matrix_tear_feed_cm ?? 2.5)}
+                    onChange={(e) =>
+                      setBill((b) => ({
+                        ...b,
+                        dot_matrix_tear_feed_cm: Number(e.target.value),
+                      }))
+                    }
+                  />
+                </Field>
+              </div>
+
+              <h4>Slip style</h4>
+              <div className="ph-fields">
+                <Field label="Dot matrix bill style">
+                  <select
+                    className="settings-input"
+                    value={String(bill.dot_matrix_style || 'compact')}
+                    onChange={(e) =>
+                      setBill((b) => ({ ...b, dot_matrix_style: e.target.value }))
+                    }
+                  >
+                    <option value="compact">New slip (no blessing, no GST, more medicines)</option>
+                    <option value="classic">Old slip (blessing, GST INVOICE, GST, wish line)</option>
+                  </select>
+                </Field>
+              </div>
+              <div className="settings-check-grid-3">
+                <Check
+                  label="Total printed bold (printer strikes the line twice)"
+                  checked={Boolean(bill.dot_matrix_bold_total ?? true)}
+                  onChange={(v) => setBill((b) => ({ ...b, dot_matrix_bold_total: v }))}
+                />
+                <Check
+                  label="Whole bill printed bold (darker, prints a little slower)"
+                  checked={Boolean(bill.dot_matrix_bold_all ?? false)}
+                  onChange={(v) => setBill((b) => ({ ...b, dot_matrix_bold_all: v }))}
+                />
+                <Check
+                  label='Item count line ("8 aushadhe, 59 nag")'
+                  checked={Boolean(bill.dot_matrix_item_count ?? true)}
+                  onChange={(v) => setBill((b) => ({ ...b, dot_matrix_item_count: v }))}
+                />
+                <Check
+                  label="Show the customer's due on the slip when money is owed"
+                  checked={Boolean(bill.dot_matrix_due_lines ?? true)}
+                  onChange={(v) => setBill((b) => ({ ...b, dot_matrix_due_lines: v }))}
+                />
+                <Check
+                  label="Show vertical | borders (off = horizontal lines only)"
+                  checked={
+                    String(bill.dot_matrix_style || 'compact') === 'compact'
+                      ? false
+                      : Boolean(bill.dot_matrix_vertical_borders ?? true)
+                  }
+                  disabled={String(bill.dot_matrix_style || 'compact') === 'compact'}
+                  onChange={(v) =>
+                    setBill((b) => ({ ...b, dot_matrix_vertical_borders: v }))
+                  }
+                />
+              </div>
+
+              <h4>Alignment</h4>
+              <div className="ph-btn-row">
+                <button
+                  type="button"
+                  className="settings-action-btn"
+                  disabled={aligning}
+                  onClick={() => void onAlignmentTest()}
+                >
+                  {aligning ? 'Printing…' : 'Print alignment test'}
+                </button>
+                {alignMsg ? <span className="ph-inline-msg">{alignMsg}</span> : null}
+              </div>
+              <Note>
+                The test uses the values on screen: try a value, print, and save
+                once it lands right.
+              </Note>
+
+              <Help>
+                <ul className="ph-help-list">
+                  <li>
+                    Dot matrix line spacing 28–32 = more space between lines
+                    (default 30).
+                  </li>
+                  <li>
+                    Top offset cm: reverse-feed before print to start bill higher
+                    on A6 slip (default 0.8). Top margin cm: how far BELOW the
+                    perforation the first line prints.
+                  </li>
+                  <li>
+                    Slip height cm: measure one slip from perforation to
+                    perforation; every bill then moves the paper by exactly one
+                    slip (0 = off).
+                  </li>
+                  <li>
+                    Top and bottom margin cm: blank space kept at the top and
+                    bottom of every slip; the medicine table always fills
+                    whatever is left, so the bill is the same shape on every
+                    slip.
+                  </li>
+                  <li>
+                    Print width cm: the paper width minus the tractor holes
+                    (14.5 cm slip - 0.8 cm each side = 12.9).
+                  </li>
+                  <li>
+                    Tear-off handled by Satpuda: after each bill the slip is fed
+                    out by Tear-off eject cm so the perforation clears the tear
+                    edge, and the next bill pulls back exactly that same
+                    distance - no more - so it starts on the top of the next
+                    slip. Raise Tear-off eject until the slip is fully out past
+                    the tear bar (4 cm to start, up to 8); it cannot drift,
+                    because both ends use the one number.
+                  </li>
+                  <li>
+                    Turn the printer&apos;s own Auto tear off OFF, or the two
+                    fight each other - it is in the printer&apos;s Default
+                    Setting mode, the app cannot change it.
+                  </li>
+                  <li>
+                    Left offset cm: moves the whole bill right of the
+                    printer&apos;s first column (nothing prints left of it - if
+                    the bill is too far right at 0, move the paper left in the
+                    printer).
+                  </li>
+                  <li>
+                    Tear feed cm: how far the paper moves up after a bill when no
+                    slip height is set.
+                  </li>
+                  <li>
+                    Print alignment test uses the values on screen, so try a
+                    value, print, and save once it lands right.
+                  </li>
+                  <li>Turn off vertical borders for horizontal-rule-only bills.</li>
+                  <li>Shrink % fits the bill on A5/A6 without clipping borders.</li>
+                </ul>
+              </Help>
+            </div>
+          </details>
         </Frame>
         <SaveBar
           label="Save Bill Print Style"
@@ -1415,6 +1513,12 @@ export function PharmacyPanel(props: Props) {
             Non-final pages show Continued...; last page shows Total. Half
             position = A5/A6 single-copy placement.
           </Help>
+        </Frame>
+        <Frame title="Enter after payment (Sales Page)">
+          <Note>
+            Choose what happens when you press Enter after payment on the Sales
+            page.
+          </Note>
           <Field label="Enter on Online (Cash mode)">
             <select
               className="settings-input"
@@ -1451,10 +1555,6 @@ export function PharmacyPanel(props: Props) {
               ))}
             </select>
           </Field>
-          <Note>
-            Choose what happens when you press Enter after payment on the Sales
-            page.
-          </Note>
         </Frame>
         <SaveBar
           label="Save Bill Print Style"
@@ -1478,8 +1578,6 @@ export function PharmacyPanel(props: Props) {
         <Frame title="Silent Printer Setup (Windows)">
           <Note>
             Invoices print directly to the selected printer via SumatraPDF.
-            Paper size, orientation, tray, and quality use Windows printer
-            preferences.
           </Note>
           {spoolerRunning === false ? (
             <p className="error">
@@ -1489,7 +1587,7 @@ export function PharmacyPanel(props: Props) {
           ) : null}
 
           <Field label="Default printer">
-            <div className="settings-inline-row">
+            <div className="ph-select-btn">
               <select
                 className="settings-input"
                 value={sel(printer.selected_printer)}
@@ -1558,59 +1656,6 @@ export function PharmacyPanel(props: Props) {
           </Field>
           <Note>Leave slot printers blank to use the default printer.</Note>
 
-          <Field label="SumatraPDF path">
-            <div className="settings-inline-row">
-              <input
-                className="settings-input"
-                value={String(printer.sumatra_path || '')}
-                onChange={(e) =>
-                  setPrinter((p) => ({ ...p, sumatra_path: e.target.value }))
-                }
-              />
-              <button
-                type="button"
-                className="settings-action-btn"
-                disabled={busy}
-                onClick={() => void refreshSumatra()}
-              >
-                Refresh
-              </button>
-              <button
-                type="button"
-                className="settings-action-btn"
-                disabled={busy}
-                onClick={() => void browseSumatra()}
-              >
-                Browse…
-              </button>
-            </div>
-          </Field>
-          <Note>
-            Auto-detects tools\SumatraPDF64.exe or SumatraPDF32.exe (dev and
-            EXE).
-          </Note>
-
-          <Check
-            label="Silent print (no Windows dialog) for Print Sales 1 / 2"
-            checked={Boolean(printer.silent_print_enabled ?? true)}
-            onChange={(v) =>
-              setPrinter((p) => ({ ...p, silent_print_enabled: v }))
-            }
-          />
-          <Check
-            label="Print in black only (saves colour ink)"
-            checked={Boolean(printer.print_black_only ?? true)}
-            onChange={(v) =>
-              setPrinter((p) => ({ ...p, print_black_only: v }))
-            }
-          />
-          <Note>
-            Silent print and the Windows print dialog (used when silent print
-            is off or fails) ask the printer for grayscale, so bills use the
-            black cartridge instead of a mix of colour inks. Dot matrix
-            printing is not affected.
-          </Note>
-
           <Field label="Printer type">
             <select
               className="settings-input"
@@ -1626,64 +1671,149 @@ export function PharmacyPanel(props: Props) {
               ))}
             </select>
           </Field>
-          <Field label="Dot matrix print method">
-            <select
-              className="settings-input"
-              disabled={String(printer.printer_type || 'standard') !== 'dot_matrix'}
-              value={String(printer.dot_matrix_print_method || 'auto')}
-              onChange={(e) =>
-                setPrinter((p) => ({
-                  ...p,
-                  dot_matrix_print_method: e.target.value,
-                }))
-              }
-            >
-              {(opts.dot_matrix_print_methods || [
-                { value: 'auto', label: 'Auto' },
-                { value: 'raw', label: 'RAW ESC/P' },
-                { value: 'gdi', label: 'Windows driver' },
-              ]).map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </Field>
           <Note>
             For LX-310: select &quot;EPSON LX-310 ESC/P&quot; (native driver),
             NOT &quot;EPSON LX-310&quot; (Class Driver).
           </Note>
-          <Note>
-            RAW ESC/P sends the bill straight to the printer: it starts at the
-            printer&apos;s first column and the Top offset / Slip height in
-            Paper &amp; Copies apply exactly. Use it whenever the printer takes
-            it (any Epson-compatible 9-pin). Windows driver draws the bill
-            through the driver; it now starts top-left too, and with a Slip
-            height the page is one slip long. Auto picks RAW for an ESC/P driver
-            and the Windows driver for class / generic drivers.
-          </Note>
-          <Note>
-            Print debug log: {printLogPath || 'config/print_log.txt'}
-          </Note>
+
+          <h4>Printing</h4>
+          <div className="settings-check-grid-3">
+            <Check
+              label="Silent print (no Windows dialog) for Print Sales 1 / 2"
+              checked={Boolean(printer.silent_print_enabled ?? true)}
+              onChange={(v) =>
+                setPrinter((p) => ({ ...p, silent_print_enabled: v }))
+              }
+            />
+            <Check
+              label="Print in black only (saves colour ink)"
+              checked={Boolean(printer.print_black_only ?? true)}
+              onChange={(v) =>
+                setPrinter((p) => ({ ...p, print_black_only: v }))
+              }
+            />
+          </div>
+          <Help>
+            <ul className="ph-help-list">
+              <li>
+                Paper size, orientation, tray, and quality use Windows printer
+                preferences.
+              </li>
+              <li>
+                Silent print and the Windows print dialog (used when silent
+                print is off or fails) ask the printer for grayscale, so bills
+                use the black cartridge instead of a mix of colour inks. Dot
+                matrix printing is not affected.
+              </li>
+            </ul>
+          </Help>
         </Frame>
 
-        <div className="settings-inline-row">
+        {/* SumatraPDF, the dot matrix print method and the debug log are
+            rarely touched: folded, so the printers come first (owner,
+            18 Oct 2026). */}
+        <Frame title="Advanced">
+          <details
+            className="ph-advanced"
+            open={String(printer.printer_type || 'standard') === 'dot_matrix'}
+          >
+            <summary>SumatraPDF, dot matrix print method, debug log</summary>
+            <div className="ph-advanced-body">
+              <Field label="SumatraPDF path">
+                <div className="ph-select-btn">
+                  <input
+                    className="settings-input"
+                    value={String(printer.sumatra_path || '')}
+                    onChange={(e) =>
+                      setPrinter((p) => ({ ...p, sumatra_path: e.target.value }))
+                    }
+                  />
+                  <button
+                    type="button"
+                    className="settings-action-btn"
+                    disabled={busy}
+                    onClick={() => void refreshSumatra()}
+                  >
+                    Refresh
+                  </button>
+                  <button
+                    type="button"
+                    className="settings-action-btn"
+                    disabled={busy}
+                    onClick={() => void browseSumatra()}
+                  >
+                    Browse…
+                  </button>
+                </div>
+              </Field>
+              <Note>
+                Auto-detects tools\SumatraPDF64.exe or SumatraPDF32.exe (dev and
+                EXE).
+              </Note>
+
+              <Field label="Dot matrix print method">
+                <select
+                  className="settings-input"
+                  disabled={String(printer.printer_type || 'standard') !== 'dot_matrix'}
+                  value={String(printer.dot_matrix_print_method || 'auto')}
+                  onChange={(e) =>
+                    setPrinter((p) => ({
+                      ...p,
+                      dot_matrix_print_method: e.target.value,
+                    }))
+                  }
+                >
+                  {(opts.dot_matrix_print_methods || [
+                    { value: 'auto', label: 'Auto' },
+                    { value: 'raw', label: 'RAW ESC/P' },
+                    { value: 'gdi', label: 'Windows driver' },
+                  ]).map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Help>
+                RAW ESC/P sends the bill straight to the printer: it starts at
+                the printer&apos;s first column and the Top offset / Slip height
+                in Paper &amp; Copies apply exactly. Use it whenever the printer
+                takes it (any Epson-compatible 9-pin). Windows driver draws the
+                bill through the driver; it now starts top-left too, and with a
+                Slip height the page is one slip long. Auto picks RAW for an
+                ESC/P driver and the Windows driver for class / generic drivers.
+              </Help>
+
+              <Note>
+                Print debug log: {printLogPath || 'config/print_log.txt'}
+              </Note>
+            </div>
+          </details>
+        </Frame>
+
+        {/* The panel's Save, kept in sight like every other panel's SaveBar,
+            with Test Print beside it and the last printer message. */}
+        <div className="settings-savebar">
           <SaveBtn
-            label="Save Printer Settings"
+            label={saving ? 'Saving…' : 'Save Printer Settings'}
             saving={saving}
             onClick={() => onSave({ printer })}
           />
           <button
             type="button"
-            className="settings-action-btn"
+            className="settings-action-btn ph-btn-secondary"
             disabled={testing}
             onClick={() => void onTestPrint()}
           >
             Test Print
           </button>
+          {printerWarn ? (
+            <span className="settings-savebar-msg err">{printerWarn}</span>
+          ) : null}
+          {printerMsg ? (
+            <span className="settings-savebar-msg">{printerMsg}</span>
+          ) : null}
         </div>
-        {printerWarn ? <p className="error">{printerWarn}</p> : null}
-        {printerMsg ? <Note>{printerMsg}</Note> : null}
       </>
     )
   }

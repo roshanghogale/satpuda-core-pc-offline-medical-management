@@ -15,11 +15,13 @@ import {
   Check,
   Field,
   Frame,
+  Help,
   Note,
   PanelTitle,
   SaveBar,
   SaveBtn,
 } from './SettingsChrome'
+import '../../styles/prefs-settings.css'
 
 type Opts = SettingsBundle['options']
 
@@ -148,33 +150,36 @@ export function AppearancePanel({
     }
   }
 
+  // The panel's Save in sight at the bottom (same markup as <SaveBar>), with
+  // Restart App beside it as an outline button.
   const saveBtn = (
     <>
-      <SaveBtn
-        label="Save Appearance"
-        saving={saving}
-        onClick={onSaveAppearance}
-      />
-      {onRequestRestart ? (
-        <button
-          type="button"
-          className="settings-action-btn"
-          style={{ marginLeft: 8 }}
-          onClick={() =>
-            onRequestRestart(
-              'Restart the desktop app to fully reload all pages and the local data engine.',
-            )
-          }
-        >
-          Restart App…
-        </button>
-      ) : null}
-      <Note>
+      <Help title="When changes apply">
         Theme and pack preview update instantly when you change the lists — no
         restart. Click Save Appearance to keep them after you close the app.
         Font size and the banner width also apply live. Quick Access and the
         Dashboard Sections apply as soon as you press Save Appearance.
-      </Note>
+      </Help>
+      <div className="settings-savebar">
+        <SaveBtn
+          label={saving ? 'Saving…' : 'Save Appearance'}
+          saving={saving}
+          onClick={onSaveAppearance}
+        />
+        {onRequestRestart ? (
+          <button
+            type="button"
+            className="settings-action-btn prefs-btn-secondary"
+            onClick={() =>
+              onRequestRestart(
+                'Restart the desktop app to fully reload all pages and the local data engine.',
+              )
+            }
+          >
+            Restart App…
+          </button>
+        ) : null}
+      </div>
     </>
   )
 
@@ -246,27 +251,29 @@ export function AppearancePanel({
               onPrefsChange({ ...prefs, show_nav_shortcut_keys: v })
             }}
           />
-          <Check
-            label="Scroll long text in tables (marquee)"
-            checked={Boolean(
-              appearance.table_text_marquee ?? prefs.table_text_marquee,
-            )}
-            onChange={(v) => {
-              setAppearance((a) => ({ ...a, table_text_marquee: v }))
-              onPrefsChange({ ...prefs, table_text_marquee: v })
-            }}
-          />
-          <Note>
-            When off (default), long medicine or customer names show ellipsis
-            only. Turn on to animate scrolling in inventory and history lists.
-          </Note>
+          <div className="prefs-check-item">
+            <Check
+              label="Scroll long text in tables (marquee)"
+              checked={Boolean(
+                appearance.table_text_marquee ?? prefs.table_text_marquee,
+              )}
+              onChange={(v) => {
+                setAppearance((a) => ({ ...a, table_text_marquee: v }))
+                onPrefsChange({ ...prefs, table_text_marquee: v })
+              }}
+            />
+            <p className="prefs-check-hint">
+              When off (default), long medicine or customer names show ellipsis
+              only. Turn on to animate scrolling in inventory and history lists.
+            </p>
+          </div>
+          <Help title="About theme packs">
+            Packs rematch the same 20 themes: Classic (original), Accessible
+            (clearer chrome + high-contrast status), Modern (deeper dark / soft
+            light panels + vivid accents). Use Dark / Use Light still flips the
+            family variant only.
+          </Help>
         </Frame>
-        <Note>
-          Packs rematch the same 20 themes: Classic (original), Accessible
-          (clearer chrome + high-contrast status), Modern (deeper dark / soft
-          light panels + vivid accents). Use Dark / Use Light still flips the
-          family variant only.
-        </Note>
         {saveBtn}
       </>
     )
@@ -279,7 +286,7 @@ export function AppearancePanel({
         <Frame title="Font Size">
           <Field label="Font size (7–20)">
             <input
-              className="settings-input"
+              className="settings-input prefs-num"
               type="number"
               min={7}
               max={20}
@@ -325,82 +332,84 @@ export function AppearancePanel({
               }))
             }
           />
-          <Field label="Custom banner path">
-            <div className="settings-inline-row">
-              <input
-                className="settings-input"
-                value={String(appearance.home_banner_path ?? '')}
-                readOnly
-                disabled={useDefault}
-                placeholder="Choose an image with Browse…"
-              />
-              <button
-                type="button"
-                className="settings-action-btn"
-                disabled={useDefault || bannerBusy}
-                // Straight from the click: an await first would spend the
-                // browser's user activation and the picker would not open.
-                onClick={() => bannerInputRef.current?.click()}
-              >
-                Browse…
-              </button>
-              <input
-                ref={bannerInputRef}
-                type="file"
-                accept="image/png,image/jpeg,image/gif,image/webp,image/bmp"
-                style={{ display: 'none' }}
-                onChange={(e) => {
-                  const f = e.target.files?.[0]
-                  e.target.value = ''
-                  if (f) void uploadBanner(f)
-                }}
-              />
-              <button
-                type="button"
-                className="settings-action-btn"
-                disabled={useDefault || bannerBusy}
-                onClick={() => {
-                  void (async () => {
-                    setBannerBusy(true)
-                    setBannerNote('')
-                    try {
-                      const next = {
-                        ...appearance,
-                        home_banner_path: '',
-                        home_banner_use_default: true,
+          <div className="prefs-wide">
+            <Field label="Custom banner path">
+              <div className="settings-inline-row">
+                <input
+                  className="settings-input"
+                  value={String(appearance.home_banner_path ?? '')}
+                  readOnly
+                  disabled={useDefault}
+                  placeholder="Choose an image with Browse…"
+                />
+                <button
+                  type="button"
+                  className="settings-action-btn"
+                  disabled={useDefault || bannerBusy}
+                  // Straight from the click: an await first would spend the
+                  // browser's user activation and the picker would not open.
+                  onClick={() => bannerInputRef.current?.click()}
+                >
+                  Browse…
+                </button>
+                <input
+                  ref={bannerInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/gif,image/webp,image/bmp"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0]
+                    e.target.value = ''
+                    if (f) void uploadBanner(f)
+                  }}
+                />
+                <button
+                  type="button"
+                  className="settings-action-btn prefs-btn-secondary"
+                  disabled={useDefault || bannerBusy}
+                  onClick={() => {
+                    void (async () => {
+                      setBannerBusy(true)
+                      setBannerNote('')
+                      try {
+                        const next = {
+                          ...appearance,
+                          home_banner_path: '',
+                          home_banner_use_default: true,
+                        }
+                        setAppearance(next)
+                        await saveSettingsSection('appearance', {
+                          home_banner_use_default: true,
+                          home_banner_path: '',
+                          home_banner_size: Number(
+                            appearance.home_banner_size ?? 1500,
+                          ),
+                        })
+                        setBannerNote('Using default banner (assets/home_banner.png).')
+                        window.dispatchEvent(
+                          new Event('satpuda:home-banner-changed'),
+                        )
+                      } catch (e) {
+                        setBannerNote(
+                          e instanceof Error ? e.message : String(e),
+                        )
+                      } finally {
+                        setBannerBusy(false)
                       }
-                      setAppearance(next)
-                      await saveSettingsSection('appearance', {
-                        home_banner_use_default: true,
-                        home_banner_path: '',
-                        home_banner_size: Number(
-                          appearance.home_banner_size ?? 1500,
-                        ),
-                      })
-                      setBannerNote('Using default banner (assets/home_banner.png).')
-                      window.dispatchEvent(
-                        new Event('satpuda:home-banner-changed'),
-                      )
-                    } catch (e) {
-                      setBannerNote(
-                        e instanceof Error ? e.message : String(e),
-                      )
-                    } finally {
-                      setBannerBusy(false)
-                    }
-                  })()
-                }}
-              >
-                Clear
-              </button>
-            </div>
-          </Field>
+                    })()
+                  }}
+                >
+                  Clear
+                </button>
+              </div>
+            </Field>
+          </div>
           {bannerNote ? <Note>{bannerNote}</Note> : null}
-          <Note>
+          <Help>
             Browse copies the image into the app config folder (same as the Python
             app). After Browse or Clear, open Home to see the banner (or click
             Retry if it was blank).
-          </Note>
+          </Help>
         </Frame>
         {saveBtn}
       </>
@@ -412,19 +421,22 @@ export function AppearancePanel({
       <>
         <PanelTitle>Quick Access</PanelTitle>
         <Frame title="Quick Access buttons">
-          {opts.quick_access.map((q) => (
-            <Check
-              key={q.key}
-              label={q.label}
-              checked={qa[q.key] !== false}
-              onChange={(v) =>
-                setAppearance((a) => ({
-                  ...a,
-                  quick_access: { ...qa, [q.key]: v },
-                }))
-              }
-            />
-          ))}
+          <Note>Tick the Quick Access buttons that Home shows.</Note>
+          <div className="settings-check-grid-3">
+            {opts.quick_access.map((q) => (
+              <Check
+                key={q.key}
+                label={q.label}
+                checked={qa[q.key] !== false}
+                onChange={(v) =>
+                  setAppearance((a) => ({
+                    ...a,
+                    quick_access: { ...qa, [q.key]: v },
+                  }))
+                }
+              />
+            ))}
+          </div>
         </Frame>
         {saveBtn}
       </>
@@ -436,19 +448,21 @@ export function AppearancePanel({
       <>
         <PanelTitle>Dashboard Sections</PanelTitle>
         <Frame title="Home dashboard sections">
-          {opts.dashboard_sections.map((d) => (
-            <Check
-              key={d.key}
-              label={d.label}
-              checked={dash[d.key] !== false}
-              onChange={(v) =>
-                setAppearance((a) => ({
-                  ...a,
-                  dashboard_sections: { ...dash, [d.key]: v },
-                }))
-              }
-            />
-          ))}
+          <div className="settings-check-grid-3">
+            {opts.dashboard_sections.map((d) => (
+              <Check
+                key={d.key}
+                label={d.label}
+                checked={dash[d.key] !== false}
+                onChange={(v) =>
+                  setAppearance((a) => ({
+                    ...a,
+                    dashboard_sections: { ...dash, [d.key]: v },
+                  }))
+                }
+              />
+            ))}
+          </div>
         </Frame>
         {saveBtn}
       </>
@@ -481,6 +495,11 @@ export function LayoutListsPanel({
 }) {
   const pages = opts.column_pages || []
   const [exportPage, setExportPage] = useState(pages[0]?.key || '')
+  // What is typed in the Medicine Types box while it has focus. The saved list
+  // drops empty lines on every keystroke, so a box showing only that list ate
+  // the Enter that starts a new type at the end; the draft keeps the typing,
+  // the list underneath is the same as before.
+  const [medTypesDraft, setMedTypesDraft] = useState<string | null>(null)
 
   const exportPageKey = exportPage || pages[0]?.key || ''
   // The export report's OWN columns. Using the screen list here meant an
@@ -537,22 +556,26 @@ export function LayoutListsPanel({
             >
             const pageVis = vis[page.key] || {}
             const cols = opts.table_columns?.[page.key] || []
+            // An unsaved key is not automatically "shown": a few columns ship
+            // hidden, and rendering those ticked told the shop the opposite
+            // of what the screen was doing.
+            const shown = (key: string) =>
+              pageVis[key] ?? opts.column_defaults?.[page.key]?.[key] ?? true
+            const shownCount = cols.filter((c) => shown(c.key)).length
             return (
-              <div key={page.key} className="settings-column-page">
-                <h4>{page.label}</h4>
-                <div className="settings-check-grid">
+              <div key={page.key} className="settings-column-page prefs-col-group">
+                <h4>
+                  {page.label}
+                  <span className="prefs-count">
+                    {shownCount} of {cols.length} shown
+                  </span>
+                </h4>
+                <div className="settings-check-grid-3">
                   {cols.map((col) => (
                     <Check
                       key={col.key}
                       label={col.label}
-                      // An unsaved key is not automatically "shown": a few
-                      // columns ship hidden, and rendering those ticked told
-                      // the shop the opposite of what the screen was doing.
-                      checked={
-                        pageVis[col.key] ??
-                        opts.column_defaults?.[page.key]?.[col.key] ??
-                        true
-                      }
+                      checked={shown(col.key)}
                       onChange={(v) =>
                         setLayoutLists((l) => ({
                           ...l,
@@ -576,6 +599,7 @@ export function LayoutListsPanel({
           })}
         </Frame>
         <Frame title="Export report columns">
+          <Note>The columns an exported report of the chosen page has.</Note>
           <Field label="Page">
             <select
               className="settings-input"
@@ -589,7 +613,7 @@ export function LayoutListsPanel({
               ))}
             </select>
           </Field>
-          <div className="settings-check-grid">
+          <div className="settings-check-grid-3">
             {exportCols.map((col) => (
               <Check
                 key={col.key}
@@ -649,23 +673,41 @@ export function LayoutListsPanel({
             rows stay in the list — scroll inside the table. Save, then open
             the page to see the new height.
           </Note>
-          {ROW_FIELDS.map(([k, lab, mn, mx]) => (
-            <Field key={k} label={lab}>
-              <input
-                className="settings-input"
-                type="number"
-                min={mn}
-                max={mx}
-                value={Number(layoutLists[k] ?? 0)}
-                onChange={(e) =>
-                  setLayoutLists((l) => ({
-                    ...l,
-                    [k]: Number(e.target.value),
-                  }))
-                }
-              />
-            </Field>
-          ))}
+          <table className="settings-type-table">
+            <thead>
+              <tr>
+                <th>List</th>
+                <th>Rows visible</th>
+                <th>Allowed</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ROW_FIELDS.map(([k, lab, mn, mx]) => (
+                <tr key={k}>
+                  <td>{lab.replace(/ rows$/, '')}</td>
+                  <td>
+                    <input
+                      className="settings-input"
+                      type="number"
+                      aria-label={lab}
+                      min={mn}
+                      max={mx}
+                      value={Number(layoutLists[k] ?? 0)}
+                      onChange={(e) =>
+                        setLayoutLists((l) => ({
+                          ...l,
+                          [k]: Number(e.target.value),
+                        }))
+                      }
+                    />
+                  </td>
+                  <td className="prefs-range">
+                    {mn}–{mx}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </Frame>
         {saveBtn}
       </>
@@ -677,15 +719,23 @@ export function LayoutListsPanel({
       <>
         <PanelTitle>Medicine Types</PanelTitle>
         <Frame title="Medicine types">
-          <Field label="Medicine types (one per line)">
+          <Note>
+            One type per line; empty lines are dropped. Medicine Units shows one
+            row for each type in this list.
+          </Note>
+          <label className="settings-field stacked prefs-list-field">
+            <span>Medicine types (one per line)</span>
             <textarea
-              className="settings-input settings-textarea"
-              rows={10}
+              className="settings-input settings-textarea prefs-list-box"
+              rows={18}
+              spellCheck={false}
               value={
-                (layoutLists.med_types as string[] | undefined)?.join('\n') ||
-                ''
+                medTypesDraft ??
+                ((layoutLists.med_types as string[] | undefined)?.join('\n') ||
+                  '')
               }
-              onChange={(e) =>
+              onChange={(e) => {
+                setMedTypesDraft(e.target.value)
                 setLayoutLists((l) => ({
                   ...l,
                   med_types: e.target.value
@@ -693,9 +743,14 @@ export function LayoutListsPanel({
                     .map((x) => x.trim())
                     .filter(Boolean),
                 }))
-              }
+              }}
+              onBlur={() => setMedTypesDraft(null)}
             />
-          </Field>
+            <span className="prefs-list-count">
+              {((layoutLists.med_types as string[] | undefined) || []).length}{' '}
+              types
+            </span>
+          </label>
         </Frame>
         {saveBtn}
       </>
@@ -772,10 +827,16 @@ export function LayoutListsPanel({
       <>
         <PanelTitle>Schedules</PanelTitle>
         <Frame title="Schedules">
-          <Field label="Schedules (one per line; blank line = empty schedule)">
+          <Note>
+            The schedules a medicine can have (H, H1, X, …), one per line. A
+            blank line stands for &quot;no schedule&quot;.
+          </Note>
+          <label className="settings-field stacked prefs-list-field short">
+            <span>Schedules (one per line; blank line = empty schedule)</span>
             <textarea
-              className="settings-input settings-textarea"
-              rows={8}
+              className="settings-input settings-textarea prefs-list-box"
+              rows={12}
+              spellCheck={false}
               value={
                 (layoutLists.schedules as string[] | undefined)?.join('\n') ||
                 ''
@@ -787,7 +848,7 @@ export function LayoutListsPanel({
                 }))
               }
             />
-          </Field>
+          </label>
         </Frame>
         {saveBtn}
       </>
@@ -999,6 +1060,22 @@ export function SalesBillingPanel({
           </Field>
         </Frame>
         <Frame title="Discount per medicine">
+          <Note>
+            Stored bills always keep the discount in ₹. Percentage is converted
+            when you add the line.
+          </Note>
+          <Check
+            label="Show item discount column on Sales"
+            checked={Boolean(
+              salesBilling.billing_show_item_discount !== false,
+            )}
+            onChange={(v) =>
+              setSalesBilling((s) => ({
+                ...s,
+                billing_show_item_discount: v,
+              }))
+            }
+          />
           <Field label="Line discount input">
             <select
               className="settings-input"
@@ -1018,24 +1095,12 @@ export function SalesBillingPanel({
               ))}
             </select>
           </Field>
-          <Check
-            label="Show item discount column on Sales"
-            checked={Boolean(
-              salesBilling.billing_show_item_discount !== false,
-            )}
-            onChange={(v) =>
-              setSalesBilling((s) => ({
-                ...s,
-                billing_show_item_discount: v,
-              }))
-            }
-          />
-          <Note>
-            Stored bills always keep the discount in ₹. Percentage is converted
-            when you add the line.
-          </Note>
         </Frame>
         <Frame title="Margin column (Sales screen only)">
+          <Note>
+            Percentage shows margin as % of MRP line value (same idea as Disc %).
+            Rupees shows the absolute margin amount.
+          </Note>
           <Check
             label="Show margin column per medicine"
             checked={Boolean(salesBilling.billing_show_margin_column)}
@@ -1066,10 +1131,6 @@ export function SalesBillingPanel({
               )}
             </select>
           </Field>
-          <Note>
-            Percentage shows margin as % of MRP line value (same idea as Disc %).
-            Rupees shows the absolute margin amount.
-          </Note>
           <Check
             label="Show total margin in billing summary"
             checked={Boolean(salesBilling.billing_show_total_margin)}
@@ -1112,7 +1173,7 @@ export function SalesBillingPanel({
             }
           />
         </Frame>
-        <SaveBtn label={saveLabel} saving={saving} onClick={save} />
+        <SaveBar label={saveLabel} saving={saving} onClick={save} />
       </>
     )
   }
@@ -1148,7 +1209,7 @@ export function SalesBillingPanel({
             }
           />
         </Frame>
-        <SaveBtn label={saveLabel} saving={saving} onClick={save} />
+        <SaveBar label={saveLabel} saving={saving} onClick={save} />
       </>
     )
   }
@@ -1160,7 +1221,7 @@ export function SalesBillingPanel({
         <Frame title="Sales Return">
           <Field label="Lookup window (days)">
             <input
-              className="settings-input"
+              className="settings-input prefs-num"
               type="number"
               min={1}
               max={365}
@@ -1174,7 +1235,7 @@ export function SalesBillingPanel({
             />
           </Field>
         </Frame>
-        <SaveBtn label={saveLabel} saving={saving} onClick={save} />
+        <SaveBar label={saveLabel} saving={saving} onClick={save} />
       </>
     )
   }
@@ -1206,20 +1267,22 @@ export function SalesBillingPanel({
               ))}
             </select>
           </Field>
-          <Field label="Save folder">
-            <input
-              className="settings-input"
-              value={String(salesBilling.sales_bill_save_dir ?? '')}
-              onChange={(e) =>
-                setSalesBilling((s) => ({
-                  ...s,
-                  sales_bill_save_dir: e.target.value,
-                }))
-              }
-            />
-          </Field>
+          <div className="prefs-wide">
+            <Field label="Save folder">
+              <input
+                className="settings-input"
+                value={String(salesBilling.sales_bill_save_dir ?? '')}
+                onChange={(e) =>
+                  setSalesBilling((s) => ({
+                    ...s,
+                    sales_bill_save_dir: e.target.value,
+                  }))
+                }
+              />
+            </Field>
+          </div>
         </Frame>
-        <SaveBtn label={saveLabel} saving={saving} onClick={save} />
+        <SaveBar label={saveLabel} saving={saving} onClick={save} />
       </>
     )
   }
@@ -1264,7 +1327,7 @@ export function SalesBillingPanel({
             </select>
           </Field>
         </Frame>
-        <SaveBtn label={saveLabel} saving={saving} onClick={save} />
+        <SaveBar label={saveLabel} saving={saving} onClick={save} />
       </>
     )
   }
@@ -1283,7 +1346,7 @@ export function SalesBillingPanel({
         />
         <Field label="Interval (seconds)">
           <input
-            className="settings-input"
+            className="settings-input prefs-num"
             type="number"
             min={30}
             max={3600}
@@ -1297,7 +1360,7 @@ export function SalesBillingPanel({
           />
         </Field>
       </Frame>
-      <SaveBtn label={saveLabel} saving={saving} onClick={save} />
+      <SaveBar label={saveLabel} saving={saving} onClick={save} />
     </>
   )
 }
