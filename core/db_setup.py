@@ -1064,6 +1064,20 @@ def _migrate_customer_payments(cur):
         print(f"customer_payments migration: {e}")
 
 
+def ensure_recent_columns(conn) -> None:
+    """Columns the engine needs on a store opened as it is (core/desktop_api._open_conn).
+
+    The desktop engine opens an existing store without initialise(), so a column added
+    here for a feature reaches an upgraded PC only through this: the Payment panel said
+    "no such column: sp.allocations" on a store made by an older build (18 Oct 2026).
+    Each step is an ALTER only when the column is missing.
+    """
+    cur = conn.cursor()
+    _migrate_payment_allocations(cur)
+    _migrate_return_credit(cur)
+    conn.commit()
+
+
 def _migrate_payment_allocations(cur):
     """The bills a payment was given (core/bill_clearing.py): JSON text, NULL = oldest first."""
     for table in ('customer_payments', 'supplier_payments'):

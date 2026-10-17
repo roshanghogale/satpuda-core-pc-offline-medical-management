@@ -256,6 +256,12 @@ def _open_conn(db_path: str) -> sqlite3.Connection:
         conn.execute("PRAGMA foreign_keys=ON")
     except Exception:
         pass
+    try:
+        from core.db_setup import ensure_recent_columns
+
+        ensure_recent_columns(conn)
+    except Exception as exc:
+        print(f"[schema] recent columns: {exc}", flush=True)
     # Offline owns a real settings table. Mirror it, so switching to Online --
     # which runs on :memory: -- shows the same thresholds instead of defaults.
     try:
