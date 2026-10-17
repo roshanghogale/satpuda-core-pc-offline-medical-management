@@ -2288,6 +2288,10 @@ def print_all_sales(conn, body: dict[str, Any]) -> dict[str, Any]:
     slot = _safe_int(body.get("slot") or PRINT_ALL_SLOT)
     if slot not in (1, 2):
         slot = PRINT_ALL_SLOT
+    # Print All's copy dropdown (owner, 17 Oct 2026): none / customer / store.
+    copy_label = {"customer": "Customer Copy", "store": "Store Copy"}.get(
+        str(body.get("copy_label") or "").strip().lower(), ""
+    )
 
     raw_ids = body.get("sale_ids")
     if isinstance(raw_ids, list) and raw_ids:
@@ -2330,7 +2334,7 @@ def print_all_sales(conn, body: dict[str, Any]) -> dict[str, Any]:
         pass
 
     pages, failures = print_bills_batch(
-        conn, sale_ids, paper=paper, slot=slot, db_path=db_path
+        conn, sale_ids, paper=paper, slot=slot, db_path=db_path, copy_label=copy_label
     )
     ok = not failures
     if dot_matrix:

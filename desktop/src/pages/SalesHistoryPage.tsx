@@ -107,6 +107,15 @@ export function SalesHistoryPage({
   // The Print All dialog's own Paper select drives this; A6 is only the
   // opening value. (It used to be hardcoded all the way to the engine.)
   const [printAllPaper, setPrintAllPaper] = useState('A6')
+  // "Customer Copy" / "Store Copy" under each bill, standard print only (owner,
+  // 17 Oct 2026). Remembered on this PC; '' prints no label.
+  const [printAllCopy, setPrintAllCopy] = useState<string>(() => {
+    try {
+      return localStorage.getItem('printAllCopyLabel') || ''
+    } catch {
+      return ''
+    }
+  })
   const [printAllSchedule, setPrintAllSchedule] = useState('')
   const [printAllUnapplied, setPrintAllUnapplied] = useState<string[]>([])
   // Dot matrix: each bill is printed on its own slip, one after another, with
@@ -544,6 +553,7 @@ export function SalesHistoryPage({
         to,
         sale_ids: ids,
         paper: printAllPaper,
+        copy_label: printAllCopy,
         slot: 2,
       })
       // Close either way: leaving all twenty still ticked behind the alert
@@ -1094,6 +1104,28 @@ export function SalesHistoryPage({
                     <option value="A6">A6 — one bill per sheet</option>
                     <option value="A5">A5 — two per sheet</option>
                     <option value="A4">A4 — four per sheet</option>
+                  </select>
+                </label>
+                )}
+                {printAllDotMatrix ? null : (
+                <label>
+                  Copy
+                  <select
+                    className="settings-input"
+                    value={printAllCopy}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      setPrintAllCopy(v)
+                      try {
+                        localStorage.setItem('printAllCopyLabel', v)
+                      } catch {
+                        /* remembered for this session only */
+                      }
+                    }}
+                  >
+                    <option value="">No copy label</option>
+                    <option value="customer">Customer Copy</option>
+                    <option value="store">Store Copy</option>
                   </select>
                 </label>
                 )}

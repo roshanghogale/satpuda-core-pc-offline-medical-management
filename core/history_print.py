@@ -309,8 +309,13 @@ def print_bills_batch(
     hwnd_owner: int = 0,
     settings_override: dict | None = None,
     db_path: str | None = None,
+    copy_label: str = "",
 ) -> tuple[int, list[str]]:
-    """Print many sales bills — same logic as Tk sales_history_actions."""
+    """Print many sales bills — same logic as Tk sales_history_actions.
+
+    copy_label ("Customer Copy" / "Store Copy") is printed under each bill, outside its
+    border, on the standard (HTML) print only; a dot matrix slip has no room for it.
+    """
     if sale_ids and _dot_matrix_mode():
         # A dot matrix prints slips, one bill each: A5/A4 "bills per sheet" would
         # be one continuous document running every bill into the next.
@@ -341,6 +346,7 @@ def print_bills_batch(
     slot_settings["bill_copies"] = 1
     render_settings = apply_print_bill_layout(slot_settings, print_slot_copies=1)
     render_settings["paper_size"] = paper_u
+    render_settings["copy_footer_label"] = str(copy_label or "").strip()
     printer = PrinterManager.get_printer_for_slot(slot)
     failures: list[str] = []
     pages = 0
