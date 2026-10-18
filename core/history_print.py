@@ -253,6 +253,14 @@ def save_bills_pdf(
     else:
         from bill_templates.classic import render_classic_bill_html_multi
 
+        # A wholesale tax invoice is a page of its own (core/wholesale_sale.py), never one
+        # of several bills on a sheet.
+        sale_ids, ws_ids = _split_wholesale(conn, sale_ids)
+        for sale_id in ws_ids:
+            try:
+                parts.append(_wholesale_pdf(conn, sale_id, render_settings, db_path))
+            except Exception as exc:
+                failures.append(f"Sale {sale_id}: {exc}")
         for chunk in _chunk_sale_ids_for_print(sale_ids, paper_u):
             try:
                 contexts = [
@@ -300,6 +308,26 @@ def save_bills_pdf(
             except OSError:
                 pass
     return remember(out_path), failures
+
+
+def _split_wholesale(conn, sale_ids: list[int]) -> tuple[list[int], list[int]]:
+    """(other bills, wholesale tax invoices) of a Print All list, each in its order."""
+    from core.wholesale_sale import is_wholesale_sale
+
+    rest: list[int] = []
+    ws: list[int] = []
+    for sid in sale_ids:
+        (ws if conn is not None and is_wholesale_sale(conn, sid) else rest).append(sid)
+    return rest, ws
+
+
+def _wholesale_pdf(conn, sale_id: int, settings: dict, db_path: str | None) -> str:
+    from core.bill_output import wholesale_invoice_files
+
+    files = wholesale_invoice_files(conn, sale_id, settings, db_path=db_path)
+    if not files or not files[1]:
+        raise RuntimeError("PDF could not be created (install Edge or Chrome).")
+    return files[1]
 
 
 def _chunk_sale_ids_for_print(sale_ids: list[int], paper: str) -> list[list[int]]:
@@ -481,6 +509,15 @@ def print_bills_batch(
 
     from bill_templates.classic import render_classic_bill_html_multi
 
+    sale_ids, ws_ids = _split_wholesale(conn, sale_ids)
+    for sale_id in ws_ids:
+        try:
+            PrinterManager.print_pdf_silently(
+                _wholesale_pdf(conn, sale_id, render_settings, db_path), printer, copies=1,
+            )
+            pages += 1
+        except Exception as exc:
+            failures.append(f"Sale {sale_id}: {exc}")
     for chunk in _chunk_sale_ids_for_print(sale_ids, paper_u):
         try:
             contexts = []

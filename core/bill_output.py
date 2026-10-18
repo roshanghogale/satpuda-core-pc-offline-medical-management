@@ -473,6 +473,66 @@ def _render_bill_files(bill_no, ctx, html_settings, save_dir: str, *, page_index
     return html_path, pdf_saved
 
 
+def _wholesale_invoice_ctx(conn, sale_id, db_path: str | None = None):
+    """The tax-invoice context of a wholesale bill (core/wholesale_sale.py), or None for
+    any other bill. Read like _load_sale_data_for_pdf: a fresh connection first, retried
+    briefly so a just-saved bill is seen, then the caller's own."""
+    from core import wholesale_sale
+
+    try:
+        sid = int(sale_id)
+    except (TypeError, ValueError):
+        return None
+    # The store's own connection wrote the bill, so it answers "which kind" at once; every
+    # retail bill stops here.
+    if conn is None or not wholesale_sale.is_wholesale_sale(conn, sid):
+        return None
+    path = resolve_bill_db_path(conn, db_path)
+    for attempt in range(4):
+        c, own = _open_bill_pdf_conn(conn, path)
+        try:
+            if wholesale_sale.is_wholesale_sale(c, sid):
+                return wholesale_sale.invoice_context(c, sid)
+        except Exception:
+            pass
+        finally:
+            if own:
+                try:
+                    c.close()
+                except Exception:
+                    pass
+        if c is conn:
+            break
+        time.sleep(0.04 * (attempt + 1))
+    return wholesale_sale.invoice_context(conn, sid)
+
+
+def wholesale_invoice_files(conn, sale_id, settings: dict | None = None, *,
+                            db_path: str | None = None, save_dir: str | None = None):
+    """(html path, pdf path or None) of a wholesale bill's tax invoice, A4 or A5 by the
+    print slot's paper; None when the bill is not a wholesale one."""
+    inv = _wholesale_invoice_ctx(conn, sale_id, db_path)
+    if inv is None:
+        return None
+    from bill_templates.wholesale_invoice import render_wholesale_invoice_html
+    from core.wholesale_sale import invoice_paper, paper_mm
+
+    paper = invoice_paper(settings)
+    html = render_wholesale_invoice_html(inv, paper=paper)
+    if not save_dir:
+        from core.bill_save_prefs import resolve_sales_bill_save_dir
+
+        save_dir = resolve_sales_bill_save_dir()
+    stem = _safe_bill_stem(inv.get("bill_no") or sale_id)
+    html_path = os.path.join(save_dir, f"{stem}.html")
+    pdf_path = os.path.join(save_dir, f"{stem}.pdf")
+    with open(html_path, "w", encoding="utf-8") as f:
+        f.write(html)
+    w_mm, h_mm = paper_mm(paper)
+    ok = _try_pdf_via_browser(html_path, pdf_path, paper_width_mm=w_mm, paper_height_mm=h_mm)
+    return html_path, (pdf_path if ok else None)
+
+
 def _open_bill_pdf_conn(conn, path: str):
     """Open a dedicated store connection for bill render; fall back to shared conn."""
     try:
@@ -578,6 +638,13 @@ def save_bill_pdf_pages(
     F5 / Save Bill defaults to Print Sales 1 when no slot is passed.
     """
     effective_slot = 1 if print_slot is None else int(print_slot)
+    ws_settings = get_print_slot_settings(load_bill_print_settings(), effective_slot)
+    if settings_override:
+        ws_settings.update(settings_override)
+    ws = wholesale_invoice_files(conn, sale_id, ws_settings, db_path=db_path)
+    if ws is not None:
+        # A wholesale tax invoice: its own template, one document however long.
+        return [ws]
     bill_no, ctx, settings = _load_sale_data_for_pdf(
         conn, sale_id, settings_override, print_slot=effective_slot, db_path=db_path,
     )
@@ -884,6 +951,23 @@ def _print_bill_dot_matrix_with_slot(
         f'dot_matrix print start sale_id={sale_id} slot={slot} db_path={db_path or ""}'
     )
 
+    ws_settings = get_print_slot_settings(load_bill_print_settings(), slot)
+    if settings_override:
+        ws_settings.update(settings_override)
+    ws = wholesale_invoice_files(conn, sale_id, ws_settings, db_path=db_path)
+    if ws is not None:
+        # A wholesale tax invoice is a page, not a slip: it goes to the slot's printer as
+        # its PDF.
+        html_path, pdf_path = ws
+        if not pdf_path:
+            raise RuntimeError(
+                'Tax invoice HTML was saved, but its PDF could not be created for printing.'
+            )
+        PrinterManager.print_pdf_silently(
+            pdf_path, PrinterManager.get_printer_for_slot(slot), copies=1,
+        )
+        return html_path, pdf_path
+
     base = load_bill_print_settings()
     bill_no, ctx, settings = _load_sale_data_for_pdf(
         conn, sale_id, settings_override=settings_override, print_slot=slot, db_path=db_path,
@@ -1084,6 +1168,11 @@ def save_bill_pdf_a6(
         "copies": 1,
         "bill_copies": 1,
     }
+    ws = wholesale_invoice_files(
+        conn, sale_id, get_print_slot_settings(load_bill_print_settings(), 1), db_path=db_path,
+    )
+    if ws is not None:
+        return ws
     bill_no, ctx, settings = _load_sale_data_for_pdf(
         conn, sale_id, settings_override=override, db_path=db_path,
     )
