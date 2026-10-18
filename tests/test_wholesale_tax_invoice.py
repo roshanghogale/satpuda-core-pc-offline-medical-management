@@ -45,6 +45,8 @@ def _offline():
 def _store(mode: str = "wholesale") -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
     db_setup.initialise(conn)
+    # initialise() can seed a profile from the checkout's config/pharmacy_profile.json
+    conn.execute("DELETE FROM pharmacy_profile")
     conn.execute(
         "INSERT INTO pharmacy_profile (name, address, phone, gstin, dl_number) VALUES "
         "('TEST WHOLESALE AGENCY', 'Shop 1, Market Road, Testnagar', '9000000000', ?, "
