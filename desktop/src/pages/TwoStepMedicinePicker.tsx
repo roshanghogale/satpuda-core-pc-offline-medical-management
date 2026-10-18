@@ -22,6 +22,8 @@ type Props = {
   onEmptyEnter?: () => void
   /** Name voice finds this field by. */
   voiceField?: string
+  /** Leave the MRP column out of both lists (wholesale sells strips at Rate A / B / C). */
+  hideMrp?: boolean
 }
 
 /**
@@ -40,6 +42,7 @@ export function TwoStepMedicinePicker({
   inputRef,
   onEmptyEnter,
   voiceField = 'medicine',
+  hideMrp = false,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const localInputRef = useRef<HTMLInputElement | null>(null)
@@ -361,7 +364,7 @@ export function TwoStepMedicinePicker({
   }
 
   return (
-    <div className="two-step-med" ref={wrapRef} data-voice-wrap="">
+    <div className={`two-step-med${hideMrp ? ' two-step-no-mrp' : ''}`} ref={wrapRef} data-voice-wrap="">
       <input
         ref={setInputRef}
         type="text"
@@ -401,7 +404,7 @@ export function TwoStepMedicinePicker({
           <div className="two-step-head">
             <span>Medicine</span>
             <span>Stock</span>
-            <span>MRP</span>
+            {hideMrp ? null : <span>MRP</span>}
             <span>Sch</span>
           </div>
           {loading && !displayNames.length ? (
@@ -425,7 +428,7 @@ export function TwoStepMedicinePicker({
             >
               <span className="med-name">{n.name}</span>
               <span className="mono">{n.stock}</span>
-              <span className="mono">{Number(n.mrp).toFixed(2)}</span>
+              {hideMrp ? null : <span className="mono">{Number(n.mrp).toFixed(2)}</span>}
               <span>{n.schedule || '—'}</span>
             </button>
           ))}
@@ -437,7 +440,7 @@ export function TwoStepMedicinePicker({
             <span>Batch</span>
             <span>Expiry</span>
             <span>Avail</span>
-            <span>MRP</span>
+            {hideMrp ? null : <span>MRP</span>}
             <span>Sch</span>
           </div>
           {loading && !batches.length ? (
@@ -464,7 +467,7 @@ export function TwoStepMedicinePicker({
               <span className="mono">{b.batch || '(none)'}</span>
               <span className="mono">{b.expiry || '—'}</span>
               <span className="mono">{availOf(b)}</span>
-              <span className="mono">{Number(b.mrp).toFixed(2)}</span>
+              {hideMrp ? null : <span className="mono">{Number(b.mrp).toFixed(2)}</span>}
               <span>{b.schedule || '—'}</span>
             </button>
           ))}
