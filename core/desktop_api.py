@@ -970,6 +970,31 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 except Exception as exc:
                     _json_response(self, 400, {"ok": False, "error": str(exc)})
                 return
+            if path in ("/api/reports/wholesale", "/api/reports/wholesale/parties"):
+                # Wholesale reports (core/wholesale_reports.py): ?report=register|party|items|
+                # outstanding|price_list&from&to&party_id&as_of&tier&in_stock&search
+                conn = _db.get("conn")
+                if conn is None:
+                    _json_response(self, 503, {"error": "Database not open"})
+                    return
+                try:
+                    from urllib.parse import parse_qs
+
+                    from core import wholesale_reports
+
+                    problem = wholesale_reports.refusal(conn)
+                    if problem:
+                        _json_response(self, 409, {"ok": False, "error": problem})
+                        return
+                    qs = {k: v[0] for k, v in parse_qs(urlparse(self.path).query).items() if v}
+                    if path.endswith("/parties"):
+                        out = {"parties": wholesale_reports.parties(conn)}
+                    else:
+                        out = wholesale_reports.build(conn, qs.get("report") or "", qs)
+                    _json_response(self, 200, {"ok": True, **out})
+                except Exception as exc:
+                    _json_response(self, 400, {"ok": False, "error": str(exc)})
+                return
             if path in ("/api/reports/gst", "/api/customers/gst"):
                 # GST reports for a period (core/gst_reports.py) / a customer's GSTIN (core/customer_gst.py)
                 conn = _db.get("conn")
@@ -2845,6 +2870,23 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                     from core import gst_extras
 
                     _json_response(self, 200, gst_extras.save_hsn(conn, body.get("items") or []))
+                except Exception as exc:
+                    _json_response(self, 400, {"ok": False, "error": str(exc)})
+                return
+            if path == "/api/reports/wholesale/export":
+                # A wholesale report as CSV / Excel / PDF or on paper (core/wholesale_reports.export).
+                if conn is None:
+                    _json_response(self, 503, {"error": "Database not open"})
+                    return
+                try:
+                    from core import wholesale_reports
+
+                    problem = wholesale_reports.refusal(conn)
+                    if problem:
+                        _json_response(self, 409, {"ok": False, "error": problem})
+                        return
+                    out = wholesale_reports.export(conn, body)
+                    _json_response(self, 200 if out.get("ok") else 400, out)
                 except Exception as exc:
                     _json_response(self, 400, {"ok": False, "error": str(exc)})
                 return

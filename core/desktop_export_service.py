@@ -2135,13 +2135,21 @@ def print_report(title: str, cols: list, rows: list, print_to: str, page_layout:
 
 # ── Payment report: which bills each payment cleared (owner, 17 Oct 2026) ─────────────────
 PAYMENT_REPORT_COLUMNS = ["Date", "Payment", "Party", "Mode", "Amount", "Bill No", "Bill Date", "Cleared", "How"]
+RECEIPT_COLUMN = "Receipt No"   # the paper receipt's number (receipt_no), shown when a payment has one
+
+
+def payment_report_columns(rep: dict[str, Any]) -> list[str]:
+    cols = list(PAYMENT_REPORT_COLUMNS)
+    if rep.get("has_receipts"):
+        cols.insert(2, RECEIPT_COLUMN)
+    return cols
 
 
 def payment_report(conn, kind: str, from_date: str = "", to_date: str = "", party: str = "") -> dict[str, Any]:
     """The payments of a date range (one party or all), each with the bills it cleared.
 
-    {"payments": [{id, date, number, party, mode, amount, cleared: [...], credit_left}],
-     "totals": {count, amount, cleared, credit_left}} -- from this PC's books, by the rule
+    {"payments": [{id, date, number, receipt_no, party, mode, amount, cleared: [...], credit_left}],
+     "totals": {count, amount, cleared, credit_left}, "has_receipts"} -- from this PC's books, by the rule
     the dues are stored with (core/bill_clearing.py): "chosen" = the bill was picked for the
     payment, "oldest" = it went to the oldest open bills.
     """
@@ -2159,16 +2167,22 @@ def payment_report(conn, kind: str, from_date: str = "", to_date: str = "", part
     if str(party or "").strip():
         where.append("UPPER(t.name) = UPPER(?)")
         params.append(str(party).strip())
+    table = "customer_payments" if kind == "customer" else "supplier_payments"
+    try:
+        has_receipt_col = any(r[1] == "receipt_no" for r in conn.execute(f"PRAGMA table_info({table})"))
+    except Exception:
+        has_receipt_col = False
+    receipt = "COALESCE(p.receipt_no,'')" if has_receipt_col else "''"
     if kind == "customer":
         sql = (
             "SELECT p.id, p.payment_date, '', COALESCE(p.reference_no,''), t.name, "
-            "COALESCE(p.payment_mode,''), COALESCE(p.amount,0), p.customer_id "
+            f"COALESCE(p.payment_mode,''), COALESCE(p.amount,0), p.customer_id, {receipt} "
             "FROM customer_payments p JOIN customers t ON t.id = p.customer_id "
         )
     else:
         sql = (
             "SELECT p.id, p.payment_date, COALESCE(p.payment_no,''), COALESCE(p.reference,''), t.name, "
-            "COALESCE(p.mode,''), COALESCE(p.amount,0), p.supplier_id "
+            f"COALESCE(p.mode,''), COALESCE(p.amount,0), p.supplier_id, {receipt} "
             "FROM supplier_payments p JOIN suppliers t ON t.id = p.supplier_id "
         )
     rows = conn.execute(
@@ -2178,7 +2192,7 @@ def payment_report(conn, kind: str, from_date: str = "", to_date: str = "", part
         conn, kind, [{"id": r[0], "party_id": r[7], "amount": r[6]} for r in rows]
     )
     payments = []
-    for pid, pdate, pno, ref, name, mode, amount, _party_id in rows:
+    for pid, pdate, pno, ref, name, mode, amount, _party_id, receipt_no in rows:
         hit = cleared.get(int(pid)) or {}
         number = str(pno or "").strip() or f"#{pid}"
         if str(ref or "").strip():
@@ -2187,6 +2201,7 @@ def payment_report(conn, kind: str, from_date: str = "", to_date: str = "", part
             "id": int(pid),
             "date": str(pdate or "")[:10],
             "number": number,
+            "receipt_no": str(receipt_no or "").strip(),
             "party": str(name or ""),
             "mode": str(mode or ""),
             "amount": r2(amount),
@@ -2201,6 +2216,7 @@ def payment_report(conn, kind: str, from_date: str = "", to_date: str = "", part
     return {
         "kind": kind,
         "payments": payments,
+        "has_receipts": any(p["receipt_no"] for p in payments),
         "totals": {
             "count": len(payments),
             "amount": r2(tot_amount),
@@ -2215,32 +2231,43 @@ def _payment_report_lines(rep: dict[str, Any]) -> list[tuple[str, list[Any]]]:
     from core.fy_serial import display_purchase_no, display_sales_bill_no
 
     short = display_sales_bill_no if rep.get("kind") == "customer" else display_purchase_no
+    receipts = bool(rep.get("has_receipts"))
     out: list[tuple[str, list[Any]]] = []
+
+    def add(kind: str, cells: list[Any], receipt: Any = "") -> None:
+        if receipts:
+            cells = cells[:2] + [receipt] + cells[2:]
+        out.append((kind, cells))
+
     for p in rep["payments"]:
-        out.append(("pay", [p["date"], p["number"], p["party"], p["mode"], p["amount"], "", "", "", ""]))
+        add("pay", [p["date"], p["number"], p["party"], p["mode"], p["amount"], "", "", "", ""],
+            p.get("receipt_no") or "")
         for c in p["cleared"]:
-            out.append(("bill", ["", "", "", "", "", short(c.get("bill_no")) or f"#{c.get('bill_id')}",
-                                 c.get("date") or "", c["amount"],
-                                 "Chosen" if c.get("how") == "chosen" else "Oldest first"]))
+            add("bill", ["", "", "", "", "", short(c.get("bill_no")) or f"#{c.get('bill_id')}",
+                         c.get("date") or "", c["amount"],
+                         "Chosen" if c.get("how") == "chosen" else "Oldest first"])
         if p["credit_left"] > 0.009:
-            out.append(("credit", ["", "", "", "", "", "Left as credit", "", p["credit_left"], ""]))
+            add("credit", ["", "", "", "", "", "Left as credit", "", p["credit_left"], ""])
     t = rep["totals"]
-    out.append(("total", ["TOTAL", f"{t['count']} payments", "", "", t["amount"], "", "", t["cleared"], "cleared"]))
+    add("total", ["TOTAL", f"{t['count']} payments", "", "", t["amount"], "", "", t["cleared"], "cleared"])
     if t["credit_left"] > 0.009:
-        out.append(("total", ["", "", "", "", "", "Left as credit", "", t["credit_left"], ""]))
+        add("total", ["", "", "", "", "", "Left as credit", "", t["credit_left"], ""])
     return out
 
 
-def _payment_report_pdf(path: str, title: str, subtitle: str, lines) -> str:
+def _payment_report_pdf(path: str, title: str, subtitle: str, lines, columns: list[str] | None = None) -> str:
     def esc(v: Any) -> str:
         return str(v).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
+    columns = list(columns or PAYMENT_REPORT_COLUMNS)
+    money = {columns.index("Amount"), columns.index("Cleared")}
+
     def cell(v: Any, i: int) -> str:
-        if isinstance(v, (int, float)) and i in (4, 7):
+        if isinstance(v, (int, float)) and i in money:
             return f"<td class=num>{float(v):.2f}</td>"
         return f"<td>{esc(v)}</td>"
 
-    hdr = "".join(f"<th>{esc(h)}</th>" for h in PAYMENT_REPORT_COLUMNS)
+    hdr = "".join(f"<th>{esc(h)}</th>" for h in columns)
     trs = "".join(
         f"<tr class={k}>" + "".join(cell(v, i) for i, v in enumerate(cells)) + "</tr>"
         for k, cells in lines
@@ -2290,13 +2317,13 @@ def export_payment_report(conn, body: dict[str, Any]) -> dict[str, Any]:
         buf = io.StringIO()
         w = csv.writer(buf)
         w.writerow([title, who, period])
-        w.writerow(PAYMENT_REPORT_COLUMNS)
+        w.writerow(payment_report_columns(rep))
         w.writerows(cells for _k, cells in lines)
         payload, mime = buf.getvalue().encode("utf-8-sig"), "text/csv;charset=utf-8"
     elif fmt == "pdf":
         fd, path = tempfile.mkstemp(suffix=".pdf", prefix="payment_report_")
         os.close(fd)
-        saved = _payment_report_pdf(path, title, f"{who} · {period}", lines)
+        saved = _payment_report_pdf(path, title, f"{who} · {period}", lines, payment_report_columns(rep))
         with open(saved, "rb") as fh:
             payload = fh.read()
         for p in {saved, path, saved.rsplit(".", 1)[0] + ".html"}:
