@@ -33,11 +33,14 @@ The pack rate and disc % printed on the invoice are worked back from these
 """
 from __future__ import annotations
 
+import logging
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Iterable, Optional
 
 from core.wholesale_schema import RATE_TIERS, WHOLESALE, get_business_mode
+
+log = logging.getLogger(__name__)
 
 CENT = Decimal("0.01")
 ZERO = Decimal("0.00")
@@ -636,6 +639,21 @@ def _online() -> bool:
         return False
 
 
+def remember_contact(conn, p: dict, body: dict) -> bool:
+    """The phone / address typed on the bill go onto the party, as on the retail bill
+    (core/customer_service.get_or_create_customer): an empty box never wipes one."""
+    phone = str(body.get("customer_phone") or "").strip()
+    address = str(body.get("customer_address") or "").strip()
+    phone = phone if phone != str(p.get("phone") or "").strip() else ""
+    address = address if address != str(p.get("address") or "").strip() else ""
+    if not (phone or address):
+        return False
+    from core.customer_service import _update_customer_contact
+
+    _update_customer_contact(conn, int(p["id"]), phone, address)
+    return True
+
+
 def save_sale(conn, body: dict) -> dict[str, Any]:
     """Save (or, with editing_sale_id, re-save) a wholesale tax invoice."""
     from core import desktop_sales_service as dss
@@ -831,6 +849,10 @@ def save_sale(conn, body: dict) -> dict[str, Any]:
             pass
         return {"ok": False, "error": f"Failed to save sale: {exc}"}
 
+    try:
+        remember_contact(conn, p, body)
+    except Exception as exc:  # the bill is saved; a contact that did not stick is not fatal
+        log.warning("wholesale sale %s: party contact not updated: %s", sale_id, exc)
     after = party(conn, p["id"]) or p
     return {
         "ok": True,

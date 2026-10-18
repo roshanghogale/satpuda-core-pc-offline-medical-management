@@ -96,12 +96,15 @@ export type LoadedWholesale = {
   bill_date: string
   party: WholesaleParty
   customer_id: number
+  buyer_gstin?: string
+  buyer_dl?: string
   transport: string
   lr_no: string
   eway_bill_no: string
   due_date: string
   cash_paid: number
   online_paid: number
+  due_amount?: number
   total_amount: number
   items: WholesaleLine[]
 }
