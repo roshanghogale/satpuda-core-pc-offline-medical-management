@@ -121,18 +121,30 @@ class OnTheBill(unittest.TestCase):
 
     def test_in_the_middle_it_has_no_shop_name(self):
         # Owner, 18 Oct 2026: the box sits between the messages and the totals, too narrow
-        # for "For SHOP"; the picture above the caption.
+        # for "For SHOP". Since the same day's later change: the shop's name at its foot in
+        # place of SIGN OF Q.P., and the picture over the whole box, drawn after the name so
+        # it lies on top of it, as if signed on the name by hand.
         body = self.render(uri=self.URI)
         self.assertIn("bottom-zone-one-row", body)
         cell = body[body.index('class="signature-cell"'):]
         cell = cell[:cell.index("</div>\n      </div>") if "</div>\n      </div>" in cell else len(cell)]
         self.assertNotIn("For SATPUDA MEDICAL", body)
-        self.assertLess(cell.index("sign-img"), cell.index("SIGN OF Q.P."))
+        self.assertLess(cell.index('class="sign-shop'), cell.index("sign-img-cover"))
+        self.assertNotIn("SIGN OF Q.P.", cell)
 
-    def test_no_picture_prints_the_old_empty_box(self):
+    def test_no_picture_prints_the_shop_name_alone(self):
         body = self.render(uri="")
         self.assertNotIn("sign-img", body)
-        self.assertIn("SIGN OF Q.P.", body)
+        self.assertIn('aria-label="SATPUDA MEDICAL"', body)
+
+    def test_a_long_name_goes_on_two_lines_that_fit(self):
+        from bill_templates.classic import _shop_name_fit
+
+        svg = _shop_name_fit("Shree Gajanan Medical & General Stores")
+        self.assertIn("sign-shop-2", svg)
+        self.assertIn(">SHREE GAJANAN MEDICAL</text>", svg)
+        self.assertIn(">&amp; GENERAL STORES</text>", svg)
+        self.assertIn("sign-shop-1", _shop_name_fit("Ram Medical"))
 
     def test_the_bill_setting_turns_it_off(self):
         self.assertNotIn("sign-img", self.render(uri=self.URI, print_signature_image=False))
