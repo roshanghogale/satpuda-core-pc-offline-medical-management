@@ -192,6 +192,13 @@ def _pair_for_store(remote_store: dict, store_key: str) -> str:
     return token
 
 
+def _ws_doc_fields(table: str, row) -> dict:
+    """The wholesale columns of a row, for its server document (core/wholesale_sync.py)."""
+    from core.wholesale_sync import doc_fields
+
+    return doc_fields(table, row)
+
+
 def _build_docs(conn, collection: str, ids=None) -> list[dict]:
     """Build server docs (with id). Flat tables and sales/purchases use bulk SQL.
 
@@ -396,6 +403,8 @@ def _build_flat_docs(conn, collection: str, ids=None) -> list[dict]:
                         "synced_at",
                     )
                 }
+            # Wholesale columns (party type, GSTIN-side fields, Rate A/B/C, receipt no).
+            payload.update(_ws_doc_fields(collection, row))
             payload.update(_sync_meta_fields_from_row(row))
             payload["id"] = rid
             _sanitize_dates_in_doc(payload)
@@ -549,7 +558,8 @@ def _build_purchases_docs(conn, ids=None) -> list[dict]:
         _pi_cols = {r[1] for r in cur.execute("PRAGMA table_info(purchase_items)")}
     except Exception:
         _pi_cols = set()
-    _extra = [f"pi.{c}" for c in ("schedule", "hsn_code", "manufacturer") if c in _pi_cols]
+    _extra = [f"pi.{c}" for c in ("schedule", "hsn_code", "manufacturer", "rate_a", "rate_b", "rate_c")
+              if c in _pi_cols]
     _extra_sql = ("," + ", ".join(_extra)) if _extra else ""
 
     for i in range(0, len(purchase_ids), 800):
@@ -594,6 +604,7 @@ def _build_purchases_docs(conn, ids=None) -> list[dict]:
                     "hsn_code": ir.get("hsn_code") or ir.get("med_hsn_code"),
                     "manufacturer": ir.get("manufacturer") or ir.get("med_manufacturer"),
                     "item_amount": ir.get("item_amount", 0),
+                    **_ws_doc_fields("purchase_items", ir),
                 }
             )
 

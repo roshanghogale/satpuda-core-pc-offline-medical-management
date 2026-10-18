@@ -527,6 +527,13 @@ def build_sale_payload(conn, sale_id: int) -> Optional[dict]:
     return _sanitize_server_doc(payload)
 
 
+def _ws_doc_fields(table: str, row) -> dict:
+    """The wholesale columns of a row, for its server document (core/wholesale_sync.py)."""
+    from core.wholesale_sync import doc_fields
+
+    return doc_fields(table, row)
+
+
 def build_customer_payload(conn, customer_id: int) -> Optional[dict]:
     cur = conn.cursor()
     cur.execute('SELECT * FROM customers WHERE id=?', (customer_id,))
@@ -543,6 +550,7 @@ def build_customer_payload(conn, customer_id: int) -> Optional[dict]:
         'total_credit': c.get('total_credit', 0),
         'created_at': c.get('created_at'),
     }
+    payload.update(_ws_doc_fields('customers', c))
     payload.update(_sync_meta_fields_from_row(c))
     return payload
 
@@ -572,6 +580,7 @@ def build_medicine_payload(conn, medicine_id: int) -> Optional[dict]:
         'content_drug': m.get('content_drug'),
         'is_hidden': bool(int(m.get('is_hidden') or 0)),
     }
+    payload.update(_ws_doc_fields('medicines', m))
     payload.update(_sync_meta_fields_from_row(m))
     try:
         from core.client_uuid import ensure_row_client_uuid
@@ -621,7 +630,8 @@ def build_purchase_payload(conn, purchase_id: int) -> Optional[dict]:
         _pi_cols = {r[1] for r in cur.execute("PRAGMA table_info(purchase_items)")}
     except Exception:
         _pi_cols = set()
-    _extra = [f"pi.{c}" for c in ("schedule", "hsn_code", "manufacturer") if c in _pi_cols]
+    _extra = [f"pi.{c}" for c in ("schedule", "hsn_code", "manufacturer", "rate_a", "rate_b", "rate_c")
+              if c in _pi_cols]
     _extra_sql = ("," + ", ".join(_extra)) if _extra else ""
     cur.execute(
         f'''
@@ -660,6 +670,7 @@ def build_purchase_payload(conn, purchase_id: int) -> Optional[dict]:
                 'hsn_code': item.get('hsn_code') or item.get('med_hsn_code'),
                 'manufacturer': item.get('manufacturer') or item.get('med_manufacturer'),
                 'item_amount': item.get('item_amount', 0),
+                **_ws_doc_fields('purchase_items', item),
             }
         )
     payload = {
@@ -850,6 +861,7 @@ def push_medicine(conn, medicine_id: int, *, commit_synced_at: bool = True) -> b
         'content_drug': m.get('content_drug'),
         'is_hidden': bool(int(m.get('is_hidden') or 0)),
     }
+    payload.update(_ws_doc_fields('medicines', m))
     payload.update(_sync_meta_fields_from_row(m))
     synced_at = push_doc('medicines', str(medicine_id), payload)
     if synced_at and commit_synced_at:
@@ -1027,6 +1039,7 @@ def build_customer_payment_payload(conn, payment_id: int) -> Optional[dict]:
         'created_at': p.get('created_at'),
         'allocations': clean_allocations(p.get('allocations')),
     }
+    payload.update(_ws_doc_fields('customer_payments', p))
     payload.update(_sync_meta_fields_from_row(p))
     return payload
 
@@ -1061,6 +1074,7 @@ def build_supplier_payment_payload(conn, payment_id: int) -> Optional[dict]:
         'created_at': p.get('created_at'),
         'allocations': clean_allocations(p.get('allocations')),
     }
+    payload.update(_ws_doc_fields('supplier_payments', p))
     payload.update(_sync_meta_fields_from_row(p))
     return payload
 
@@ -1726,8 +1740,10 @@ def sync_down_doc(conn, collection: str, doc_id: str, data: dict) -> str:
             return 'soft_deleted'
 
         cur = conn.cursor()
+        from core import wholesale_sync as _ws
         try:
             if collection == 'customers':
+                _ws_keep = _ws.snapshot(cur, 'customers', doc_id)
                 cur.execute('''
                     INSERT OR REPLACE INTO customers
                     (id, name, phone, address, total_due, total_credit, created_at)
@@ -1741,6 +1757,7 @@ def sync_down_doc(conn, collection: str, doc_id: str, data: dict) -> str:
                     float(data.get('total_credit') or 0),
                     data.get('created_at'),
                 ))
+                _ws.apply_doc(cur, 'customers', doc_id, data, keep=_ws_keep)
             elif collection == 'medicines':
                 from core.medicine_sync_merge import merge_medicine_pull
                 from core.conflict_resolver import meta_from_mapping
@@ -1833,6 +1850,8 @@ def sync_down_doc(conn, collection: str, doc_id: str, data: dict) -> str:
                         data.get('synced_at') or data.get('updated_at'),
                         data.get('created_at') or None,
                     ))
+                # Wholesale purchase rate / Rate A / B / C of the batch (upsert keeps the rest).
+                _ws.apply_doc(cur, 'medicines', med_id, data)
                 conn.commit()
             elif collection == 'sales':
                 sale_id = int(doc_id)
@@ -2093,6 +2112,7 @@ def sync_down_doc(conn, collection: str, doc_id: str, data: dict) -> str:
                         item.get('expiry_date'),
                         float(item.get('item_amount') or 0),
                     ))
+                    _ws.apply_doc(cur, 'purchase_items', cur.lastrowid, item)
                     # The line's HSN, discount and tax, which this pull used to drop: every
                     # pulled purchase line had no HSN and no taxable value, so the GST
                     # reports could not split the bill by rate (3 Oct 2026). Only the
@@ -2160,6 +2180,7 @@ def sync_down_doc(conn, collection: str, doc_id: str, data: dict) -> str:
                 # INSERT OR REPLACE writes a whole new row: a column left out here is wiped
                 # on every pull, so the bills the payment was given go in too.
                 alloc_cols, alloc_vals = _pulled_allocations(conn, 'customer_payments', doc_id, data)
+                _ws_keep = _ws.snapshot(cur, 'customer_payments', doc_id)
                 cur.execute(f'''
                     INSERT OR REPLACE INTO customer_payments
                     (id, customer_id, payment_date, amount, payment_mode,
@@ -2178,8 +2199,10 @@ def sync_down_doc(conn, collection: str, doc_id: str, data: dict) -> str:
                     data.get('created_at'),
                     *alloc_vals,
                 ))
+                _ws.apply_doc(cur, 'customer_payments', doc_id, data, keep=_ws_keep)
             elif collection == 'supplier_payments':
                 alloc_cols, alloc_vals = _pulled_allocations(conn, 'supplier_payments', doc_id, data)
+                _ws_keep = _ws.snapshot(cur, 'supplier_payments', doc_id)
                 cur.execute(f'''
                     INSERT OR REPLACE INTO supplier_payments
                     (id, payment_no, supplier_id, payment_date, amount, mode,
@@ -2198,6 +2221,7 @@ def sync_down_doc(conn, collection: str, doc_id: str, data: dict) -> str:
                     data.get('created_at'),
                     *alloc_vals,
                 ))
+                _ws.apply_doc(cur, 'supplier_payments', doc_id, data, keep=_ws_keep)
             elif collection == 'sales_returns':
                 return_id = int(doc_id)
                 cur.execute(
