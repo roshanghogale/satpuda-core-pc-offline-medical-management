@@ -62,11 +62,12 @@ class _Store(unittest.TestCase):
                 (3, "Medicine Three", "B3", "2026-12", "3004", 12, 9.0, 12, 11, 10, 40, 15)]
         for mid, name, batch, exp, hsn, gst, pr, ra, rb, rc, stock, mrp in meds:
             c.execute("INSERT INTO medicines (id, name, batch_no, expiry_date, hsn_code, gst_percent, purchase_rate,"
-                      " rate_a, rate_b, rate_c, stock_qty, mrp, type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'Tablet')",
+                      " rate_a, rate_b, rate_c, stock_qty, mrp, type, unit) VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'Tablet', '10')",
                       (mid, name, batch, exp, hsn, gst, pr, ra, rb, rc, stock, mrp))
 
         def invoice(sid, no, day, cust, gstin, pos, due, lines, paid=0.0):
-            """lines: (medicine, qty, free, rate, gst%): taxable = qty x rate, GST on top."""
+            """lines: (medicine, packs, free packs, rate, gst%): taxable = packs x rate, GST on top.
+            Stored as the sale stores it (core/wholesale_sale): qty in units, free packs inside."""
             taxable = sum(q * r for _, q, _, r, _ in lines)
             tax = sum(round(q * r * g / 100, 2) for _, q, _, r, g in lines)
             inter = pos != "27"
@@ -83,7 +84,7 @@ class _Store(unittest.TestCase):
                 ga = round(t * g / 100, 2)
                 c.execute("INSERT INTO sales_items (sale_id, medicine_id, qty, free_qty, rate, gst_percent, taxable,"
                           " gst_amt, amount, rate_tier, batch_no, hsn_code) VALUES (?,?,?,?,?,?,?,?,?, 'A', ?, ?)",
-                          (sid, mid, qty, free, rate, g, t, ga, t + ga, f"B{mid}", ""))
+                          (sid, mid, (qty + free) * 10, free, rate, g, t, ga, t + ga, f"B{mid}", ""))
 
         # WS1 Party A, same state: 10 x 50 @12% + 4 x 25 @5% = 600 + 65 GST = 665.00
         invoice(1, 1, "2026-07-01", 1, PARTY_A_GSTIN, "27", "2026-07-31", [(1, 10, 1, 50, 12), (2, 4, 0, 25, 5)])

@@ -181,7 +181,8 @@ def _lines(conn, sale_ids: list[int]) -> dict:
         for r in conn.execute(
             f"""SELECT si.sale_id, COALESCE(si.medicine_id,0), COALESCE(m.name,''), {batch}, {hsn},
                        COALESCE(si.qty,0), COALESCE(si.free_qty,0), si.taxable, si.gst_amt,
-                       COALESCE(si.amount,0), COALESCE(si.gst_percent, m.gst_percent, 0)
+                       COALESCE(si.amount,0), COALESCE(si.gst_percent, m.gst_percent, 0),
+                       {"m.type" if "type" in have else "''"}, {"m.unit" if "unit" in have else "''"}
                 FROM sales_items si LEFT JOIN medicines m ON m.id = si.medicine_id
                 WHERE si.sale_id IN ({marks}) AND {_live(conn, 'sales_items', 'si')}
                 ORDER BY si.sale_id, si.id""", chunk):
@@ -194,9 +195,17 @@ def _lines(conn, sale_ids: list[int]) -> dict:
                 amount, rate = to_paise(r[9]), float(r[10] or 0)
                 taxable = to_paise(float(amount) * 100 / (100 + rate)) if rate > 0 else amount
                 gst = amount - taxable
+            # A wholesale line keeps qty in stock units with the free packs inside it
+            # (core/wholesale_sale): the report counts sold packs and free packs.
+            qty, free = float(r[5] or 0), float(r[6] or 0)
+            if r[7] is not None:
+                from core.wholesale_sale import units_per_pack
+
+                ups = max(1, int(units_per_pack(r[11], r[12]) or 1))
+                qty = max(0.0, round(qty / ups - free, 3))
             out[int(r[0])].append({
                 "medicine_id": int(r[1]), "name": str(r[2] or ""), "batch": str(r[3] or ""), "hsn": str(r[4] or ""),
-                "qty": float(r[5] or 0), "free_qty": float(r[6] or 0), "taxable": taxable, "gst": gst,
+                "qty": qty, "free_qty": free, "taxable": taxable, "gst": gst,
                 "amount": taxable + gst,
             })
     return out
