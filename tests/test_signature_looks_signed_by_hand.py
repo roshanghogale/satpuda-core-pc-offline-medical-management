@@ -24,10 +24,18 @@ class EachPrintItsOwn(unittest.TestCase):
             self.assertLessEqual(abs(tilt), look.MAX_TILT_DEG)
             self.assertTrue(look.SIZE_RANGE[0] <= size <= look.SIZE_RANGE[1])
             self.assertLessEqual(abs(dx), look.MAX_SHIFT_PCT)
-            self.assertTrue(-look.MAX_LIFT_PCT <= dy <= 0)
+            self.assertTrue(look.UP_DOWN_PCT[0] <= dy <= look.UP_DOWN_PCT[1])
 
     def test_two_prints_differ(self):
         self.assertNotEqual(look.natural_style(), look.natural_style())
+
+    def test_up_and_down_and_sizes_that_show(self):
+        rng = random.Random(11)
+        parts = [self._parts(look.natural_style(rng)) for _ in range(200)]
+        self.assertTrue(any(p[1] < -8 for p in parts) and any(p[1] > 4 for p in parts))
+        sizes = [p[3] for p in parts]
+        self.assertGreater(max(sizes) - min(sizes), 0.25)
+        self.assertGreater(sum(1 for p in parts if abs(p[2]) >= look.MIN_TILT_DEG) / len(parts), 0.6)
 
     def test_left_and_right_both_happen(self):
         rng = random.Random(3)
