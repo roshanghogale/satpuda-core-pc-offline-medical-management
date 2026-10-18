@@ -237,14 +237,17 @@ def save_bills_pdf(
     parts: list[str] = []
     temps: list[str] = []
     if paper_u != "A6":
-        # A wholesale tax invoice is a page of its own (core/wholesale_sale.py), never one
-        # of several bills on a sheet. (A6 makes each bill's own PDF, which knows it.)
+        # Wholesale GST invoices are never mixed with retail bills on a sheet: two of them
+        # to an A4 sheet, one to an A5 (core/wholesale_sale.py). (A6 makes each bill's own
+        # PDF, which knows it.)
         sale_ids, ws_ids = _split_wholesale(conn, sale_ids)
-        for sale_id in ws_ids:
+        for chunk in _wholesale_chunks(ws_ids):
             try:
-                parts.append(_wholesale_pdf(conn, sale_id, render_settings, db_path))
+                html_path, pdf_path = _wholesale_pdf(conn, chunk, render_settings, db_path)
+                temps += [html_path, pdf_path]
+                parts.append(pdf_path)
             except Exception as exc:
-                failures.append(f"Sale {sale_id}: {exc}")
+                failures.append(f"Wholesale bills [{', '.join(str(x) for x in chunk[:4])}]: {exc}")
     if paper_u == "A6":
         for sale_id in sale_ids:
             try:
@@ -322,13 +325,41 @@ def _split_wholesale(conn, sale_ids: list[int]) -> tuple[list[int], list[int]]:
     return rest, ws
 
 
-def _wholesale_pdf(conn, sale_id: int, settings: dict, db_path: str | None) -> str:
-    from core.bill_output import wholesale_invoice_files
+# Wholesale invoices per printed document (ten A4 sheets of two).
+WHOLESALE_PER_JOB = 20
 
-    files = wholesale_invoice_files(conn, sale_id, settings, db_path=db_path)
-    if not files or not files[1]:
-        raise RuntimeError("PDF could not be created (install Edge or Chrome).")
-    return files[1]
+
+def _wholesale_chunks(ws_ids: list[int]) -> list[list[int]]:
+    ids = [int(x) for x in ws_ids]
+    return [ids[i:i + WHOLESALE_PER_JOB] for i in range(0, len(ids), WHOLESALE_PER_JOB)]
+
+
+def _wholesale_pdf(conn, sale_ids: list[int], settings: dict,
+                   db_path: str | None) -> tuple[str, str]:
+    """(html, pdf) temporary files of these wholesale invoices: two to an A4 portrait sheet
+    on an A4 Print All, one A5 landscape page each on A5 (core/bill_output)."""
+    from core.bill_output import wholesale_invoices_pdf
+
+    return wholesale_invoices_pdf(conn, sale_ids, settings, db_path=db_path)
+
+
+def _remove_later(paths) -> None:
+    """Delete a printed job's temporary files once the spooler has had time to read them."""
+    paths = [p for p in paths or () if p]
+    if not paths:
+        return
+
+    def _work() -> None:
+        time.sleep(60)
+        for p in paths:
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+
+    import threading
+
+    threading.Thread(target=_work, name="ws-invoice-cleanup", daemon=True).start()
 
 
 def _chunk_sale_ids_for_print(sale_ids: list[int], paper: str) -> list[list[int]]:
@@ -511,14 +542,16 @@ def print_bills_batch(
     from bill_templates.classic import render_classic_bill_html_multi
 
     sale_ids, ws_ids = _split_wholesale(conn, sale_ids)
-    for sale_id in ws_ids:
+    for chunk in _wholesale_chunks(ws_ids):
+        # Wholesale GST invoices: two to an A4 sheet, one to an A5 sheet.
+        files: tuple[str, ...] = ()
         try:
-            PrinterManager.print_pdf_silently(
-                _wholesale_pdf(conn, sale_id, render_settings, db_path), printer, copies=1,
-            )
+            files = _wholesale_pdf(conn, chunk, render_settings, db_path)
+            PrinterManager.print_pdf_silently(files[1], printer, copies=1)
             pages += 1
         except Exception as exc:
-            failures.append(f"Sale {sale_id}: {exc}")
+            failures.append(f"Wholesale bills [{', '.join(str(x) for x in chunk[:4])}]: {exc}")
+        _remove_later(files)
     for chunk in _chunk_sale_ids_for_print(sale_ids, paper_u):
         try:
             contexts = []

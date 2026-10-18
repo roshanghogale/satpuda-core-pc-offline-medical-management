@@ -1106,7 +1106,9 @@ def invoice_context(conn, sale_id: Any) -> dict[str, Any]:
         "tax": float(h["cgst"] + h["sgst"] + h["igst"]),
     } for (code, pct), h in sorted(hsn.items())]
     party_ = dict(sale["party"])
+    extras = _invoice_extras(conn, sale, lines, shop)
     return {
+        **extras,
         **sale,
         "shop": shop,
         "buyer": {
@@ -1130,11 +1132,158 @@ def invoice_context(conn, sale_id: Any) -> dict[str, Any]:
     }
 
 
+DEFAULT_DECLARATION = (
+    "Declaration :- I/We declare that this invoice shows actual price of the goods "
+    "described and that all particulars are true and correct. Goods once sold will not be "
+    "taken back or exchanged. Bills not paid by the due date will attract 24% interest. "
+    "Subject to {city} jurisdiction only."
+)
+
+
+def _setting_text(conn, name: str) -> str:
+    try:
+        row = conn.execute("SELECT value FROM settings WHERE name=?", (name,)).fetchone()
+        return str(row[0] if row else "").strip()
+    except Exception:
+        return ""
+
+
+def _city(address: str) -> str:
+    """The town of the shop's address: its last part that is not a PIN code or a state."""
+    import re
+
+    for part in reversed(re.split(r"[,\n]", str(address or ""))):
+        word = re.sub(r"[\d\-\s]+$", "", part.strip()).strip(" .-")
+        if word and word.upper() not in {"MAHARASHTRA", "INDIA", "MS", "M.S"}:
+            return word.upper()
+    return "LOCAL"
+
+
+def declaration_text(conn, shop: dict) -> str:
+    """The declaration under the GST table: the shop's own words (settings kv
+    ``invoice_declaration``, ``{city}`` filled in) or the default."""
+    text = _setting_text(conn, "invoice_declaration") or DEFAULT_DECLARATION
+    return text.replace("{city}", _city(shop.get("address", "")))
+
+
+def pack_text(unit: Any, ups: int) -> str:
+    """The PACK column: 1x10 for a strip of ten, 100ML for a bottle, blank for a single."""
+    u = str(unit or "").strip()
+    if not u or u == "1":
+        return ""
+    if u.isdigit():
+        return f"1x{u}" if int(ups or 1) > 1 else u
+    return u.upper()
+
+
+def _bill_payments(conn, sid: int, customer_id: int) -> list[dict[str, Any]]:
+    """Payments that cleared this bill and carry a receipt number (core/bill_clearing)."""
+    if customer_id <= 0 or "receipt_no" not in _cols(conn, "customer_payments"):
+        return []
+    try:
+        from core.bill_clearing import party_ledger
+
+        led = party_ledger(conn, "customer", customer_id)
+    except Exception as exc:
+        log.warning("wholesale invoice %s: payments not read: %s", sid, exc)
+        return []
+    by_pay: dict[int, Decimal] = {}
+    for a in (led.get("result") or {}).get("applied") or []:
+        if a.get("credit_kind") == "payment" and int(a.get("bill_id") or 0) == sid:
+            pid = int(a.get("credit_id") or 0)
+            by_pay[pid] = by_pay.get(pid, ZERO) + _d(a.get("amount"))
+    out = []
+    for pid, amount in sorted(by_pay.items()):
+        row = conn.execute(
+            "SELECT COALESCE(receipt_no,''), payment_date FROM customer_payments WHERE id=?",
+            (pid,)).fetchone()
+        if row and str(row[0] or "").strip() and amount > 0:
+            out.append({"receipt_no": str(row[0]).strip(), "amount": float(amount),
+                        "date": str(row[1] or "")[:10]})
+    return out
+
+
+def _invoice_extras(conn, sale: dict, lines: list[dict], shop: dict) -> dict[str, Any]:
+    """What the printed invoice shows beyond the stored figures: MFG / PACK / gross per line,
+    the returns settled in it (read as the retail bill reads them), the paid amount and the
+    receipts that cleared it, the party's ledger balance after it, the declaration and the
+    signature picture. Every amount is one the engine stored."""
+    sid = int(sale["sale_id"])
+    extra = conn.execute(
+        "SELECT COALESCE(si.item_discount,0), COALESCE(m.manufacturer,'') FROM sales_items si "
+        "LEFT JOIN medicines m ON m.id = si.medicine_id "
+        "WHERE si.sale_id=? AND COALESCE(si.deleted,0)=0 ORDER BY si.id", (sid,)).fetchall()
+    sub = disc = ZERO
+    for i, line in enumerate(lines):
+        off = _d(extra[i][0]) if i < len(extra) else ZERO
+        line["mfg"] = str(extra[i][1] or "") if i < len(extra) else ""
+        line["pack"] = pack_text(line.get("unit"), int(line.get("units_per_pack") or 1))
+        # GROSS AMT. = packs x rate, before the line's discount and scheme
+        line["gross"] = float(_d(line.get("taxable")) + off)
+        line["line_discount"] = float(off)
+        sub += _d(line.get("taxable")) + off
+        disc += off
+    row = conn.execute(
+        "SELECT COALESCE(discount,0), COALESCE(amount_paid,0), COALESCE(previous_due,0), "
+        "COALESCE(previous_credit,0) FROM sales WHERE id=?", (sid,)).fetchone() or (0, 0, 0, 0)
+    bill_disc, paid, prev_due, prev_credit = (_d(v) for v in row)
+
+    # The returns settled in this bill (core/return_credit.returns_in_bill, qty in packs:
+    # returns_in_sale), as the retail bill's Return rows (core/bill_output.bill_return_rows).
+    returns: list[dict] = []
+    returns_total = ZERO
+    try:
+        from dataclasses import asdict
+
+        from core.bill_output import bill_return_rows
+        from core.return_credit import returns_total as _returns_total
+
+        rets = returns_in_sale(conn, sid)
+        returns = [asdict(r) for r in bill_return_rows(rets)]
+        returns_total = _d(_returns_total(rets))
+    except Exception as exc:
+        log.warning("wholesale invoice %s: returns not read: %s", sid, exc)
+
+    total = _d(sale.get("total_amount"))
+    party_total = total - returns_total
+    # The party's balance after this bill, as the retail bill's Total Due works it out
+    # (core/bill_render_utils.total_due_display) but signed: below zero the party is in credit.
+    ledger = prev_due - prev_credit + party_total - paid
+    signature = ""
+    try:
+        from core.bill_config import load_bill_print_settings
+
+        if load_bill_print_settings().get("print_signature_image", True):
+            from core.bill_context import _signature_to_base64
+
+            signature = _signature_to_base64() or ""
+    except Exception:
+        signature = ""
+    return {
+        "sub_total": float(sub),
+        "line_discount": float(disc),
+        "bill_discount": float(bill_disc),
+        "returns": returns,
+        "returns_total": float(returns_total),
+        "party_total": float(party_total),
+        "party_total_words": amount_in_words(float(party_total)),
+        "amount_paid": float(paid),
+        "receipts": _bill_payments(conn, sid, int(sale.get("customer_id") or 0)),
+        "ledger_balance": float(ledger),
+        "pay_label": "CASH" if paid + returns_total >= total - Decimal("0.01") else "CREDIT",
+        "total_items": len(lines),
+        "total_qty": sum(int(it.get("qty") or 0) for it in lines),
+        "declaration": declaration_text(conn, shop),
+        "signature_src": signature,
+    }
+
+
 def invoice_paper(settings: Optional[dict]) -> str:
-    """A5 when the print slot is set to A5 (printed landscape, like the retail A5 bill),
-    else A4 portrait."""
+    """The wholesale invoice is always A5 landscape (owner, 18 Oct 2026): on an A4 slot two
+    of them share a portrait sheet ("A4"); on an A5 or A6 slot -- or any other -- it is a
+    page of its own ("A5")."""
     paper = str((settings or {}).get("paper_size") or "").strip().upper()
-    return "A5" if paper == "A5" else "A4"
+    return "A4" if paper == "A4" else "A5"
 
 
 def paper_mm(paper: str) -> tuple[float, float]:
