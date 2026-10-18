@@ -410,6 +410,20 @@ def save_purchase_bill(conn, body: dict[str, Any]) -> dict[str, Any]:
             "code": "supplier_required",
         }
 
+    # Wholesale: Rate A on every line (owner, 18 Oct 2026). An imported supplier bill comes in
+    # without it; nothing is written until every line has one.
+    try:
+        from core.wholesale_mode import is_wholesale as _ws_store
+
+        if _ws_store(conn):
+            from core.wholesale_rates import rate_a_required_answer
+
+            refused = rate_a_required_answer(body.get("items") or [])
+            if refused:
+                return refused
+    except Exception as exc:
+        print(f"[desktop_purchase] rate A check: {exc}")
+
     phone = str(body.get("supplier_phone") or "").strip()
     address = str(body.get("supplier_address") or "").strip()
     gstin = str(body.get("gstin") or "").strip()
@@ -2461,6 +2475,20 @@ def apply_purchase_import(conn, body: dict[str, Any]) -> dict[str, Any]:
 
     converted = list(prepared.get("converted") or [])
 
+    # Wholesale: the bill's MRP, qty, free, rate, discount, GST, HSN, batch, expiry, maker and
+    # pack come in exactly as for retail (MRP is kept -- the wholesale invoice prints it). Rate
+    # A / B / C are the shop's own sale rates: a supplier bill normally has none, so each line
+    # comes in with them empty and marked, and the save waits until the shop types Rate A.
+    from core.wholesale_mode import is_wholesale as _ws_store
+    from core.wholesale_rates import mark_import_lines
+
+    wholesale = False
+    try:
+        wholesale = bool(_ws_store(conn))
+    except Exception:
+        wholesale = False
+    rate_a_needed = mark_import_lines(converted, wholesale=wholesale)
+
     # Merging: the answer is the SAVED bill's form with the missing lines appended and
     # editing_purchase_id set, so the next Save updates that purchase. The bill's own header,
     # totals and payment stay as the shop saved them -- an import may add medicines to a bill
@@ -2514,12 +2542,22 @@ def apply_purchase_import(conn, body: dict[str, Any]) -> dict[str, Any]:
         "edi_manual_supplier": bool(prepared.get("edi_manual_supplier")),
     }
 
+    ws_note = ""
+    if wholesale:
+        form["rate_a_needed"] = rate_a_needed
+        if rate_a_needed:
+            ws_note = (
+                f"\n\nWholesale: {rate_a_needed} line(s) need Rate A (the bill has no Rate A / B / C). "
+                "Open each red line and type Rate A, or press Fill Rate A/B/C from margins. "
+                "The purchase is saved only when every line has Rate A."
+            )
     message = (
         f"{len(converted)} item(s) loaded on the Purchase page.\n"
         "Line discounts are shown in the Disc column (₹ or % from the bill)."
         f"{disc_note}{supplier_note}{ocr_note}{note}\n"
         "Check MRP, rate, quantity and schedule on every line (and batch / expiry) "
         "before you save the purchase."
+        f"{ws_note}"
     )
 
     # Drop session (and temp files) after successful apply

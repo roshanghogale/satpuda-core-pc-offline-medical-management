@@ -65,6 +65,7 @@ import { BillScanProgressOverlay } from '../components/BillScanProgressOverlay'
 import { dispatchDataChanged } from '../syncRefresh'
 import { todayLocal } from '../localDate'
 import { fetchLastRates, suggestedRates, useBusinessMode } from '../wholesale/mode'
+import { fillRatesFromMargins, lineNeedsRateA, rateAMissing, rateAMissingText } from '../wholesale/rateA'
 import '../wholesale/wholesale.css'
 
 type LineItem = {
@@ -1904,6 +1905,49 @@ export function PurchasePage({
     }
   }
 
+  /** Wholesale lines without Rate A: say which, open the first with its Rate A box focused.
+   *  True when the save was refused. */
+  const refuseMissingRateA = (rows: number[], message?: string): boolean => {
+    const items = tabRef.current.items
+    const live = rows.filter((i) => items[i] && lineNeedsRateA(items[i]))
+    if (!live.length) return false
+    const first = live[0]
+    showAlert({
+      title: 'Rate A required',
+      message:
+        message ||
+        `${rateAMissingText(items, live)}\n\n` +
+          'Wholesale: Rate A is required for every medicine (per strip, GST extra). ' +
+          'Open each red line and type Rate A, or press "Fill Rate A/B/C from margins". ' +
+          'Nothing was saved.',
+      kind: 'warning',
+      focusAfterClose: () => {
+        startLineEdit(first)
+        window.setTimeout(() => focusNavOrder(19), 80)
+      },
+    })
+    return true
+  }
+
+  /** The quick action: Rate A / B / C from the shop's margins on every line without Rate A. */
+  const fillMissingRatesFromMargins = () => {
+    if (editingIdxRef.current !== null) {
+      showAlert({
+        title: 'Finish the line first',
+        message: 'A medicine is open for editing. Press Update Medicine or Escape first.',
+        kind: 'warning',
+      })
+      return
+    }
+    const r = fillRatesFromMargins(tabRef.current.items, ws.margins)
+    if (r.filled) patchTab({ items: r.items })
+    const m = ws.margins
+    setNote(
+      `Rate A/B/C filled on ${r.filled} line(s) from margins A +${m.A}% · B +${m.B}% · C +${m.C}%` +
+        (r.noRate ? ` · ${r.noRate} line(s) have no purchase rate: type Rate A there` : ''),
+    )
+  }
+
   const savePurchase = async (opts?: {
     /** The shop answered "Tari save kar" to the refusal below. */
     allowDuplicate?: boolean
@@ -1925,6 +1969,9 @@ export function PurchasePage({
       })
       return false
     }
+    // Wholesale: Rate A on every line. An imported supplier bill has none -- nothing is saved
+    // until each red line has it; the first one opens with its Rate A box focused.
+    if (ws.isWholesale && refuseMissingRateA(rateAMissing(tabRef.current.items))) return false
     setSaving(true)
     try {
       const payload: Record<string, unknown> = tabPayload(tabRef.current)
@@ -1983,6 +2030,12 @@ export function PurchasePage({
           },
         })
         return false
+      }
+      if (!res.ok && res.code === 'rate_a_required') {
+        const rows = (res as { missing_rows?: number[] }).missing_rows
+        if (refuseMissingRateA(rows?.length ? rows : rateAMissing(tabRef.current.items), res.error)) {
+          return false
+        }
       }
       if (!res.ok) {
         const title =
@@ -2459,6 +2512,7 @@ export function PurchasePage({
   if (!tab) return null
 
   const summary = (calc?.calc || {}) as Record<string, number>
+  const wsMissing = ws.isWholesale ? rateAMissing(tab.items) : []
   const gross = Number(summary.gross_subtotal ?? summary.gross) || 0
   const subtotal = Number(summary.subtotal) || 0
   const totalGst = Number(summary.total_gst) || 0
@@ -3047,7 +3101,10 @@ export function PurchasePage({
                         data-nav-order={19}
                         data-nav-chain={NAV}
                         onFocus={() => {
-                          if (!rateA && !rateB && !rateC) prefillWholesaleRates(rate)
+                          // A new line is offered its last rates / the margins. A line opened
+                          // from the list (an imported bill's above all) keeps what it has:
+                          // Rate A is typed, or filled with the visible margins button.
+                          if (editingIdx === null && !rateA && !rateB && !rateC) prefillWholesaleRates(rate)
                         }}
                         onChange={(e) => {
                           wsTypedRef.current = true
@@ -3198,6 +3255,24 @@ export function PurchasePage({
           </span>
         }
       >
+        {ws.isWholesale && wsMissing.length ? (
+          <div className="ws-rate-banner" role="status">
+            <span>
+              <strong>
+                {wsMissing.length === 1 ? '1 line needs Rate A' : `${wsMissing.length} lines need Rate A`}
+              </strong>{' '}
+              — open a red line (Enter) and type Rate A. Save waits until every line has it.
+            </span>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              title={`Rate A / B / C = purchase rate + A ${ws.margins.A}% · B ${ws.margins.B}% · C ${ws.margins.C}% (lines without Rate A only)`}
+              onClick={fillMissingRatesFromMargins}
+            >
+              Fill Rate A/B/C from margins
+            </button>
+          </div>
+        ) : null}
         <CappedTableWrap visibleRows={purchaseRows}>
           <table className="sat-table" ref={tableRef}>
             <thead>
@@ -3251,7 +3326,14 @@ export function PurchasePage({
                   <tr
                     key={`${it.name}-${it.batch}-${i}`}
                     tabIndex={0}
-                    className={editingIdx === i ? 'row-editing' : undefined}
+                    className={
+                      [
+                        editingIdx === i ? 'row-editing' : '',
+                        ws.isWholesale && lineNeedsRateA(it) ? 'ws-rate-missing' : '',
+                      ]
+                        .filter(Boolean)
+                        .join(' ') || undefined
+                    }
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault()
@@ -3337,6 +3419,11 @@ export function PurchasePage({
                     {showCol.rate ? (
                       <td className="numsm mono">
                         {it.rate.toFixed(2)}
+                        {ws.isWholesale && lineNeedsRateA(it) ? (
+                          <div className="ws-rate-needed" title="Open the line (Enter) and type Rate A">
+                            Rate A needed
+                          </div>
+                        ) : null}
                         {ws.isWholesale && (it.rateA || it.rateB || it.rateC) ? (
                           <div className="ws-line-rates" title="Rate A / B / C">
                             {[it.rateA, it.rateB, it.rateC]

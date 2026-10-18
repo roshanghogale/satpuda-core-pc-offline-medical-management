@@ -952,6 +952,12 @@ def _build_import_payload(
     """DB-heavy row prep — safe on a background thread with check_same_thread=False."""
     available_types = getattr(purchase_page, "_med_types", [])
     converted: List[Dict[str, Any]] = []
+    try:
+        from core.wholesale_mode import is_wholesale
+
+        wholesale_store = bool(is_wholesale(conn))
+    except Exception:
+        wholesale_store = False
     total = len(selected_items)
     for idx, item in enumerate(selected_items, 1):
         if on_progress and (idx == 1 or idx == total or idx % 5 == 0):
@@ -1038,6 +1044,16 @@ def _build_import_payload(
             "content_drug": item.content_drug.strip(),
             "is_tax_inclusive": invoice_gst_calc_method(invoice) == "discount_after_gst",
         }
+        # A wholesaler's own Rate A / B / C, only when the bill printed such columns (rare --
+        # most supplier bills have none), and for a wholesale store only -- a retail line
+        # never carries them (core/wholesale_rates.mark_import_lines).
+        for rk in (("rate_a", "rate_b", "rate_c") if wholesale_store else ()):
+            try:
+                rv = round(float(raw.get(rk) or 0), 2)
+            except (TypeError, ValueError):
+                rv = 0.0
+            if rv > 0:
+                converted_item[rk] = rv
         bill_amt = round(float(item.amount or 0), 2)
         qty_val = float(converted_item["qty"] or 0)
         if bill_amt > 0 and qty_val > 0:
