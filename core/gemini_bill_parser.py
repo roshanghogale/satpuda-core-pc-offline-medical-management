@@ -64,7 +64,8 @@ Return ONLY valid JSON (no markdown):
     "manufacturer": "MFG code e.g. SMART, ALK",
     "qty": 0, "free_qty": 0, "rate": 0, "mrp": 0,
     "sgst_pct": 0, "cgst_pct": 0, "gst_pct": 0,
-    "discount_pct": 0, "amount": 0
+    "discount_pct": 0, "amount": 0,
+    "rate_a": 0, "rate_b": 0, "rate_c": 0
   }]
 }
 
@@ -122,6 +123,9 @@ General:
 - Do NOT compute discount from MRP minus Rate — MRP is retail price, Rate is purchase rate.
 - amount = qty × rate when DIS is zero (ignore free qty in amount)
 - medicine_type, schedule, and content_drug are NOT printed on these bills — always leave them as empty strings ""
+- rate_a / rate_b / rate_c = ONLY when the bill has columns literally headed "Rate A", "Rate B", "Rate C"
+  (a wholesaler's own sale rates). Almost no supplier bill has them — then leave all three 0.
+  NEVER copy MRP, PTR, PTS, Rate, Amount or any other column into rate_a / rate_b / rate_c.
 """
 
 
@@ -367,6 +371,10 @@ def _json_to_invoice(data: Dict[str, Any], source_path: str) -> PurchaseInvoice:
             "cgst_pct": _num(row.get("cgst_pct") or row.get("cgst") or row.get("CGST")),
             "discount_pct": _num(row.get("discount_pct")),
             "amount": _num(row.get("amount") or row.get("amt")),
+            # Only a bill that prints Rate A / B / C columns fills these (else 0).
+            "rate_a": _num(row.get("rate_a")),
+            "rate_b": _num(row.get("rate_b")),
+            "rate_c": _num(row.get("rate_c")),
             "source_row": line_no,
             "line_no": line_no,
             "page": page_no,
@@ -426,8 +434,10 @@ def _json_to_invoice(data: Dict[str, Any], source_path: str) -> PurchaseInvoice:
             for s in raw_slabs
             if isinstance(s, dict) and (_num(s.get("taxable") or s.get("gross")) > 0)
         ]
+    _prefer_slab_gst(inv)
     line_gross = round(sum(float(it.amount or 0) for it in items), 2)
     inv.line_gross = line_gross
+    _drop_foreign_item_count(inv, line_gross)
     footer_gross = _num(totals.get("gross_amount"))
     if footer_gross > line_gross * 1.003:
         inv.gross_amount = footer_gross
@@ -455,6 +465,50 @@ def _json_to_invoice(data: Dict[str, Any], source_path: str) -> PurchaseInvoice:
     if not items:
         inv.issues.append("No medicine lines were found on this bill. Try a clearer photo.")
     return inv
+
+
+def _prefer_slab_gst(inv: PurchaseInvoice) -> None:
+    """Footer CGST / SGST that do not add up, when the GST slab table does.
+
+    A photo of two overlapping bills (a shop, 18 Oct 2026) gave the front bill's slab table but
+    the CGST / SGST totals of the bill behind it, nearly three times as much: the screen showed
+    that GST on a bill whose gross + GST is its net payable only with the slab figures. The
+    slab sums win when they make gross + GST = net payable and the footer figures do not;
+    otherwise nothing changes.
+    """
+    slabs = list(getattr(inv, "footer_gst_slabs", None) or [])
+    gross = float(inv.gross_amount or 0)
+    net = float(inv.invoice_total or 0)
+    if not slabs or gross <= 0 or net <= 0:
+        return
+    s_cgst = round(sum(float(s.get("cgst") or 0) for s in slabs), 2)
+    s_sgst = round(sum(float(s.get("sgst") or 0) for s in slabs), 2)
+    if s_cgst <= 0 and s_sgst <= 0:
+        return
+    f_cgst, f_sgst = float(inv.total_cgst or 0), float(inv.total_sgst or 0)
+    if abs(f_cgst - s_cgst) < 0.05 and abs(f_sgst - s_sgst) < 0.05:
+        return
+    disc = float(inv.product_discount or 0) + float(inv.cash_discount or 0)
+    off = float(inv.round_off or 0)
+
+    def miss(c: float, s: float) -> float:
+        return min(abs(gross + c + s + off - net), abs(gross - disc + c + s + off - net))
+
+    if miss(s_cgst, s_sgst) <= 1.0 and miss(f_cgst, f_sgst) > 1.0:
+        inv.total_cgst, inv.total_sgst = s_cgst, s_sgst
+
+
+def _drop_foreign_item_count(inv: PurchaseInvoice, line_gross: float) -> None:
+    """An item count that cannot be this bill's: the rows read add up to the bill's own gross
+    exactly, so none is missing -- the count was read off another paper in the photo (the
+    overlapping bill behind it counted six times as many items). A missing page shows as a
+    footer gross above the rows, which keeps the count and its warning."""
+    expected = int(getattr(inv, "expected_item_count", 0) or 0)
+    gross = float(inv.gross_amount or 0)
+    if expected <= len(inv.items) or gross <= 0 or line_gross <= 0:
+        return
+    if abs(gross - line_gross) <= max(0.5, gross * 0.001):
+        inv.expected_item_count = 0
 
 
 def _num(value: Any) -> float:

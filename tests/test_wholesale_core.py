@@ -328,7 +328,11 @@ class ThePurchaseRates(_Base):
         from core import desktop_purchase_service as svc
         from core.wholesale_rates import last_rates
 
-        res = self.save([self.line(rate_a=108, rate_b=110, rate_c=112.5), self.line("TEST SYRUP", batch="S1")])
+        # owner, 18 Oct 2026: Rate A on every line -- a line without it is refused, nothing written
+        refused = self.save([self.line(rate_a=108, rate_b=110, rate_c=112.5), self.line("TEST SYRUP", batch="S1")])
+        self.assertEqual((refused["ok"], refused["code"], refused["missing_rows"]), (False, "rate_a_required", [1]))
+        self.assertFalse(self.conn.execute("SELECT 1 FROM purchase_items").fetchone())
+        res = self.save([self.line(rate_a=108, rate_b=110, rate_c=112.5), self.line("TEST SYRUP", batch="S1", rate_a=105)])
         self.assertTrue(res["ok"], res)
         pid = res["purchase_id"]
         rows = self.conn.execute(
@@ -336,13 +340,14 @@ class ThePurchaseRates(_Base):
             "FROM purchase_items pi JOIN medicines m ON m.id = pi.medicine_id WHERE pi.purchase_id=? ORDER BY pi.id",
             (pid,)).fetchall()
         self.assertEqual(rows[0], ("TEST TAB", 108.0, 110.0, 112.5, 100.0, 108.0, 112.5))
-        self.assertEqual(rows[1][1:4], (None, None, None))  # a line without rates: retail as before
+        self.assertEqual(rows[1][1:4], (105.0, None, None))  # B and C may stay empty
         loaded = svc.load_purchase(self.conn, pid)
         self.assertEqual([(i["rate_a"], i["rate_b"], i["rate_c"]) for i in loaded["form"]["items"]],
-                         [(108.0, 110.0, 112.5), (None, None, None)])
+                         [(108.0, 110.0, 112.5), (105.0, None, None)])
         got = last_rates(self.conn, name="test tab")
         self.assertEqual((got["found"], got["rate_b"], got["purchase_rate"]), (True, 110.0, 100.0))
-        self.assertFalse(last_rates(self.conn, name="TEST SYRUP")["found"])
+        self.assertEqual(last_rates(self.conn, name="TEST SYRUP")["rate_a"], 105.0)
+        self.assertFalse(last_rates(self.conn, name="TEST NEVER BOUGHT")["found"])
 
     def test_autosave_keeps_the_rates_on_the_lines_only(self):
         from core import desktop_purchase_service as svc

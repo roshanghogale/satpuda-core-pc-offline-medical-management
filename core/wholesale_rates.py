@@ -135,3 +135,66 @@ def medicine_doc_rates(item: dict) -> dict[str, float]:
     if pr is not None:
         rates["purchase_rate"] = pr
     return rates
+
+
+# ── Rate A on every line (owner, 18 Oct 2026) ─────────────────────────────────
+# A wholesale bill sells at Rate A / B / C, so every purchase line needs at least Rate A. A
+# supplier bill read by Import Bill normally has no such column: its lines come in with Rate A
+# empty and marked, and the purchase is not saved until the shop types it (or fills it from
+# the margins).
+
+def needs_rate_a(item: Any) -> bool:
+    """A purchase line with a name and no Rate A above zero."""
+    if not isinstance(item, dict):
+        return False
+    if not str(item.get("name") or item.get("medicine") or "").strip():
+        return False
+    return "rate_a" not in line_rates(item)
+
+
+def rate_a_missing_rows(items: Any) -> list[int]:
+    """Indexes (in the list as sent) of the lines that still need Rate A."""
+    return [i for i, it in enumerate(items or []) if needs_rate_a(it)]
+
+
+def mark_import_lines(items: list, *, wholesale: bool) -> int:
+    """An imported bill's lines, for the Purchase page. Wholesale: keep any Rate A / B / C the
+    bill itself printed and set ``needs_rate_a`` on each line without Rate A; returns how many.
+    Retail: no rate keys at all (a retail line never carries them); returns 0."""
+    n = 0
+    for it in items or []:
+        if not isinstance(it, dict):
+            continue
+        rates = line_rates(it)
+        for k in RATE_KEYS:
+            it.pop(k, None)
+        it.pop("needs_rate_a", None)
+        if not wholesale:
+            continue
+        it.update(rates)
+        if needs_rate_a(it):
+            it["needs_rate_a"] = True
+            n += 1
+    return n
+
+
+def rate_a_required_answer(items: Any) -> dict[str, Any] | None:
+    """The save refusal for a wholesale purchase with lines that have no Rate A, else None."""
+    rows = rate_a_missing_rows(items)
+    if not rows:
+        return None
+    names = [str((items[i] or {}).get("name") or (items[i] or {}).get("medicine") or "").strip()
+             for i in rows]
+    shown = ", ".join(names[:3]) + (f" and {len(names) - 3} more" if len(names) > 3 else "")
+    return {
+        "ok": False,
+        "code": "rate_a_required",
+        "missing_rows": rows,
+        "missing_count": len(rows),
+        "error": (
+            f"{len(rows)} line(s) need Rate A: {shown}.\n\n"
+            "Wholesale: Rate A is required for every medicine (per strip, GST extra). "
+            "Open the line and type Rate A, or use Fill Rate A/B/C from margins. "
+            "Nothing was saved."
+        ),
+    }

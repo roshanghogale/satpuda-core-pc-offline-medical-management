@@ -907,7 +907,8 @@ def extract_invoice_totals(text: str) -> Dict[str, float]:
             r"\bsub\s*total\b.*\bdiscount\D+([\d,]+(?:\.\d{1,2})?)",
         ),
         "round_off": (
-            r"(?:round(?:ing)?\s*(?:off|adj)?)\D+([-]?[\d,]+(?:\.\d{1,2})?)",
+            # \b: "GROUND FLOOR NO2" in a supplier's address is not a round-off of 2.
+            r"(?:\bround(?:ing)?\s*(?:off|adj)?)\D+([-]?[\d,]+(?:\.\d{1,2})?)",
             r"other\s*/?\s*\+/?\-?\s*,?\s*r/?\s*o\.?\D+([-]?[\d,]+(?:\.\d{1,2})?)",
         ),
         "added_charges": (

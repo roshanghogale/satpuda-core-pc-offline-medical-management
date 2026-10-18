@@ -83,6 +83,34 @@
   white-space: nowrap;
 }
 
+/* purchase table: a line without Rate A (an imported supplier bill) -- red until typed */
+.sat-table tbody tr.ws-rate-missing > td {
+  background: var(--danger-soft, #fde8e8);
+}
+.sat-table tbody tr.ws-rate-missing > td:first-child {
+  box-shadow: inset 3px 0 0 var(--danger, #b91c1c);
+}
+.ws-rate-needed {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--danger, #b91c1c);
+  white-space: nowrap;
+}
+.ws-rate-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 6px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--danger, #b91c1c);
+  background: var(--danger-soft, #fde8e8);
+  border: 1px solid color-mix(in srgb, var(--danger, #b91c1c) 35%, transparent);
+}
+
 /* purchase entry: Rate A / B / C side by side */
 .price-split.ws-rates3 {
   grid-template-columns: repeat(3, minmax(0, 1fr));
