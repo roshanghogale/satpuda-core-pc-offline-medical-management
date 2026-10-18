@@ -258,11 +258,14 @@ def save_new_bill(conn, customer_id, medicines, discount_pct,
                   rounding, cash_paid, online_paid,
                   doctor_name, doctor_phone, previous_due,
                   discount_rs=None, bill_date=None,
-                  customer_name="", customer_phone="", sync=False):
+                  customer_name="", customer_phone="", sync=False, wholesale=None):
     """
     Insert a new sale + items, update stock, update customer balance.
     Returns (bill_no, sale_id).
     Online: enqueue mutation and return immediately (background push).
+
+    ``wholesale`` (core/wholesale_sale.py): the tax-invoice columns of the sale, written
+    in the same transaction, before the sale is stamped for sync. Retail never passes it.
     """
     from core.calc_engine import calc_bill_summary, calc_payment_result
     from core.online_guard import ensure_can_mutate, commit_after_cloud_push
@@ -430,6 +433,10 @@ def save_new_bill(conn, customer_id, medicines, discount_pct,
     from core.quick_sale_medicine import resolve_quick_sale_medicines
     resolve_quick_sale_medicines(conn, medicines)
     _insert_items_and_update_stock(cur, sale_id, medicines)
+    if wholesale:
+        from core.wholesale_sale import write_sale_header
+
+        write_sale_header(cur, sale_id, wholesale)
 
     from core.customer_service import recalculate_customer_due
     med_ids = [m['id'] for m in medicines if m.get('id')]
@@ -1067,10 +1074,11 @@ def update_existing_bill(conn, sale_id, medicines, discount_pct,
                          rounding, cash_paid, online_paid,
                          customer_name, customer_phone, doctor_name,
                          previous_due, discount_rs=None, bill_date=None,
-                         *, existing_doc=None):
+                         *, existing_doc=None, wholesale=None):
     """
     Update an existing sale: restore old stock, replace items, recalculate.
     Online: enqueue mutation and return immediately (background push).
+    ``wholesale``: the tax-invoice columns, as for save_new_bill.
     """
     from core.calc_engine import calc_bill_summary, calc_payment_result
     from datetime import date
@@ -1257,6 +1265,10 @@ def update_existing_bill(conn, sale_id, medicines, discount_pct,
     from core.quick_sale_medicine import resolve_quick_sale_medicines
     resolve_quick_sale_medicines(conn, medicines)
     _insert_items_and_update_stock(cur, sale_id, medicines)
+    if wholesale:
+        from core.wholesale_sale import write_sale_header
+
+        write_sale_header(cur, sale_id, wholesale)
 
     from core.customer_service import recalculate_customer_due
     med_ids = [m['id'] for m in medicines if m.get('id')]
@@ -1311,6 +1323,11 @@ def _insert_items_and_update_stock(cur, sale_id, medicines):
         """, (sale_id, med_id, med['qty'], med['rate'],
               med.get('gst_percent', 0), med['amount'],
               med.get('medicine_discount', 0), cost_price))
+        if med.get('wholesale'):
+            # A wholesale tax-invoice line (core/wholesale_sale.py); retail lines carry none.
+            from core.wholesale_sale import write_line_fields
+
+            write_line_fields(cur, cur.lastrowid, med['wholesale'])
         cur.execute(
             "UPDATE medicines SET stock_qty=stock_qty-? WHERE id=?",
             (med['qty'], med_id))
