@@ -2310,10 +2310,12 @@ def print_all_sales(conn, body: dict[str, Any]) -> dict[str, Any]:
     slot = _safe_int(body.get("slot") or PRINT_ALL_SLOT)
     if slot not in (1, 2):
         slot = PRINT_ALL_SLOT
-    # Print All's copy dropdown (owner, 17 Oct 2026): none / customer / store.
-    copy_label = {"customer": "Customer Copy", "store": "Store Copy"}.get(
-        str(body.get("copy_label") or "").strip().lower(), ""
-    )
+    # Print All's copy dropdown (owner, 17 Oct 2026): none / customer / store. The words are
+    # the shop's own, from Bill Print Style (owner, 18 Oct 2026), e.g.
+    # "Store copy : For Record Purpose Only".
+    from core.bill_config import copy_label_text
+
+    copy_label = copy_label_text(str(body.get("copy_label") or ""))
 
     raw_ids = body.get("sale_ids")
     if isinstance(raw_ids, list) and raw_ids:

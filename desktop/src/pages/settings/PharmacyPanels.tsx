@@ -836,6 +836,31 @@ export function PharmacyPanel(props: Props) {
             Buttons) can use its own style.
           </Note>
         </Frame>
+        <Frame title="Print All copy labels">
+          <Field label="Customer copy">
+            <input
+              className="settings-input"
+              type="text"
+              maxLength={120}
+              value={String(bill.copy_label_customer ?? 'CUSTOMER COPY')}
+              onChange={(e) => setBill((b) => ({ ...b, copy_label_customer: e.target.value }))}
+            />
+          </Field>
+          <Field label="Store copy">
+            <input
+              className="settings-input"
+              type="text"
+              maxLength={120}
+              value={String(bill.copy_label_store ?? 'STORE COPY')}
+              onChange={(e) => setBill((b) => ({ ...b, copy_label_store: e.target.value }))}
+            />
+          </Field>
+          <Note>
+            Printed under each bill exactly as typed when Print All prints a Customer or
+            Store copy, e.g. "Store copy : For Record Purpose Only". Left empty, the words
+            CUSTOMER COPY / STORE COPY are printed.
+          </Note>
+        </Frame>
         <SaveBar
           label="Save Bill Print Style"
           saving={saving}

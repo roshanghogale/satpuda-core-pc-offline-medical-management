@@ -60,9 +60,10 @@ class UploadShowRemove(_TempStore):
         self.assertNotIn("no transparent background", res["message"])
         self.assertEqual(self.act("get_signature")["data_uri"], res["data_uri"])
 
-        from core.bill_context import _signature_to_base64
+        from core.bill_context import _signature_to_base64, trim_signature_data_uri
 
-        self.assertEqual(_signature_to_base64(), res["data_uri"])
+        # the bill prints only the ink (owner, 18 Oct 2026): the upload, border cut off
+        self.assertEqual(_signature_to_base64(), trim_signature_data_uri(res["data_uri"]))
 
     def test_a_jpeg_is_used_but_the_shop_is_told_about_the_white(self):
         from PIL import Image
