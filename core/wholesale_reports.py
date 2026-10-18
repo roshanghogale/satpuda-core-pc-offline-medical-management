@@ -362,6 +362,10 @@ def outstanding(conn, as_of: str = "", party_id: int = 0) -> dict:
         "SELECT id, due_date FROM sales WHERE COALESCE(due_date,'') <> ''"
         + (" AND customer_id = ?" if party_id else ""), params).fetchall()}
     gst_of = _party_gstins(conn)
+    # a party's GSTIN as its latest wholesale invoice printed it, when its GSTIN list is empty
+    invoice_gstin = {int(r[0]): str(r[1]).strip().upper() for r in conn.execute(
+        "SELECT customer_id, buyer_gstin FROM sales WHERE COALESCE(buyer_gstin,'') <> '' "
+        "AND COALESCE(customer_id,0) > 0 ORDER BY substr(bill_date,1,10), id").fetchall()}
     ledgers = party_ledgers(conn, "customer", list(parties))
     summary, detail = [], []
     tot = {b: ZERO for b in BUCKETS}
@@ -384,7 +388,7 @@ def outstanding(conn, as_of: str = "", party_id: int = 0) -> dict:
             continue
         pid_row = parties.get(pid)
         name, phone, limit = (str(pid_row[1]), str(pid_row[2]), to_paise(pid_row[3])) if pid_row else ("", "", ZERO)
-        gstin = str((gst_of.get(pid) or {}).get("gstin") or "")
+        gstin = str((gst_of.get(pid) or {}).get("gstin") or "") or invoice_gstin.get(pid, "")
         buckets = {b: ZERO for b in BUCKETS}
         bal = ZERO
         for b, bdate, due, owed, days in open_rows:
@@ -554,5 +558,7 @@ def export(conn, body: dict) -> dict:
     res = export_alert_sections({**body, "title": title, "sections": secs, "page_layout": layout})
     if res.get("ok") and res.get("filename"):
         stem = rep["title"].lower().replace(" - ", "_").replace(" ", "_").replace("-", "_")
-        res["filename"] = f"wholesale_{stem}_{date.today().isoformat()}.{res.get('format') or 'csv'}"
+        if not stem.startswith("wholesale"):
+            stem = f"wholesale_{stem}"
+        res["filename"] = f"{stem}_{date.today().isoformat()}.{res.get('format') or 'csv'}"
     return res

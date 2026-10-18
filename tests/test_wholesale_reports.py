@@ -170,6 +170,7 @@ class Outstanding(_Store):
         self.assertEqual((365.0, 67.2, 560.0), (a["Due 61-90"], a["Due 0-30"], a["Not Due"]))
         self.assertEqual((992.2, 79, 3), (a["Balance"], a["Days Late (oldest)"], a["Bills"]))
         self.assertEqual((1000.0, "No"), (a["Limit"], a["Limit Crossed"]))
+        self.assertEqual(PARTY_A_GSTIN, a["GSTIN"])                  # from its invoices
         b = party["Party B"]
         self.assertEqual((875.2, 875.2, 54, "", ""), (b["Balance"], b["Due 31-60"], b["Days Late (oldest)"],
                                                       b["Limit"], b["Limit Crossed"]))
@@ -304,7 +305,7 @@ class ExportAndMode(_Store):
         rows = list(csv.reader(io.StringIO(base64.b64decode(res["content_base64"]).decode("utf-8-sig"))))
         self.assertEqual(wr.REGISTER_COLUMNS, rows[0])
         self.assertEqual("TOTAL", rows[-1][0])
-        self.assertTrue(res["filename"].startswith("wholesale_wholesale_sales_register_"))
+        self.assertTrue(res["filename"].startswith("wholesale_sales_register_"))
 
     def test_outstanding_csv_has_both_tables(self):
         res = wr.export(self.conn, {"report": "outstanding", "as_of": "2026-10-18", "format": "csv"})
