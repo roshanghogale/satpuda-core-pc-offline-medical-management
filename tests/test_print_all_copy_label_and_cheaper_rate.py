@@ -46,7 +46,7 @@ class TheLabelOnTheBill(unittest.TestCase):
 
     def test_each_bill_on_the_sheet_carries_it_after_its_invoice(self):
         html = self.render(2, "A5", "Store Copy")
-        self.assertEqual(html.count('<div class="copy-tag">STORE COPY</div>'), 2)
+        self.assertEqual(html.count('<div class="copy-tag">Store Copy</div>'), 2)
         # outside the bordered invoice: the tag frame follows the invoice's closing div
         shells = re.findall(r'<section class="copy-shell[^"]*">(.*?)</section>', html, re.S)
         self.assertEqual(len(shells), 2)
@@ -55,27 +55,28 @@ class TheLabelOnTheBill(unittest.TestCase):
 
     def test_rotated_a4_bills_turn_the_label_with_them(self):
         html = self.render(4, "A4", "Customer Copy")
-        self.assertEqual(html.count("CUSTOMER COPY</div>"), 4)
+        self.assertEqual(html.count("Customer Copy</div>"), 4)
         self.assertEqual(html.count('class="copy-tag-frame copy-tag-rotated"'), 4)
 
     def test_no_choice_prints_no_label(self):
         html = self.render(2, "A5", "")
         self.assertNotIn('class="copy-tag"', html.split("</style>", 1)[1])
-        self.assertNotIn("has-copy-tag", html)
+        self.assertNotIn('class="copy-shell has-copy-tag', html)
 
     def test_the_odd_last_bill_on_a5_is_upright_not_cut_off(self):
         # It used to fall to the A5 landscape single-bill layout, which the PDF step cut off.
         html = self.render(1, "A5", "Store Copy")
         self.assertIn("a5-pdf-two", html)
         self.assertIn("upright-invoice", html.split("</style>", 1)[1])
-        self.assertIn("STORE COPY", html)
+        self.assertIn("Store Copy</div>", html)
 
 
 class PrintAllSendsIt(unittest.TestCase):
     def test_the_dropdown_value_reaches_the_batch(self):
         from core import desktop_sales_service as svc
 
-        for sent, want in (("customer", "Customer Copy"), ("store", "Store Copy"), ("", ""), ("x", "")):
+        # the shop's own words from Bill Print Style; these are the defaults (owner, 18 Oct 2026)
+        for sent, want in (("customer", "CUSTOMER COPY"), ("store", "STORE COPY"), ("", ""), ("x", "")):
             with mock.patch("core.history_print.print_bills_batch", return_value=(1, [])) as batch, \
                  mock.patch("core.bill_output._is_dot_matrix_printer_mode", return_value=False):
                 svc.print_all_sales(None, {"sale_ids": [5], "paper": "A5", "copy_label": sent})
@@ -105,7 +106,7 @@ class PrintAllSendsIt(unittest.TestCase):
             )
         self.assertEqual(failures, [])
         self.assertEqual(pages, 2)
-        self.assertEqual(sum(h.count("CUSTOMER COPY</div>") for h in seen), 3)
+        self.assertEqual(sum(h.count("Customer Copy</div>") for h in seen), 3)
 
     def test_a6_bills_get_it_in_their_own_settings(self):
         from core import history_print

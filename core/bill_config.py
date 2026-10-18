@@ -35,6 +35,9 @@ DEFAULT_BILL_PRINT_SETTINGS = {
     # bills and dot matrix slips alike.
     "signature_position": "center",
     "print_signature_image": True,
+    # Print All's copy labels, printed under each bill as typed (owner, 18 Oct 2026).
+    "copy_label_customer": "CUSTOMER COPY",
+    "copy_label_store": "STORE COPY",
     "show_gross_total": False,
     "show_store_name": True,
     "show_store_address": True,
@@ -776,3 +779,14 @@ def render_bill_html(ctx: BillContext, settings: Optional[Dict[str, Any]] = None
         return render_legacy_bill_html(ctx, settings)
     from bill_templates.classic import render_classic_bill_html
     return render_classic_bill_html(ctx, settings)
+
+
+def copy_label_text(kind: str, settings: Dict[str, Any] | None = None) -> str:
+    """The words printed under each bill for Print All's "customer" / "store" copy: the
+    shop's own from Bill Print Style, else CUSTOMER COPY / STORE COPY. "" for no label."""
+    key = str(kind or "").strip().lower()
+    if key not in ("customer", "store"):
+        return ""
+    s = settings if settings is not None else load_bill_print_settings()
+    text = " ".join(str(s.get(f"copy_label_{key}") or "").split())
+    return (text or DEFAULT_BILL_PRINT_SETTINGS[f"copy_label_{key}"])[:120]

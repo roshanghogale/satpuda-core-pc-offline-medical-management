@@ -769,7 +769,7 @@ def _bill_copy(ctx, copy_label: str, settings, *, upright: bool = False, layout:
     copy_tag = str(settings.get("copy_footer_label") or "").strip()
     copy_tag_html = (
         f'<div class="copy-tag-frame{"" if upright else " copy-tag-rotated"}">'
-        f'<div class="copy-tag">{esc(copy_tag.upper())}</div></div>'
+        f'<div class="copy-tag">{esc(copy_tag)}</div></div>'
         if copy_tag
         else ""
     )
@@ -1276,6 +1276,12 @@ def render_classic_html(ctx: BillContext, settings: Dict[str, Any] | None = None
   .copy-tag-frame.copy-tag-rotated {{
     transform: translate(-50%, -50%) rotate(90deg);
   }}
+  /* A copy label under a turned bill: the bill and its label move 1.6 mm toward the bill's
+     top, so the label is not cut at the sheet's edge (owner, 18 Oct 2026). */
+  .has-copy-tag > .rotated-invoice,
+  .has-copy-tag > .copy-tag-frame.copy-tag-rotated {{
+    transform: translate(calc(-50% + 1.6mm), -50%) rotate(90deg);
+  }}
   .copy-tag {{
     position: absolute;
     left: 0;
@@ -1735,6 +1741,7 @@ def render_classic_html(ctx: BillContext, settings: Dict[str, Any] | None = None
   .bottom-zone-one-row .signature-cell .sign-stack {{ height: 100%; }}
   /* The middle box: the shop's name at its foot, never wider than the box, and the
      uploaded signature over the whole box (transparent PNG), as if signed on the name. */
+  .bottom-zone-one-row .signature-cell:has(.sign-img-cover) {{ overflow: visible; z-index: 3; }}
   .sign-shop-box {{
     position: relative;
     flex: 1 1 auto;
@@ -1757,12 +1764,17 @@ def render_classic_html(ctx: BillContext, settings: Dict[str, Any] | None = None
     z-index: 1;
   }}
   .sign-shop.sign-shop-2 {{ max-height: {2 * 8.8 * font_scale * 1.2:.2f}pt; }}
+  /* Across the whole box; a signature wider than the box is tall may rise above it, as a
+     hand signature does over the line, so it takes the box's full width. */
   .sign-img-cover {{
     position: absolute;
-    inset: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
     width: 100%;
-    height: 100%;
+    height: 165%;
     object-fit: contain;
+    object-position: center bottom;
     z-index: 2;
   }}
   .bottom-zone-one-row .totals-cell {{

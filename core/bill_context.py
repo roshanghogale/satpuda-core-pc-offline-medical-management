@@ -181,9 +181,60 @@ def _signature_to_base64():
     try:
         from core.store_images import BILL_SIGNATURE, resolve_data_uri
 
-        return resolve_data_uri(BILL_SIGNATURE)
+        return trim_signature_data_uri(resolve_data_uri(BILL_SIGNATURE))
     except Exception:
         return ''
+
+
+_TRIMMED: dict[str, str] = {}
+
+
+def trim_signature_data_uri(uri: str) -> str:
+    """Only the ink of an uploaded signature (owner, 18 Oct 2026): a photo or scan on white
+    paper has its white made see-through, and the empty border round the ink is cut off,
+    so the signature fills the bill's signature box instead of a fraction of it. Anything
+    that cannot be read is returned as it came."""
+    if not uri or not uri.startswith('data:image/') or ';base64,' not in uri:
+        return uri
+    hit = _TRIMMED.get(uri)
+    if hit is not None:
+        return hit
+    out = uri
+    try:
+        import io
+
+        from PIL import Image
+
+        raw = base64.b64decode(uri.split(';base64,', 1)[1])
+        im = Image.open(io.BytesIO(raw)).convert('RGBA')
+        if im.getchannel('A').getextrema()[0] == 255:
+            # No transparency at all: paper (a photo's paper is grey, not white). The
+            # paper's own brightness is the commonest one; ink is clearly darker than it.
+            gray = im.convert('L')
+            hist = gray.histogram()
+            half, seen, paper = sum(hist) / 2, 0, 255
+            for level in range(255, -1, -1):
+                seen += hist[level]
+                if seen >= half:
+                    paper = level
+                    break
+            cut = max(40, paper - 60)
+            im.putalpha(gray.point(lambda v: 255 if v < cut else 0))
+        box = im.getchannel('A').point(lambda v: 255 if v > 24 else 0).getbbox()
+        if box:
+            pad = max(2, round(max(box[2] - box[0], box[3] - box[1]) * 0.02))
+            box = (max(0, box[0] - pad), max(0, box[1] - pad),
+                   min(im.width, box[2] + pad), min(im.height, box[3] + pad))
+            im = im.crop(box)
+            buf = io.BytesIO()
+            im.save(buf, format='PNG', optimize=True)
+            out = 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode('ascii')
+    except Exception:
+        out = uri
+    if len(_TRIMMED) > 8:
+        _TRIMMED.clear()
+    _TRIMMED[uri] = out
+    return out
 
 
 def _logo_to_base64(logo_path):
