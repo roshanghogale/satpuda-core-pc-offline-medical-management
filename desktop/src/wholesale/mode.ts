@@ -5,11 +5,12 @@
  * 'retail' whenever the server does not allow wholesale. Until the first answer, and when the
  * engine does not answer, the store is retail.
  *
- *   const { allowed, mode, isWholesale } = useBusinessMode()
- *   const st = await fetchBusinessMode()          // the same, outside React (cached)
- *   const st = await fetchBusinessMode(true)      // ask the engine again
+ *   const { allowed, mode, isWholesale, ready } = useBusinessMode()
+ *   const st = await fetchBusinessMode()          // ask the engine now
+ *   const st = await fetchBusinessMode(false)     // the last answer if there is one
  *
- * Re-checked every 5 minutes and when the window comes back into focus.
+ * Re-checked every 5 minutes, when the window comes back into focus, and whenever
+ * BUSINESS_MODE_EVENT is dispatched on window (a switch dispatches it).
  */
 import { useSyncExternalStore } from 'react'
 import { getApiBase } from '../api'
@@ -28,7 +29,12 @@ export type BusinessModeState = {
   margins: WholesaleMargins
   /** The first check has finished (answered or failed). */
   checked: boolean
+  /** Same as `checked` (false only until the first answer arrives). */
+  ready?: boolean
 }
+
+/** Dispatched on window after the mode is switched, so every screen reads it again. */
+export const BUSINESS_MODE_EVENT = 'satpuda:business-mode-changed'
 
 export const DEFAULT_MARGINS: WholesaleMargins = { A: 8, B: 10, C: 12 }
 
@@ -43,6 +49,7 @@ let state: BusinessModeState = {
   isWholesale: false,
   margins: DEFAULT_MARGINS,
   checked: false,
+  ready: false,
 }
 const listeners = new Set<() => void>()
 let inflight: Promise<BusinessModeState> | null = null
@@ -83,6 +90,7 @@ export function parseBusinessMode(v: unknown): BusinessModeState {
       C: num(m.C, DEFAULT_MARGINS.C),
     },
     checked: true,
+    ready: true,
   }
 }
 
@@ -91,8 +99,9 @@ function schedule(ms: number) {
   timer = window.setTimeout(() => void fetchBusinessMode(true), ms)
 }
 
-/** The store's mode. Cached after the first answer; `force` asks the engine again. Never throws. */
-export function fetchBusinessMode(force = false): Promise<BusinessModeState> {
+/** The store's mode, asked of the engine now (`force` false: the last answer when there is
+ *  one). Never throws; any failure reads as retail. */
+export function fetchBusinessMode(force = true): Promise<BusinessModeState> {
   if (!force && state.checked) return Promise.resolve(state)
   if (inflight) return inflight
   lastCheckAt = Date.now()
@@ -111,7 +120,9 @@ export function fetchBusinessMode(force = false): Promise<BusinessModeState> {
     } finally {
       window.clearTimeout(t)
     }
-    if (!ok) publish({ ...state, allowed: false, mode: 'retail', isWholesale: false, checked: true })
+    if (!ok) {
+      publish({ ...state, allowed: false, mode: 'retail', isWholesale: false, checked: true, ready: true })
+    }
     schedule(ok ? RECHECK_MS : RETRY_MS)
     inflight = null
     return state
@@ -130,6 +141,11 @@ export async function setBusinessMode(mode: BusinessMode): Promise<BusinessModeS
   if (!res.ok || d.ok === false) throw new Error(d.error || `HTTP ${res.status}`)
   const next = parseBusinessMode(d)
   publish(next)
+  try {
+    window.dispatchEvent(new CustomEvent(BUSINESS_MODE_EVENT, { detail: next }))
+  } catch {
+    /* no window events (tests) */
+  }
   return next
 }
 
@@ -156,6 +172,11 @@ export function suggestedRates(purchaseRate: number, margins: WholesaleMargins =
   return { rate_a: r(margins.A), rate_b: r(margins.B), rate_c: r(margins.C) }
 }
 
+function onModeEvent() {
+  // setBusinessMode already published its answer; another dispatcher gets a fresh read.
+  if (Date.now() - lastCheckAt > 500) void fetchBusinessMode(true)
+}
+
 function onFocus() {
   if (Date.now() - lastCheckAt > FOCUS_GAP_MS) void fetchBusinessMode(true)
 }
@@ -166,6 +187,7 @@ function subscribe(cb: () => void) {
     started = true
     void fetchBusinessMode(true)
     window.addEventListener('focus', onFocus)
+    window.addEventListener(BUSINESS_MODE_EVENT, onModeEvent)
   }
   return () => {
     listeners.delete(cb)
