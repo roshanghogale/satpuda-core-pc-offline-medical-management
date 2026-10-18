@@ -1122,6 +1122,19 @@ export function PurchasePage({
       })
       return
     }
+    // Wholesale: at least Rate A is required on every line -- it is what the bill sells at
+    // (owner, 18 Oct 2026). B and C may stay empty; a party on B or C then gets Rate A.
+    if (ws.isWholesale && !((wsRate(rateA) ?? 0) > 0)) {
+      showAlert({
+        title: 'Rate A required',
+        message:
+          'Wholesale: Rate A is required for every medicine (per strip, GST extra). ' +
+          'Rate B and Rate C are optional.',
+        kind: 'warning',
+        focusAfterClose: () => focusNavOrder(19),
+      })
+      return
+    }
     const free = Math.max(0, Number(freeStrips) || 0)
     const rateN = Number(rate) || 0
     const mrpN = Number(mrp) || 0
@@ -1160,14 +1173,7 @@ export function PurchasePage({
       tablets_per_stripe: meta.strip ? tpsN : undefined,
       mrpTab: meta.strip ? mrpN / tpsN : undefined,
       rateTab: meta.strip ? rateN / tpsN : undefined,
-      ...(ws.isWholesale
-        ? rateA || rateB || rateC
-          ? { rateA: wsRate(rateA), rateB: wsRate(rateB), rateC: wsRate(rateC) }
-          : (() => {
-              const s = suggestedRates(rateN, ws.margins)
-              return { rateA: wsRate(s.rate_a), rateB: wsRate(s.rate_b), rateC: wsRate(s.rate_c) }
-            })()
-        : {}),
+      ...(ws.isWholesale ? { rateA: wsRate(rateA), rateB: wsRate(rateB), rateC: wsRate(rateC) } : {}),
     }
     void registerPurchaseMedicine({
       name: line.name,

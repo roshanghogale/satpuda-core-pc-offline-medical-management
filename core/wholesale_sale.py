@@ -418,26 +418,20 @@ def units_per_pack(med_type: Any, unit: Any) -> int:
 
 
 def tier_rate(med: dict, tier: str, conn=None) -> tuple[float, str]:
-    """(rate per strip / pack, where it came from): the tier's own rate; without one, the
-    purchase rate plus the shop's margin for that tier -- the purchase screen's prefill.
-    medicines.rate is the PURCHASE rate per strip: selling at it gave the stock away at
-    cost (owner, 18 Oct 2026: wholesale sells strips, never per tablet or by MRP)."""
+    """(rate per strip / pack, the tier it came from): the party's own tier rate, else Rate A,
+    else 0 -- no price is made up (owner, 18 Oct 2026: at least Rate A is required; the
+    medicine's stored rate is the PURCHASE rate per strip and selling at it gave stock away
+    at cost)."""
     t = str(tier or "A").strip().upper()
     if t not in RATE_TIERS:
         t = "A"
     r = _f(med.get(f"rate_{t.lower()}"))
     if r > 0:
         return round(r, 4), t
-    cost = _f(med.get("purchase_rate")) or _f(med.get("rate"))
-    if cost <= 0:
-        return 0.0, ""
-    try:
-        from core.wholesale_mode import DEFAULT_MARGINS, margins, suggested_rates
-
-        marg = margins(conn) if conn is not None else dict(DEFAULT_MARGINS)
-        return round(_f(suggested_rates(cost, marg).get(t)), 4), ""
-    except Exception:
-        return round(cost, 4), ""
+    a = _f(med.get("rate_a"))
+    if a > 0:
+        return round(a, 4), "A"
+    return 0.0, ""
 
 
 def medicine(conn, medicine_id: Any) -> Optional[dict[str, Any]]:
@@ -484,8 +478,13 @@ def build_line(conn, body: dict) -> dict[str, Any]:
         "gst_percent": round(_f(m.get("gst_percent")), 2),
         "mrp": round(_f(m.get("mrp")), 2),
     }
+    want = str(body.get("rate_tier") or "A").strip().upper()
     if rate <= 0:
-        line["warning"] = "This batch has no Rate A / B / C or rate: type the rate."
+        line["warning"] = (f"{line['name']}: no Rate A for this batch. Rate A is required -- set it "
+                           "in Purchase (Rate A / B / C) or type the rate here.")
+        line["rate_missing"] = True
+    elif used and used != want:
+        line["warning"] = f"{line['name']}: no Rate {want} for this batch -- Rate {used} used."
     return {"ok": True, "line": line}
 
 
@@ -682,7 +681,7 @@ def save_sale(conn, body: dict) -> dict[str, Any]:
             return {"ok": False, "code": "bad_qty",
                     "error": f"{m['name']}: quantity must be at least one pack."}
         if _f(it.get("rate")) <= 0:
-            return {"ok": False, "code": "bad_rate", "error": f"{m['name']}: type the rate."}
+            return {"ok": False, "code": "bad_rate", "error": f"{m['name']}: no rate. Rate A is required -- type the rate."}
         line = dict(it)
         line["id"] = int(m["id"])
         line["hsn_code"] = str(it.get("hsn_code") or m.get("hsn_code") or "")

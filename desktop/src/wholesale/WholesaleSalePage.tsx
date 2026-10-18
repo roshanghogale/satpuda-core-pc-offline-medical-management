@@ -264,7 +264,9 @@ export function WholesaleSalePage({
       const line: Line = { ...r.line, key: nextKey() }
       setForm((f) => ({ ...f, items: [...f.items, line] }))
       setMedText('')
-      if (r.line.warning) setNotice(r.line.warning)
+      // No Rate A on the batch: a red message, not a quiet notice (owner, 18 Oct 2026).
+      if ((r.line as { rate_missing?: boolean }).rate_missing) setError(String(r.line.warning || ''))
+      else if (r.line.warning) setNotice(r.line.warning)
       window.setTimeout(() => {
         const el = qtyRefs.current[line.key]
         el?.focus()
