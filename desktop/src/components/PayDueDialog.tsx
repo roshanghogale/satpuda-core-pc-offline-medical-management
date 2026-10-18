@@ -42,6 +42,7 @@ export function PayDueDialog({
   const [amount, setAmount] = useState('')
   const [mode, setMode] = useState<'Cash' | 'Online'>('Cash')
   const [date, setDate] = useState(() => todayLocal())
+  const [receiptNo, setReceiptNo] = useState('')
   const [saving, setSaving] = useState(false)
   const amountRef = useRef<HTMLInputElement>(null)
 
@@ -53,6 +54,7 @@ export function PayDueDialog({
     setSaving(false)
     setMode('Cash')
     setDate(todayLocal())
+    setReceiptNo('')
     fetch(`${getApiBase()}/api/history/bill-due?kind=${kind}&id=${billId}`)
       .then((r) => r.json())
       .then((d: DueInfo) => {
@@ -87,7 +89,7 @@ export function PayDueDialog({
       const res = await fetch(`${getApiBase()}/api/history/pay-bill`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kind, id: info.bill_id, amount: amt, mode, date }),
+        body: JSON.stringify({ kind, id: info.bill_id, amount: amt, mode, date, receipt_no: receiptNo.trim() }),
       })
       const d = (await res.json()) as { ok?: boolean; error?: string; message?: string }
       if (!res.ok || d.ok === false) {
@@ -182,6 +184,17 @@ export function PayDueDialog({
                     type="date"
                     value={date}
                     onChange={(e) => setDate(e.target.value)}
+                  />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  Receipt no.
+                  <input
+                    className="settings-input"
+                    value={receiptNo}
+                    maxLength={40}
+                    placeholder="optional"
+                    onChange={(e) => setReceiptNo(e.target.value)}
+                    style={{ width: 120 }}
                   />
                 </label>
               </div>

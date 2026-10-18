@@ -198,6 +198,8 @@ def pay_bill(conn: sqlite3.Connection | None, data: dict[str, Any]) -> dict[str,
             "bill_no": info["bill_no"],
             "amount": _r2(min(amount, info["bill_due"])),
         }]
+    if str(data.get("receipt_no") or "").strip():
+        body["receipt_no"] = str(data.get("receipt_no"))  # the paper receipt's number
     saved = save_payment(conn, body)
     after = bill_due_info(conn, info["kind"], info["bill_id"])
     return {

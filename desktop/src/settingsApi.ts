@@ -66,6 +66,15 @@ export type SettingsBundle = {
       village: string
       address?: string
       total_due: number
+      /** Wholesale party fields (core/wholesale_party.py). */
+      party_type?: 'retail' | 'medical'
+      gstin?: string
+      dl_numbers?: string
+      state_code?: string
+      state_name?: string
+      rate_tier?: 'A' | 'B' | 'C'
+      credit_limit?: number
+      credit_days?: number
     }[]
     suppliers: {
       id: number
@@ -378,6 +387,8 @@ export type PaymentDetails = {
   online: number
   reference: string
   note: string
+  /** The paper receipt's number given or taken with the payment ('' when none). */
+  receipt_no?: string
   refund: boolean
   chosen: PaymentAllocation[]
   cleared: { bill_id: number; bill_no: string; date: string; bill_total: number; amount: number; how: 'chosen' | 'oldest' }[]

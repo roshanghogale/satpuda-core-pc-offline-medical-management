@@ -3,6 +3,15 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AppNavigate } from '../../App'
 import type { ReorderPrefill } from '../../pagesApi'
 import { CustomerGstRow } from './CustomerGstRow'
+import { useBusinessMode } from '../../wholesale/mode'
+import {
+  EMPTY_PARTY,
+  GST_STATES,
+  PartyFields,
+  partyFromRow,
+  partyPayload,
+  type PartyForm,
+} from '../../wholesale/PartyFields'
 import {
   alertAction,
   applyAlertNavigation,
@@ -179,6 +188,15 @@ function noneText(one: string, many: string, search: string, numbered: boolean) 
   return `No ${many} yet. Add one above.`
 }
 
+/** Payment history search: receipt no., party, reference, payment no. or note. */
+function historyMatches(r: Record<string, unknown>, q: string): boolean {
+  const s = q.trim().toLowerCase()
+  if (!s) return true
+  return ['receipt_no', 'party', 'reference', 'payment_no', 'note'].some((k) =>
+    String(r[k] ?? '').toLowerCase().includes(s),
+  )
+}
+
 /* ─── Contacts ─────────────────────────────────────────────────────────── */
 
 const CONTACTS_NAV = 'contacts'
@@ -221,6 +239,13 @@ export function ContactsPanel({
     phone: '',
     address: '',
   })
+  // Wholesale: the customer as a party (GSTIN, DL, state, tier, credit terms).
+  const { isWholesale } = useBusinessMode()
+  const [party, setParty] = useState<PartyForm>(EMPTY_PARTY)
+  const partyRef = useRef(party)
+  partyRef.current = party
+  const wholesaleRef = useRef(isWholesale)
+  wholesaleRef.current = isWholesale
   const [supplier, setSupplier] = useState({
     name: '',
     phone: '',
@@ -308,6 +333,7 @@ export function ContactsPanel({
     setEditId(null)
     setDoctor({ name: '', reg_no: '', phone: '' })
     setCustomer({ name: '', phone: '', address: '' })
+    setParty(EMPTY_PARTY)
     setSupplier({ name: '', phone: '', gstin: '', address: '' })
   }
 
@@ -339,11 +365,15 @@ export function ContactsPanel({
       return false
     }
     await rememberVillage(c.address)
+    // The party fields only go with a wholesale save: a retail save never touches them.
+    const fields: Record<string, unknown> = wholesaleRef.current
+      ? { ...c, ...partyPayload(partyRef.current) }
+      : { ...c }
     const ok = await run(
       contactPayload(
         'customer',
         editIdRef.current != null ? 'update' : 'add',
-        { id: editIdRef.current ?? undefined, fields: { ...c } },
+        { id: editIdRef.current ?? undefined, fields },
       ),
     )
     if (ok) {
@@ -671,7 +701,11 @@ export function ContactsPanel({
                 />
               </Field>
             </div>
-            {editId != null ? <CustomerGstRow customerId={editId} customerName={customer.name} /> : null}
+            {isWholesale ? (
+              <PartyFields value={party} onChange={setParty} />
+            ) : editId != null ? (
+              <CustomerGstRow customerId={editId} customerName={customer.name} />
+            ) : null}
             <div className="iset-row">
               <SaveBtn
                 label={editId != null ? 'Save Customer' : 'Add Customer'}
@@ -774,6 +808,15 @@ export function ContactsPanel({
                   <th>Name</th>
                   <th>Phone</th>
                   <th>Address</th>
+                  {isWholesale ? (
+                    <>
+                      <th>Type</th>
+                      <th>GSTIN</th>
+                      <th>State</th>
+                      <th>Tier</th>
+                      <th className="num">Credit</th>
+                    </>
+                  ) : null}
                   <th className="num">Due</th>
                   <th className="act">Actions</th>
                 </tr>
@@ -792,6 +835,20 @@ export function ContactsPanel({
                     <td>{d.name}</td>
                     <td>{d.phone}</td>
                     <td>{d.address || ''}</td>
+                    {isWholesale ? (
+                      <>
+                        <td>{d.party_type === 'medical' ? 'Medical' : 'Retail'}</td>
+                        <td>{d.gstin || ''}</td>
+                        <td title={GST_STATES[d.state_code || ''] || ''}>{d.state_code || ''}</td>
+                        <td>
+                          <span className="ws-tier">{d.rate_tier || 'A'}</span>
+                        </td>
+                        <td className="num">
+                          {Number(d.credit_limit || 0) > 0 ? money(Number(d.credit_limit)) : ''}
+                          {Number(d.credit_days || 0) > 0 ? ` · ${d.credit_days}d` : ''}
+                        </td>
+                      </>
+                    ) : null}
                     <td className="num">{money(d.total_due)}</td>
                     <td className="act">
                       <button
@@ -804,6 +861,7 @@ export function ContactsPanel({
                             phone: d.phone,
                             address: d.address || d.village || '',
                           })
+                          setParty(partyFromRow(d))
                         }}
                       >
                         Edit
@@ -823,7 +881,7 @@ export function ContactsPanel({
                   </tr>
                 ))}
                 {!customers.length ? (
-                  <EmptyRow cols={showVoiceNo ? 6 : 5}>
+                  <EmptyRow cols={(showVoiceNo ? 6 : 5) + (isWholesale ? 5 : 0)}>
                     {noneText('customer', 'customers', search, numbered)}
                   </EmptyRow>
                 ) : null}
@@ -1936,6 +1994,12 @@ function PaymentDetailsDialog({
                 <dd>{d?.reference || String(row.reference ?? '')}</dd>
               </div>
             ) : null}
+            {d?.receipt_no || row.receipt_no ? (
+              <div>
+                <dt>Receipt no.</dt>
+                <dd>{d?.receipt_no || String(row.receipt_no ?? '')}</dd>
+              </div>
+            ) : null}
             {d?.note ? (
               <div>
                 <dt>Note</dt>
@@ -2046,6 +2110,9 @@ export function PaymentPanel({
   const [online, setOnline] = useState('0')
   const [date, setDate] = useState(todayLocal())
   const [reference, setReference] = useState('')
+  // The paper receipt's number (both modes): saved on the payment, searchable below.
+  const [receiptNo, setReceiptNo] = useState('')
+  const [histSearch, setHistSearch] = useState('')
   const [note, setNote] = useState('')
   const [err, setErr] = useState('')
   const [msg, setMsg] = useState('')
@@ -2225,6 +2292,7 @@ export function PaymentPanel({
     setCash('0')
     setOnline('0')
     setReference('')
+    setReceiptNo('')
     setNote('')
     setEditingId(null)
     setEditHint('')
@@ -2337,6 +2405,7 @@ export function PaymentPanel({
               mode,
               date,
               reference,
+              receipt_no: receiptNo.trim(),
               allocations,
               ...(editingId ? { id: editingId } : {}),
             }
@@ -2347,6 +2416,7 @@ export function PaymentPanel({
               online: Number(online),
               date,
               reference,
+              receipt_no: receiptNo.trim(),
               note,
               allocations,
               ...(editingId ? { id: editingId } : {}),
@@ -2496,6 +2566,7 @@ export function PaymentPanel({
     setPartyId(null)
     setDate(String(r.date ?? todayLocal()))
     setReference(String(r.reference ?? ''))
+    setReceiptNo(String(r.receipt_no ?? ''))
     if (kind === 'supplier') {
       setAmount(String(r.amount ?? ''))
       setMode(String(r.mode || 'Cash'))
@@ -2883,6 +2954,18 @@ export function PaymentPanel({
                 onChange={(e) => setReference(e.target.value)}
               />
             </BarField>
+            {payKind !== 'refund' ? (
+              <BarField label="Receipt no.">
+                <input
+                  className="settings-input"
+                  value={receiptNo}
+                  maxLength={40}
+                  placeholder="optional"
+                  title="The number on the paper receipt given or taken with this payment"
+                  onChange={(e) => setReceiptNo(e.target.value)}
+                />
+              </BarField>
+            ) : null}
             {kind === 'customer' ? (
               <BarField label="Note">
                 <input
@@ -2924,6 +3007,15 @@ export function PaymentPanel({
         </Frame>
       </div>
       <Frame title={`Payment history (${data.history.length})`}>
+        <div className="iset-bar">
+          <input
+            className="settings-input"
+            style={{ maxWidth: 320 }}
+            value={histSearch}
+            placeholder="Search receipt no., party, reference…"
+            onChange={(e) => setHistSearch(e.target.value)}
+          />
+        </div>
         <div className="iset-table-wrap capped">
           <table className="settings-table">
             <thead>
@@ -2939,6 +3031,7 @@ export function PaymentPanel({
                 ) : null}
                 <th>Mode</th>
                 <th>Ref</th>
+                <th>Receipt</th>
                 <th className="num">Due Before</th>
                 <th className="num">Due After</th>
                 <th title="✓ = chosen for this payment; the rest went to the oldest bills">Bills cleared</th>
@@ -2946,7 +3039,7 @@ export function PaymentPanel({
               </tr>
             </thead>
             <tbody>
-              {data.history.map((r) => (
+              {data.history.filter((r) => historyMatches(r, histSearch)).map((r) => (
                 <tr
                   key={String(r.id)}
                   className={
@@ -2980,6 +3073,7 @@ export function PaymentPanel({
                   ) : null}
                   <td>{String(r.mode ?? '')}</td>
                   <td>{String(r.reference ?? '')}</td>
+                  <td>{String(r.receipt_no ?? '')}</td>
                   <td className="num">
                     {r.due_before != null ? money(r.due_before) : '—'}
                   </td>

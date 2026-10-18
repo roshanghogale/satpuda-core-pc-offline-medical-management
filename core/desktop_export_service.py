@@ -2159,16 +2159,20 @@ def payment_report(conn, kind: str, from_date: str = "", to_date: str = "", part
     if str(party or "").strip():
         where.append("UPPER(t.name) = UPPER(?)")
         params.append(str(party).strip())
+    # The paper receipt number given or taken with the payment (wholesale_schema).
+    table = "customer_payments" if kind == "customer" else "supplier_payments"
+    has_rcpt = "receipt_no" in {str(r[1]) for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    rcpt = "COALESCE(p.receipt_no,'')" if has_rcpt else "''"
     if kind == "customer":
         sql = (
             "SELECT p.id, p.payment_date, '', COALESCE(p.reference_no,''), t.name, "
-            "COALESCE(p.payment_mode,''), COALESCE(p.amount,0), p.customer_id "
+            f"COALESCE(p.payment_mode,''), COALESCE(p.amount,0), p.customer_id, {rcpt} "
             "FROM customer_payments p JOIN customers t ON t.id = p.customer_id "
         )
     else:
         sql = (
             "SELECT p.id, p.payment_date, COALESCE(p.payment_no,''), COALESCE(p.reference,''), t.name, "
-            "COALESCE(p.mode,''), COALESCE(p.amount,0), p.supplier_id "
+            f"COALESCE(p.mode,''), COALESCE(p.amount,0), p.supplier_id, {rcpt} "
             "FROM supplier_payments p JOIN suppliers t ON t.id = p.supplier_id "
         )
     rows = conn.execute(
@@ -2178,15 +2182,18 @@ def payment_report(conn, kind: str, from_date: str = "", to_date: str = "", part
         conn, kind, [{"id": r[0], "party_id": r[7], "amount": r[6]} for r in rows]
     )
     payments = []
-    for pid, pdate, pno, ref, name, mode, amount, _party_id in rows:
+    for pid, pdate, pno, ref, name, mode, amount, _party_id, receipt_no in rows:
         hit = cleared.get(int(pid)) or {}
         number = str(pno or "").strip() or f"#{pid}"
         if str(ref or "").strip():
             number = f"{number} · {str(ref).strip()}"
+        if str(receipt_no or "").strip():
+            number = f"{number} · Rcpt {str(receipt_no).strip()}"
         payments.append({
             "id": int(pid),
             "date": str(pdate or "")[:10],
             "number": number,
+            "receipt_no": str(receipt_no or "").strip(),
             "party": str(name or ""),
             "mode": str(mode or ""),
             "amount": r2(amount),

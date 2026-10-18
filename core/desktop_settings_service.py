@@ -1288,7 +1288,7 @@ def get_contacts(conn: sqlite3.Connection) -> dict[str, Any]:
         sup_rows = [s for s in suppliers() if isinstance(s, dict)]
         live_c = _live_party_due_map("customer") if cust_rows else None
         live_s = _live_party_due_map("supplier") if sup_rows else None
-        return {
+        out = {
             "doctors": [
                 {
                     "id": d.get("id") or d.get("local_id"),
@@ -1328,6 +1328,8 @@ def get_contacts(conn: sqlite3.Connection) -> dict[str, Any]:
             "villages": load_villages(conn),
             "default_village": get_default_village(conn),
         }
+        _wholesale_contacts(conn, out["customers"], cust_rows)
+        return out
 
     doctors = conn.execute(
         "SELECT id, name, COALESCE(registration_number,''), COALESCE(phone,'') "
@@ -1342,7 +1344,7 @@ def get_contacts(conn: sqlite3.Connection) -> dict[str, Any]:
         "COALESCE(address,''), COALESCE(total_due,0) "
         "FROM suppliers ORDER BY name COLLATE NOCASE"
     ).fetchall()
-    return {
+    out = {
         "doctors": [
             {"id": r[0], "name": r[1], "reg_no": r[2], "phone": r[3]} for r in doctors
         ],
@@ -1371,6 +1373,26 @@ def get_contacts(conn: sqlite3.Connection) -> dict[str, Any]:
         "villages": load_villages(conn),
         "default_village": get_default_village(conn),
     }
+    _wholesale_contacts(conn, out["customers"], None)
+    return out
+
+
+def _wholesale_contacts(conn, customers: list, docs) -> None:
+    """Party type, GSTIN, DL, state, rate tier and credit terms on each customer row
+    (core/wholesale_party.py). Never breaks the contacts list."""
+    try:
+        from core.wholesale_party import enrich_contacts
+
+        enrich_contacts(conn, customers, docs)
+    except Exception as exc:
+        print(f"[contacts] wholesale fields: {exc}")
+
+
+def _wholesale_party(data: dict) -> dict:
+    """The wholesale party fields a customer save carries, checked ({} when none)."""
+    from core.wholesale_party import clean_party, has_party_fields
+
+    return clean_party(data) if has_party_fields(data) else {}
 
 
 def get_import_prefs() -> dict[str, Any]:
@@ -1562,6 +1584,7 @@ def mutate_contact(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, 
             return get_contacts(conn)
 
         collection = "customers" if kind == "customer" else "suppliers"
+        party = _wholesale_party(data) if kind == "customer" and action in ("add", "update") else {}
         if action == "add":
             name = str(data.get("name") or "").strip()
             if not name:
@@ -1576,12 +1599,21 @@ def mutate_contact(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, 
             }
             if kind == "customer":
                 doc["name"] = name
+                from core.wholesale_party import doc_party
+
+                doc.update(doc_party(party))
             upsert_contact_online(collection, doc)
             if kind == "customer":
                 _ensure_contact_village(conn, doc.get("address") or "")
+                if "gstin" in party:
+                    from core.wholesale_party import save_gstin
+
+                    save_gstin(conn, nid, party["gstin"], legal_name=name)
         elif action == "update":
             cid = int(data["id"])
             address = str(data.get("address") or data.get("village") or "")
+            from core.wholesale_party import doc_party
+
             upsert_contact_online(
                 collection,
                 {
@@ -1590,10 +1622,15 @@ def mutate_contact(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, 
                     "name": str(data.get("name") or "").strip(),
                     "phone": str(data.get("phone") or ""),
                     "address": address,
+                    **doc_party(party),
                 },
             )
             if kind == "customer":
                 _ensure_contact_village(conn, address)
+                if "gstin" in party:
+                    from core.wholesale_party import save_gstin
+
+                    save_gstin(conn, cid, party["gstin"], legal_name=str(data.get("name") or "").strip())
         elif action == "delete":
             delete_contact_online(collection, int(data["id"]))
         else:
@@ -1724,16 +1761,22 @@ def mutate_contact(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, 
             if not name:
                 raise ValueError("Customer name is required.")
             address = str(data.get("address") or data.get("village") or "")
+            party = _wholesale_party(data)
             cur = conn.execute(
                 "INSERT INTO customers (name, phone, address) VALUES (?,?,?)",
                 (name, str(data.get("phone") or ""), address),
             )
+            if party:
+                from core.wholesale_party import save_party_local
+
+                save_party_local(conn, int(cur.lastrowid), party, legal_name=name)
             conn.commit()
             after_customer_saved(conn, int(cur.lastrowid))
             _ensure_contact_village(conn, address)
         elif action == "update":
             cid = int(data["id"])
             address = str(data.get("address") or data.get("village") or "")
+            party = _wholesale_party(data)
             conn.execute(
                 "UPDATE customers SET name=?, phone=?, address=? WHERE id=?",
                 (
@@ -1743,6 +1786,10 @@ def mutate_contact(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, 
                     cid,
                 ),
             )
+            if party:
+                from core.wholesale_party import save_party_local
+
+                save_party_local(conn, cid, party, legal_name=str(data.get("name") or "").strip())
             conn.commit()
             after_customer_saved(conn, cid)
             _ensure_contact_village(conn, address)
@@ -1766,6 +1813,15 @@ def mutate_contact(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, 
         raise ValueError(f"Unknown contact kind: {kind}")
 
     return get_contacts(conn)
+
+
+def _receipt_col(conn: sqlite3.Connection, table: str, alias: str) -> str:
+    """The payment's paper receipt number for a SELECT ('' on a file without the column)."""
+    try:
+        cols = {str(r[1]) for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    except Exception:
+        cols = set()
+    return f"COALESCE({alias}.receipt_no,'')" if "receipt_no" in cols else "''"
 
 
 def get_payments(conn: sqlite3.Connection, kind: str = "supplier") -> dict[str, Any]:
@@ -1814,6 +1870,7 @@ def get_payments(conn: sqlite3.Connection, kind: str = "supplier") -> dict[str, 
                             "online": float(r.get("online_amount") or r.get("online") or 0),
                             "reference": r.get("reference_no") or r.get("reference") or "",
                             "note": r.get("note") or "",
+                            "receipt_no": r.get("receipt_no") or "",
                         }
                         for r in hist
                         if isinstance(r, dict)
@@ -1870,6 +1927,7 @@ def get_payments(conn: sqlite3.Connection, kind: str = "supplier") -> dict[str, 
                         "reference": r.get("reference") or "",
                         "due_before": r.get("due_before"),
                         "due_after": r.get("due_after"),
+                        "receipt_no": r.get("receipt_no") or "",
                     }
                     for r in hist
                     if isinstance(r, dict)
@@ -1896,7 +1954,7 @@ def get_payments(conn: sqlite3.Connection, kind: str = "supplier") -> dict[str, 
             SELECT cp.id, cp.payment_date, c.name, cp.amount, cp.payment_mode,
                    COALESCE(cp.cash_amount,0), COALESCE(cp.online_amount,0),
                    COALESCE(cp.reference_no,''), COALESCE(cp.note,''),
-                   cp.customer_id, cp.allocations
+                   cp.customer_id, cp.allocations, """ + _receipt_col(conn, "customer_payments", "cp") + """
             FROM customer_payments cp
             JOIN customers c ON c.id = cp.customer_id
             WHERE COALESCE(cp.deleted,0)=0
@@ -1921,6 +1979,7 @@ def get_payments(conn: sqlite3.Connection, kind: str = "supplier") -> dict[str, 
                     "online": float(r[6] or 0),
                     "reference": r[7],
                     "note": r[8],
+                    "receipt_no": r[11] or "",
                     **_cleared_fields(cleared, r[0], r[10]),
                     **_refund_fields(refunds, r[0]),
                 }
@@ -1935,7 +1994,7 @@ def get_payments(conn: sqlite3.Connection, kind: str = "supplier") -> dict[str, 
         """
         SELECT sp.id, sp.payment_no, sp.payment_date, s.name, sp.amount, sp.mode,
                COALESCE(sp.reference,''), sp.due_before, sp.due_after,
-               sp.supplier_id, sp.allocations
+               sp.supplier_id, sp.allocations, """ + _receipt_col(conn, "supplier_payments", "sp") + """
         FROM supplier_payments sp
         JOIN suppliers s ON s.id = sp.supplier_id
         WHERE COALESCE(sp.deleted,0)=0
@@ -1960,6 +2019,7 @@ def get_payments(conn: sqlite3.Connection, kind: str = "supplier") -> dict[str, 
                 "reference": r[6],
                 "due_before": float(r[7] or 0),
                 "due_after": float(r[8] or 0),
+                "receipt_no": r[11] or "",
                 **_cleared_fields(cleared, r[0], r[10]),
                 **_refund_fields(refunds, r[0]),
             }
@@ -3457,6 +3517,28 @@ def save_payment(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, An
     return out
 
 
+def _clean_receipt_no(value: Any) -> str:
+    return " ".join(str(value or "").split())[:40]
+
+
+def _receipt_no_field(data: dict[str, Any]) -> dict[str, Any]:
+    """{"receipt_no": ...} when the save carries one (the paper receipt's number, both
+    modes); {} when the request does not mention it, so an edit from an older screen or
+    voice keeps the number already saved."""
+    if "receipt_no" not in (data or {}):
+        return {}
+    return {"receipt_no": _clean_receipt_no(data.get("receipt_no"))}
+
+
+def _save_receipt_no(conn: sqlite3.Connection, table: str, payment_id: Any, data: dict[str, Any]) -> None:
+    field = _receipt_no_field(data)
+    if not field:
+        return
+    cols = {str(r[1]) for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if "receipt_no" in cols:
+        conn.execute(f"UPDATE {table} SET receipt_no=? WHERE id=?", (field["receipt_no"] or None, int(payment_id)))
+
+
 def _save_payment(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, Any]:
     from datetime import date
     from core.sync_prefs import is_online_mode
@@ -3539,6 +3621,7 @@ def _save_payment(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, A
                 "online_amount": online,
                 "reference_no": str(data.get("reference") or ""),
                 "note": str(data.get("note") or ""),
+                **_receipt_no_field(data),
                 "_fifo": "customer",
                 "_customers": [
                     {
@@ -3736,6 +3819,7 @@ def _save_payment(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, A
             "reference": str(data.get("reference") or data.get("note") or ""),
             "due_before": due_before,
             "due_after": due_after,
+            **_receipt_no_field(data),
             "_fifo": "supplier",
             "_suppliers": [
                 {
@@ -3893,6 +3977,7 @@ def _save_payment(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, A
                  alloc_val[0] if alloc_val else None),
             )
             payment_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        _save_receipt_no(conn, "customer_payments", payment_id, data)
         conn.commit()
         recalculate_customer_due(conn, customer_id)
         try:
@@ -3994,6 +4079,7 @@ def _save_payment(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, A
              alloc_val[0] if alloc_val else None),
         )
         payment_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    _save_receipt_no(conn, "supplier_payments", payment_id, data)
     conn.commit()
     recalculate_supplier_due(conn, supplier_id)
     try:
