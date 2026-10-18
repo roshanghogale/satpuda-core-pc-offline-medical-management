@@ -15,7 +15,8 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-PREFIXES = ("regular_meds:", "customer_gst:", "gst_filed:")
+# business_mode / ws_margin_*: the wholesale switch and its rate margins (core/wholesale_mode.py).
+PREFIXES = ("regular_meds:", "customer_gst:", "gst_filed:", "business_mode", "ws_margin_")
 
 
 def _carried(name: str) -> bool:
