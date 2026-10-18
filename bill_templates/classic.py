@@ -385,7 +385,15 @@ def _signature(ctx, settings) -> str:
     sig_src = str(getattr(ctx, "signature_src", "") or "")
     signed = sig_src.startswith("data:image/") and settings.get("print_signature_image", True)
     if centred:
-        img = f'<img class="sign-img-cover" src="{sig_src}" alt="">' if signed else ""
+        img = ""
+        if signed:
+            # Each print its own small tilt, size and place: signed, not stamped (owner,
+            # 18 Oct 2026). A test can pin it with settings["signature_look"].
+            from core.bill_signature_look import natural_style
+
+            look = settings.get("signature_look")
+            style = look if isinstance(look, str) else natural_style()
+            img = f'<img class="sign-img-cover" src="{sig_src}" alt="" style="{esc(style)}">'
         return f'<div class="sign-shop-box">{_shop_name_fit(ctx.store_name)}{img}</div>'
     # The old style: the uploaded signature sits in the gap left for a hand signature,
     # between "For SHOP" and the caption (owner, 17 Oct 2026).

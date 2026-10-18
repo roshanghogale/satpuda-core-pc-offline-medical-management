@@ -18,6 +18,9 @@ import {
   fetchSalesBillHint,
   fetchSalesForm,
   fetchSalesRuntimePrefs,
+  fetchSignatureSwitch,
+  setSignatureSwitch,
+  type SignatureSwitch,
   listAutosaveSessions,
   lookupCustomerByName,
   loadLastSale,
@@ -414,6 +417,22 @@ function RetailSalesPage({
   const [alert, setAlert] = useState<AlertState | null>(null)
   const [recentOpen, setRecentOpen] = useState(false)
   const [toolsOpen, setToolsOpen] = useState(false)
+  // The signature picture on bills, switched from Tabs & Tools (owner, 18 Oct 2026).
+  const [sigSwitch, setSigSwitch] = useState<SignatureSwitch | null>(null)
+  useEffect(() => {
+    if (!toolsOpen) return
+    let alive = true
+    fetchSignatureSwitch()
+      .then((s) => {
+        if (alive) setSigSwitch(s)
+      })
+      .catch(() => {
+        if (alive) setSigSwitch(null)
+      })
+    return () => {
+      alive = false
+    }
+  }, [toolsOpen])
   const [recentSales, setRecentSales] = useState<
     { id: number; bill_no: string; bill_date: string; customer: string; total: number }[]
   >([])
@@ -3331,6 +3350,25 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
             onClick: () => {
               setToolsOpen(false)
               setQuickOpen(true)
+            },
+          },
+          {
+            label: `Signature on bill: ${sigSwitch?.on === false ? 'OFF' : 'ON'}`,
+            detail: !sigSwitch
+              ? 'Uploaded signature picture on printed bills'
+              : !sigSwitch.uploaded
+                ? 'No signature uploaded (Settings -> Pharmacy Profile)'
+                : sigSwitch.on
+                  ? 'Printed on bills, a little different each time -- click to turn off'
+                  : 'Not printed -- click to turn on',
+            variant: sigSwitch?.on === false ? 'warning' : undefined,
+            onClick: () => {
+              const next = !(sigSwitch?.on ?? true)
+              void setSignatureSwitch(next)
+                .then((s) => setSigSwitch(s))
+                .catch((e) =>
+                  showAlert({ title: 'Signature on bill', message: e instanceof Error ? e.message : String(e), kind: 'error' }),
+                )
             },
           },
           {

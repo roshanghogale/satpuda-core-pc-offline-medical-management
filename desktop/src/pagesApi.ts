@@ -1916,3 +1916,14 @@ export async function saveRegulars(body: { customer_id: number; customer: string
   if (!res.ok || data.ok === false) throw new Error(data.error || `HTTP ${res.status}`)
   return data
 }
+
+/** The signature picture on bills (Sales -> Tabs & Tools), owner 18 Oct 2026. */
+export type SignatureSwitch = { ok: boolean; on: boolean; uploaded: boolean }
+
+export function fetchSignatureSwitch(): Promise<SignatureSwitch> {
+  return getJson<SignatureSwitch>('/api/bill/signature-switch')
+}
+
+export function setSignatureSwitch(on: boolean): Promise<SignatureSwitch> {
+  return postJson<SignatureSwitch>('/api/bill/signature-switch', { on })
+}
