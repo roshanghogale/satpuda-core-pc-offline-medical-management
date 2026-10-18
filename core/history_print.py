@@ -236,6 +236,15 @@ def save_bills_pdf(
     failures: list[str] = []
     parts: list[str] = []
     temps: list[str] = []
+    if paper_u != "A6":
+        # A wholesale tax invoice is a page of its own (core/wholesale_sale.py), never one
+        # of several bills on a sheet. (A6 makes each bill's own PDF, which knows it.)
+        sale_ids, ws_ids = _split_wholesale(conn, sale_ids)
+        for sale_id in ws_ids:
+            try:
+                parts.append(_wholesale_pdf(conn, sale_id, render_settings, db_path))
+            except Exception as exc:
+                failures.append(f"Sale {sale_id}: {exc}")
     if paper_u == "A6":
         for sale_id in sale_ids:
             try:
@@ -253,14 +262,6 @@ def save_bills_pdf(
     else:
         from bill_templates.classic import render_classic_bill_html_multi
 
-        # A wholesale tax invoice is a page of its own (core/wholesale_sale.py), never one
-        # of several bills on a sheet.
-        sale_ids, ws_ids = _split_wholesale(conn, sale_ids)
-        for sale_id in ws_ids:
-            try:
-                parts.append(_wholesale_pdf(conn, sale_id, render_settings, db_path))
-            except Exception as exc:
-                failures.append(f"Sale {sale_id}: {exc}")
         for chunk in _chunk_sale_ids_for_print(sale_ids, paper_u):
             try:
                 contexts = [
