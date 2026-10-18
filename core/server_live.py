@@ -1747,6 +1747,49 @@ def flush_entity_repush_queue(conn, progress_cb: ProgressCb = None) -> int:
     return 0
 
 
+class _BatchConn:
+    """The store connection for a full download: the pull writers' own commit() does
+    nothing, so a whole list lands in one transaction, and their rollback() undoes only the
+    document being applied (a savepoint).
+
+    Each writer committed after every document -- two disk syncs a record -- so copying a
+    shop on a PC's hard disk took minutes for a few hundred medicines (owner, 18 Oct 2026:
+    six minutes and not past the second list of thirteen)."""
+
+    _SP = "pull_doc"
+
+    def __init__(self, conn):
+        self._c = conn
+
+    def __getattr__(self, name):
+        return getattr(self._c, name)
+
+    def begin(self) -> None:
+        if not getattr(self._c, "in_transaction", False):
+            self._c.execute("BEGIN")
+
+    def begin_doc(self) -> None:
+        self._c.execute(f"SAVEPOINT {self._SP}")
+
+    def end_doc(self) -> None:
+        try:
+            self._c.execute(f"RELEASE {self._SP}")
+        except Exception:
+            pass
+
+    def commit(self) -> None:  # the writers' per-document commit
+        pass
+
+    def rollback(self) -> None:  # the writers' per-document rollback
+        try:
+            self._c.execute(f"ROLLBACK TO {self._SP}")
+        except Exception:
+            pass
+
+    def flush(self) -> None:
+        self._c.commit()
+
+
 def _pull_collection_pages(
     token: str,
     collection: str,
@@ -1956,10 +1999,20 @@ def sync_down_all(
                 continue
             _progress(progress_cb, f"Merging {col}… ({len(docs):,} records)")
             max_ts = None
+            batch = None if incremental else _BatchConn(conn)
+            if batch is not None:
+                batch.begin()
             for i, doc in enumerate(docs, 1):
                 if not isinstance(doc, dict):
                     continue
-                status = apply_server_doc(conn, col, doc)
+                if batch is not None:
+                    batch.begin_doc()
+                    try:
+                        status = apply_server_doc(batch, col, doc)
+                    finally:
+                        batch.end_doc()
+                else:
+                    status = apply_server_doc(conn, col, doc)
                 # Advance watermark only when the remote doc was handled (applied,
                 # already-equal skip, or keep-local). Never advance on apply errors
                 # or offline skips — otherwise Android bills can be missed forever.
@@ -1971,6 +2024,9 @@ def sync_down_all(
                     if isinstance(ts, str) and ts and (max_ts is None or ts > max_ts):
                         max_ts = ts
                 if i % 250 == 0:
+                    if batch is not None:
+                        batch.flush()
+                        batch.begin()
                     _progress(
                         progress_cb,
                         f"Merging {col}… {i:,}/{len(docs):,}",
