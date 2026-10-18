@@ -109,6 +109,42 @@ class AWholesaleReturn(_Store):
                        "orig_amount": 907.2, "is_tablet": True}]})
         self.assertFalse(res.get("ok"))
 
+    def test_the_returns_page_is_told_to_count_strips_and_the_slip_shows_strips(self):
+        first = self.bill([_line(10, disc=10)], payment_mode="Cash", pay_full=True)
+        loaded = returns_svc.load_sales_bill_for_return(self.conn, first["sale_id"])
+        self.assertEqual(loaded["invoice_mode"], "wholesale")
+        ret = self.give_back(first["sale_id"], 2)
+        # stored as always: tablets, the line's rate per tablet
+        self.assertEqual(self.conn.execute(
+            "SELECT qty FROM sales_return_items WHERE return_id=?", (ret["return_id"],)).fetchone()[0], 20)
+        from core.return_details import sales_return_details
+
+        d = sales_return_details(self.conn, ret["return_id"])
+        self.assertEqual(d["qty_unit"], "strip")
+        it = d["items"][0]
+        self.assertEqual((it["qty"], it["units"], it["units_per_pack"], it["rate"]), (2.0, 20.0, 10, 90.72))
+        self.assertEqual(d["refund_amount"], 181.44)
+        from core.document_output import render_sales_return_html
+
+        html = render_sales_return_html(self.conn, ret["return_id"])
+        self.assertIn("90.72", html)
+
+    def test_a_retail_bill_return_stays_in_tablets(self):
+        from core.billing_service import save_new_bill
+
+        _no, sid = save_new_bill(self.conn, 2, [{
+            "id": 1, "name": "TESTOCIN 500", "qty": 20, "rate": 12, "amount": 240,
+            "medicine_discount": 0, "unit": "10", "type": "Tablet", "batch": "TB01",
+            "gst_percent": 12}], 0, 0, 240, 0, "", "", 0, bill_date=DAY)
+        loaded = returns_svc.load_sales_bill_for_return(self.conn, sid)
+        self.assertEqual(loaded["invoice_mode"], "")
+        ret = self.give_back(sid, 1)
+        from core.return_details import sales_return_details
+
+        d = sales_return_details(self.conn, ret["return_id"])
+        self.assertEqual(d["qty_unit"], "")
+        self.assertEqual((d["items"][0]["qty"], d["items"][0]["rate"]), (10.0, 12.0))
+
 
 class ASettledReturnInTheNextBill(_Store):
     def setUp(self):

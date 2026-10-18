@@ -32,6 +32,8 @@ export type ReturnDetailView = {
   refund: number
   /** null: not known here (an Online shop keeps its returns on the server). */
   credit: ReturnCreditStatus | null
+  /** 'strip': a wholesale invoice's return -- qty in strips, rate per strip. */
+  qtyUnit?: string
 }
 
 function money(n: number) {
@@ -198,8 +200,8 @@ export function ReturnDetailsDialog({
                     <th>Medicine</th>
                     <th>Batch</th>
                     <th>Expiry</th>
-                    <th className="num">Qty</th>
-                    <th className="num">Rate</th>
+                    <th className="num">{view.qtyUnit === 'strip' ? 'Qty (strips)' : 'Qty'}</th>
+                    <th className="num">{view.qtyUnit === 'strip' ? 'Rate / strip' : 'Rate'}</th>
                     <th className="num">Amount</th>
                   </tr>
                 </thead>

@@ -484,6 +484,8 @@ export type LoadedSalesReturnBill = {
   previous_due?: number
   previous_credit?: number
   items?: ReturnLineItem[]
+  /** 'wholesale' for a tax invoice: the Returns page counts it in strips. */
+  invoice_mode?: string
 }
 
 export type PurchaseReturnBill = {
@@ -703,6 +705,8 @@ export function fetchSalesReturnDetails(returnId: number) {
     discount_pct?: number
     refund_amount?: number
     credit?: ReturnCreditStatus
+    /** 'strip': a wholesale invoice's return, items' qty in strips and rate per strip */
+    qty_unit?: string
   }>(`/api/returns/sales/return${qs({ return_id: returnId })}`)
 }
 

@@ -28,6 +28,40 @@ export type SalesReturnLine = {
 
 export type SalesReturnAlert = { title: string; message: string }
 
+/** A wholesale tax invoice is returned in strips, as it was sold (owner, 18 Oct 2026:
+ *  wholesale only sells strips): the screen counts strips (packs for a non-strip type) and
+ *  rates per strip; the lines kept and saved stay in the bill's units (tablets of a strip
+ *  type), so the engine stores what it always stored. A retail bill: tablets / loose. */
+export function billInPacks(bill: { invoice_mode?: string } | null | undefined): boolean {
+  return String(bill?.invoice_mode || '').toLowerCase() === 'wholesale'
+}
+
+/** Units in one pack of a bill line: tablets per strip for a strip-counted medicine, else 1. */
+export function packSize(it: { is_tablet?: boolean; tablets_per_stripe?: number }): number {
+  const t = Math.round(Number(it.tablets_per_stripe) || 1)
+  return it.is_tablet && t > 1 ? t : 1
+}
+
+/** Units as packs, to two places (3 strips, 2.5 strips). */
+export function unitsAsPacks(units: unknown, it: { is_tablet?: boolean; tablets_per_stripe?: number }): number {
+  return Math.round(((Number(units) || 0) / packSize(it)) * 100) / 100
+}
+
+/** What one pack of a bill line is refunded at: the line's amount over the units it gave
+ *  (free strips included -- so a line with free strips refunds at the averaged rate), per pack. */
+export function packRefundRate(it: {
+  orig_qty?: number
+  amount?: number
+  rate?: number
+  is_tablet?: boolean
+  tablets_per_stripe?: number
+}): number {
+  const origQty = Number(it.orig_qty) || 0
+  const amt = Number(it.amount) || 0
+  const perUnit = origQty > 0 && amt > 0 ? amt / origQty : Number(it.rate) || 0
+  return Math.round(perUnit * packSize(it) * 100) / 100
+}
+
 export function returnMoney(n: number) {
   return `₹${n.toLocaleString('en-IN', {
     minimumFractionDigits: 2,
@@ -144,6 +178,8 @@ export function checkSalesReturnAdd(
   pickId: number | null,
   pickName: string,
   qtyText: string,
+  /** qtyText is in strips / packs (a wholesale tax invoice, billInPacks) */
+  inPacks = false,
 ): SalesReturnAdd {
   if (!bill?.items?.length) {
     return { ok: false, alert: { title: 'Load bill', message: 'Load a sales bill first.' } }
@@ -160,12 +196,31 @@ export function checkSalesReturnAdd(
       alert: { title: 'Medicine', message: 'Pick a medicine from the loaded bill.' },
     }
   }
-  const qty = Number(qtyText) || 0
+  const typed = Number(qtyText) || 0
+  const pack = inPacks ? packSize(item) : 1
+  const qty = typed * pack
   const remaining = salesRemainingQty(lines, item.medicine_id, item.remaining_qty)
   if (qty <= 0) {
     return { ok: false, alert: { title: 'Return qty', message: 'Enter a valid return quantity.' } }
   }
-  if (qty > remaining) {
+  if (inPacks) {
+    const word = item.is_tablet ? 'strips' : 'packs'
+    if (!Number.isInteger(typed)) {
+      return {
+        ok: false,
+        alert: { title: 'Return qty', message: `${item.name}: a wholesale bill is returned in whole ${word}.` },
+      }
+    }
+    if (qty > remaining + 1e-9) {
+      return {
+        ok: false,
+        alert: {
+          title: 'Return qty',
+          message: `Cannot return more than ${unitsAsPacks(remaining, item)} ${word} for ${item.name}.`,
+        },
+      }
+    }
+  } else if (qty > remaining) {
     return {
       ok: false,
       alert: {
@@ -175,7 +230,7 @@ export function checkSalesReturnAdd(
     }
   }
   // A sale counts a strip-counted medicine in tablets: whole tablets only.
-  const part = partTabletProblem(item.name, qty, item.is_tablet, item.tablets_per_stripe, 'tablet')
+  const part = inPacks ? null : partTabletProblem(item.name, qty, item.is_tablet, item.tablets_per_stripe, 'tablet')
   if (part) {
     return { ok: false, alert: { title: 'Return qty', message: part } }
   }

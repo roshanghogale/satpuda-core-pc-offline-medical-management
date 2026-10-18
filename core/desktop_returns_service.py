@@ -847,6 +847,9 @@ def load_sales_bill_for_return(conn, sale_id: int) -> dict[str, Any]:
         "previous_due": float(cust_due),
         "previous_credit": float(cust_credit),
         "items": items,
+        # "wholesale" for a tax invoice: the Returns page then counts in strips (qty and
+        # rate per pack); what is saved stays in units either way.
+        "invoice_mode": _invoice_mode(conn, int(row[0])),
     }
 
 
@@ -1757,6 +1760,16 @@ def _purchase_returnable(
         mid: (names.get(mid, ""), max(0.0, round(qty - returned.get(mid, 0.0), 6)))
         for mid, qty in bought.items()
     }
+
+
+def _invoice_mode(conn, sale_id: int) -> str:
+    """The sale's invoice_mode ("wholesale" for a tax invoice, "" for a retail bill)."""
+    try:
+        from core.wholesale_sale import WHOLESALE, is_wholesale_sale
+
+        return WHOLESALE if is_wholesale_sale(conn, sale_id) else ""
+    except Exception:
+        return ""
 
 
 def _tablets_per_strip(med_type: Any, unit: Any) -> int:
