@@ -47,6 +47,7 @@ import { ModernCombo } from './ModernCombo'
 import { fetchOpenReturns, type BillReturn, type OpenReturn } from '../pagesApi'
 import { ReturnTableRows, ReturnsPickDialog, returnsForScreen } from './billReturns'
 import { belowReturnedProblem, samePurchaseLine } from './billLineRules'
+import { useLayoutRowCount } from '../layoutRows'
 import { registerVoicePage, type VoiceHandler } from '../voice/voiceBus'
 import {
   ActionBtn,
@@ -55,6 +56,7 @@ import {
   Field,
   PageRoot,
   Panel,
+  CappedTableWrap,
   ScheduleChip,
   SelectWrap,
   StatusLine,
@@ -64,8 +66,6 @@ import { dispatchDataChanged } from '../syncRefresh'
 import { todayLocal } from '../localDate'
 import { fetchLastRates, suggestedRates, useBusinessMode } from '../wholesale/mode'
 import '../wholesale/wholesale.css'
-import '../styles/compact-entry.css'
-import { SupplierQuickDialog, type SupplierDialogState, type SupplierSaved } from './QuickContactDialogs'
 
 type LineItem = {
   medicine: string
@@ -433,6 +433,7 @@ export function PurchasePage({
     setEditingIdx(null)
     clearMedicineFieldsRef.current()
   }, [activeTab])
+  const purchaseRows = useLayoutRowCount('purchase_rows')
 
   const [medicine, setMedicine] = useState('')
   const [medType, setMedType] = useState('')
@@ -911,122 +912,6 @@ export function PurchasePage({
 
   const onSupplierTyped = (name: string) => {
     void applySupplierBalance(name, { force: false })
-  }
-
-  // ── New / Edit supplier popup (owner, 18 Oct 2026) ──
-  // A name that is not saved opens it ONLY on Enter in the Supplier box -- never while
-  // typing or on leaving the box. ✎ opens it for the supplier on the bill.
-  const [supplierDlg, setSupplierDlg] = useState<SupplierDialogState | null>(null)
-
-  const onSupplierEnter = async (picked?: { label: string }) => {
-    if (picked) {
-      // onPick has applied it; on to the bill number.
-      focusNavOrder(2)
-      return
-    }
-    const typed = (
-      (
-        document.querySelector(
-          `.desktop-page[data-nav-chain="${NAV}"] [data-nav-order="1"]`,
-        ) as HTMLInputElement | null
-      )?.value ?? tabRef.current?.supplier ?? ''
-    ).trim()
-    if (!typed) {
-      focusNavOrder(2)
-      return
-    }
-    const same = (n: string) => n.trim().toUpperCase() === typed.toUpperCase()
-    let saved = !!suppliers.find((s) => same(s.name))
-    if (!saved && tabRef.current?.editingPurchaseId) saved = true // the bill's own supplier
-    if (!saved) {
-      try {
-        const res = await lookupSupplierByName(typed, true)
-        saved = !!(res.found && res.supplier)
-      } catch {
-        /* the popup still opens */
-      }
-    }
-    if (saved) {
-      void applySupplierBalance(typed, { force: true })
-      focusNavOrder(2)
-      return
-    }
-    const cur = tabRef.current
-    setSupplierDlg({
-      id: null,
-      name: typed.toUpperCase(),
-      phone: cur?.phone || '',
-      address: cur?.address || '',
-      gstin: cur?.gstin || '',
-      dl: cur?.dl || '',
-    })
-  }
-
-  const openEditSupplier = () => {
-    const cur = tabRef.current
-    if (!cur?.supplier.trim()) return
-    setSupplierDlg({
-      id: cur.supplierId,
-      name: cur.supplier,
-      phone: cur.phone,
-      address: cur.address,
-      gstin: cur.gstin,
-      dl: cur.dl,
-    })
-  }
-
-  const onSupplierSaved = async (s: SupplierSaved) => {
-    setSupplierDlg(null)
-    // Read it back for its id and balance. The DL numbers stay as typed: they are not a
-    // Contacts field, the purchase save stores them with the supplier.
-    let id = s.id ?? tabRef.current?.supplierId ?? null
-    let bal: { prevDue: number; prevCredit: number } | null = null
-    try {
-      const res = await lookupSupplierByName(s.name, true)
-      if (res.found && res.supplier) {
-        id = res.supplier.id || id
-        bal = { prevDue: Number(res.supplier.due) || 0, prevCredit: Number(res.supplier.credit) || 0 }
-      }
-    } catch {
-      /* keep what the popup saved */
-    }
-    patchTab({
-      supplier: s.name,
-      supplierId: id,
-      phone: s.phone,
-      address: s.address,
-      gstin: s.gstin,
-      dl: s.dl,
-      // An opened saved purchase keeps the balance it was saved with.
-      ...(bal && !tabRef.current?.editingPurchaseId ? bal : {}),
-    })
-    setDefaults((d) => {
-      if (!d) return d
-      const list = [...(d.suppliers || [])]
-      const at = list.findIndex(
-        (x) => (id != null && x.id === id) || x.name.trim().toUpperCase() === s.name,
-      )
-      const row = {
-        id: id ?? undefined,
-        name: s.name,
-        phone: s.phone,
-        address: s.address,
-        gstin: s.gstin,
-        dl: s.dl,
-        due: bal?.prevDue ?? 0,
-        credit: bal?.prevCredit ?? 0,
-      }
-      if (at < 0) list.push(row)
-      else list[at] = { ...list[at], ...row }
-      return { ...d, suppliers: list }
-    })
-    setNote(`Supplier ${s.name} saved.`)
-    window.setTimeout(() => focusNavOrder(2), 40)
-  }
-
-  const onSupplierCancel = () => {
-    setSupplierDlg(null)
-    window.setTimeout(() => focusNavOrder(1), 30)
   }
 
   const applySupplierBalance = useCallback(
@@ -2548,8 +2433,6 @@ export function PurchasePage({
     free: colOn('Free'),
     mrp: colOn('MRP') && !ws.isWholesale,
     rate: colOn('Rate'),
-    // Wholesale: the line's Rate A / B / C in a column of its own (one line per row).
-    wsRates: colOn('Rate') && ws.isWholesale,
     disc: colOn('Disc%'),
     gstPct: colOn('GST%'),
     taxable: colOn('Taxable'),
@@ -2641,7 +2524,7 @@ export function PurchasePage({
   return (
     <PageRoot
       navChain={NAV}
-      className={`bill-page ce-page${editPending ? ' is-edit-loading' : ''}`}
+      className={`bill-page${editPending ? ' is-edit-loading' : ''}`}
     >
       <StatusLine
         error={error}
@@ -2772,544 +2655,528 @@ export function PurchasePage({
         }
       />
 
-      {supplierDlg ? (
-        <SupplierQuickDialog
-          state={supplierDlg}
-          onSaved={onSupplierSaved}
-          onCancel={onSupplierCancel}
-        />
-      ) : null}
-
-      {/* ONE supplier row on top (owner, 18 Oct 2026): the supplier's address, phone,
-          GSTIN and DL numbers live in the New / Edit supplier popup (Enter on a name that
-          is not saved, or ✎), and show here as plain text. */}
-      <Panel className="pur-supplier-panel">
-        <div className="ce-party-row pur-supplier-row">
-          <Field label="Supplier" className="ce-f-party">
-            <ModernCombo
-              value={tab.supplier}
-              navOrder={1}
-              navChain={NAV}
-              placeholder="Search supplier…"
-              voiceField="supplier"
-              minChars={0}
-              filterLocal
-              listLabel="Suppliers"
-              emptyText="Not saved yet — Enter adds a new supplier"
-              items={suppliers.map((s) => ({
-                id: String(s.id ?? s.name),
-                label: s.name,
-                meta: s.phone || undefined,
-              }))}
-              onChange={(v) => onSupplierTyped(v)}
-              onPick={(it) => onPickSupplier(it.label)}
-              onEnter={(picked) => void onSupplierEnter(picked)}
-            />
-          </Field>
-          <Field label="Bill Number" className="ce-f-bill">
-            <input
-              type="text"
-              className="mono"
-              value={tab.billNumber}
-              data-nav-order={2}
-              data-nav-chain={NAV}
-              onChange={(e) => patchTab({ billNumber: e.target.value })}
-            />
-          </Field>
-          <Field label="Purchase Date" hint="YYYY-MM-DD" className="ce-f-pdate">
-            <input
-              type="text"
-              className="mono"
-              value={tab.purchaseDate}
-              data-nav-order={3}
-              data-nav-chain={NAV}
-              data-nav-enter="to-medicine"
-              onChange={(e) => patchTab({ purchaseDate: e.target.value })}
-            />
-          </Field>
-          <Field label="GST Method" className="ce-f-gst">
-            <SelectWrap>
-              <select
-                value={tab.gstMethod}
-                onChange={(e) =>
-                  // Choosing a method also releases an imported bill from its
-                  // printed footer -- otherwise the footer wins and the
-                  // dropdown appears to do nothing.
-                  patchTab({
-                    gstMethod: e.target.value,
-                    importBillMode: false,
-                  })
-                }
-                tabIndex={-1}
-                title="Not in Classic Enter chain — change with mouse if needed"
-              >
-                {(
-                  prefs?.gst_calc_methods || [
-                    {
-                      value: 'discount_before_gst',
-                      label: 'Discount before GST',
-                    },
-                    {
-                      value: 'discount_after_gst',
-                      label: 'Discount after GST',
-                    },
-                  ]
-                ).map((m) => (
-                  <option key={m.value} value={m.value}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-            </SelectWrap>
-          </Field>
-          <div className="ce-facts" aria-label="Supplier details">
-            {tab.supplier.trim() && (tab.supplierId || tab.gstin || tab.phone || tab.dl || tab.address) ? (
-              <>
-                <div className="ce-facts-line" title={`GSTIN ${tab.gstin || '—'} · Phone ${tab.phone || '—'}`}>
-                  <span className="ce-fact">
-                    <span className="ce-fact-k">GSTIN</span>
-                    <b className="mono">{tab.gstin || '—'}</b>
-                  </span>
-                  <span className="ce-fact">
-                    <span className="ce-fact-k">Phone</span>
-                    <b className="mono">{tab.phone || '—'}</b>
-                  </span>
-                </div>
-                <div className="ce-facts-line" title={`DL ${tab.dl || '—'} · ${tab.address || ''}`}>
-                  <span className="ce-fact">
-                    <span className="ce-fact-k">DL</span>
-                    <b className="mono">{tab.dl || '—'}</b>
-                  </span>
-                  {tab.address ? <span className="ce-fact ce-fact-k">{tab.address}</span> : null}
-                </div>
-              </>
-            ) : (
-              <div className="ce-facts-line ce-facts-empty">
-                {tab.supplier.trim()
-                  ? 'Not a saved supplier — press Enter in the Supplier box to add it.'
-                  : 'Pick a saved supplier, or type a new name and press Enter to add it.'}
-              </div>
-            )}
-          </div>
-          <button
-            type="button"
-            className="ce-edit-btn"
-            title={tab.supplier.trim() ? `Edit ${tab.supplier}` : 'Pick a supplier first'}
-            aria-label="Edit supplier"
-            disabled={!tab.supplier.trim()}
-            onClick={openEditSupplier}
-          >
-            ✎
-          </button>
-        </div>
-      </Panel>
-
-      {/* Medicine Details: the full width, every box in sight, two rows. */}
-      <Panel
-        title="Medicine Details"
-        className="pur-med-panel"
-        headRight={
-          <span className={`pur-med-note${note ? ' is-note' : ''}`} title={note || undefined}>
-            {note ||
-              (tab.items.length
-                ? `${tab.items.length} line(s) in bill`
-                : 'Add medicines to this purchase')}
-          </span>
-        }
-      >
-        <div className={`pmed-row pmed-row1${ws.isWholesale ? ' is-ws' : ''}`}>
-          <Field label="Medicine Name" className="pf-xl">
-            <ModernCombo
-              value={medicine}
-              inputRef={medRef}
-              voiceField="medicine"
-              navOrder={9}
-              navChain={NAV}
-              navEnter="medicine-enter"
-              enterPicksHighlight={false}
-              placeholder={
-                masterListLoading
-                  ? 'Loading medicines… (local list available)'
-                  : 'Click or type to search medicine…'
-              }
-              minChars={0}
-              openOnFocus
-              filterLocal={false}
-              loading={medSearchLoading}
-              maxVisible={50}
-              listLabel="Medicines"
-              emptyText={
-                masterListLoading
-                  ? 'Loading master list… type to search local medicines'
-                  : 'No matches — type a name or pick from the list'
-              }
-              items={medSuggestions.map((m, i) => ({
-                id: String(m.id ?? `${m.name}-${i}`),
-                label: m.name,
-                meta: m.source || undefined,
-              }))}
-              onFocus={() => void refreshMedicineSuggestions(medicine)}
-              onChange={(v) => setMedicine(v)}
-              onPick={(it) => {
-                setMedicine(it.label)
-                void onPickMedicine(it.label)
-              }}
-              onEnter={(picked) => {
-                const q = (
-                  picked?.label ||
-                  (
-                    document.querySelector(
-                      `.desktop-page[data-nav-chain="${NAV}"] [data-nav-order="9"]`,
-                    ) as HTMLInputElement | null
-                  )?.value ||
-                  medicine
-                ).trim()
-                if (!q) {
-                  focusNavOrder(27)
-                  return
-                }
-                if (!picked) void onPickMedicine(q)
-                focusNavOrder(10)
-              }}
-            />
-          </Field>
-          <Field label="Type" className="pf-m">
-            <ModernCombo
-              value={medType}
-              navOrder={10}
-              navChain={NAV}
-              enterPicksHighlight
-              placeholder="Select or type…"
-              minChars={0}
-              filterLocal
-              openOnFocus
-              maxVisible={40}
-              listLabel="Medicine types"
-              items={medicineTypes.map((t) => ({ id: t, label: t }))}
-              onChange={onMedTypeChange}
-              onPick={(it) => onMedTypeChange(it.label)}
-              onEnter={() => focusNavOrder(11)}
-            />
-          </Field>
-          <Field label={activeTypeMeta.qty_label} className="pf-s">
-            <input
-              type="text"
-              className="mono"
-              value={strips}
-              data-nav-order={11}
-              data-nav-chain={NAV}
-              onChange={(e) => setStrips(e.target.value)}
-              // The keyboard routes select via focusNavOrder; a mouse click
-              // did not, which is how a stale quantity got typed onto here.
-              onFocus={(e) => e.currentTarget.select()}
-            />
-          </Field>
-          <Field
-            label={
-              stripMode
-                ? activeTypeMeta.pack_label
-                : `${activeTypeMeta.pack_label}${
-                    activeTypeMeta.measure_unit
-                      ? ` (e.g. ${activeTypeMeta.measure_unit})`
-                      : ''
-                  }`
-            }
-            className="pf-s"
-          >
-            <input
-              type="text"
-              className="mono"
-              value={tabsPerStrip}
-              data-nav-order={12}
-              data-nav-chain={NAV}
-              onChange={(e) => setTabsPerStrip(e.target.value)}
-            />
-          </Field>
-          {activeTypeMeta.is_vaccine ? (
-            <Field label="Vaccine unit" className="pf-s">
+      <div className="top-split">
+        <Panel title="Supplier Information">
+          <div className="supplier-grid">
+            <Field label="Supplier Name">
+              <ModernCombo
+                value={tab.supplier}
+                navOrder={1}
+                navChain={NAV}
+                navEnter="supplier-enter"
+                placeholder="Search supplier…"
+                voiceField="supplier"
+                minChars={0}
+                filterLocal
+                listLabel="Suppliers"
+                items={suppliers.map((s) => ({
+                  id: String(s.id ?? s.name),
+                  label: s.name,
+                  meta: s.phone || undefined,
+                }))}
+                onChange={(v) => onSupplierTyped(v)}
+                onPick={(it) => onPickSupplier(it.label)}
+              />
+            </Field>
+            <Field label="Address">
+              <input
+                type="text"
+                value={tab.address}
+                data-nav-order={2}
+                data-nav-chain={NAV}
+                onChange={(e) => patchTab({ address: e.target.value })}
+              />
+            </Field>
+            <Field label="Phone">
+              <input
+                type="text"
+                className="mono"
+                value={tab.phone}
+                data-nav-order={3}
+                data-nav-chain={NAV}
+                onChange={(e) => patchTab({ phone: e.target.value })}
+              />
+            </Field>
+            <Field label="GSTIN">
+              <input
+                type="text"
+                className="mono"
+                value={tab.gstin}
+                data-nav-order={4}
+                data-nav-chain={NAV}
+                onChange={(e) => patchTab({ gstin: e.target.value })}
+              />
+            </Field>
+            <Field label="DL Numbers">
+              <input
+                type="text"
+                className="mono"
+                value={tab.dl}
+                data-nav-order={5}
+                data-nav-chain={NAV}
+                onChange={(e) => patchTab({ dl: e.target.value })}
+              />
+            </Field>
+            <Field label="Purchase Date" hint="(YYYY-MM-DD)">
+              <input
+                type="text"
+                className="mono"
+                value={tab.purchaseDate}
+                data-nav-order={6}
+                data-nav-chain={NAV}
+                onChange={(e) => patchTab({ purchaseDate: e.target.value })}
+              />
+            </Field>
+            <Field label="Bill Number">
+              <input
+                type="text"
+                className="mono"
+                value={tab.billNumber}
+                data-nav-order={7}
+                data-nav-chain={NAV}
+                data-nav-enter="to-medicine"
+                onChange={(e) => patchTab({ billNumber: e.target.value })}
+              />
+            </Field>
+            <Field label="GST Method">
               <SelectWrap>
                 <select
-                  value={vaccineUnit}
-                  onChange={(e) => setVaccineUnit(e.target.value)}
+                  value={tab.gstMethod}
+                  onChange={(e) =>
+                    // Choosing a method also releases an imported bill from its
+                    // printed footer -- otherwise the footer wins and the
+                    // dropdown appears to do nothing.
+                    patchTab({
+                      gstMethod: e.target.value,
+                      importBillMode: false,
+                    })
+                  }
                   tabIndex={-1}
+                  title="Not in Classic Enter chain — change with mouse if needed"
                 >
-                  <option value="ml">ml</option>
-                  <option value="Doses">Doses</option>
+                  {(
+                    prefs?.gst_calc_methods || [
+                      {
+                        value: 'discount_before_gst',
+                        label: 'Discount before GST',
+                      },
+                      {
+                        value: 'discount_after_gst',
+                        label: 'Discount after GST',
+                      },
+                    ]
+                  ).map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
                 </select>
               </SelectWrap>
             </Field>
-          ) : null}
-          <Field label={activeTypeMeta.free_label} className="pf-xs">
-            <input
-              type="text"
-              className="mono"
-              value={freeStrips}
-              data-nav-order={13}
-              data-nav-chain={NAV}
-              onChange={(e) => setFreeStrips(e.target.value)}
-            />
-          </Field>
-          <Field label="HSN Code" className="pf-s">
-            <input
-              type="text"
-              className="mono"
-              value={hsn}
-              data-nav-order={14}
-              data-nav-chain={NAV}
-              onChange={(e) => setHsn(e.target.value)}
-            />
-          </Field>
-          <Field label="GST %" className="pf-xs">
-            <input
-              type="text"
-              className="mono"
-              value={gstPct}
-              data-nav-order={15}
-              data-nav-chain={NAV}
-              list="purchase-gst-pct"
-              onChange={(e) => setGstPct(e.target.value)}
-            />
-            <datalist id="purchase-gst-pct">
-              {['0', '5', '12', '18', '28'].map((g) => (
-                <option key={g} value={g} />
-              ))}
-            </datalist>
-          </Field>
-          {/* Wholesale sells whole strips at Rate A / B / C: no MRP, no per-tablet price
-              (owner, 18 Oct 2026). */}
-          {ws.isWholesale ? null : (
-          <Field
-            label="MRP"
-            hint={stripMode ? 'strip / per tab' : undefined}
-            className={stripMode ? 'pf-l' : 'pf-s'}
-          >
-            {stripMode ? (
-              <div className="price-split">
-                <div className="price-half">
-                  <input
-                    type="text"
-                    className="mono"
-                    value={mrp}
-                    data-nav-order={16}
-                    data-nav-chain={NAV}
-                    onChange={(e) => onStripMrpChange(e.target.value)}
-                    onBlur={checkRateAgainstHistory}
-                  />
-                </div>
-                <div className="price-half">
-                  <input
-                    type="text"
-                    className="mono"
-                    value={tabletMrp}
-                    data-nav-order={17}
-                    data-nav-chain={NAV}
-                    onChange={(e) => onTabletMrpChange(e.target.value)}
-                    onBlur={checkRateAgainstHistory}
-                  />
-                </div>
-              </div>
-            ) : (
+          </div>
+        </Panel>
+
+        <Panel title="Medicine Details">
+          <div className="med-grid">
+            <Field label="Medicine Name" className="span3">
+              <ModernCombo
+                value={medicine}
+                inputRef={medRef}
+                voiceField="medicine"
+                navOrder={9}
+                navChain={NAV}
+                navEnter="medicine-enter"
+                enterPicksHighlight={false}
+                placeholder={
+                  masterListLoading
+                    ? 'Loading medicines… (local list available)'
+                    : 'Click or type to search medicine…'
+                }
+                minChars={0}
+                openOnFocus
+                filterLocal={false}
+                loading={medSearchLoading}
+                maxVisible={50}
+                listLabel="Medicines"
+                emptyText={
+                  masterListLoading
+                    ? 'Loading master list… type to search local medicines'
+                    : 'No matches — type a name or pick from the list'
+                }
+                items={medSuggestions.map((m, i) => ({
+                  id: String(m.id ?? `${m.name}-${i}`),
+                  label: m.name,
+                  meta: m.source || undefined,
+                }))}
+                onFocus={() => void refreshMedicineSuggestions(medicine)}
+                onChange={(v) => setMedicine(v)}
+                onPick={(it) => {
+                  setMedicine(it.label)
+                  void onPickMedicine(it.label)
+                }}
+                onEnter={(picked) => {
+                  const q = (
+                    picked?.label ||
+                    (
+                      document.querySelector(
+                        `.desktop-page[data-nav-chain="${NAV}"] [data-nav-order="9"]`,
+                      ) as HTMLInputElement | null
+                    )?.value ||
+                    medicine
+                  ).trim()
+                  if (!q) {
+                    focusNavOrder(27)
+                    return
+                  }
+                  if (!picked) void onPickMedicine(q)
+                  focusNavOrder(10)
+                }}
+              />
+            </Field>
+            <Field label="Type" className="span2">
+              <ModernCombo
+                value={medType}
+                navOrder={10}
+                navChain={NAV}
+                enterPicksHighlight
+                placeholder="Select or type…"
+                minChars={0}
+                filterLocal
+                openOnFocus
+                maxVisible={40}
+                listLabel="Medicine types"
+                items={medicineTypes.map((t) => ({ id: t, label: t }))}
+                onChange={onMedTypeChange}
+                onPick={(it) => onMedTypeChange(it.label)}
+                onEnter={() => focusNavOrder(11)}
+              />
+            </Field>
+            <Field label={activeTypeMeta.qty_label}>
               <input
                 type="text"
                 className="mono"
-                value={mrp}
-                data-nav-order={16}
+                value={strips}
+                data-nav-order={11}
                 data-nav-chain={NAV}
-                onChange={(e) => onStripMrpChange(e.target.value)}
-                onBlur={checkRateAgainstHistory}
+                onChange={(e) => setStrips(e.target.value)}
+                // The keyboard routes select via focusNavOrder; a mouse click
+                // did not, which is how a stale quantity got typed onto here.
+                onFocus={(e) => e.currentTarget.select()}
               />
-            )}
-          </Field>
-          )}
-          <Field
-            label={ws.isWholesale ? 'Purchase rate' : 'Rate'}
-            hint={ws.isWholesale ? (stripMode ? 'per strip' : 'per pack') : stripMode ? 'strip / per tab' : 'per unit'}
-            className={stripMode && !ws.isWholesale ? 'pf-l' : 'pf-m'}
-          >
-            {stripMode && !ws.isWholesale ? (
-              <div className="price-split">
-                <div className="price-half">
-                  <input
-                    type="text"
-                    className="mono"
-                    value={rate}
-                    data-nav-order={18}
-                    data-nav-chain={NAV}
-                    onChange={(e) => onStripRateChange(e.target.value)}
-                    onBlur={checkRateAgainstHistory}
-                  />
-                </div>
-                <div className="price-half">
-                  <input
-                    type="text"
-                    className="mono"
-                    value={tabletRate}
-                    data-nav-order={19}
-                    data-nav-chain={NAV}
-                    onChange={(e) => onTabletRateChange(e.target.value)}
-                    onBlur={checkRateAgainstHistory}
-                  />
-                </div>
-              </div>
-            ) : (
-              <input
-                type="text"
-                className="mono"
-                value={rate}
-                data-nav-order={18}
-                data-nav-chain={NAV}
-                onChange={(e) => onStripRateChange(e.target.value)}
-                onBlur={checkRateAgainstHistory}
-              />
-            )}
-          </Field>
-          {ws.isWholesale ? (
+            </Field>
             <Field
-              label="Rate A / B / C"
-              hint={stripMode ? 'per strip, + GST' : 'per pack, + GST'}
-              className="pf-xl"
+              label={
+                stripMode
+                  ? activeTypeMeta.pack_label
+                  : `${activeTypeMeta.pack_label}${
+                      activeTypeMeta.measure_unit
+                        ? ` (e.g. ${activeTypeMeta.measure_unit})`
+                        : ''
+                    }`
+              }
             >
-              <div className="price-split ws-rates3">
-                {(
-                  [
-                    ['A', rateA, setRateA],
-                    ['B', rateB, setRateB],
-                    ['C', rateC, setRateC],
-                  ] as const
-                ).map(([tier, value, setValue]) => (
-                  <div className="price-half" key={tier}>
+              <input
+                type="text"
+                className="mono"
+                value={tabsPerStrip}
+                data-nav-order={12}
+                data-nav-chain={NAV}
+                onChange={(e) => setTabsPerStrip(e.target.value)}
+              />
+            </Field>
+            {activeTypeMeta.is_vaccine ? (
+              <Field label="Vaccine unit">
+                <SelectWrap>
+                  <select
+                    value={vaccineUnit}
+                    onChange={(e) => setVaccineUnit(e.target.value)}
+                    tabIndex={-1}
+                  >
+                    <option value="ml">ml</option>
+                    <option value="Doses">Doses</option>
+                  </select>
+                </SelectWrap>
+              </Field>
+            ) : null}
+            <Field label={activeTypeMeta.free_label}>
+              <input
+                type="text"
+                className="mono"
+                value={freeStrips}
+                data-nav-order={13}
+                data-nav-chain={NAV}
+                onChange={(e) => setFreeStrips(e.target.value)}
+              />
+            </Field>
+            <Field label="HSN Code">
+              <input
+                type="text"
+                className="mono"
+                value={hsn}
+                data-nav-order={14}
+                data-nav-chain={NAV}
+                onChange={(e) => setHsn(e.target.value)}
+              />
+            </Field>
+            <Field label="GST %">
+              <input
+                type="text"
+                className="mono"
+                value={gstPct}
+                data-nav-order={15}
+                data-nav-chain={NAV}
+                list="purchase-gst-pct"
+                onChange={(e) => setGstPct(e.target.value)}
+              />
+              <datalist id="purchase-gst-pct">
+                {['0', '5', '12', '18', '28'].map((g) => (
+                  <option key={g} value={g} />
+                ))}
+              </datalist>
+            </Field>
+            {/* Wholesale sells whole strips at Rate A / B / C: no MRP, no per-tablet price
+                (owner, 18 Oct 2026). */}
+            {ws.isWholesale ? null : (
+            <Field
+              label="MRP"
+              hint={stripMode ? 'strip / per tab' : undefined}
+              className="span2"
+            >
+              {stripMode ? (
+                <div className="price-split">
+                  <div className="price-half">
                     <input
                       type="text"
                       className="mono"
-                      inputMode="decimal"
-                      aria-label={`Rate ${tier}`}
-                      placeholder={tier}
-                      value={value}
-                      data-nav-order={19}
+                      value={mrp}
+                      data-nav-order={16}
                       data-nav-chain={NAV}
-                      onFocus={() => {
-                        if (!rateA && !rateB && !rateC) prefillWholesaleRates(rate)
-                      }}
-                      onChange={(e) => {
-                        wsTypedRef.current = true
-                        setValue(e.target.value.replace(/[^0-9.]/g, ''))
-                      }}
+                      onChange={(e) => onStripMrpChange(e.target.value)}
+                      onBlur={checkRateAgainstHistory}
                     />
                   </div>
-                ))}
-              </div>
+                  <div className="price-half">
+                    <input
+                      type="text"
+                      className="mono"
+                      value={tabletMrp}
+                      data-nav-order={17}
+                      data-nav-chain={NAV}
+                      onChange={(e) => onTabletMrpChange(e.target.value)}
+                      onBlur={checkRateAgainstHistory}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <input
+                  type="text"
+                  className="mono"
+                  value={mrp}
+                  data-nav-order={16}
+                  data-nav-chain={NAV}
+                  onChange={(e) => onStripMrpChange(e.target.value)}
+                  onBlur={checkRateAgainstHistory}
+                />
+              )}
             </Field>
-          ) : null}
-        </div>
-        <div className="pmed-row pmed-row2">
-          <Field label="Discount %" className="pf-xs">
-            <input
-              type="text"
-              className="mono"
-              value={discPct}
-              data-nav-order={20}
-              data-nav-chain={NAV}
-              onChange={(e) => setDiscPct(e.target.value)}
-            />
-          </Field>
-          <Field label="Manufacturer" className="pf-l">
-            <input
-              type="text"
-              value={manufacturer}
-              data-nav-order={21}
-              data-nav-chain={NAV}
-              onChange={(e) => setManufacturer(e.target.value)}
-            />
-          </Field>
-          <Field label="Batch No" className="pf-m">
-            <input
-              type="text"
-              className="mono"
-              value={batch}
-              data-nav-order={22}
-              data-nav-chain={NAV}
-              onChange={(e) => setBatch(e.target.value)}
-            />
-          </Field>
-          <Field label="Expiry (MM/YY)" className="pf-s">
-            <input
-              type="text"
-              className="mono"
-              value={expiry}
-              placeholder="MM/YY"
-              inputMode="numeric"
-              maxLength={5}
-              data-nav-order={23}
-              data-nav-chain={NAV}
-              onChange={(e) => {
-                const el = e.target
-                const prev = expiry
-                const start = el.selectionStart ?? el.value.length
-                const deleting = el.value.length < prev.length
-                const formatted = formatExpiryMmYy(el.value, deleting)
-                setExpiry(formatted)
-                window.requestAnimationFrame(() => {
-                  let pos = start
-                  if (
-                    formatted.length > prev.length &&
-                    formatted.includes('/') &&
-                    start >= 2
-                  ) {
-                    pos = start + (formatted.length - prev.length)
-                  }
-                  pos = Math.min(Math.max(pos, 0), formatted.length)
-                  try {
-                    el.setSelectionRange(pos, pos)
-                  } catch {
-                    /* ignore */
-                  }
-                })
-              }}
-              onBlur={() => setExpiry(formatExpiryMmYy(expiry))}
-            />
-          </Field>
-          <Field label="Schedule" className="pf-s">
-            <ModernCombo
-              value={schedule}
-              navOrder={24}
-              navChain={NAV}
-              enterPicksHighlight={false}
-              placeholder="Schedule…"
-              minChars={0}
-              filterLocal
-              openOnFocus
-              maxVisible={20}
-              listLabel="Schedules"
-              items={scheduleOptions.map((s) => ({
-                id: s || '__none__',
-                label: s || '(none)',
-              }))}
-              onChange={(v) => setSchedule(v === '(none)' ? '' : v)}
-              onPick={(it) => setSchedule(it.label === '(none)' ? '' : it.label)}
-              onEnter={() => focusNavOrder(25)}
-            />
-          </Field>
-          <Field label="Content / Drug" className="pf-xl">
-            <input
-              type="text"
-              value={content}
-              data-nav-order={25}
-              data-nav-chain={NAV}
-              data-nav-enter="add"
-              onChange={(e) => setContent(e.target.value)}
-            />
-          </Field>
-          <div className="pmed-add">
-            <ActionBtn
-              label={editingIdx !== null ? 'Update Medicine' : 'Add Medicine'}
-              onClick={addItem}
-              navOrder={26}
-              navChain={NAV}
-              navAction="add"
-            />
+            )}
+            <Field
+              label={ws.isWholesale ? 'Purchase rate' : 'Rate'}
+              hint={ws.isWholesale ? (stripMode ? 'per strip' : 'per pack') : stripMode ? 'strip / per tab' : 'per unit'}
+              className="span2"
+            >
+              {stripMode && !ws.isWholesale ? (
+                <div className="price-split">
+                  <div className="price-half">
+                    <input
+                      type="text"
+                      className="mono"
+                      value={rate}
+                      data-nav-order={18}
+                      data-nav-chain={NAV}
+                      onChange={(e) => onStripRateChange(e.target.value)}
+                      onBlur={checkRateAgainstHistory}
+                    />
+                  </div>
+                  <div className="price-half">
+                    <input
+                      type="text"
+                      className="mono"
+                      value={tabletRate}
+                      data-nav-order={19}
+                      data-nav-chain={NAV}
+                      onChange={(e) => onTabletRateChange(e.target.value)}
+                      onBlur={checkRateAgainstHistory}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <input
+                  type="text"
+                  className="mono"
+                  value={rate}
+                  data-nav-order={18}
+                  data-nav-chain={NAV}
+                  onChange={(e) => onStripRateChange(e.target.value)}
+                  onBlur={checkRateAgainstHistory}
+                />
+              )}
+            </Field>
+            {ws.isWholesale ? (
+              <Field
+                label="Rate A / B / C"
+                hint={stripMode ? 'per strip, + GST' : 'per pack, + GST'}
+                className="span2"
+              >
+                <div className="price-split ws-rates3">
+                  {(
+                    [
+                      ['A', rateA, setRateA],
+                      ['B', rateB, setRateB],
+                      ['C', rateC, setRateC],
+                    ] as const
+                  ).map(([tier, value, setValue]) => (
+                    <div className="price-half" key={tier}>
+                      <input
+                        type="text"
+                        className="mono"
+                        inputMode="decimal"
+                        aria-label={`Rate ${tier}`}
+                        placeholder={tier}
+                        value={value}
+                        data-nav-order={19}
+                        data-nav-chain={NAV}
+                        onFocus={() => {
+                          if (!rateA && !rateB && !rateC) prefillWholesaleRates(rate)
+                        }}
+                        onChange={(e) => {
+                          wsTypedRef.current = true
+                          setValue(e.target.value.replace(/[^0-9.]/g, ''))
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </Field>
+            ) : null}
+            <Field label="Discount %">
+              <input
+                type="text"
+                className="mono"
+                value={discPct}
+                data-nav-order={20}
+                data-nav-chain={NAV}
+                onChange={(e) => setDiscPct(e.target.value)}
+              />
+            </Field>
+            <Field label="Manufacturer" className="span2">
+              <input
+                type="text"
+                value={manufacturer}
+                data-nav-order={21}
+                data-nav-chain={NAV}
+                onChange={(e) => setManufacturer(e.target.value)}
+              />
+            </Field>
+            <Field label="Batch No">
+              <input
+                type="text"
+                className="mono"
+                value={batch}
+                data-nav-order={22}
+                data-nav-chain={NAV}
+                onChange={(e) => setBatch(e.target.value)}
+              />
+            </Field>
+            <Field label="Expiry (MM/YY)">
+              <input
+                type="text"
+                className="mono"
+                value={expiry}
+                placeholder="MM/YY"
+                inputMode="numeric"
+                maxLength={5}
+                data-nav-order={23}
+                data-nav-chain={NAV}
+                onChange={(e) => {
+                  const el = e.target
+                  const prev = expiry
+                  const start = el.selectionStart ?? el.value.length
+                  const deleting = el.value.length < prev.length
+                  const formatted = formatExpiryMmYy(el.value, deleting)
+                  setExpiry(formatted)
+                  window.requestAnimationFrame(() => {
+                    let pos = start
+                    if (
+                      formatted.length > prev.length &&
+                      formatted.includes('/') &&
+                      start >= 2
+                    ) {
+                      pos = start + (formatted.length - prev.length)
+                    }
+                    pos = Math.min(Math.max(pos, 0), formatted.length)
+                    try {
+                      el.setSelectionRange(pos, pos)
+                    } catch {
+                      /* ignore */
+                    }
+                  })
+                }}
+                onBlur={() => setExpiry(formatExpiryMmYy(expiry))}
+              />
+            </Field>
+            <Field label="Schedule">
+              <ModernCombo
+                value={schedule}
+                navOrder={24}
+                navChain={NAV}
+                enterPicksHighlight={false}
+                placeholder="Schedule code…"
+                minChars={0}
+                filterLocal
+                openOnFocus
+                maxVisible={20}
+                listLabel="Schedules"
+                items={scheduleOptions.map((s) => ({
+                  id: s || '__none__',
+                  label: s || '(none)',
+                }))}
+                onChange={(v) => setSchedule(v === '(none)' ? '' : v)}
+                onPick={(it) => setSchedule(it.label === '(none)' ? '' : it.label)}
+                onEnter={() => focusNavOrder(25)}
+              />
+            </Field>
+            <Field label="Content / Drug" className="span3">
+              <input
+                type="text"
+                value={content}
+                data-nav-order={25}
+                data-nav-chain={NAV}
+                data-nav-enter="add"
+                onChange={(e) => setContent(e.target.value)}
+              />
+            </Field>
+            <div className="addmed-row">
+              <span className="addmed-note">
+                {tab.items.length
+                  ? `${tab.items.length} line(s) in bill`
+                  : 'Add medicines to this purchase'}
+              </span>
+              {/* The second copy of "Tabs & Tools" -- the tab bar above the
+                  form carries the same button. Two of the same control on one
+                  screen, this one sitting beside Add Medicine where it reads
+                  like part of the medicine row. */}
+              <ActionBtn
+                label={editingIdx !== null ? 'Update Medicine' : 'Add Medicine'}
+                onClick={addItem}
+                navOrder={26}
+                navChain={NAV}
+                navAction="add"
+              />
+            </div>
           </div>
-        </div>
-      </Panel>
+        </Panel>
+      </div>
 
       <Panel
         title="Purchase Items"
@@ -3331,9 +3198,8 @@ export function PurchasePage({
           </span>
         }
       >
-        {/* All the height that is left (owner, 18 Oct 2026): no row-count cap here. */}
-        <div className="table-scroll ce-table-fill">
-          <table className="sat-table pur-table" ref={tableRef}>
+        <CappedTableWrap visibleRows={purchaseRows}>
+          <table className="sat-table" ref={tableRef}>
             <thead>
               <tr>
                 {showCol.medicine ? <th>Medicine</th> : null}
@@ -3346,7 +3212,6 @@ export function PurchasePage({
                 {showCol.free ? <th className="numsm">Free</th> : null}
                 {showCol.mrp ? <th className="numsm">MRP</th> : null}
                 {showCol.rate ? <th className="numsm">Rate</th> : null}
-                {showCol.wsRates ? <th className="numsm">Rate A / B / C</th> : null}
                 {showCol.disc ? <th className="numsm">Disc%</th> : null}
                 {showCol.gstPct ? <th className="numsm">GST%</th> : null}
                 {showCol.taxable ? <th className="numsm">Taxable</th> : null}
@@ -3419,16 +3284,12 @@ export function PurchasePage({
                         {editingIdx === i ? (
                           null
                         ) : (
-                          // Name and maker on ONE line, so every row is one line high.
-                          <div
-                            className="pur-med-cell"
-                            title={it.manufacturer ? `${it.medicine} — ${it.manufacturer}` : it.medicine}
-                          >
+                          <>
                             <span className="med-name">{it.medicine}</span>
                             {it.manufacturer ? (
                               <span className="med-sub">{it.manufacturer}</span>
                             ) : null}
-                          </div>
+                          </>
                         )}
                       </td>
                     ) : null}
@@ -3476,15 +3337,13 @@ export function PurchasePage({
                     {showCol.rate ? (
                       <td className="numsm mono">
                         {it.rate.toFixed(2)}
-                      </td>
-                    ) : null}
-                    {showCol.wsRates ? (
-                      <td className="numsm mono ws-line-rates" title="Rate A / B / C">
-                        {it.rateA || it.rateB || it.rateC
-                          ? [it.rateA, it.rateB, it.rateC]
+                        {ws.isWholesale && (it.rateA || it.rateB || it.rateC) ? (
+                          <div className="ws-line-rates" title="Rate A / B / C">
+                            {[it.rateA, it.rateB, it.rateC]
                               .map((r) => (r ? r.toFixed(2) : '—'))
-                              .join(' / ')
-                          : '—'}
+                              .join(' / ')}
+                          </div>
+                        ) : null}
                       </td>
                     ) : null}
                     {showCol.disc ? (
@@ -3538,7 +3397,6 @@ export function PurchasePage({
                     ...(showCol.free ? ['free'] : []),
                     ...(showCol.mrp ? ['mrp'] : []),
                     ...(showCol.rate ? ['rate'] : []),
-                    ...(showCol.wsRates ? ['wsRates'] : []),
                     ...(showCol.disc ? ['disc'] : []),
                     ...(showCol.gstPct ? ['gstPct'] : []),
                     ...(showCol.taxable ? ['taxable'] : []),
@@ -3550,7 +3408,7 @@ export function PurchasePage({
               ) : null}
             </tbody>
           </table>
-        </div>
+        </CappedTableWrap>
       </Panel>
       <ReturnsPickDialog
         open={returnsAsk && openReturnCount > 0}
@@ -3566,195 +3424,212 @@ export function PurchasePage({
         }}
       />
 
-      {/* The summary in two rows (owner, 18 Oct 2026): the boxes and buttons, then every
-          total in one line. */}
-      <section
-        className="panel summary-panel purchase-summary ce-pur-summary"
-        aria-label="Purchase summary"
+      <Panel
+        title="Purchase Summary"
+        className="summary-panel purchase-summary"
+        bare
       >
-        <div className="ce-pur-row1">
-          <div className="ce-sum-field">
-            <label>Overall Disc %</label>
-            <input
-              className="mono"
-              value={tab.overallDiscPct}
-              data-nav-order={27}
-              data-nav-chain={NAV}
-              onChange={(e) => {
-                const pct = Number(e.target.value) || 0
-                const base = subtotal || 0
-                patchTab({
-                  overallDiscPct: e.target.value,
-                  overallDisc: String(
-                    Math.round(((base * pct) / 100) * 100) / 100,
-                  ),
-                })
-              }}
-            />
-          </div>
-          <div className="ce-sum-field">
-            <label>Overall Disc ₹</label>
-            <input
-              className="mono"
-              value={tab.overallDisc}
-              data-nav-order={28}
-              data-nav-chain={NAV}
-              onChange={(e) =>
-                patchTab({ overallDisc: e.target.value })
-              }
-            />
-          </div>
-          <div className="ce-sum-field">
-            <label>Rounding</label>
-            <input
-              className="mono"
-              value={tab.rounding}
-              data-nav-order={29}
-              data-nav-chain={NAV}
-              onChange={(e) =>
-                patchTab({
-                  rounding: e.target.value,
-                  roundingTouched: true,
-                })
-              }
-            />
-          </div>
-          <div className="ce-sum-field">
-            <label>Delivery / Exp.</label>
-            <input
-              className="mono"
-              value={tab.delivery}
-              data-nav-order={30}
-              data-nav-chain={NAV}
-              onChange={(e) => patchTab({ delivery: e.target.value })}
-            />
-          </div>
-          <div className="ce-sum-field">
-            <label>Cash Paid</label>
-            <input
-              ref={cashRef}
-              className="mono"
-              value={tab.cash}
-              data-nav-order={31}
-              data-nav-chain={NAV}
-              onChange={(e) => patchTab({ cash: e.target.value })}
-            />
-          </div>
-          <div className="ce-sum-field">
-            <label>Online Paid</label>
-            <input
-              className="mono"
-              value={tab.online}
-              data-nav-order={32}
-              data-nav-chain={NAV}
-              data-nav-enter="save"
-              onChange={(e) => patchTab({ online: e.target.value })}
-            />
-          </div>
-          <div className="purchase-pay-actions ce-pur-actions">
-            <ActionBtn
-              label={importing ? 'Importing…' : 'Import Bill'}
-              variant="neutral"
-              kbd="Shift+F2"
-              disabled={importing}
-              onClick={openImportPicker}
-            />
-            <ActionBtn
-              label="GST Slab"
-              variant="neutral"
-              kbd="F7"
-              onClick={() => void openGstSlab()}
-            />
-            <ActionBtn
-              label="Recalculate"
-              variant="neutral"
-              kbd="F8"
-              onClick={() => void recalculatePurchase()}
-            />
-            <ActionBtn
-              label="Clear"
-              variant="neutral"
-              kbd="F9"
-              onClick={() => void clearForm()}
-            />
-            <ActionBtn
-              label={saving ? 'Saving…' : 'Save Purchase'}
-              variant="primary"
-              kbd="F5"
-              disabled={saving}
-              onClick={() => void savePurchase()}
-            />
-          </div>
-        </div>
-        <div className="summary-totals ce-pur-totals">
-          <div className="tot-row">
-            <span>Gross</span>
-            <strong className="mono">{money(gross || subtotal + (Number(summary.total_discount) || 0))}</strong>
-          </div>
-          <div className="tot-row">
-            <span>Taxable</span>
-            <strong className="mono">{money(subtotal)}</strong>
-          </div>
-          <div className="tot-row" title={`CGST ${money(cgst)} + SGST ${money(sgst)}`}>
-            <span>GST</span>
-            <strong className="mono">{money(totalGst)}</strong>
-          </div>
-          <div className="tot-row">
-            <span>Bill Total</span>
-            <strong className="mono">{money(totalAmount)}</strong>
-          </div>
-          <div className="tot-row">
-            <span title="Including delivery / expenses">{retUsed > 0 ? 'Total' : 'Final'}</span>
-            <strong className="mono">{money(finalAmount)}</strong>
-          </div>
-          {retUsed > 0 ? (
-            <>
-              <div className="tot-row" data-returns-total="1">
-                <span>Return total</span>
-                <strong className="mono">− {money(retUsed)}</strong>
+        <div className="summary-top">
+          <div className="summary-editcol">
+            <h3>Discount &amp; Payment</h3>
+            <div className="sfield-row">
+              <div className="sfield">
+                <label>Overall Disc %</label>
+                <input
+                  className="mono"
+                  value={tab.overallDiscPct}
+                  data-nav-order={27}
+                  data-nav-chain={NAV}
+                  onChange={(e) => {
+                    const pct = Number(e.target.value) || 0
+                    const base = subtotal || 0
+                    patchTab({
+                      overallDiscPct: e.target.value,
+                      overallDisc: String(
+                        Math.round(((base * pct) / 100) * 100) / 100,
+                      ),
+                    })
+                  }}
+                />
               </div>
-              <div className="tot-row accent">
-                <span>Net to pay</span>
-                <strong className="mono">{money(finalAmount - retUsed)}</strong>
+              <div className="sfield">
+                <label>Overall Disc ₹</label>
+                <input
+                  className="mono"
+                  value={tab.overallDisc}
+                  data-nav-order={28}
+                  data-nav-chain={NAV}
+                  onChange={(e) =>
+                    patchTab({ overallDisc: e.target.value })
+                  }
+                />
               </div>
-            </>
-          ) : null}
-          <div className="tot-row">
-            <span>Previous Due</span>
-            <strong className="mono">{money(tab.prevDue)}</strong>
-          </div>
-          <div className="tot-row">
-            <span>Previous Credit</span>
-            {/* The returns settled above are this credit; it is not counted twice. */}
-            <strong className="mono">
-              {money(Math.max(0, tab.prevCredit - (tab.editingPurchaseId ? 0 : retUsed)))}
-            </strong>
-          </div>
-          <div className="tot-row">
-            <span>Need to Pay</span>
-            <strong className="mono">{money(needToPay)}</strong>
-          </div>
-          <div className="tot-row">
-            <span>Paid</span>
-            <strong className="mono">{money(paid)}</strong>
-          </div>
-          <div className="tot-row accent">
-            <span>Due</span>
-            <strong className="mono">{money(due)}</strong>
-          </div>
-          {credit > 0 ? (
-            <div className="tot-row">
-              <span>Credit</span>
-              <strong className="mono">{money(credit)}</strong>
+              <div className="sfield">
+                <label>Rounding</label>
+                <input
+                  className="mono"
+                  value={tab.rounding}
+                  data-nav-order={29}
+                  data-nav-chain={NAV}
+                  onChange={(e) =>
+                    patchTab({
+                      rounding: e.target.value,
+                      roundingTouched: true,
+                    })
+                  }
+                />
+              </div>
+              <div className="sfield">
+                <label>Delivery / Exp.</label>
+                <input
+                  className="mono"
+                  value={tab.delivery}
+                  data-nav-order={30}
+                  data-nav-chain={NAV}
+                  onChange={(e) => patchTab({ delivery: e.target.value })}
+                />
+              </div>
+              <div className="sfield">
+                <label>Cash Paid</label>
+                <input
+                  ref={cashRef}
+                  className="mono"
+                  value={tab.cash}
+                  data-nav-order={31}
+                  data-nav-chain={NAV}
+                  onChange={(e) => patchTab({ cash: e.target.value })}
+                />
+              </div>
+              <div className="sfield">
+                <label>Online Paid</label>
+                <input
+                  className="mono"
+                  value={tab.online}
+                  data-nav-order={32}
+                  data-nav-chain={NAV}
+                  data-nav-enter="save"
+                  onChange={(e) => patchTab({ online: e.target.value })}
+                />
+              </div>
             </div>
-          ) : null}
+            <div className="purchase-pay-actions">
+              <ActionBtn
+                label={importing ? 'Importing…' : 'Import Bill'}
+                variant="neutral"
+                kbd="Shift+F2"
+                disabled={importing}
+                onClick={openImportPicker}
+              />
+              <ActionBtn
+                label="GST Slab"
+                variant="neutral"
+                kbd="F7"
+                onClick={() => void openGstSlab()}
+              />
+              <ActionBtn
+                label="Recalculate"
+                variant="neutral"
+                kbd="F8"
+                onClick={() => void recalculatePurchase()}
+              />
+              <ActionBtn
+                label="Clear"
+                variant="neutral"
+                kbd="F9"
+                onClick={() => void clearForm()}
+              />
+              <ActionBtn
+                label={saving ? 'Saving…' : 'Save Purchase'}
+                variant="primary"
+                kbd="F5"
+                disabled={saving}
+                onClick={() => void savePurchase()}
+              />
+            </div>
+          </div>
+          <div className="summary-totals">
+            <div className="tot-row">
+              <span>Gross</span>
+              <strong className="mono">{money(gross || subtotal + (Number(summary.total_discount) || 0))}</strong>
+            </div>
+            <div className="tot-row">
+              <span>Taxable</span>
+              <strong className="mono">{money(subtotal)}</strong>
+            </div>
+            <div className="tot-row">
+              <span>CGST</span>
+              <strong className="mono">{money(cgst)}</strong>
+            </div>
+            <div className="tot-row">
+              <span>SGST</span>
+              <strong className="mono">{money(sgst)}</strong>
+            </div>
+            <div className="tot-row">
+              <span>Total GST</span>
+              <strong className="mono">{money(totalGst)}</strong>
+            </div>
+            <div className="tot-row">
+              <span>Bill Total</span>
+              <strong className="mono">{money(totalAmount)}</strong>
+            </div>
+            <div className="tot-row">
+              <span>{retUsed > 0 ? 'Total (incl. delivery)' : 'Final (incl. delivery)'}</span>
+              <strong className="mono">{money(finalAmount)}</strong>
+            </div>
+            {retUsed > 0 ? (
+              <>
+                <div className="tot-row" data-returns-total="1">
+                  <span>Return total</span>
+                  <strong className="mono">− {money(retUsed)}</strong>
+                </div>
+                <div className="tot-row accent">
+                  <span>Net to pay</span>
+                  <strong className="mono">{money(finalAmount - retUsed)}</strong>
+                </div>
+              </>
+            ) : null}
+            <div className="tot-row">
+              <span>Previous Due</span>
+              <strong className="mono">{money(tab.prevDue)}</strong>
+            </div>
+            <div className="tot-row">
+              <span>Previous Credit</span>
+              {/* The returns settled above are this credit; it is not counted twice. */}
+              <strong className="mono">
+                {money(Math.max(0, tab.prevCredit - (tab.editingPurchaseId ? 0 : retUsed)))}
+              </strong>
+            </div>
+            <div className="tot-row">
+              <span>Need to Pay</span>
+              <strong className="mono">{money(needToPay)}</strong>
+            </div>
+            <div className="tot-row">
+              <span>Paid</span>
+              <strong className="mono">{money(paid)}</strong>
+            </div>
+            <div className="tot-row accent">
+              <span>Due</span>
+              <strong className="mono">{money(due)}</strong>
+            </div>
+            {credit > 0 ? (
+              <div className="tot-row">
+                <span>Credit</span>
+                <strong className="mono">{money(credit)}</strong>
+              </div>
+            ) : null}
+          </div>
         </div>
         {tab.editingPurchaseId && tab.returnsNote ? (
           <div className="summary-actions" data-returns-note="1">
             <p className="note">{tab.returnsNote}</p>
           </div>
         ) : null}
-      </section>
+        {note ? (
+          <div className="summary-actions">
+            <p className="status-ok">{note}</p>
+          </div>
+        ) : null}
+      </Panel>
     </PageRoot>
   )
 }
