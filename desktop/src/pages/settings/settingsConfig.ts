@@ -43,7 +43,8 @@ export const SETTINGS_TABS: TabDef[] = [
       { id: 'bill_template', label: 'Bill Template' },
       { id: 'bill_fields', label: 'Bill Fields' },
       { id: 'bill_text', label: 'Bill Text Lines' },
-      { id: 'bill_logo', label: 'Bill Logo' },
+      // No separate Bill Logo section (owner, 18 Oct 2026): the logo and where it
+      // prints are chosen in Pharmacy Profile, which an old 'bill_logo' link opens.
       { id: 'bill_paper', label: 'Paper & Copies' },
       { id: 'bill_sales', label: 'Sales Print Buttons' },
       { id: 'printer', label: 'Printer Setup' },

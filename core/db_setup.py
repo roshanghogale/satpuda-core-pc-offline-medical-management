@@ -759,6 +759,19 @@ def _migrate_pharmacy_profile(cur):
         _migrate_fssai_print_flag(cur)
     except Exception as e:
         print(f"pharmacy_profile migration: {e}")
+    _migrate_profile_bank(cur)
+
+
+def _migrate_profile_bank(cur):
+    """The shop's bank details on the profile (core/pharmacy_profile_io.BANK_KEYS, 18 Oct 2026)."""
+    try:
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='pharmacy_profile'")
+        if not cur.fetchone():
+            return
+        for col in ('bank_name', 'bank_account_no', 'bank_ifsc', 'bank_branch'):
+            _alter_if_missing(cur, 'pharmacy_profile', col, 'TEXT')
+    except Exception as e:
+        print(f"pharmacy_profile bank columns: {e}")
 
 
 def _migrate_fssai_print_flag(cur):
@@ -1077,6 +1090,7 @@ def ensure_recent_columns(conn) -> None:
     _migrate_payment_allocations(cur)
     _migrate_return_credit(cur)
     _migrate_wholesale(cur)
+    _migrate_profile_bank(cur)
     conn.commit()
 
 

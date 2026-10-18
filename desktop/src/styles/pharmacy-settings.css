@@ -168,6 +168,80 @@
   margin: 0 0 4px;
 }
 
+/* Pharmacy Profile: each item with its own "Show on bill" tick beside the
+   label (owner, 18 Oct 2026 -- one window for the detail and its bill choice). */
+.ph-prof-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.ph-prof-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.ph-prof-head > label:first-child {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.ph-show-bill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+.ph-show-bill > input {
+  margin: 0;
+}
+.ph-show-bill:has(> input:checked) {
+  color: var(--accent);
+}
+
+/* Bank Details: the bill tick on the left, the UPI ID (kept in Sales & Billing)
+   on the right. */
+.ph-bank-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  max-width: 780px;
+}
+.ph-upi {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.ph-upi > b {
+  color: var(--text-primary, inherit);
+  font-weight: 600;
+}
+.ph-link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+/* The logo's place and its sizes, under the picture. */
+.ph-logo-place {
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  margin-top: 4px;
+}
+
 /* Narrow panel: one column. */
 @container (max-width: 640px) {
   .ph-grid-2,

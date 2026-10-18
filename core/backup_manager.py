@@ -1684,8 +1684,10 @@ def restore_latest_backup_to_store(
 
 # A file that came back from the phone has no FSSAI columns (the phone's database never
 # had them), so the restore printed bills without the shop's FSSAI number from then on.
-# What this PC had is put back when the incoming file has nothing of its own.
-_PROFILE_EXTRAS = ("fssai_number", "show_fssai_on_bill")
+# What this PC had is put back when the incoming file has nothing of its own. The same
+# goes for the shop's bank details (18 Oct 2026), which no phone file carries either.
+_PROFILE_EXTRAS = ("fssai_number", "show_fssai_on_bill",
+                   "bank_name", "bank_account_no", "bank_ifsc", "bank_branch")
 
 
 def _profile_extras(db_path: str) -> dict:

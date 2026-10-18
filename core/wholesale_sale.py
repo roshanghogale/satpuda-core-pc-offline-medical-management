@@ -314,6 +314,21 @@ def shop_profile(conn) -> dict[str, Any]:
                 bank.append((label, v))
                 break
     if not bank:
+        # The profile's own bank details kept as the store's settings rows (they sync
+        # shop-wide; the server's profile has no bank columns) -- core.pharmacy_profile_io.
+        try:
+            from core.pharmacy_profile_io import BANK_KV
+
+            labels = {"bank_name": "Bank", "bank_account_no": "A/c No",
+                      "bank_ifsc": "IFSC", "bank_branch": "Branch"}
+            for key, name in BANK_KV.items():
+                row = conn.execute("SELECT value FROM settings WHERE name=?", (name,)).fetchone()
+                v = str(row[0] if row and row[0] is not None else "").strip()
+                if v:
+                    bank.append((labels[key], v))
+        except Exception:
+            pass
+    if not bank:
         # A free-text setting a shop can fill without a profile column (one line per row).
         try:
             row = conn.execute(
@@ -326,6 +341,14 @@ def shop_profile(conn) -> dict[str, Any]:
             if line.strip():
                 k, _, v = line.partition(":")
                 bank.append((k.strip(), v.strip()) if v else ("", line.strip()))
+    try:
+        # "Show on bill" beside Bank details in the Pharmacy Profile window.
+        from core.bill_config import load_bill_print_settings
+
+        if not load_bill_print_settings().get("show_store_bank", True):
+            bank = []
+    except Exception:
+        pass
     return {
         "name": str(prof.get("name") or ""),
         "address": str(prof.get("address") or ""),
