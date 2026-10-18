@@ -1,0 +1,475 @@
+/* Compact entry (owner, 18 Oct 2026): the Sales (wholesale) and Purchase screens keep
+   normal-size text and table rows, but the inputs above and below the medicine table take
+   far less height -- one party / supplier row, the medicine boxes in one (sale) or two
+   (purchase) rows, one summary row (two on Purchase) -- and the table takes the rest. */
+
+/* a little less air between the blocks of these two pages (the text stays its size) */
+.desktop-page.ce-page {
+  gap: 4px;
+  padding-bottom: 3px;
+}
+.ce-page .table-title {
+  padding: 4px 14px;
+}
+.ce-page .ce-party-row > .field,
+.ce-page .pmed-row > .field,
+.ce-page .medsel-grid > .field,
+.ce-page .ce-sum-field,
+.ce-page .ce-tot {
+  gap: 2px;
+}
+.ce-page .ce-party-row .field-label,
+.ce-page .pmed-row .field-label,
+.ce-page .medsel-grid .field-label,
+.ce-page .ce-sum-field > label,
+.ce-page .ce-tot > span {
+  line-height: 1.2;
+}
+
+/* ── the one party / supplier row ─────────────────────────────────────────── */
+.ce-party-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px 8px;
+  min-width: 0;
+}
+.ce-party-row > .field {
+  min-width: 0;
+}
+.ce-party-row .field-label,
+.pmed-row .field-label,
+.ce-sum-field > label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ce-f-party {
+  flex: 2.4 1 0;
+  min-width: 160px;
+}
+.ce-f-pay {
+  flex: 0 1 120px;
+  min-width: 96px;
+}
+.ce-f-date {
+  flex: 0 1 134px;
+  min-width: 118px;
+}
+.ce-f-ro {
+  flex: 0.7 1 0;
+  min-width: 72px;
+  max-width: 124px;
+}
+.ce-f-ro.ce-f-due {
+  min-width: 98px;
+}
+.ce-f-bill {
+  flex: 1 1 0;
+  min-width: 96px;
+  max-width: 190px;
+}
+.ce-f-pdate {
+  flex: 0 1 118px;
+  min-width: 100px;
+}
+.ce-f-gst {
+  flex: 0 1 210px;
+  min-width: 140px;
+}
+
+/* the saved party's / supplier's facts: plain text, two lines, the height of a box + label */
+.ce-facts {
+  flex: 3 1 0;
+  min-width: 0;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 1px;
+  padding: 0 2px 1px 6px;
+  border-left: 1px dashed var(--border-strong);
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-primary);
+}
+.ce-facts-line {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ce-fact {
+  margin-right: 12px;
+}
+.ce-fact:last-child {
+  margin-right: 0;
+}
+.ce-fact b {
+  font-weight: 600;
+}
+.ce-fact .ce-fact-k,
+.ce-fact-k {
+  color: var(--text-muted);
+  font-weight: 500;
+  margin: 0 4px;
+}
+.ce-fact > .ce-fact-k:first-child {
+  margin-left: 0;
+}
+.ce-facts-empty {
+  color: var(--text-muted);
+  white-space: normal;
+}
+.ce-edit-btn {
+  flex: 0 0 auto;
+  width: 30px;
+  height: var(--unit-h);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.ce-edit-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.ce-edit-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* the wholesale sale: party row, then the medicine row */
+.wholesale-sale-page .ws-header-panel .panel-body {
+  padding: 6px 12px;
+}
+.wholesale-sale-page .sales-header-panel .medsel-grid {
+  margin-top: 6px;
+  padding-top: 6px;
+}
+.wholesale-sale-page .ws-header-panel .hint-text {
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* the medicine table: all the height that is left */
+.bill-page > .bill-items-panel {
+  flex: 1 1 auto;
+  min-height: 120px;
+}
+.table-scroll.ce-table-fill {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* ── one summary row (wholesale sale) ─────────────────────────────────────── */
+.bill-page .ce-summary-row {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 6px 10px;
+}
+.ce-sum-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 64px;
+  flex: 0 1 100px;
+}
+.ce-sum-field > label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.ce-sum-field > input {
+  height: var(--unit-h);
+  font-size: 11.5px;
+  min-width: 0;
+}
+.ce-tot {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.ce-tot > span {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.ce-tot > strong {
+  height: var(--unit-h);
+  display: flex;
+  align-items: center;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.ce-tot-grand > span {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+.ce-tot-grand > strong {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--accent-dark);
+}
+.ce-transport {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 60px;
+  min-width: 0;
+}
+.ce-transport .btn {
+  flex: 0 0 auto;
+}
+.ce-transport-text {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.ce-sum-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+.ce-sum-actions .btn-primary {
+  min-width: 92px;
+  justify-content: center;
+}
+.ce-last {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  margin-left: 4px;
+}
+.ce-last-k {
+  font-family: var(--font-mono);
+  margin-right: 2px;
+}
+.ce-link {
+  background: none;
+  border: 0;
+  padding: 0 3px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* ── purchase: supplier row, two medicine rows, summary in two rows ──────────── */
+.pur-supplier-panel .panel-body {
+  padding: 3px 10px 4px;
+}
+.pur-med-panel .panel-body {
+  padding: 4px 10px 5px;
+}
+.pur-med-panel .panel-head {
+  gap: 12px;
+  padding: 2px 12px;
+}
+.pur-med-note {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.pur-med-note.is-note {
+  color: var(--success, var(--accent-dark));
+  font-weight: 600;
+}
+.pmed-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 5px 8px;
+  min-width: 0;
+}
+.pmed-row + .pmed-row {
+  margin-top: 5px;
+}
+.pmed-row > .field {
+  min-width: 0;
+}
+.pf-xl {
+  flex: 3 1 0;
+}
+.pf-l {
+  flex: 2 1 0;
+}
+.pf-m {
+  flex: 1.35 1 0;
+}
+.pf-s {
+  flex: 0.9 1 0;
+}
+.pf-xs {
+  flex: 0.7 1 0;
+}
+.pmed-row1 > .pf-xl:first-child {
+  flex: 3.2 1 0;
+}
+.pmed-row1.is-ws > .pf-xl:last-child {
+  flex: 2.4 1 0;
+}
+.pmed-add {
+  flex: 0 0 auto;
+}
+
+/* the purchase table: name and maker on one line, so every row is one line high */
+.pur-table .pur-med-cell {
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pur-table .pur-med-cell .med-sub {
+  display: inline;
+  margin-left: 6px;
+}
+.pur-table td.ws-line-rates {
+  font-size: 11px;
+  width: auto;
+}
+
+.bill-page .ce-pur-summary {
+  padding: 4px 10px 3px;
+}
+.ce-pur-row1 {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px 8px;
+  min-width: 0;
+}
+.ce-pur-row1 > .ce-sum-field {
+  flex: 1 1 0;
+}
+.purchase-summary .ce-pur-row1 .ce-sum-field > label {
+  font-size: 10px;
+}
+.purchase-summary .ce-pur-row1 .ce-sum-field > input {
+  height: var(--unit-h);
+  font-size: 11.5px;
+}
+.purchase-pay-actions.ce-pur-actions {
+  display: flex;
+  flex: 0 0 auto;
+  width: auto;
+  gap: 6px;
+  margin: 0 0 0 4px;
+}
+.purchase-pay-actions.ce-pur-actions .btn {
+  width: auto;
+  padding-inline: 10px;
+}
+/* every total in one line: "Gross ₹1,234.00 · Taxable ..." */
+.purchase-summary .summary-totals.ce-pur-totals {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0 14px;
+  margin-top: 3px;
+  padding: 2px 2px 0;
+  border-left: none;
+  border-top: 1px dashed var(--border-strong);
+  background: transparent;
+}
+.purchase-summary .ce-pur-totals .tot-row {
+  justify-content: flex-start;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+}
+.purchase-summary .ce-pur-totals .tot-row > span {
+  font-size: 11px;
+  font-weight: 600;
+  overflow: visible;
+}
+.purchase-summary .ce-pur-totals .tot-row > strong {
+  font-size: 12px;
+}
+.purchase-summary .ce-pur-totals .tot-row.accent > strong {
+  font-size: 13px;
+}
+
+/* the quick add / edit popups */
+.quick-contact-card {
+  width: min(620px, 100%);
+}
+.quick-contact-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.quick-contact-grid > .iset-field {
+  flex: 1 1 150px;
+}
+.quick-contact-grid > .iset-field.quick-contact-wide {
+  flex: 2 1 260px;
+}
+.quick-contact-card .settings-input {
+  height: var(--unit-h);
+}
+.quick-contact-note {
+  margin: 10px 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.quick-contact-error {
+  margin-top: 10px;
+}
+.quick-contact-keys {
+  margin-right: auto;
+  align-self: center;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+/* a narrower window: the key hints go first, then the last-bill links */
+@media (max-width: 1250px) {
+  .ce-sum-actions .kbd,
+  .ce-pur-actions .kbd {
+    display: none;
+  }
+  .ce-last {
+    display: none;
+  }
+}
+@media (max-width: 1100px) {
+  .ce-f-party {
+    min-width: 140px;
+  }
+  .ce-fact {
+    margin-right: 8px;
+  }
+  .bill-page .ce-summary-row {
+    gap: 6px 8px;
+  }
+  .purchase-summary .summary-totals.ce-pur-totals {
+    column-gap: 8px;
+  }
+  .purchase-pay-actions.ce-pur-actions .btn {
+    padding-inline: 8px;
+  }
+}

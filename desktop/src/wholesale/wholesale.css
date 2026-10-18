@@ -88,49 +88,26 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-/* ---- Wholesale Sales page: the retail bill's layout (owner, 18 Oct 2026) ---- */
-/* the party box gets the room of the header row (Payment is a short list) */
-.wholesale-sale-page .ws-header-panel .form-grid {
-  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.6fr) repeat(3, minmax(0, 1fr));
-}
+/* ---- Wholesale Sales page: the retail bill's layout (owner, 18 Oct 2026) ----
+   The one party row and the one summary row are styles/compact-entry.css. */
 /* one entry row: Medicine | Batch | Qty | Free | Rate | Disc % | Sch % | HSN | Add */
 .wholesale-sale-page .medsel-grid.ws-medsel {
   grid-template-columns: 2.4fr 1.15fr 0.6fr 0.55fr 0.85fr 0.55fr 0.55fr 0.75fr auto;
 }
-/* A narrow window keeps the retail-like rows (the shared 1100px rule would stack the
-   header into 3 columns and push the summary off the bottom of the screen). */
+/* A narrow window keeps the one entry row (the shared 1100px rule would stack it into
+   3 columns and push the table down). */
 @media (max-width: 1100px) {
-  .wholesale-sale-page .ws-header-panel .form-grid {
-    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.6fr) repeat(3, minmax(0, 1fr));
-  }
-  .wholesale-sale-page .summary-grid {
-    grid-template-columns: 1.7fr 0.95fr 1.15fr;
-  }
-  .wholesale-sale-page .summary-col + .summary-col {
-    border-top: none;
-    border-left: 1px solid var(--border);
-  }
   .wholesale-sale-page .medsel-grid.ws-medsel {
     grid-template-columns: 2fr 1fr 0.6fr 0.5fr 0.85fr 0.5fr 0.5fr 0.7fr auto;
   }
 }
 @media (max-width: 900px) {
-  .wholesale-sale-page .ws-header-panel .form-grid,
   .wholesale-sale-page .medsel-grid.ws-medsel {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
-  .wholesale-sale-page .summary-grid {
-    grid-template-columns: 1fr;
-  }
-  .wholesale-sale-page .summary-col + .summary-col {
-    border-left: none;
-    border-top: 1px solid var(--border);
-  }
 }
 /* the grid cells may shrink below their content: nothing pushes past the window */
-.wholesale-sale-page .form-grid > .field,
-.wholesale-sale-page .medsel-grid > .field,
-.wholesale-sale-page .sfield {
+.wholesale-sale-page .medsel-grid > .field {
   min-width: 0;
 }
 .ws-rate-box {
@@ -169,21 +146,6 @@
   color: var(--danger);
   font-size: 9.5px;
   font-weight: 600;
-}
-.wholesale-sale-page .sfield label .opt {
-  font-weight: 400;
-  color: var(--text-muted);
-}
-.wholesale-sale-page .ws-calc-warn {
-  margin: 5px 0 0;
-  font-size: 10.5px;
-}
-.wholesale-sale-page .ws-words {
-  font-size: 10px;
-  color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* the medicine picker without its MRP column */

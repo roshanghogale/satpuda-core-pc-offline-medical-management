@@ -8,9 +8,11 @@
  *
  *  The layout is the retail Sales page's (owner, 18 Oct 2026: "purchase and sales are not
  *  like the retail shops"): bill tabs + Tabs & Tools on top, one "Party & Medicine" panel
- *  of compact inputs with a single medicine entry row, the Selected Medicines table taking
- *  the rest of the height, and the Billing Summary pinned at the bottom. Transport / LR /
- *  e-way sit in the summary so they never push the table down. */
+ *  with ONE party row (Party ▾ · Payment · Bill Date · Due Date · Invoice No and the saved
+ *  party's facts as plain text, ✎ to edit) and a single medicine entry row, the Selected
+ *  Medicines table taking all the rest of the height, and ONE summary row at the bottom
+ *  (Cash · Online · totals · Transport popup · Save buttons). A name that is not a saved
+ *  party opens the New party popup only on Enter (pages/QuickContactDialogs.tsx). */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AppNavigate } from '../App'
 import {
@@ -22,16 +24,22 @@ import {
 } from '../pagesApi'
 import { todayLocal } from '../localDate'
 import { showSavedFile } from '../savedFiles'
-import { useLayoutRowCount } from '../layoutRows'
 import './wholesale.css'
+import '../styles/compact-entry.css'
 import { BillPreviewDialog } from '../pages/BillPreviewDialog'
 import { TwoStepMedicinePicker } from '../pages/TwoStepMedicinePicker'
 import { ModernCombo } from '../pages/ModernCombo'
 import { RowContextMenu } from '../pages/MedicineEditDialog'
 import { AlertDialog, type AlertState } from '../pages/SalesDialogs'
 import {
+  PartyQuickDialog,
+  TransportDialog,
+  newPartyState,
+  type PartyDialogState,
+} from '../pages/QuickContactDialogs'
+import { partyFromRow } from './PartyFields'
+import {
   ActionBtn,
-  CappedTableWrap,
   DocTabBar,
   DocToolsDialog,
   Field,
@@ -74,8 +82,8 @@ const NAV = 'wholesale-sale'
 
 /* Enter order along the page (data-nav-order), like the retail bill. */
 const NO = {
-  payment: 1,
-  party: 2,
+  party: 1,
+  payment: 2,
   billDate: 3,
   medicine: 8,
   qty: 9,
@@ -85,8 +93,6 @@ const NO = {
   sch: 13,
   add: 14,
   transport: 20,
-  lr: 21,
-  eway: 22,
   cash: 23,
   online: 24,
   save: 30,
@@ -171,7 +177,11 @@ export function WholesaleSalePage({
     error?: string
     saleId?: number
   }>({ open: false })
-  const billingRows = useLayoutRowCount('billing_rows')
+  /** The New / Edit party popup (Enter on a name that is not saved, or ✎). */
+  const [partyDlg, setPartyDlg] = useState<PartyDialogState | null>(null)
+  const [transportOpen, setTransportOpen] = useState(false)
+  /** Bumped after the party is edited in the popup, so its facts are read again. */
+  const [partyNonce, setPartyNonce] = useState(0)
   const partyRef = useRef<HTMLInputElement | null>(null)
   const medRef = useRef<HTMLInputElement | null>(null)
   const qtyRef = useRef<HTMLInputElement | null>(null)
@@ -263,7 +273,7 @@ export function WholesaleSalePage({
     return () => {
       alive = false
     }
-  }, [form.partyId])
+  }, [form.partyId, partyNonce])
 
   // Live totals from the engine.
   const calcBody = useMemo(
@@ -363,6 +373,85 @@ export function WholesaleSalePage({
     patch({ partyText: row.name, partyId: row.id })
     setSuggestOpen(false)
     window.setTimeout(() => medRef.current?.focus(), 0)
+  }
+
+  /** Enter in the Party box. A row picked from the list goes on (onPick did it); a saved
+   *  name typed in full is picked; a name that is not saved opens the New party popup --
+   *  only here, never while typing or on leaving the box (owner, 18 Oct 2026). */
+  const onPartyEnter = async (picked?: { id: string }) => {
+    if (picked) {
+      focusNav(NO.medicine)
+      return
+    }
+    const typed = (partyRef.current?.value ?? form.partyText).trim()
+    if (!typed) {
+      focusNav(NO.payment)
+      return
+    }
+    if (form.partyId) {
+      focusNav(NO.medicine)
+      return
+    }
+    const same = (p: PartyRow) => p.name.trim().toUpperCase() === typed.toUpperCase()
+    let row = suggest.find(same)
+    if (!row) {
+      try {
+        row = (await searchParties(typed)).parties?.find(same)
+      } catch {
+        /* the popup still opens */
+      }
+    }
+    if (row) pickParty(row)
+    else setPartyDlg(newPartyState(typed))
+  }
+
+  const openEditParty = () => {
+    if (!party) return
+    setPartyDlg({
+      id: party.id,
+      name: party.name,
+      phone: party.phone || '',
+      address: party.address || '',
+      party: partyFromRow(party as unknown as Record<string, unknown>),
+    })
+  }
+
+  const findPartyId = async (name: string) => {
+    try {
+      const want = name.trim().toUpperCase()
+      const r = await searchParties(name)
+      return r.parties?.find((p) => p.name.trim().toUpperCase() === want)?.id ?? null
+    } catch {
+      return null
+    }
+  }
+
+  const onPartySaved = (id: number | null, name: string) => {
+    const editing = !!partyDlg?.id
+    setPartyDlg(null)
+    if (!id) {
+      setError(`Party ${name} was saved but could not be picked: type its name again.`)
+      window.setTimeout(() => partyRef.current?.focus(), 30)
+      return
+    }
+    patch({ partyText: name, partyId: id })
+    setSuggestOpen(false)
+    setPartyNonce((n) => n + 1)
+    setError('')
+    setNotice(editing ? `Party ${name} saved.` : `New party ${name} added.`)
+    window.setTimeout(() => medRef.current?.focus(), 40)
+  }
+
+  const onPartyCancel = () => {
+    setPartyDlg(null)
+    window.setTimeout(() => partyRef.current?.focus(), 30)
+  }
+
+  const closeTransport = (next?: { transport: string; lrNo: string; ewayNo: string }) => {
+    if (next) patch(next)
+    setTransportOpen(false)
+    // On along the bill: Cash / Online when they are open, else Save.
+    window.setTimeout(() => focusNav(form.paymentMode === 'Due' ? NO.save : NO.cash), 30)
   }
 
   /** Units already on this bill by medicine id, so the picker shows what is left. */
@@ -605,6 +694,7 @@ export function WholesaleSalePage({
   navActionRef.current = (action: string) => {
     if (action === 'ws-add') commitEntry()
     else if (action === 'ws-save') focusNav(NO.save)
+    else if (action === 'ws-transport') setTransportOpen(true)
     else if (action === 'med-next') {
       if (pending) focusQty()
     }
@@ -689,12 +779,37 @@ export function WholesaleSalePage({
     num(pending.qty) + num(pending.free) > (pending.stock_packs || 0) + 1e-9
   const tabTitles = tabs.map((t) => t.title + (isDirty(t) ? ' •' : ''))
 
+  // "VRL · LR 77 · EWB 1234" beside the Transport button once anything is filled.
+  const transportText = [
+    form.transport,
+    form.lrNo ? `LR ${form.lrNo}` : '',
+    form.ewayNo ? `EWB ${form.ewayNo}` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
+  const transportTitle = `Transport: ${form.transport || '—'} · LR No.: ${form.lrNo || '—'} · E-way Bill No.: ${form.ewayNo || '—'}`
+
   const setPaymentMode = (m: Form['paymentMode']) =>
     patch(m === 'Due' ? { paymentMode: m, cash: '', online: '' } : { paymentMode: m })
 
   return (
-    <PageRoot className="bill-page wholesale-sale-page" navChain={NAV}>
+    <PageRoot className="bill-page wholesale-sale-page ce-page" navChain={NAV}>
       <AlertDialog alert={alert} onClose={() => setAlert(null)} />
+      {partyDlg ? (
+        <PartyQuickDialog
+          state={partyDlg}
+          findId={findPartyId}
+          onSaved={onPartySaved}
+          onCancel={onPartyCancel}
+        />
+      ) : null}
+      {transportOpen ? (
+        <TransportDialog
+          value={{ transport: form.transport, lrNo: form.lrNo, ewayNo: form.ewayNo }}
+          onDone={(v) => closeTransport(v)}
+          onCancel={() => closeTransport()}
+        />
+      ) : null}
       <DocToolsDialog
         open={toolsOpen}
         title="Wholesale bills & tools"
@@ -791,8 +906,37 @@ export function WholesaleSalePage({
       />
 
       <Panel title="Party & Medicine" className="sales-header-panel ws-header-panel">
-        <div className="form-grid">
-          <Field label="Payment">
+        <div className="ce-party-row ws-party-row">
+          <Field label="Party (customer)" className="ce-f-party">
+            <ModernCombo
+              value={form.partyText}
+              inputRef={partyRef}
+              navOrder={NO.party}
+              navChain={NAV}
+              placeholder="Type the medical's name"
+              minChars={0}
+              keepOrder
+              voiceField="customer"
+              listLabel="Parties"
+              emptyText="Not saved yet — Enter adds a new party"
+              items={suggest.map((p) => ({
+                id: String(p.id),
+                label: p.name,
+                meta: [p.phone, p.party_type === 'medical' ? 'MEDICAL' : ''].filter(Boolean).join(' · '),
+              }))}
+              onFocus={() => setSuggestOpen(true)}
+              onChange={(v) => {
+                patch({ partyText: v, partyId: null })
+                setSuggestOpen(true)
+              }}
+              onPick={(item) => {
+                const row = suggest.find((p) => String(p.id) === item.id)
+                if (row) pickParty(row)
+              }}
+              onEnter={(picked) => void onPartyEnter(picked)}
+            />
+          </Field>
+          <Field label="Payment" className="ce-f-pay">
             <SelectWrap>
               <select
                 data-nav-order={NO.payment}
@@ -819,65 +963,7 @@ export function WholesaleSalePage({
               </select>
             </SelectWrap>
           </Field>
-          <Field label="Party (customer)">
-            <ModernCombo
-              value={form.partyText}
-              inputRef={partyRef}
-              navOrder={NO.party}
-              navChain={NAV}
-              placeholder="Type the medical's name"
-              minChars={0}
-              keepOrder
-              voiceField="customer"
-              listLabel="Parties"
-              items={suggest.map((p) => ({
-                id: String(p.id),
-                label: p.name,
-                meta: [p.phone, p.party_type === 'medical' ? 'MEDICAL' : ''].filter(Boolean).join(' · '),
-              }))}
-              onFocus={() => setSuggestOpen(true)}
-              onChange={(v) => {
-                patch({ partyText: v, partyId: null })
-                setSuggestOpen(true)
-              }}
-              onPick={(item) => {
-                const row = suggest.find((p) => String(p.id) === item.id)
-                if (row) pickParty(row)
-              }}
-              onEnter={(picked) => focusNav(picked ? NO.medicine : NO.billDate)}
-            />
-          </Field>
-          <Field label="GSTIN">
-            <input
-              type="text"
-              className="mono"
-              readOnly
-              tabIndex={-1}
-              value={party ? party.gstin || 'Unregistered' : ''}
-              placeholder="—"
-            />
-          </Field>
-          <Field label="DL Numbers">
-            <input
-              type="text"
-              className="mono"
-              readOnly
-              tabIndex={-1}
-              value={party ? party.dl_numbers || 'Not on file' : ''}
-              title={party?.dl_numbers || ''}
-              placeholder="—"
-            />
-          </Field>
-          <Field label="Previous Due">
-            <input
-              type="text"
-              className="due-val mono"
-              readOnly
-              tabIndex={-1}
-              value={money(party?.total_due)}
-            />
-          </Field>
-          <Field label="Bill Date">
+          <Field label="Bill Date" className="ce-f-date">
             <input
               type="date"
               className="mono"
@@ -887,10 +973,10 @@ export function WholesaleSalePage({
               onChange={(e) => patch({ billDate: e.target.value || todayLocal() })}
             />
           </Field>
-          <Field label="Due Date">
+          <Field label="Due Date" className="ce-f-ro ce-f-due">
             <input type="text" className="mono" readOnly tabIndex={-1} value={calc?.due_date || ''} />
           </Field>
-          <Field label="Invoice No">
+          <Field label="Invoice No" className="ce-f-ro">
             <input
               type="text"
               className="mono"
@@ -900,23 +986,66 @@ export function WholesaleSalePage({
               title="Next sale bill number (automatic)"
             />
           </Field>
-          <Field label="Place of Supply">
-            <input type="text" readOnly tabIndex={-1} value={supplyText} title={supplyText} />
-          </Field>
-          <Field label="Rate · Credit">
-            <input
-              type="text"
-              className="mono"
-              readOnly
-              tabIndex={-1}
-              value={
-                party
-                  ? `Rate ${party.rate_tier} · ${party.credit_limit > 0 ? `Rs ${money(party.credit_limit)}` : 'no limit'} · ${party.credit_days || 0} days`
-                  : ''
-              }
-              placeholder="—"
-            />
-          </Field>
+          <div className="ce-facts" aria-label="Party details">
+            {party ? (
+              <>
+                <div
+                  className="ce-facts-line"
+                  title={`GSTIN ${party.gstin || 'Unregistered'} · DL ${party.dl_numbers || 'not on file'}`}
+                >
+                  <span className="ce-fact">
+                    <span className="ce-fact-k">GSTIN</span>
+                    <b className="mono">{party.gstin || 'Unregistered'}</b>
+                  </span>
+                  <span className="ce-fact">
+                    <span className="ce-fact-k">DL</span>
+                    <b className="mono">{party.dl_numbers || 'not on file'}</b>
+                  </span>
+                </div>
+                <div
+                  className="ce-facts-line"
+                  title={`Previous due ₹${money(party.total_due)} · Rate ${party.rate_tier} · ${party.credit_days || 0} credit days${party.credit_limit > 0 ? ` · credit limit ₹${money(party.credit_limit)}` : ''} · place of supply ${supplyText}`}
+                >
+                  <span className="ce-fact">
+                    <span className="ce-fact-k">Prev. due</span>
+                    <b className="mono due-val">₹{money(party.total_due)}</b>
+                  </span>
+                  <span className="ce-fact">
+                    <span className="ce-fact-k">Rate</span>
+                    <b>{party.rate_tier}</b>
+                  </span>
+                  <span className="ce-fact">
+                    <b>{party.credit_days || 0}</b>
+                    <span className="ce-fact-k">days</span>
+                  </span>
+                  <span className="ce-fact">
+                    <b>{posName || party.state_name || '—'}</b>
+                    <span className="ce-fact-k">{intra ? 'CGST+SGST' : 'IGST'}</span>
+                  </span>
+                  {party.credit_limit > 0 ? (
+                    <span className="ce-fact">
+                      <span className="ce-fact-k">limit</span>
+                      <b className="mono">₹{money(party.credit_limit)}</b>
+                    </span>
+                  ) : null}
+                </div>
+              </>
+            ) : (
+              <div className="ce-facts-line ce-facts-empty">
+                Pick a saved party, or type a new name and press Enter to add it.
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            className="ce-edit-btn"
+            title={party ? `Edit ${party.name}` : 'Pick a party first'}
+            aria-label="Edit party"
+            disabled={!party}
+            onClick={openEditParty}
+          >
+            ✎
+          </button>
         </div>
         <div className="medsel-grid ws-medsel">
           <Field label="Medicine">
@@ -1040,6 +1169,8 @@ export function WholesaleSalePage({
             <div className="hint-text ws-msg ws-msg-error">
               Only {pending?.stock_packs} strip(s) in stock for this batch.
             </div>
+          ) : calc?.warnings?.length ? (
+            <div className="hint-text ws-msg ws-msg-error">{calc.warnings.join(' ')}</div>
           ) : notice ? (
             <div className="hint-text ws-msg">{notice}</div>
           ) : (
@@ -1062,7 +1193,8 @@ export function WholesaleSalePage({
           </span>
         }
       >
-        <CappedTableWrap visibleRows={billingRows}>
+        {/* All the height that is left (owner, 18 Oct 2026): no row-count cap here. */}
+        <div className="table-scroll ce-table-fill">
           <table className="sat-table ws-sale-table" ref={tableRef}>
             <thead>
               <tr>
@@ -1178,164 +1310,113 @@ export function WholesaleSalePage({
               )}
             </tbody>
           </table>
-        </CappedTableWrap>
-      </Panel>
-
-      <Panel title="Billing Summary" className="summary-panel" bare>
-        <div className="summary-grid">
-          <div className="summary-col">
-            <h3>Transport &amp; Payment</h3>
-            <div className="sfield-row sfield-row-3">
-              <div className="sfield">
-                <label>Transport <span className="opt">(optional)</span></label>
-                <input
-                  type="text"
-                  data-nav-order={NO.transport}
-                  data-nav-chain={NAV}
-                  value={form.transport}
-                  onChange={(e) => patch({ transport: e.target.value })}
-                />
-              </div>
-              <div className="sfield">
-                <label>LR No. <span className="opt">(optional)</span></label>
-                <input
-                  type="text"
-                  className="mono"
-                  data-nav-order={NO.lr}
-                  data-nav-chain={NAV}
-                  value={form.lrNo}
-                  onChange={(e) => patch({ lrNo: e.target.value })}
-                />
-              </div>
-              <div className="sfield">
-                <label>E-way Bill No. <span className="opt">(optional)</span></label>
-                <input
-                  type="text"
-                  className="mono"
-                  data-nav-order={NO.eway}
-                  data-nav-chain={NAV}
-                  value={form.ewayNo}
-                  onChange={(e) => patch({ ewayNo: e.target.value })}
-                />
-              </div>
-              <div className="sfield">
-                <label>GST</label>
-                <div className="gst-note-box" title={`Place of supply: ${supplyText}`}>
-                  {intra ? 'CGST + SGST (added)' : 'IGST (added)'}
-                </div>
-              </div>
-              <div className="sfield">
-                <label>Cash</label>
-                <input
-                  type="text"
-                  className="mono"
-                  data-nav-order={NO.cash}
-                  data-nav-chain={NAV}
-                  disabled={dueMode}
-                  value={form.cash}
-                  onChange={(e) => patch({ cash: e.target.value })}
-                />
-              </div>
-              <div className="sfield">
-                <label>Online</label>
-                <input
-                  type="text"
-                  className="mono"
-                  data-nav-order={NO.online}
-                  data-nav-chain={NAV}
-                  data-nav-enter="ws-save"
-                  disabled={dueMode}
-                  value={form.online}
-                  onChange={(e) => patch({ online: e.target.value })}
-                />
-              </div>
-            </div>
-            {calc?.warnings?.length ? (
-              <p className="page-error ws-calc-warn">{calc.warnings.join(' ')}</p>
-            ) : null}
-          </div>
-
-          <div className="summary-col">
-            <h3>Totals</h3>
-            <div className="totals-list">
-              <div className="totals-row">
-                <span className="label">Taxable</span>
-                <span className="value">{money(calc?.taxable_total)}</span>
-              </div>
-              {intra ? (
-                <>
-                  <div className="totals-row">
-                    <span className="label">CGST</span>
-                    <span className="value">{money(calc?.cgst_total)}</span>
-                  </div>
-                  <div className="totals-row">
-                    <span className="label">SGST</span>
-                    <span className="value">{money(calc?.sgst_total)}</span>
-                  </div>
-                </>
-              ) : (
-                <div className="totals-row">
-                  <span className="label">IGST</span>
-                  <span className="value">{money(calc?.igst_total)}</span>
-                </div>
-              )}
-              <div className="totals-row">
-                <span className="label">Round off</span>
-                <span className="value">{money(calc?.round_off)}</span>
-              </div>
-              <div className="totals-row divider emph amt">
-                <span className="label">Grand Total</span>
-                <span className="value">{money(calc?.grand_total)}</span>
-              </div>
-              <div className="ws-words" title={calc?.amount_in_words || ''}>
-                {calc?.amount_in_words || ''}
-              </div>
-            </div>
-          </div>
-
-          <div className="summary-col actions-col">
-            <ActionBtn
-              label={busy ? 'Saving…' : 'Save'}
-              kbd="F5"
-              disabled={busy}
-              navOrder={NO.save}
-              navAction="ws-save-click"
-              navChain={NAV}
-              onClick={() => void save(false)}
-            />
-            <div className="print-row">
-              <ActionBtn
-                label="Save & Print"
-                kbd="F7"
-                variant="secondary"
-                disabled={busy}
-                onClick={() => void save(true)}
-              />
-              <ActionBtn label="New Bill" kbd="F9" variant="secondary" onClick={clearForm} />
-            </div>
-            <div className="print-row">
-              <ActionBtn
-                label={lastSaved ? `Preview ${lastSaved.billNo}` : 'Preview last'}
-                variant="neutral"
-                disabled={!lastSaved}
-                onClick={() => lastSaved && void openPreview(lastSaved.id)}
-              />
-              <ActionBtn
-                label={lastSaved ? `Print ${lastSaved.billNo}` : 'Print last'}
-                variant="neutral"
-                disabled={!lastSaved}
-                onClick={() => lastSaved && void printBill(lastSaved.id, lastSaved.billNo)}
-              />
-              <ActionBtn
-                label="Save PDF"
-                variant="neutral"
-                disabled={!lastSaved}
-                onClick={() => lastSaved && void savePdf(lastSaved.id)}
-              />
-            </div>
-          </div>
         </div>
       </Panel>
+
+      <section className="panel summary-panel ce-summary-row ws-summary-row" aria-label="Billing summary">
+        <div className="ce-sum-field">
+          <label>Cash</label>
+          <input
+            type="text"
+            className="mono"
+            data-nav-order={NO.cash}
+            data-nav-chain={NAV}
+            disabled={dueMode}
+            value={form.cash}
+            onChange={(e) => patch({ cash: e.target.value })}
+          />
+        </div>
+        <div className="ce-sum-field">
+          <label>Online</label>
+          <input
+            type="text"
+            className="mono"
+            data-nav-order={NO.online}
+            data-nav-chain={NAV}
+            data-nav-enter="ws-save"
+            disabled={dueMode}
+            value={form.online}
+            onChange={(e) => patch({ online: e.target.value })}
+          />
+        </div>
+        <div className="ce-tot">
+          <span>Taxable</span>
+          <strong className="mono">{money(calc?.taxable_total)}</strong>
+        </div>
+        <div
+          className="ce-tot"
+          title={
+            intra
+              ? `CGST ${money(calc?.cgst_total)} + SGST ${money(calc?.sgst_total)} · place of supply ${supplyText}`
+              : `IGST ${money(calc?.igst_total)} · place of supply ${supplyText}`
+          }
+        >
+          <span>{intra ? 'CGST + SGST' : 'IGST'}</span>
+          <strong className="mono">
+            {intra ? `${money(calc?.cgst_total)} + ${money(calc?.sgst_total)}` : money(calc?.igst_total)}
+          </strong>
+        </div>
+        <div className="ce-tot">
+          <span>Round off</span>
+          <strong className="mono">{money(calc?.round_off)}</strong>
+        </div>
+        <div className="ce-tot ce-tot-grand" title={calc?.amount_in_words || ''}>
+          <span>Grand Total</span>
+          <strong className="mono">{money(calc?.grand_total)}</strong>
+        </div>
+        <div className="ce-transport">
+          <ActionBtn
+            label="Transport"
+            variant="neutral"
+            navOrder={NO.transport}
+            navAction="ws-transport"
+            navChain={NAV}
+            onClick={() => setTransportOpen(true)}
+          />
+          {transportText ? (
+            <span className="ce-transport-text" title={transportTitle}>
+              {transportText}
+            </span>
+          ) : null}
+        </div>
+        <div className="ce-sum-actions">
+          <ActionBtn
+            label={busy ? 'Saving…' : 'Save'}
+            kbd="F5"
+            disabled={busy}
+            navOrder={NO.save}
+            navAction="ws-save-click"
+            navChain={NAV}
+            onClick={() => void save(false)}
+          />
+          <ActionBtn
+            label="Save & Print"
+            kbd="F7"
+            variant="secondary"
+            disabled={busy}
+            onClick={() => void save(true)}
+          />
+          <ActionBtn label="New Bill" kbd="F9" variant="secondary" onClick={clearForm} />
+          {lastSaved ? (
+            <span className="ce-last" title="The bill saved last (also in Tabs & Tools)">
+              <span className="ce-last-k">{lastSaved.billNo}:</span>
+              <button type="button" className="ce-link" onClick={() => void openPreview(lastSaved.id)}>
+                Preview
+              </button>
+              <button
+                type="button"
+                className="ce-link"
+                onClick={() => void printBill(lastSaved.id, lastSaved.billNo)}
+              >
+                Print
+              </button>
+              <button type="button" className="ce-link" onClick={() => void savePdf(lastSaved.id)}>
+                PDF
+              </button>
+            </span>
+          ) : null}
+        </div>
+      </section>
 
       <RowContextMenu
         menu={lineMenu ? { x: lineMenu.x, y: lineMenu.y } : null}
