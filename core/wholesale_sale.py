@@ -525,6 +525,20 @@ def _invoice_for_body(conn, body: dict, p: dict) -> dict[str, Any]:
     return inv
 
 
+def returns_used_in_calc(grand: float, paid: float, body: dict) -> float:
+    """The Return total of the live totals, as retail's calc_sale works it out
+    (core/desktop_sales_service.py): a saved bill opened for edit sends what its returns
+    settled (``returns_settled``); a new bill the open credit of the ticked returns
+    (``returns_total``), which settles no more than the payment leaves unpaid."""
+    settled = _f(body.get("returns_settled"))
+    if settled > 0:
+        return round(min(settled, max(0.0, _f(grand))), 2)
+    ticked = _f(body.get("returns_total"))
+    if ticked > 0:
+        return round(min(ticked, max(0.0, round(_f(grand) - _f(paid), 2))), 2)
+    return 0.0
+
+
 def calc_sale(conn, body: dict) -> dict[str, Any]:
     """The live totals of the wholesale screen, with the place of supply and credit check."""
     p = party(conn, body.get("customer_id")) or {
@@ -539,7 +553,11 @@ def calc_sale(conn, body: dict) -> dict[str, Any]:
     if sid > 0:
         row = conn.execute("SELECT COALESCE(due_amount,0) FROM sales WHERE id=?", (sid,)).fetchone()
         this_due = _f(row[0]) if row else 0.0
-    warn = credit_warning(p if p.get("id") else None, inv["grand_total"], paid, this_bill_due=this_due)
+    used = returns_used_in_calc(inv["grand_total"], paid, body)
+    inv["returns_total"] = used
+    inv["net_total"] = round(inv["grand_total"] - used, 2)
+    warn = credit_warning(p if p.get("id") else None, inv["grand_total"], paid + used,
+                          this_bill_due=this_due)
     inv["due_date"] = due_date_for(body.get("bill_date"), p.get("credit_days"))
     inv["warnings"] = [warn] if warn else []
     inv["ok"] = True
@@ -652,6 +670,72 @@ def remember_contact(conn, p: dict, body: dict) -> bool:
 
     _update_customer_contact(conn, int(p["id"]), phone, address)
     return True
+
+
+def plan_sale_returns(conn, customer_id: int, wanted: Any) -> tuple[list, Optional[dict]]:
+    """The returns ticked on the screen (``apply_returns``: return ids), checked against the
+    party's open return credit the way retail's save does: (plan, None), or ([], the refusal)
+    when one has no credit left any more."""
+    from core.return_credit import plan_returns
+
+    try:
+        return plan_returns(conn, "customer", int(customer_id), wanted), None
+    except ValueError as exc:
+        return [], {"ok": False, "error": str(exc), "code": "returns_changed"}
+
+
+def returns_in_packs(conn, rows: list[dict]) -> list[dict]:
+    """Returns (core/return_credit: open_returns / returns_in_bill) with their medicines
+    counted the way the wholesale bill counts them: ``qty`` in packs (strips), ``units`` the
+    stock units the return holds (tablets of a strip type), ``units_per_pack``, and ``rate``
+    (when there) per pack. Amounts are unchanged."""
+    ids = sorted({int(r["return_id"]) for r in rows or [] if r.get("return_id")})
+    if not ids:
+        return list(rows or [])
+    packs: dict[int, list[int]] = {}
+    for rid, mtype, unit in conn.execute(
+            "SELECT ri.return_id, COALESCE(m.type,''), COALESCE(m.unit,'1') "
+            "FROM sales_return_items ri LEFT JOIN medicines m ON m.id = ri.medicine_id "
+            f"WHERE ri.return_id IN ({','.join('?' * len(ids))}) ORDER BY ri.return_id, ri.id",
+            ids).fetchall():
+        packs.setdefault(int(rid), []).append(units_per_pack(mtype, unit))
+    out = []
+    for r in rows:
+        ups_list = packs.get(int(r.get("return_id") or 0), [])
+        items = []
+        for i, it in enumerate(r.get("items") or []):
+            ups = ups_list[i] if i < len(ups_list) else 1
+            units = _f(it.get("qty"))
+            q = round(units / ups, 2)
+            item = {**it, "qty": int(q) if q == int(q) else q, "units": it.get("qty"),
+                    "units_per_pack": ups}
+            if "rate" in it:
+                item["rate"] = round(_f(it.get("rate")) * ups, 2)
+            items.append(item)
+        out.append({**r, "items": items})
+    return out
+
+
+def returns_in_sale(conn, sale_id: int) -> list[dict]:
+    """The returns settled in this bill (core/return_credit.returns_in_bill), qty in packs
+    (``returns_in_packs``), for the screen's and the invoice's Return rows."""
+    try:
+        from core.return_credit import returns_in_bill
+
+        return returns_in_packs(conn, returns_in_bill(conn, "customer", int(sale_id)))
+    except Exception as exc:  # the bill still opens without them
+        log.warning("wholesale sale %s: returns not read: %s", sale_id, exc)
+        return []
+
+
+def open_returns_for_party(conn, customer_id: Any) -> dict[str, Any]:
+    """The party's returns whose credit is not used yet (core/return_credit), qty in packs,
+    for the wholesale screen's popup."""
+    from core.return_credit import open_returns_for_party as _open
+
+    res = _open(conn, "customer", party_id=_int(customer_id))
+    res["returns"] = returns_in_packs(conn, res.get("returns") or [])
+    return res
 
 
 def save_sale(conn, body: dict) -> dict[str, Any]:
@@ -789,9 +873,11 @@ def save_sale(conn, body: dict) -> dict[str, Any]:
     is_due = mode == "due"
     cash = 0.0 if is_due else round(_f(body.get("cash_paid")), 2)
     online = 0.0 if is_due else round(_f(body.get("online_paid")), 2)
+    paid_in_full = False
     if not is_due and cash + online <= 0:
         if body.get("pay_full"):
             cash = grand
+            paid_in_full = True
         else:
             return {"ok": False, "code": "payment_required",
                     "error": "Cash or Online amount must be greater than zero (or choose Due)."}
@@ -815,13 +901,20 @@ def save_sale(conn, body: dict) -> dict[str, Any]:
         r = conn.execute("SELECT COALESCE(due_amount,0) FROM sales WHERE id=?",
                          (editing_id,)).fetchone()
         this_due = _f(r[0]) if r else 0.0
-    warnings = []
-    warn = credit_warning(p, grand, cash + online, this_bill_due=this_due)
-    if warn:
-        warnings.append(warn)
-
+    returns_plan: list = []
+    returns_done: dict = {"list": [], "total": 0.0}
     try:
         with dss._SALE_WRITE_LOCK:
+            if editing_id <= 0 and body.get("apply_returns"):
+                # The party's returns ticked on the screen (a new bill only), as retail:
+                # checked before the bill exists, settled after (core/return_credit.py).
+                returns_plan, why = plan_sale_returns(conn, p["id"], body.get("apply_returns"))
+                if why:
+                    return why
+                if returns_plan and paid_in_full:
+                    from core.return_credit import plan_total
+
+                    cash = round(max(0.0, cash - plan_total(returns_plan)), 2)
             if editing_id > 0:
                 update_existing_bill(
                     conn, editing_id, medicines,
@@ -842,6 +935,11 @@ def save_sale(conn, body: dict) -> dict[str, Any]:
                     online_paid=online, doctor_name="", doctor_phone="",
                     previous_due=p["total_due"], bill_date=bill_date, wholesale=header,
                 )
+                if returns_plan and int(sale_id or 0) > 0:
+                    # The ticked returns pay what the payment did not: Return rows on the bill.
+                    from core.return_credit import settle_sale
+
+                    returns_done = settle_sale(conn, p["id"], returns_plan, int(sale_id))
     except Exception as exc:
         try:
             conn.rollback()
@@ -853,6 +951,9 @@ def save_sale(conn, body: dict) -> dict[str, Any]:
         remember_contact(conn, p, body)
     except Exception as exc:  # the bill is saved; a contact that did not stick is not fatal
         log.warning("wholesale sale %s: party contact not updated: %s", sale_id, exc)
+    # The credit check counts what the ticked returns paid, as the screen's does.
+    warn = credit_warning(p, grand, cash + online + returns_done["total"], this_bill_due=this_due)
+    warnings = [warn] if warn else []
     after = party(conn, p["id"]) or p
     return {
         "ok": True,
@@ -869,6 +970,11 @@ def save_sale(conn, body: dict) -> dict[str, Any]:
         "grand_total": grand,
         "due_date": header["due_date"],
         "warnings": warnings,
+        # the returns settled in this bill: [{return_id, return_no, amount}], their sum, and
+        # grand total less that (core/return_credit.settle_sale)
+        "returns_used": returns_done["list"],
+        "returns_total": returns_done["total"],
+        "net_total": round(grand - returns_done["total"], 2),
     }
 
 
