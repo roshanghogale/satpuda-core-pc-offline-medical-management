@@ -488,6 +488,7 @@ input[type='text'],
 input[type='date'],
 input[type='number'],
 input[type='search'],
+input[type='tel'],
 input:not([type]),
 select,
 textarea {

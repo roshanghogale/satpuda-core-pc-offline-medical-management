@@ -290,6 +290,24 @@ class SavingAndReading(unittest.TestCase):
                                     "payment_mode": "Due"})
         self.assertEqual(res.get("code"), "wholesale_bill")
 
+    def test_the_bills_phone_address_go_onto_the_party_and_gstin_dl_onto_the_bill(self):
+        # owner, 18 Oct 2026: the wholesale bill has the retail bill's Phone / Address boxes
+        # (they update the party, as on retail) and GSTIN / DL boxes in the doctor's places
+        res = self._save(customer_phone="9222222222", customer_address="",
+                         buyer_dl="20B-99, 21B-100")
+        self.assertTrue(res["ok"], res)
+        self.assertEqual(self.conn.execute(
+            "SELECT phone, address FROM customers WHERE id=1").fetchone(),
+            ("9222222222", "Main Road, Testpur"))       # an empty box never wipes one
+        self.assertEqual(self.conn.execute(
+            "SELECT buyer_dl FROM sales WHERE id=?", (res["sale_id"],)).fetchone(),
+            ("20B-99, 21B-100",))
+        self.assertEqual(ws.party(self.conn, 1)["dl_numbers"], "20B-9, 21B-10")
+        self.assertTrue(self._save(customer_address="New Road, Testpur")["ok"])
+        self.assertEqual(self.conn.execute(
+            "SELECT phone, address FROM customers WHERE id=1").fetchone(),
+            ("9222222222", "New Road, Testpur"))
+
 
 class UpToTheServerAndBack(unittest.TestCase):
     def setUp(self):

@@ -6,11 +6,18 @@
  *  this page only sends what is typed and shows what comes back. Retail billing is the
  *  untouched SalesPage.
  *
- *  The layout is the retail Sales page's (owner, 18 Oct 2026: "purchase and sales are not
- *  like the retail shops"): bill tabs + Tabs & Tools on top, one "Party & Medicine" panel
- *  of compact inputs with a single medicine entry row, the Selected Medicines table taking
- *  the rest of the height, and the Billing Summary pinned at the bottom. Transport / LR /
- *  e-way sit in the summary so they never push the table down. */
+ *  The layout is the retail Sales page's, panel for panel and cell for cell (owner, 18 Oct
+ *  2026: "the old retail purchase and sales layout is accurate ... update that old UI to fit
+ *  the new fields so it looks the same and doesn't take extra space"). The wholesale fields
+ *  sit in the slots retail uses for its own:
+ *    Customer Name / Phone / Address   -> Party / Phone / Address (they update the party)
+ *    Doctor Name / Doctor Phone        -> GSTIN / DL Numbers (this bill's; party's by default)
+ *    the empty tenth cell              -> Due Date (credit days in its label)
+ *    rate tier / credit limit / POS    -> small hints in the Party / Previous Due / GSTIN labels
+ *    Discount & Charges, 3 x 2 boxes   -> 4 x 2: Overall Disc % (every line) / Rounding (auto) /
+ *                                         Transport / LR No., E-way Bill No. / GST / Cash / Online
+ *    Subtotal / Paid / Margin / Total / Due -> Taxable / CGST + SGST / Paid / Grand Total / Due
+ *  so the header is two rows, the summary two rows, and the table gets retail's height. */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AppNavigate } from '../App'
 import {
@@ -58,6 +65,12 @@ type Form = {
   title: string
   partyText: string
   partyId: number | null
+  /** The party whose saved phone / address / GSTIN / DL are in the boxes below. */
+  filledFor: number | null
+  phone: string
+  address: string
+  gstin: string
+  dl: string
   billDate: string
   transport: string
   lrNo: string
@@ -65,18 +78,26 @@ type Form = {
   paymentMode: 'Due' | 'Cash' | 'Online'
   cash: string
   online: string
+  /** Overall Disc %: put on every line, and on each line added after it. */
+  overallDisc: string
   items: Line[]
   editingSaleId: number | null
   editingBillNo: string
+  /** The due this bill already put on the party (editing): not "previous" due. */
+  editingOldDue: number
 }
 
 const NAV = 'wholesale-sale'
 
-/* Enter order along the page (data-nav-order), like the retail bill. */
+/* Enter order along the page (data-nav-order), like the retail bill's 1..17. */
 const NO = {
   payment: 1,
   party: 2,
-  billDate: 3,
+  phone: 3,
+  address: 4,
+  gstin: 5,
+  dl: 6,
+  billDate: 7,
   medicine: 8,
   qty: 9,
   free: 10,
@@ -84,11 +105,12 @@ const NO = {
   disc: 12,
   sch: 13,
   add: 14,
-  transport: 20,
-  lr: 21,
-  eway: 22,
-  cash: 23,
-  online: 24,
+  overallDisc: 15,
+  transport: 16,
+  lr: 17,
+  eway: 18,
+  cash: 19,
+  online: 20,
   save: 30,
 } as const
 
@@ -98,6 +120,11 @@ function blankForm(title?: string): Form {
     title: title || `Bill ${++tabSeq}`,
     partyText: '',
     partyId: null,
+    filledFor: null,
+    phone: '',
+    address: '',
+    gstin: '',
+    dl: '',
     billDate: todayLocal(),
     transport: '',
     lrNo: '',
@@ -105,9 +132,11 @@ function blankForm(title?: string): Form {
     paymentMode: 'Due',
     cash: '',
     online: '',
+    overallDisc: '',
     items: [],
     editingSaleId: null,
     editingBillNo: '',
+    editingOldDue: 0,
   }
 }
 
@@ -119,6 +148,11 @@ function money(v: number | undefined | null) {
   return Number(v || 0).toFixed(2)
 }
 
+/** Rupees as the retail bill shows them: ₹1,234.50 */
+function rs(v: number | undefined | null) {
+  return `₹${Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
 function num(v: string | number) {
   const x = Number(String(v).replace(/,/g, ''))
   return Number.isFinite(x) ? x : 0
@@ -126,6 +160,13 @@ function num(v: string | number) {
 
 function shortExpiry(exp: string) {
   return exp ? exp.slice(5, 7) + '/' + exp.slice(2, 4) : ''
+}
+
+/** The Disc % every line shares ('' when they differ or have none). */
+function commonDisc(items: { disc_pct: number }[]) {
+  if (!items.length) return ''
+  const d = num(items[0].disc_pct)
+  return d > 0 && items.every((it) => Math.abs(num(it.disc_pct) - d) < 0.005) ? String(d) : ''
 }
 
 let keySeq = 0
@@ -257,8 +298,29 @@ export function WholesaleSalePage({
       return
     }
     let alive = true
-    fetchParty(form.partyId)
-      .then((r) => alive && setInfo(r.ok ? r : null))
+    const id = form.partyId
+    fetchParty(id)
+      .then((r) => {
+        if (!alive) return
+        setInfo(r.ok ? r : null)
+        if (!r.ok) return
+        // The saved party's phone / address / GSTIN / DL into the boxes, once per pick
+        // (a bill opened for edit keeps its own).
+        setTabs((all) =>
+          all.map((f) =>
+            f.partyId === id && f.filledFor !== id
+              ? {
+                  ...f,
+                  filledFor: id,
+                  phone: r.party.phone || '',
+                  address: r.party.address || '',
+                  gstin: r.party.gstin || '',
+                  dl: r.party.dl_numbers || '',
+                }
+              : f,
+          ),
+        )
+      })
       .catch((e) => alive && setError(String((e as Error).message || e)))
     return () => {
       alive = false
@@ -269,6 +331,7 @@ export function WholesaleSalePage({
   const calcBody = useMemo(
     () => ({
       customer_id: form.partyId || 0,
+      buyer_gstin: form.gstin.trim().toUpperCase(),
       bill_date: form.billDate,
       editing_sale_id: form.editingSaleId || 0,
       payment_mode: form.paymentMode,
@@ -317,6 +380,11 @@ export function WholesaleSalePage({
           ...blankForm(`Edit ${r.bill_no}`),
           partyText: r.party?.name || '',
           partyId: r.customer_id || null,
+          filledFor: r.customer_id || null,
+          phone: r.party?.phone || '',
+          address: r.party?.address || '',
+          gstin: r.buyer_gstin ?? r.party?.gstin ?? '',
+          dl: r.buyer_dl ?? r.party?.dl_numbers ?? '',
           billDate: r.bill_date || todayLocal(),
           transport: r.transport || '',
           lrNo: r.lr_no || '',
@@ -324,9 +392,11 @@ export function WholesaleSalePage({
           paymentMode: r.cash_paid > 0 ? 'Cash' : r.online_paid > 0 ? 'Online' : 'Due',
           cash: r.cash_paid ? String(r.cash_paid) : '',
           online: r.online_paid ? String(r.online_paid) : '',
+          overallDisc: commonDisc(r.items || []),
           items: (r.items || []).map((it) => ({ ...it, key: nextKey() })),
           editingSaleId: r.sale_id,
           editingBillNo: r.bill_no,
+          editingOldDue: Number(r.due_amount) || 0,
         }
         const all = tabsRef.current
         const cur = all[activeRef.current]
@@ -393,7 +463,12 @@ export function WholesaleSalePage({
         setError(r.error || 'Could not add the medicine.')
         return
       }
-      setPending({ ...r.line, key: nextKey() })
+      const overall = num(form.overallDisc)
+      setPending({
+        ...r.line,
+        ...(overall > 0 && !num(r.line.disc_pct) ? { disc_pct: form.overallDisc as unknown as number } : {}),
+        key: nextKey(),
+      })
       setEditingIdx(null)
       setMedText(r.line.name)
       // No Rate A on the batch: a red message, not a quiet notice (owner, 18 Oct 2026).
@@ -535,6 +610,9 @@ export function WholesaleSalePage({
       const body = {
         ...calcBody,
         invoice_mode: 'wholesale',
+        customer_phone: form.phone.trim(),
+        customer_address: form.address.trim(),
+        buyer_dl: form.dl.trim(),
         transport: form.transport,
         lr_no: form.lrNo,
         eway_bill_no: form.ewayNo,
@@ -692,6 +770,23 @@ export function WholesaleSalePage({
   const setPaymentMode = (m: Form['paymentMode']) =>
     patch(m === 'Due' ? { paymentMode: m, cash: '', online: '' } : { paymentMode: m })
 
+  /** Overall Disc %: the same Disc % on every line (GST stays on the discounted value). */
+  const setOverallDisc = (value: string) => {
+    const v = value.replace(/[^0-9.]/g, '')
+    setForm((f) => ({
+      ...f,
+      overallDisc: v,
+      items: f.items.map((it) => ({ ...it, disc_pct: (v || 0) as unknown as number })),
+    }))
+    setPending((cur) => (cur ? { ...cur, disc_pct: (v || 0) as unknown as number } : cur))
+  }
+
+  // Previous due / Total due the way the retail bill shows them.
+  const prevDue = Math.max(0, (party?.total_due || 0) - (form.editingSaleId ? form.editingOldDue : 0))
+  const prevCredit = party?.total_credit || 0
+  const paidNow = dueMode ? 0 : num(form.cash) + num(form.online)
+  const totalDue = Math.max(0, prevDue - prevCredit + Math.max(0, (calc?.grand_total || 0) - paidNow))
+
   return (
     <PageRoot className="bill-page wholesale-sale-page" navChain={NAV}>
       <AlertDialog alert={alert} onClose={() => setAlert(null)} />
@@ -819,7 +914,7 @@ export function WholesaleSalePage({
               </select>
             </SelectWrap>
           </Field>
-          <Field label="Party (customer)">
+          <Field label="Party Name" hint={party ? `Rate ${party.rate_tier}` : undefined}>
             <ModernCombo
               value={form.partyText}
               inputRef={partyRef}
@@ -844,37 +939,69 @@ export function WholesaleSalePage({
                 const row = suggest.find((p) => String(p.id) === item.id)
                 if (row) pickParty(row)
               }}
-              onEnter={(picked) => focusNav(picked ? NO.medicine : NO.billDate)}
+              onEnter={(picked) => focusNav(picked ? NO.medicine : NO.phone)}
             />
           </Field>
-          <Field label="GSTIN">
+          <Field label="Phone">
+            <input
+              type="tel"
+              inputMode="numeric"
+              className="mono"
+              data-nav-order={NO.phone}
+              data-nav-chain={NAV}
+              data-voice-field="customer_phone"
+              value={form.phone}
+              title="A changed number is saved on the party with the bill"
+              onChange={(e) => patch({ phone: e.target.value.replace(/\D/g, '') })}
+            />
+          </Field>
+          <Field label="Address">
+            <input
+              type="text"
+              data-nav-order={NO.address}
+              data-nav-chain={NAV}
+              data-voice-field="address"
+              placeholder="Town / address"
+              value={form.address}
+              title={form.address || 'A changed address is saved on the party with the bill'}
+              onChange={(e) => patch({ address: e.target.value })}
+            />
+          </Field>
+          <Field
+            label="Previous Due"
+            hint={party && party.credit_limit > 0 ? `limit ${rs(party.credit_limit)}` : undefined}
+          >
+            <input
+              type="text"
+              className="due-val mono"
+              readOnly
+              tabIndex={-1}
+              value={prevDue <= 0.009 && prevCredit > 0.009 ? `Credit: ${rs(prevCredit)}` : rs(prevDue)}
+            />
+          </Field>
+          <Field label="GSTIN" hint={pos ? `POS ${pos}` : undefined}>
             <input
               type="text"
               className="mono"
-              readOnly
-              tabIndex={-1}
-              value={party ? party.gstin || 'Unregistered' : ''}
-              placeholder="—"
+              data-nav-order={NO.gstin}
+              data-nav-chain={NAV}
+              maxLength={15}
+              placeholder={party ? 'Unregistered' : ''}
+              value={form.gstin}
+              title={`This bill's GSTIN (the party's by default) · Place of supply: ${supplyText}`}
+              onChange={(e) => patch({ gstin: e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, '') })}
             />
           </Field>
           <Field label="DL Numbers">
             <input
               type="text"
               className="mono"
-              readOnly
-              tabIndex={-1}
-              value={party ? party.dl_numbers || 'Not on file' : ''}
-              title={party?.dl_numbers || ''}
-              placeholder="—"
-            />
-          </Field>
-          <Field label="Previous Due">
-            <input
-              type="text"
-              className="due-val mono"
-              readOnly
-              tabIndex={-1}
-              value={money(party?.total_due)}
+              data-nav-order={NO.dl}
+              data-nav-chain={NAV}
+              placeholder={party ? 'Not on file' : ''}
+              value={form.dl}
+              title={form.dl || "This bill's drug licence numbers (the party's by default)"}
+              onChange={(e) => patch({ dl: e.target.value })}
             />
           </Field>
           <Field label="Bill Date">
@@ -887,9 +1014,6 @@ export function WholesaleSalePage({
               onChange={(e) => patch({ billDate: e.target.value || todayLocal() })}
             />
           </Field>
-          <Field label="Due Date">
-            <input type="text" className="mono" readOnly tabIndex={-1} value={calc?.due_date || ''} />
-          </Field>
           <Field label="Invoice No">
             <input
               type="text"
@@ -900,21 +1024,14 @@ export function WholesaleSalePage({
               title="Next sale bill number (automatic)"
             />
           </Field>
-          <Field label="Place of Supply">
-            <input type="text" readOnly tabIndex={-1} value={supplyText} title={supplyText} />
-          </Field>
-          <Field label="Rate · Credit">
+          <Field label="Due Date" hint={party ? `${party.credit_days || 0} days credit` : undefined}>
             <input
               type="text"
               className="mono"
               readOnly
               tabIndex={-1}
-              value={
-                party
-                  ? `Rate ${party.rate_tier} · ${party.credit_limit > 0 ? `Rs ${money(party.credit_limit)}` : 'no limit'} · ${party.credit_days || 0} days`
-                  : ''
-              }
-              placeholder="—"
+              value={party && calc?.due_date ? calc.due_date.split('-').reverse().join('-') : ''}
+              title="Bill date + the party's credit days"
             />
           </Field>
         </div>
@@ -931,7 +1048,7 @@ export function WholesaleSalePage({
                 if (pending && editingIdx === null) setPending(null)
               }}
               onBatchPicked={(b) => void onBatchPicked(b)}
-              onEmptyEnter={() => focusNav(NO.transport)}
+              onEmptyEnter={() => focusNav(NO.overallDisc)}
               inputRef={medRef}
               hideMrp
             />
@@ -1034,19 +1151,24 @@ export function WholesaleSalePage({
               navChain={NAV}
             />
           </Field>
+          {/* One line, like retail's hint: the newest message takes it (never a second row). */}
           {error ? (
-            <div className="hint-text ws-msg ws-msg-error" role="alert">{error}</div>
+            <div className="hint-text ws-msg ws-msg-error" role="alert" title={error}>{error}</div>
           ) : pendingOver ? (
             <div className="hint-text ws-msg ws-msg-error">
               Only {pending?.stock_packs} strip(s) in stock for this batch.
             </div>
+          ) : calc?.warnings?.length ? (
+            <div className="hint-text ws-msg ws-msg-error" title={calc.warnings.join(' ')}>
+              {calc.warnings.join(' ')}
+            </div>
           ) : notice ? (
-            <div className="hint-text ws-msg">{notice}</div>
+            <div className="hint-text ws-msg" title={notice}>{notice}</div>
           ) : (
-            <div className="hint-text">
+            <div className="hint-text ws-msg-plain">
               {pending
                 ? `Stock ${pending.stock_packs} strip(s) · GST ${pending.gst_percent}% · Enter on Sch % adds the line`
-                : '↓ list · Enter pick · Enter / double-click row: edit line · Delete key removes line · qty in strips (packs for syrups etc.)'}
+                : '↓ list · Enter pick · right-click / Enter on a row: edit · Delete key removes line · qty in strips'}
             </div>
           )}
         </div>
@@ -1184,12 +1306,37 @@ export function WholesaleSalePage({
       <Panel title="Billing Summary" className="summary-panel" bare>
         <div className="summary-grid">
           <div className="summary-col">
-            <h3>Transport &amp; Payment</h3>
-            <div className="sfield-row sfield-row-3">
+            <h3>Discount, Transport &amp; Payment</h3>
+            <div className="sfield-row sfield-row-3 ws-sfield-row-4">
               <div className="sfield">
-                <label>Transport <span className="opt">(optional)</span></label>
+                <label>Overall Disc %</label>
                 <input
                   type="text"
+                  className="mono"
+                  inputMode="decimal"
+                  data-nav-order={NO.overallDisc}
+                  data-nav-chain={NAV}
+                  value={form.overallDisc}
+                  title="Puts this Disc % on every line of the bill (and on lines added after)"
+                  onChange={(e) => setOverallDisc(e.target.value)}
+                />
+              </div>
+              <div className="sfield">
+                <label>Rounding</label>
+                <input
+                  type="text"
+                  className="mono"
+                  readOnly
+                  tabIndex={-1}
+                  value={money(calc?.round_off)}
+                  title="To the rupee, worked out on the tax invoice"
+                />
+              </div>
+              <div className="sfield">
+                <label>Transport</label>
+                <input
+                  type="text"
+                  placeholder="optional"
                   data-nav-order={NO.transport}
                   data-nav-chain={NAV}
                   value={form.transport}
@@ -1197,10 +1344,11 @@ export function WholesaleSalePage({
                 />
               </div>
               <div className="sfield">
-                <label>LR No. <span className="opt">(optional)</span></label>
+                <label>LR No.</label>
                 <input
                   type="text"
                   className="mono"
+                  placeholder="optional"
                   data-nav-order={NO.lr}
                   data-nav-chain={NAV}
                   value={form.lrNo}
@@ -1208,10 +1356,11 @@ export function WholesaleSalePage({
                 />
               </div>
               <div className="sfield">
-                <label>E-way Bill No. <span className="opt">(optional)</span></label>
+                <label>E-way Bill No.</label>
                 <input
                   type="text"
                   className="mono"
+                  placeholder="optional"
                   data-nav-order={NO.eway}
                   data-nav-chain={NAV}
                   value={form.ewayNo}
@@ -1250,9 +1399,6 @@ export function WholesaleSalePage({
                 />
               </div>
             </div>
-            {calc?.warnings?.length ? (
-              <p className="page-error ws-calc-warn">{calc.warnings.join(' ')}</p>
-            ) : null}
           </div>
 
           <div className="summary-col">
@@ -1260,42 +1406,39 @@ export function WholesaleSalePage({
             <div className="totals-list">
               <div className="totals-row">
                 <span className="label">Taxable</span>
-                <span className="value">{money(calc?.taxable_total)}</span>
+                <span className="value">{rs(calc?.taxable_total)}</span>
               </div>
               {intra ? (
-                <>
-                  <div className="totals-row">
-                    <span className="label">CGST</span>
-                    <span className="value">{money(calc?.cgst_total)}</span>
-                  </div>
-                  <div className="totals-row">
-                    <span className="label">SGST</span>
-                    <span className="value">{money(calc?.sgst_total)}</span>
-                  </div>
-                </>
+                <div className="totals-row" title="CGST + SGST">
+                  <span className="label">CGST + SGST</span>
+                  <span className="value">
+                    {rs(calc?.cgst_total)} + {rs(calc?.sgst_total)}
+                  </span>
+                </div>
               ) : (
                 <div className="totals-row">
                   <span className="label">IGST</span>
-                  <span className="value">{money(calc?.igst_total)}</span>
+                  <span className="value">{rs(calc?.igst_total)}</span>
                 </div>
               )}
               <div className="totals-row">
-                <span className="label">Round off</span>
-                <span className="value">{money(calc?.round_off)}</span>
+                <span className="label">Total Paid</span>
+                <span className="value">{rs(paidNow)}</span>
               </div>
-              <div className="totals-row divider emph amt">
+              <div className="totals-row divider emph amt" title={calc?.amount_in_words || ''}>
                 <span className="label">Grand Total</span>
-                <span className="value">{money(calc?.grand_total)}</span>
+                <span className="value">{rs(calc?.grand_total)}</span>
               </div>
-              <div className="ws-words" title={calc?.amount_in_words || ''}>
-                {calc?.amount_in_words || ''}
+              <div className="totals-row emph due">
+                <span className="label">Total Due</span>
+                <span className="value">{rs(totalDue)}</span>
               </div>
             </div>
           </div>
 
           <div className="summary-col actions-col">
             <ActionBtn
-              label={busy ? 'Saving…' : 'Save'}
+              label={busy ? 'Saving…' : 'Save Bill'}
               kbd="F5"
               disabled={busy}
               navOrder={NO.save}
