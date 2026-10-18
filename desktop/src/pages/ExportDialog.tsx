@@ -6,6 +6,8 @@ import { getApiBase } from '../api'
 import { exportRowsCsv } from './pageChrome'
 import { todayLocal } from '../localDate'
 import { DoctorMarginDialog } from './DoctorMarginDialog'
+import { useBusinessMode } from '../wholesale/mode'
+import { WholesaleReportsDialog } from '../wholesale/WholesaleReportsDialog'
 
 export type ExportPage = 'inventory' | 'sales_history' | 'purchase_history'
 
@@ -28,6 +30,9 @@ type Step = 'report' | 'schedule' | 'format'
 
 /** Sales History only: opens its own dialog (DoctorMarginDialog), not the format step. */
 const DOCTOR_MARGIN: Option = { key: 'doctor_margin', label: 'Doctor Margin Report' }
+
+/** Wholesale mode only (Sales History / Inventory): opens WholesaleReportsDialog. */
+const WHOLESALE_REPORTS: Option = { key: 'wholesale_reports', label: 'Wholesale Reports' }
 
 async function fetchOptions(page: string): Promise<Option[]> {
   const res = await fetch(
@@ -143,12 +148,15 @@ export function ExportDialog({
   const [schFrom, setSchFrom] = useState(from || '')
   const [schTo, setSchTo] = useState(to || todayIso())
   const [doctorMarginOpen, setDoctorMarginOpen] = useState(false)
+  const [wholesaleOpen, setWholesaleOpen] = useState(false)
+  const { isWholesale } = useBusinessMode()
 
   useEffect(() => {
     if (!open) return
     setStep('report')
     setError('')
     setDoctorMarginOpen(false)
+    setWholesaleOpen(false)
     setBusy(true)
     void fetchOptions(page)
       .then((opts) => {
@@ -161,6 +169,15 @@ export function ExportDialog({
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setBusy(false))
   }, [open, page])
+
+  // Wholesale mode: the wholesale reports first in the list (retail lists stay as they are).
+  const shownOptions = useMemo(
+    () =>
+      isWholesale && page !== 'purchase_history' && !options.some((o) => o.key === WHOLESALE_REPORTS.key)
+        ? [WHOLESALE_REPORTS, ...options]
+        : options,
+    [isWholesale, page, options],
+  )
 
   useEffect(() => {
     if (!open) return
@@ -202,6 +219,19 @@ export function ExportDialog({
 
   if (!open) return null
 
+  if (wholesaleOpen) {
+    return (
+      <WholesaleReportsDialog
+        open
+        initial={page === 'inventory' ? 'price_list' : 'register'}
+        from={page === 'sales_history' ? from : ''}
+        to={page === 'sales_history' ? to : ''}
+        onBack={() => setWholesaleOpen(false)}
+        onClose={onClose}
+      />
+    )
+  }
+
   if (doctorMarginOpen) {
     return (
       <DoctorMarginDialog
@@ -230,6 +260,10 @@ export function ExportDialog({
   const goNextFromReport = () => {
     if (report === DOCTOR_MARGIN.key) {
       setDoctorMarginOpen(true)
+      return
+    }
+    if (report === WHOLESALE_REPORTS.key) {
+      setWholesaleOpen(true)
       return
     }
     if (report === 'schedule_report') {
@@ -384,7 +418,7 @@ export function ExportDialog({
 
           {step === 'report' ? (
             <div className="export-options">
-              {options.map((o) => (
+              {shownOptions.map((o) => (
                 <label key={o.key} className="export-option">
                   <input
                     type="radio"

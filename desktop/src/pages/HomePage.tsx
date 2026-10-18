@@ -13,6 +13,8 @@ import { registerVoicePage, type VoiceHandler } from '../voice/voiceBus'
 import { usePageHotkeys } from '../hooks/usePageHotkeys'
 import { QuickActionIcon } from '../quickActionIcons'
 import { GstReportsDialog } from './GstReportsDialog'
+import { useBusinessMode } from '../wholesale/mode'
+import { WholesaleReportsDialog } from '../wholesale/WholesaleReportsDialog'
 import { Panel } from './pageChrome'
 import {
   BANNER_PREVIEW_EVENT,
@@ -131,6 +133,8 @@ export function HomePage({ onNavigate, syncRefreshNonce = 0, active }: Props) {
   )
   const [error, setError] = useState('')
   const [gstOpen, setGstOpen] = useState(false)
+  const [wholesaleOpen, setWholesaleOpen] = useState(false)
+  const { isWholesale } = useBusinessMode()
   // Kept apart from `error`: that one is worded for a dead local engine and
   // tells you to restart the app. This one means the app is fine and the
   // server is not, and the numbers on screen are zeroes from an empty
@@ -326,6 +330,17 @@ export function HomePage({ onNavigate, syncRefreshNonce = 0, active }: Props) {
                 Quick Access.
               </p>
             )}
+            {isWholesale ? (
+              <button
+                type="button"
+                className="qa-btn qa-success"
+                data-nav-order={quickActions.length + 1}
+                onClick={() => setWholesaleOpen(true)}
+              >
+                <QuickActionIcon actionKey="gst_reports" size={16} />
+                <span className="qa-label">Wholesale Reports</span>
+              </button>
+            ) : null}
           </div>
         </Panel>
 
@@ -421,6 +436,7 @@ export function HomePage({ onNavigate, syncRefreshNonce = 0, active }: Props) {
       ) : null}
       <HomeExportDialog open={exportOpen} onClose={() => setExportOpen(false)} />
       <GstReportsDialog open={gstOpen} onClose={() => setGstOpen(false)} />
+      <WholesaleReportsDialog open={wholesaleOpen} onClose={() => setWholesaleOpen(false)} />
     </div>
   )
 }
