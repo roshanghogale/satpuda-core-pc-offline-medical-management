@@ -23,7 +23,7 @@ import json
 import sqlite3
 from typing import Any
 
-from core.bill_clearing import _kind, clean_allocations, party_ledger, r2
+from core.bill_clearing import _kind, clean_allocations, clear_bills, party_ledger, r2
 
 
 def _tables(kind: str) -> tuple[str, str, str, str]:
@@ -94,15 +94,47 @@ def _by_date(rows: list[dict]) -> list[dict]:
     return sorted(rows, key=lambda r: (r["return_date"], r["return_id"]))
 
 
-def open_returns(conn: sqlite3.Connection, kind: str, party_id: int, *,
-                 leave_out_bill: int | None = None) -> list[dict]:
-    """The party's returns whose credit is not used yet, oldest first:
-    [{return_id, return_no, return_date, bill_no, amount, left, items}].
+def _refund_payments(conn: sqlite3.Connection, kind: str, party_id: int, *,
+                     leave_out_payment: int | None = None) -> list[tuple[int, str, float]]:
+    """(payment id, reference, money handed back) for the party's negative payments:
+    customer receipts below 0 (we paid the customer) or supplier payments below 0 (the
+    supplier paid us back). leave_out_payment: the refund being edited."""
+    k = _kind(kind)
+    if k == "customer":
+        table, party_col, ref_col = "customer_payments", "customer_id", "reference_no"
+    else:
+        table, party_col, ref_col = "supplier_payments", "supplier_id", "reference"
+    return [(int(i), str(ref or "").strip(), float(-(amt or 0))) for i, ref, amt in conn.execute(
+        f"SELECT id, {ref_col}, amount FROM {table} "
+        f"WHERE {party_col}=? AND COALESCE(deleted,0)=0 AND amount < 0 AND id<>?",
+        (int(party_id), int(leave_out_payment or 0)),
+    ).fetchall()]
 
-    left = refund - what the clearing rule spent of it on any bill (chosen or oldest first)
-    - cash/online handed back for it (negative receipts with the return number as reference).
+
+def refunds_paid_out(conn: sqlite3.Connection, kind: str, party_id: int, *,
+                     leave_out_payment: int | None = None) -> dict[str, float]:
+    """return no -> money handed back for it (negative payments with the return number as
+    reference). leave_out_payment: the refund being edited."""
+    out: dict[str, float] = {}
+    for _pid, ref, paid in _refund_payments(conn, kind, party_id, leave_out_payment=leave_out_payment):
+        out[ref] = r2(out.get(ref, 0) + paid)
+    return out
+
+
+def open_returns(conn: sqlite3.Connection, kind: str, party_id: int, *,
+                 leave_out_bill: int | None = None,
+                 leave_out_payment: int | None = None) -> list[dict]:
+    """The party's returns whose credit is not used yet, oldest first:
+    [{return_id, return_no, return_date, bill_no, amount, left, refunded, items}].
+
+    left = what the clearing rule leaves of a return once every bill is cleared (chosen and
+    oldest first), with the cash/online handed back FOR THAT RETURN taken off it first
+    (customers: negative receipts, suppliers: negative supplier payments, with the return
+    number as reference).
     A return settled in cash or online is never offered, nor the counter sale's returns.
     leave_out_bill: the bill being finished (an autosaved one is already in the ledger).
+    leave_out_payment: a refund being edited (Settings -> Payment -> Refund a return), so
+    its return reads as it did before that refund.
     """
     k = _kind(kind)
     try:
@@ -117,36 +149,48 @@ def open_returns(conn: sqlite3.Connection, kind: str, party_id: int, *,
         row = conn.execute("SELECT COALESCE(name,'') FROM customers WHERE id=?", (pid,)).fetchone()
         if row and str(row[0]).strip().upper() == COUNTER_SALE:
             return []
-    led = party_ledger(conn, k, pid, leave_out_bill=leave_out_bill)
-    used: dict[int, float] = {}
-    for a in led["result"]["applied"]:
-        if a["credit_kind"] == "return":
-            used[int(a["credit_id"])] = r2(used.get(int(a["credit_id"]), 0) + a["amount"])
-    left = {}
+    led = party_ledger(conn, k, pid, leave_out_bill=leave_out_bill,
+                       leave_out_payment=leave_out_payment)
+    ret_ids = [int(c["id"]) for c in led["credits"] if c["kind"] == "return"]
+    if not ret_ids:
+        return []
+    table = _tables(k)[0]
+    no_of = {int(i): str(no or "") for i, no in conn.execute(
+        f"SELECT id, return_no FROM {table} WHERE id IN ({','.join('?' * len(ret_ids))})", ret_ids).fetchall()}
+    # Money handed back for a return comes off THAT return (owner, 18 Oct 2026: "Refund a
+    # return" on the Payment screen, for customers and suppliers). The clearing rule alone
+    # takes a refund off the latest credit before it -- right for the dues (the pool is the
+    # same either way), wrong for which return is still open: two returns of 20, 20 handed
+    # back for the first, showed the first open and the second used up. So the refund is
+    # put on its return here, and the rule works out what each return has left after the
+    # bills. Supplier refunds count too (only customer receipts were taken off before).
+    refunds = _refund_payments(conn, k, pid, leave_out_payment=leave_out_payment)
+    by_no: dict[str, float] = {}
+    for _pay, ref, paid in refunds:
+        by_no[ref] = r2(by_no.get(ref, 0) + paid)
+    tied = {pay for pay, ref, _paid in refunds if ref and ref in set(no_of.values())}
+    credits = []
     for c in led["credits"]:
-        if c["kind"] == "return" and c["amount"] > 0.009:
-            rest = r2(c["amount"] - used.get(int(c["id"]), 0))
-            if rest > 0.009:
-                left[int(c["id"])] = rest
+        if c["kind"] == "payment" and int(c["id"]) in tied:
+            continue
+        if c["kind"] == "return":
+            c = dict(c, amount=r2(c["amount"] - by_no.get(no_of.get(int(c["id"]), ""), 0)))
+        credits.append(c)
+    res = clear_bills(led["bills"], credits, overpay_joins=(k == "customer"))
+    left = {int(x["credit_id"]): r2(x["left"]) for x in res.get("left") or []
+            if x["credit_kind"] == "return" and x["left"] > 0.009}
     if not left:
         return []
-    paid_out: dict[str, float] = {}
-    if k == "customer":
-        for ref, paid in conn.execute(
-            "SELECT COALESCE(reference_no,''), SUM(-amount) FROM customer_payments "
-            "WHERE customer_id=? AND COALESCE(deleted,0)=0 AND amount < 0 GROUP BY reference_no",
-            (pid,),
-        ).fetchall():
-            paid_out[str(ref)] = float(paid or 0)
     out = []
     for rid, row in _return_rows(conn, k, list(left)).items():
         if row["settle_mode"] in ("cash", "online"):
             continue
-        rest = r2(min(left[rid], row["refund"] - paid_out.get(row["return_no"], 0)))
+        rest = r2(min(left[rid], row["refund"]))
         if rest <= 0.009:
             continue
         out.append({"return_id": rid, "return_no": row["return_no"], "return_date": row["return_date"],
                     "bill_no": row["bill_no"], "amount": row["refund"], "left": rest,
+                    "refunded": r2(by_no.get(row["return_no"], 0)),
                     "items": [{"name": it["name"], "qty": it["qty"], "amount": it["amount"],
                                "batch_no": it.get("batch_no", ""), "expiry": it.get("expiry", ""),
                                "mrp": it.get("mrp", 0)}

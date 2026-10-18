@@ -158,6 +158,9 @@ export type LedgerBundle = {
     credit: number
     balance: number
     tag: string
+    /** Offline: "Cleared: S2-55 ₹500.00 ✓ · …" on a payment / return row, "Paid by: …" on a
+     *  bill row (core/payment_details.attach_ledger_links). Also the CSV column. */
+    links?: string
   }[]
   summary: {
     opening: number
@@ -310,6 +313,83 @@ export function fetchOpenBills(params: {
     bills: OpenBill[]
     allocations: PaymentAllocation[]
   }>(`/api/settings/payments/open-bills?${q.toString()}`)
+}
+
+/** A return with credit still open, for "Refund a return" (core/return_refunds.py). */
+export type RefundableReturn = {
+  return_id: number
+  return_no: string
+  return_date: string
+  bill_no: string
+  amount: number
+  left: number
+  refunded?: number
+  items: { name: string; qty: number; amount: number }[]
+}
+
+/** The party's returns with open credit; `supported` is false Online. */
+export function fetchRefundReturns(params: {
+  kind: 'supplier' | 'customer'
+  party: string
+  partyId?: number | null
+  paymentId?: number | null
+}) {
+  const q = new URLSearchParams({
+    kind: params.kind,
+    party: params.party,
+    party_id: String(params.partyId || 0),
+    payment_id: String(params.paymentId || 0),
+  })
+  return jsonFetch<{
+    ok: boolean
+    supported: boolean
+    party_id: number
+    returns: RefundableReturn[]
+    editing?: { payment_id: number; return_id: number; amount: number } | null
+  }>(`/api/settings/payments/refund-returns?${q.toString()}`)
+}
+
+/** Save "Refund a return": one negative payment per ticked return. */
+export function saveRefund(body: {
+  kind: 'supplier' | 'customer'
+  party: string
+  party_id?: number | null
+  date: string
+  mode: 'cash' | 'online'
+  note?: string
+  refunds: { return_id: number; amount: number }[]
+  id?: number
+}) {
+  return jsonFetch<PaymentBundle & { payment_ids?: number[]; refunded?: number }>(
+    '/api/settings/payments/refund',
+    { method: 'PUT', body: JSON.stringify(body) },
+  )
+}
+
+/** A payment row's View box (core/payment_details.payment_details). */
+export type PaymentDetails = {
+  id: number
+  payment_no: string
+  date: string
+  party: string
+  mode: string
+  amount: number
+  cash: number
+  online: number
+  reference: string
+  note: string
+  refund: boolean
+  chosen: PaymentAllocation[]
+  cleared: { bill_id: number; bill_no: string; date: string; bill_total: number; amount: number; how: 'chosen' | 'oldest' }[]
+  credit_left: number
+  refunded: { return_id: number; return_no: string; return_date: string; bill_no: string; refund: number; amount: number }[]
+}
+
+export function fetchPaymentDetails(kind: 'supplier' | 'customer', id: number) {
+  const q = new URLSearchParams({ kind, id: String(id) })
+  return jsonFetch<{ ok: boolean; supported: boolean; payment: PaymentDetails | null }>(
+    `/api/settings/payments/details?${q.toString()}`,
+  )
 }
 
 /** Payment report (which bills each payment cleared) as a CSV or PDF file. */

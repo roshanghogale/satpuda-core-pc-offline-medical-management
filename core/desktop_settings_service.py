@@ -1899,6 +1899,7 @@ def get_payments(conn: sqlite3.Connection, kind: str = "supplier") -> dict[str, 
                    cp.customer_id, cp.allocations
             FROM customer_payments cp
             JOIN customers c ON c.id = cp.customer_id
+            WHERE COALESCE(cp.deleted,0)=0
             ORDER BY cp.id DESC LIMIT 300
             """
         ).fetchall()
@@ -1906,6 +1907,7 @@ def get_payments(conn: sqlite3.Connection, kind: str = "supplier") -> dict[str, 
             "SELECT id, name, COALESCE(total_due,0) FROM customers ORDER BY name COLLATE NOCASE"
         ).fetchall()
         cleared = _payments_cleared(conn, "customer", rows, party_col=9, amount_col=3)
+        refunds = _payments_refunds(conn, "customer", rows, party_col=9, amount_col=3, ref_col=7)
         return {
             "kind": "customer",
             "history": [
@@ -1920,6 +1922,7 @@ def get_payments(conn: sqlite3.Connection, kind: str = "supplier") -> dict[str, 
                     "reference": r[7],
                     "note": r[8],
                     **_cleared_fields(cleared, r[0], r[10]),
+                    **_refund_fields(refunds, r[0]),
                 }
                 for r in rows
             ],
@@ -1935,6 +1938,7 @@ def get_payments(conn: sqlite3.Connection, kind: str = "supplier") -> dict[str, 
                sp.supplier_id, sp.allocations
         FROM supplier_payments sp
         JOIN suppliers s ON s.id = sp.supplier_id
+        WHERE COALESCE(sp.deleted,0)=0
         ORDER BY sp.id DESC LIMIT 300
         """
     ).fetchall()
@@ -1942,6 +1946,7 @@ def get_payments(conn: sqlite3.Connection, kind: str = "supplier") -> dict[str, 
         "SELECT id, name, COALESCE(total_due,0) FROM suppliers ORDER BY name COLLATE NOCASE"
     ).fetchall()
     cleared = _payments_cleared(conn, "supplier", rows, party_col=9, amount_col=4)
+    refunds = _payments_refunds(conn, "supplier", rows, party_col=9, amount_col=4, ref_col=6)
     return {
         "kind": "supplier",
         "history": [
@@ -1956,6 +1961,7 @@ def get_payments(conn: sqlite3.Connection, kind: str = "supplier") -> dict[str, 
                 "due_before": float(r[7] or 0),
                 "due_after": float(r[8] or 0),
                 **_cleared_fields(cleared, r[0], r[10]),
+                **_refund_fields(refunds, r[0]),
             }
             for r in rows
         ],
@@ -1981,6 +1987,30 @@ def _payments_cleared(
     except Exception as exc:
         log.warning("payments cleared (%s): %s", kind, exc)
         return {}
+
+
+def _payments_refunds(
+    conn: sqlite3.Connection, kind: str, rows: list, *, party_col: int, amount_col: int, ref_col: int
+) -> dict[int, dict]:
+    """payment id -> the return a negative row hands back money for (core/return_refunds),
+    so the history marks it "Refund SR1-3"; {} when that cannot be read."""
+    from core.return_refunds import refund_marks
+
+    try:
+        return refund_marks(
+            conn, kind,
+            [(r[0], r[party_col] or 0, r[amount_col] or 0, r[ref_col] or "") for r in rows],
+        )
+    except Exception as exc:
+        log.warning("payments refunds (%s): %s", kind, exc)
+        return {}
+
+
+def _refund_fields(refunds: dict[int, dict], payment_id: Any) -> dict[str, Any]:
+    hit = refunds.get(int(payment_id or 0))
+    if not hit:
+        return {"refund": False}
+    return {"refund": True, "refund_of": hit, "label": f"Refund {hit['return_no']}"}
 
 
 def _cleared_fields(cleared: dict[int, dict], payment_id: Any, allocations: Any) -> dict[str, Any]:
@@ -4308,6 +4338,8 @@ def get_ledger(
                         "credit": paid,
                         "balance": running,
                         "tag": "sale",
+                        "ref_kind": "bill",
+                        "ref_id": raw[5],
                     }
                 )
             elif etype == "return":
@@ -4322,6 +4354,9 @@ def get_ledger(
                         "credit": amount,
                         "balance": running,
                         "tag": "return",
+                        "ref_kind": "return",
+                        "ref_id": raw[3],
+                        "reference": raw[1],
                     }
                 )
             else:
@@ -4335,9 +4370,16 @@ def get_ledger(
                         "credit": amount,
                         "balance": running,
                         "tag": "payment",
+                        "ref_kind": "payment",
+                        "ref_id": raw[4],
+                        "reference": raw[3],
                     }
                 )
         summary["closing"] = running
+        # Which bill each payment / return cleared, and what paid each bill (second line).
+        from core.payment_details import attach_ledger_links
+
+        attach_ledger_links(conn, "customer", cid, rows_out)
         return {
             "kind": kind,
             "party": party,
@@ -4421,7 +4463,7 @@ def get_ledger(
         events.append(("purchase", r[0], r[3], round(float(r[2] or 0), 2), r))
     for r in conn.execute(
         """
-        SELECT payment_date, amount, mode, payment_no, id
+        SELECT payment_date, amount, mode, payment_no, id, COALESCE(reference,'')
         FROM supplier_payments
         WHERE supplier_id=? AND payment_date BETWEEN ? AND ?
           AND COALESCE(deleted,0)=0
@@ -4469,6 +4511,8 @@ def get_ledger(
                     "credit": paid,
                     "balance": running,
                     "tag": "purchase",
+                    "ref_kind": "bill",
+                    "ref_id": raw[3],
                 }
             )
         elif etype == "return":
@@ -4482,6 +4526,9 @@ def get_ledger(
                     "credit": amount,
                     "balance": running,
                     "tag": "return",
+                    "ref_kind": "return",
+                    "ref_id": raw[3],
+                    "reference": raw[1],
                 }
             )
         else:
@@ -4495,9 +4542,15 @@ def get_ledger(
                     "credit": amount,
                     "balance": running,
                     "tag": "payment",
+                    "ref_kind": "payment",
+                    "ref_id": raw[4],
+                    "reference": raw[5],
                 }
             )
     summary["closing"] = running
+    from core.payment_details import attach_ledger_links
+
+    attach_ledger_links(conn, "supplier", sid, rows_out)
     return {
         "kind": kind,
         "party": party,

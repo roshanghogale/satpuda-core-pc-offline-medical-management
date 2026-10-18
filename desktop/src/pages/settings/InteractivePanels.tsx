@@ -11,10 +11,13 @@ import {
   exportPaymentReport,
   fetchLedger,
   fetchOpenBills,
+  fetchPaymentDetails,
+  fetchRefundReturns,
   mutateContact,
   mutateShelf,
   reorderAction,
   savePayment,
+  saveRefund,
   saveSettingsSection,
   systemAction,
   type LedgerBundle,
@@ -22,6 +25,8 @@ import {
   type PaymentAllocation,
   type PaymentBundle,
   type PaymentCleared,
+  type PaymentDetails,
+  type RefundableReturn,
   type SettingsBundle,
 } from '../../settingsApi'
 import { focusTableSection, usePageHotkeys } from '../../hooks/usePageHotkeys'
@@ -49,6 +54,7 @@ import {
 } from './SettingsChrome'
 import { CappedTableWrap } from '../pageChrome'
 import '../../styles/interactive-settings.css'
+import '../../styles/payments-ledger.css'
 import {
   ReorderMultiTabEditor,
   fetchReorderBulkTabs,
@@ -1813,6 +1819,8 @@ function shortNo(raw: unknown) {
 /** "Bills cleared" for a history row: S2-55 ₹500 ✓ · S2-61 ₹200 · ₹50 left as credit
  *  (✓ = the bill was chosen for the payment; the rest went to the oldest bills). */
 function clearedText(r: Record<string, unknown>) {
+  const ref = refundOf(r)
+  if (ref) return `Refund of ${ref.return_no}${ref.bill_no ? ` (bill ${shortNo(ref.bill_no)})` : ''}`
   const cleared = Array.isArray(r.cleared) ? (r.cleared as PaymentCleared[]) : []
   const parts = cleared.map(
     (c) => `${shortNo(c.bill_no) || `#${c.bill_id}`} ₹${money(c.amount)}${c.how === 'chosen' ? ' ✓' : ''}`,
@@ -1820,6 +1828,200 @@ function clearedText(r: Record<string, unknown>) {
   const left = Number(r.credit_left || 0)
   if (left > 0.009) parts.push(`₹${money(left)} left as credit`)
   return parts.length ? parts.join(' · ') : '—'
+}
+
+type RefundOf = { return_id: number; return_no: string; return_date?: string; bill_no?: string }
+
+/** The return a history row hands money back for ("Refund a return"), when it is one. */
+function refundOf(r: Record<string, unknown>): RefundOf | null {
+  if (!r.refund || !r.refund_of || typeof r.refund_of !== 'object') return null
+  return r.refund_of as RefundOf
+}
+
+/** "COUGH SYRUP ×2 · PAIN TAB ×1" under a return's number. */
+function returnItemsText(items: RefundableReturn['items']) {
+  return (items || []).map((it) => `${it.name} ×${it.qty}`).join(' · ')
+}
+
+/** The View box of a payment row: what it was, the bills it cleared, or the return it refunded. */
+function PaymentDetailsDialog({
+  kind,
+  row,
+  onClose,
+}: {
+  kind: 'supplier' | 'customer'
+  row: Record<string, unknown>
+  onClose: () => void
+}) {
+  const [d, setD] = useState<PaymentDetails | null>(null)
+  const [supported, setSupported] = useState(true)
+  const [error, setError] = useState('')
+  const closeRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    closeRef.current?.focus()
+    let alive = true
+    fetchPaymentDetails(kind, Number(row.id || 0))
+      .then((res) => {
+        if (!alive) return
+        setSupported(res.supported !== false)
+        setD(res.payment || null)
+      })
+      .catch((e) => alive && setError(e instanceof Error ? e.message : String(e)))
+    return () => {
+      alive = false
+    }
+  }, [kind, row.id])
+
+  const amount = d ? d.amount : Number(row.amount || 0)
+  const isRefund = d ? d.refund : !!refundOf(row)
+  const no = d?.payment_no || String(row.payment_no || '') || `#${String(row.id ?? '')}`
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <div
+        className="modal-card pl-details-card"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Payment details"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') {
+            e.preventDefault()
+            e.stopPropagation()
+            onClose()
+          }
+        }}
+      >
+        <div className="modal-head">
+          <h2>
+            {isRefund ? 'Refund' : 'Payment'} {no}
+          </h2>
+          <button type="button" className="icon-btn" ref={closeRef} onClick={onClose} aria-label="Close">
+            ✕
+          </button>
+        </div>
+        <div className="modal-body">
+          <dl className="pl-facts">
+            <div>
+              <dt>Date</dt>
+              <dd>{d?.date || String(row.date ?? '')}</dd>
+            </div>
+            <div>
+              <dt>No</dt>
+              <dd>{no}</dd>
+            </div>
+            <div>
+              <dt>{kind === 'supplier' ? 'Supplier' : 'Customer'}</dt>
+              <dd>{d?.party || String(row.party ?? '')}</dd>
+            </div>
+            <div>
+              <dt>Mode</dt>
+              <dd>{d?.mode || String(row.mode ?? '')}</dd>
+            </div>
+            <div>
+              <dt>{isRefund ? (kind === 'supplier' ? 'Paid back to us' : 'Paid to customer') : 'Amount'}</dt>
+              <dd className="num">₹{money(isRefund ? Math.abs(amount) : amount)}</dd>
+            </div>
+            {kind === 'customer' && d && !isRefund && d.cash && d.online ? (
+              <div>
+                <dt>Cash / Online</dt>
+                <dd className="num">
+                  ₹{money(d.cash)} / ₹{money(d.online)}
+                </dd>
+              </div>
+            ) : null}
+            {(d?.reference || row.reference) && !isRefund ? (
+              <div>
+                <dt>Reference</dt>
+                <dd>{d?.reference || String(row.reference ?? '')}</dd>
+              </div>
+            ) : null}
+            {d?.note ? (
+              <div>
+                <dt>Note</dt>
+                <dd>{d.note}</dd>
+              </div>
+            ) : null}
+          </dl>
+          {error ? <p className="iset-callout warn">{error}</p> : null}
+          {!supported ? (
+            <Note>Online, which bills a payment cleared is worked out on the server; see Bills cleared in the list.</Note>
+          ) : null}
+          {d && isRefund ? (
+            <>
+              <div className="iset-subhead">Return refunded</div>
+              <div className="iset-table-wrap plain">
+                <table className="settings-table">
+                  <thead>
+                    <tr>
+                      <th>Return No</th>
+                      <th>Date</th>
+                      <th>{kind === 'supplier' ? 'Purchase' : 'Bill'}</th>
+                      <th className="num">Return total</th>
+                      <th className="num">Refunded</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {d.refunded.map((x) => (
+                      <tr key={x.return_id}>
+                        <td>{x.return_no}</td>
+                        <td>{x.return_date}</td>
+                        <td>{shortNo(x.bill_no) || '—'}</td>
+                        <td className="num">{money(x.refund)}</td>
+                        <td className="num">{money(x.amount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : null}
+          {d && !isRefund ? (
+            <>
+              <div className="iset-subhead">
+                {kind === 'supplier' ? 'Purchases' : 'Bills'} this payment cleared ({d.cleared.length})
+              </div>
+              <div className="iset-table-wrap plain">
+                <table className="settings-table">
+                  <thead>
+                    <tr>
+                      <th>{kind === 'supplier' ? 'Purchase / Bill No' : 'Bill No'}</th>
+                      <th>Date</th>
+                      <th className="num">Bill total</th>
+                      <th className="num">Cleared</th>
+                      <th>How</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {d.cleared.map((c, i) => (
+                      <tr key={`${c.bill_id}-${i}`}>
+                        <td>{shortNo(c.bill_no) || `#${c.bill_id}`}</td>
+                        <td>{c.date}</td>
+                        <td className="num">{money(c.bill_total)}</td>
+                        <td className="num">{money(c.amount)}</td>
+                        <td>{c.how === 'chosen' ? 'Chosen ✓' : 'Oldest first'}</td>
+                      </tr>
+                    ))}
+                    {!d.cleared.length ? <EmptyRow cols={5}>It has not cleared any bill.</EmptyRow> : null}
+                  </tbody>
+                </table>
+              </div>
+              <div className="pl-left">
+                {d.credit_left > 0.009
+                  ? `₹${money(d.credit_left)} of it is left as credit.`
+                  : 'Nothing of it is left as credit.'}
+              </div>
+            </>
+          ) : null}
+          <div className="iset-row">
+            <button type="button" className="settings-action-btn iset-secondary" onClick={onClose}>
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export function PaymentPanel({
@@ -1858,6 +2060,17 @@ export function PaymentPanel({
   const [ticks, setTicks] = useState<Record<number, string>>({})
   /** The amount follows the ticked total until the shop types it. */
   const [amountTyped, setAmountTyped] = useState(false)
+  // "Refund a return" (core/return_refunds.py): money going out for a return's open credit.
+  const [payKind, setPayKind] = useState<'payment' | 'refund'>('payment')
+  const [refundRows, setRefundRows] = useState<RefundableReturn[]>([])
+  const [refundSupported, setRefundSupported] = useState(true)
+  const [refundErr, setRefundErr] = useState('')
+  /** return id -> amount typed for it; a ticked return is a key here. */
+  const [refundTicks, setRefundTicks] = useState<Record<number, string>>({})
+  const [refundMode, setRefundMode] = useState<'cash' | 'online'>('cash')
+  /** The return of the refund being edited (an edit pays back that one return). */
+  const [editingReturn, setEditingReturn] = useState<number | null>(null)
+  const [viewRow, setViewRow] = useState<Record<string, unknown> | null>(null)
   const today = todayLocal()
   const [repFrom, setRepFrom] = useState(today.slice(0, 8) + '01')
   const [repTo, setRepTo] = useState(today)
@@ -1915,6 +2128,60 @@ export function PaymentPanel({
     }
   }, [billMode, kind, party, selectedPartyId, editingId])
 
+  // The party's returns with credit still open, read when "Refund a return" is on (the
+  // refund being edited left out, so its return shows what it had before it).
+  useEffect(() => {
+    if (payKind !== 'refund' || !party.trim()) {
+      setRefundRows([])
+      return
+    }
+    let alive = true
+    setRefundErr('')
+    fetchRefundReturns({ kind, party, partyId: selectedPartyId, paymentId: editingId })
+      .then((d) => {
+        if (!alive) return
+        setRefundSupported(d.supported !== false)
+        const rows = Array.isArray(d.returns) ? d.returns : []
+        setRefundRows(rows)
+        const open = new Set(rows.map((r) => r.return_id))
+        setRefundTicks((t) => {
+          const kept: Record<number, string> = {}
+          for (const [id, v] of Object.entries(t)) if (open.has(Number(id))) kept[Number(id)] = v
+          return kept
+        })
+      })
+      .catch((e) => alive && setRefundErr(e instanceof Error ? e.message : String(e)))
+    return () => {
+      alive = false
+    }
+  }, [payKind, kind, party, selectedPartyId, editingId])
+
+  const refundShown = editingReturn != null ? refundRows.filter((r) => r.return_id === editingReturn) : refundRows
+  const refundOpenTotal = refundRows.reduce((s, r) => s + (Number(r.left) || 0), 0)
+  const refundTotal = Object.values(refundTicks).reduce((s, v) => s + (Number(v) || 0), 0)
+
+  function tickReturn(r: RefundableReturn, on: boolean) {
+    const next = { ...refundTicks }
+    if (on) next[r.return_id] = r.left.toFixed(2)
+    else delete next[r.return_id]
+    setRefundTicks(next)
+  }
+
+  function setRefundAmount(r: RefundableReturn, raw: string) {
+    // never more than the return's open credit
+    const v = Number(raw) > r.left ? r.left.toFixed(2) : raw
+    setRefundTicks({ ...refundTicks, [r.return_id]: v })
+  }
+
+  function switchKind(next: 'payment' | 'refund') {
+    if (next === payKind) return
+    // a payment being edited is not a refund, nor the other way round
+    clearForm()
+    setPayKind(next)
+    setErr('')
+    setMsg('')
+  }
+
   const tickedTotal = Object.values(ticks).reduce((s, v) => s + (Number(v) || 0), 0)
   const payAmount = kind === 'supplier' ? Number(amount) || 0 : (Number(cash) || 0) + (Number(online) || 0)
   const choosing = billMode === 'choose' && billsSupported
@@ -1964,6 +2231,57 @@ export function PaymentPanel({
     setBillMode('oldest')
     setTicks({})
     setAmountTyped(false)
+    setRefundTicks({})
+    setEditingReturn(null)
+  }
+
+  /** "Refund a return" saved: one negative payment per ticked return. Null when saved. */
+  async function saveRefundNow(): Promise<string | null> {
+    const refunds = refundShown
+      .filter((r) => refundTicks[r.return_id] != null && Number(refundTicks[r.return_id]) > 0)
+      .map((r) => ({ return_id: r.return_id, amount: Number(Number(refundTicks[r.return_id]).toFixed(2)) }))
+    if (!party.trim()) {
+      const why = kind === 'supplier' ? 'Pick the supplier first.' : 'Pick the customer first.'
+      setErr(why)
+      return why
+    }
+    if (!refunds.length) {
+      const why = 'Tick a return and type the amount to refund.'
+      setErr(why)
+      return why
+    }
+    try {
+      const next = await saveRefund({
+        kind,
+        party,
+        party_id: selectedPartyId,
+        date,
+        mode: refundMode,
+        note,
+        refunds,
+        ...(editingId ? { id: editingId } : {}),
+      })
+      const merged = {
+        ...next,
+        history: Array.isArray(next.history) && next.history.length ? next.history : data.history,
+        parties: Array.isArray(next.parties) && next.parties.length ? next.parties : data.parties,
+      }
+      setData(merged)
+      onChange(merged)
+      dispatchPaymentsChanged(kind)
+      const total = refunds.reduce((s, r) => s + r.amount, 0)
+      setMsg(
+        `${editingId ? 'Refund updated' : 'Refund saved'}: ₹${money(total)} ${
+          kind === 'supplier' ? 'paid back by the supplier' : 'paid to the customer'
+        }.`,
+      )
+      clearForm()
+      return null
+    } catch (e) {
+      const why = e instanceof Error ? e.message : String(e)
+      setErr(why)
+      return why
+    }
   }
 
   async function exportReport(format: 'csv' | 'pdf') {
@@ -1999,6 +2317,7 @@ export function PaymentPanel({
   async function save(): Promise<string | null> {
     setErr('')
     setMsg('')
+    if (payKind === 'refund') return saveRefundNow()
     const allocations = chosenAllocations()
     const ticked = allocations.reduce((s, a) => s + a.amount, 0)
     if (choosing && ticked > payAmount + 0.009) {
@@ -2138,7 +2457,7 @@ export function PaymentPanel({
       setData(merged)
       onChange(merged)
       dispatchPaymentsChanged(kind)
-      setMsg('Payment deleted.')
+      setMsg(refundOf(row) ? 'Refund deleted; the return has its credit back.' : 'Payment deleted.')
       if (editingId != null && Number(row.id) === editingId) clearForm()
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
@@ -2147,6 +2466,30 @@ export function PaymentPanel({
 
   function loadHistoryRow(r: Record<string, unknown>) {
     const id = Number(r.id || 0)
+    const ref = refundOf(r)
+    if (ref && id > 0) {
+      // A refund opens in "Refund a return" with its one return ticked.
+      clearForm()
+      setPayKind('refund')
+      setParty(String(r.party ?? ''))
+      setPartyId(null)
+      setDate(String(r.date ?? todayLocal()))
+      setRefundMode(/online/i.test(String(r.mode ?? '')) ? 'online' : 'cash')
+      // customer refunds keep "Refund SR1-3 · note"; only the shop's own words go back in the box
+      const n = String(r.note ?? '')
+      const lead = `Refund ${ref.return_no}`
+      setNote(n.startsWith(lead) ? n.slice(lead.length).replace(/^\s*·\s*/, '') : n)
+      setRefundTicks({ [ref.return_id]: Math.abs(Number(r.amount || 0)).toFixed(2) })
+      setEditingReturn(ref.return_id)
+      setEditingId(id)
+      setEditHint(`Editing refund #${id} (${ref.return_no}). Save updates this row.`)
+      return
+    }
+    if (payKind === 'refund') {
+      setRefundTicks({})
+      setEditingReturn(null)
+      setPayKind('payment')
+    }
     setParty(String(r.party ?? ''))
     // A history row keeps the party's NAME, never its id, so there is no click
     // to honour here -- let the name resolve on its own.
@@ -2185,8 +2528,47 @@ export function PaymentPanel({
         {kind === 'supplier' ? 'Supplier Payment' : 'Customer Payment'}
       </PanelTitle>
       <div className="iset-form-frame">
-        <Frame title={editingId ? `Edit payment #${editingId}` : 'New payment'}>
+        <Frame
+          title={
+            payKind === 'refund'
+              ? editingId
+                ? `Edit refund #${editingId}`
+                : 'Refund a return'
+              : editingId
+                ? `Edit payment #${editingId}`
+                : 'New payment'
+          }
+        >
           <Note>F5 / Ctrl+G saves payment (button below)</Note>
+          <div>
+            <div className="pl-kind" role="radiogroup" aria-label="Payment kind">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={payKind === 'payment'}
+                className={payKind === 'payment' ? 'on' : undefined}
+                onClick={() => switchKind('payment')}
+              >
+                Payment
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={payKind === 'refund'}
+                className={payKind === 'refund' ? 'on' : undefined}
+                onClick={() => switchKind('refund')}
+              >
+                Refund a return
+              </button>
+            </div>
+            {payKind === 'refund' ? (
+              <span className="pl-kind-note">
+                {kind === 'supplier'
+                  ? 'The supplier pays us back for a return.'
+                  : 'We pay the customer back for a return.'}
+              </span>
+            ) : null}
+          </div>
           {editHint ? <p className="iset-callout">{editHint}</p> : null}
           <div className="iset-pay-top">
             <BarField label={kind === 'supplier' ? 'Supplier' : 'Customer'}>
@@ -2209,6 +2591,7 @@ export function PaymentPanel({
                   // same-named parties apart no longer describes this text.
                   setPartyId(null)
                   setTicks({})
+                  setRefundTicks({})
                 }}
                 onPick={(it) => {
                   setParty(it.label)
@@ -2216,9 +2599,10 @@ export function PaymentPanel({
                   setPartyId(id)
                   // another party's bills are not this one's
                   setTicks({})
+                  setRefundTicks({})
                   setAmountTyped(false)
                   const p = data.parties.find((x) => x.id === id)
-                  if (p && kind === 'supplier' && p.due > 0) {
+                  if (p && kind === 'supplier' && p.due > 0 && payKind === 'payment') {
                     setAmount(p.due.toFixed(2))
                   }
                 }}
@@ -2228,7 +2612,18 @@ export function PaymentPanel({
               <span>Outstanding due</span>
               <strong>₹{money(selectedDue)}</strong>
             </div>
-            {party.trim() ? (
+            {payKind === 'refund' ? (
+              party.trim() ? (
+                <div className="iset-pay-due pl-credit-box">
+                  <span>Return credit open</span>
+                  <strong>₹{money(refundOpenTotal)}</strong>
+                </div>
+              ) : (
+                <span className="iset-hint">
+                  Pick the {kind === 'supplier' ? 'supplier' : 'customer'} to see its returns.
+                </span>
+              )
+            ) : party.trim() ? (
               <BarField label="Which bills does this pay?">
                 <select
                   className="settings-input"
@@ -2245,7 +2640,78 @@ export function PaymentPanel({
               </span>
             )}
           </div>
-          {billMode === 'choose' && party.trim() ? (
+          {payKind === 'refund' && party.trim() ? (
+            !refundSupported ? (
+              <Note>Online, refund a return from the Returns page; refunds here work in Offline / offline-first.</Note>
+            ) : (
+              <>
+                {refundErr ? <p className="iset-callout warn">{refundErr}</p> : null}
+                <div className="iset-table-wrap">
+                  <table className="settings-table">
+                    <thead>
+                      <tr>
+                        <th style={{ width: 28 }} />
+                        <th>Return No</th>
+                        <th>Date</th>
+                        <th>{kind === 'supplier' ? 'Purchase' : 'Bill'}</th>
+                        <th>Medicines</th>
+                        <th className="num">Credit left</th>
+                        <th className="num">Refund</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {refundShown.map((r) => {
+                        const on = refundTicks[r.return_id] != null
+                        return (
+                          <tr key={r.return_id} className={on ? 'row-selected' : undefined}>
+                            <td>
+                              <input
+                                type="checkbox"
+                                checked={on}
+                                aria-label={`Refund ${r.return_no}`}
+                                onChange={(e) => tickReturn(r, e.target.checked)}
+                              />
+                            </td>
+                            <td>{r.return_no}</td>
+                            <td>{r.return_date}</td>
+                            <td>{shortNo(r.bill_no) || '—'}</td>
+                            <td className="wrap">
+                              <span className="pl-items">{returnItemsText(r.items) || '—'}</span>
+                            </td>
+                            <td className="num">{money(r.left)}</td>
+                            <td className="num">
+                              <input
+                                className="settings-input iset-cell-input"
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                disabled={!on}
+                                value={on ? refundTicks[r.return_id] : ''}
+                                onChange={(e) => setRefundAmount(r, e.target.value)}
+                              />
+                            </td>
+                          </tr>
+                        )
+                      })}
+                      {!refundShown.length ? (
+                        <EmptyRow cols={7}>
+                          {editingReturn != null
+                            ? 'This refund was made with the return itself (settled in cash / online); change it on the Returns page, or delete it here.'
+                            : 'No return of this party has credit left to refund.'}
+                        </EmptyRow>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+                {refundTotal > 0.009 ? (
+                  <Note>
+                    Refund ₹{money(refundTotal)} {kind === 'supplier' ? 'comes back from the supplier' : 'goes to the customer'}
+                  </Note>
+                ) : null}
+              </>
+            )
+          ) : null}
+          {payKind === 'payment' && billMode === 'choose' && party.trim() ? (
             !billsSupported ? (
               <Note>Online, a payment clears the oldest bills first; bills can be chosen in Offline / offline-first.</Note>
             ) : (
@@ -2313,7 +2779,42 @@ export function PaymentPanel({
               </>
             )
           ) : null}
-          <div className="iset-pay-fields">
+          {payKind === 'refund' ? (
+            <div className="iset-pay-fields">
+              <BarField label="Mode">
+                <select
+                  className="settings-input"
+                  value={refundMode}
+                  onChange={(e) => setRefundMode(e.target.value === 'online' ? 'online' : 'cash')}
+                >
+                  <option value="cash">Cash</option>
+                  <option value="online">Online</option>
+                </select>
+              </BarField>
+              <BarField label="Date">
+                <input
+                  className="settings-input"
+                  type="date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                />
+              </BarField>
+              {kind === 'customer' ? (
+                <BarField label="Note">
+                  <input
+                    className="settings-input"
+                    value={note}
+                    placeholder="Saved after “Refund SR…”"
+                    onChange={(e) => setNote(e.target.value)}
+                  />
+                </BarField>
+              ) : null}
+            </div>
+          ) : null}
+          <div
+            className="iset-pay-fields"
+            style={payKind === 'refund' ? { display: 'none' } : undefined}
+          >
             {kind === 'supplier' ? (
               <>
                 <BarField label="Amount" className="amount">
@@ -2394,7 +2895,15 @@ export function PaymentPanel({
           </div>
           <div className="settings-savebar">
             <SaveBtn
-              label={editingId ? 'Update Payment' : 'Save Payment'}
+              label={
+                payKind === 'refund'
+                  ? editingId
+                    ? 'Update Refund'
+                    : 'Save Refund'
+                  : editingId
+                    ? 'Update Payment'
+                    : 'Save Payment'
+              }
               onClick={save}
             />
             {editingId ? (
@@ -2447,8 +2956,22 @@ export function PaymentPanel({
                   }
                 >
                   <td>{String(r.date ?? '')}</td>
-                  <td>{String(r.party ?? '')}</td>
-                  <td className="num">{money(r.amount)}</td>
+                  <td>
+                    {refundOf(r) ? (
+                      <span className="pl-party-cell">
+                        {String(r.party ?? '')}
+                        <span
+                          className="iset-badge pl-refund"
+                          title={kind === 'supplier' ? 'The supplier paid us back for this return' : 'We paid the customer back for this return'}
+                        >
+                          Refund {refundOf(r)?.return_no}
+                        </span>
+                      </span>
+                    ) : (
+                      String(r.party ?? '')
+                    )}
+                  </td>
+                  <td className={`num${Number(r.amount || 0) < 0 ? ' pl-out' : ''}`}>{money(r.amount)}</td>
                   {kind === 'customer' ? (
                     <>
                       <td className="num">{money(r.cash)}</td>
@@ -2463,6 +2986,13 @@ export function PaymentPanel({
                   <td className="num">{r.due_after != null ? money(r.due_after) : '—'}</td>
                   <td className="wrap" style={{ minWidth: 160 }}>{clearedText(r)}</td>
                   <td className="act">
+                    <button
+                      type="button"
+                      className="iset-btn"
+                      onClick={() => setViewRow(r)}
+                    >
+                      View
+                    </button>
                     <button
                       type="button"
                       className="iset-btn"
@@ -2490,6 +3020,7 @@ export function PaymentPanel({
           </table>
         </div>
       </Frame>
+      {viewRow ? <PaymentDetailsDialog kind={kind} row={viewRow} onClose={() => setViewRow(null)} /> : null}
       <Frame title="Payment report — which bills each payment cleared">
         <div className="iset-bar" style={{ margin: 0 }}>
           <BarField label="From" className="date">
@@ -2650,13 +3181,14 @@ export function LedgerPanel({
     if (!data) return
     downloadCsv(
       `ledger-${kind}.csv`,
-      ['Date', 'Particulars', 'Debit', 'Credit', 'Balance'],
+      ['Date', 'Particulars', 'Debit', 'Credit', 'Balance', 'Cleared / Paid by'],
       data.rows.map((r) => [
         r.date,
         r.particulars,
         money(r.debit),
         money(r.credit),
         money(r.balance),
+        r.links || '',
       ]),
     )
   }
@@ -2782,7 +3314,14 @@ export function LedgerPanel({
                 {data.rows.map((r, i) => (
                   <tr key={i}>
                     <td>{r.date}</td>
-                    <td className="wrap">{r.particulars}</td>
+                    <td className="wrap">
+                      {r.particulars}
+                      {r.links ? (
+                        <div className={`pl-ledger-links${r.links.startsWith('Paid by') ? ' paid-by' : ''}`}>
+                          {r.links}
+                        </div>
+                      ) : null}
+                    </td>
                     <td className="num">{money(r.debit)}</td>
                     <td className="num">{money(r.credit)}</td>
                     <td className="num">{money(r.balance)}</td>

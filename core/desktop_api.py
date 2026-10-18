@@ -1094,6 +1094,38 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                     payment_id=_int("payment_id"),
                 ))
                 return
+            if path in ("/api/settings/payments/refund-returns", "/api/settings/payments/details"):
+                # "Refund a return" (core/return_refunds.py) and a payment row's View box
+                # (core/payment_details.py) on the Payment screen.
+                from urllib.parse import parse_qs
+
+                qs = parse_qs(urlparse(self.path).query)
+                conn = _db.get("conn")
+                if conn is None:
+                    _json_response(self, 503, {"error": "Database not open"})
+                    return
+
+                def _qnum(key: str) -> int:
+                    try:
+                        return int((qs.get(key) or ["0"])[0] or 0)
+                    except ValueError:
+                        return 0
+
+                kind_q = (qs.get("kind") or ["customer"])[0]
+                try:
+                    if path.endswith("/details"):
+                        from core.payment_details import payment_details
+
+                        out = payment_details(conn, kind_q, _qnum("id"))
+                    else:
+                        from core.return_refunds import refund_returns
+
+                        out = refund_returns(conn, kind_q, party=(qs.get("party") or [""])[0],
+                                             party_id=_qnum("party_id"), payment_id=_qnum("payment_id"))
+                    _json_response(self, 200, out)
+                except ValueError as exc:
+                    _json_response(self, 400, {"ok": False, "error": str(exc)})
+                return
             if path == "/api/settings/ledger":
                 from core.desktop_settings_service import get_ledger
                 from urllib.parse import parse_qs
@@ -2630,6 +2662,18 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 except ValueError as exc:
                     # A refusal the shop can act on ("The bills you ticked need ..."),
                     # said as it is, not as an engine failure.
+                    _json_response(self, 400, {"ok": False, "error": str(exc)})
+                return
+            if path in ("/api/settings/payments/refund",):
+                # "Refund a return": negative payments, one per ticked return.
+                if conn is None:
+                    _json_response(self, 503, {"error": "Database not open"})
+                    return
+                from core.return_refunds import save_refund
+
+                try:
+                    _json_response(self, 200, save_refund(conn, body))
+                except ValueError as exc:
                     _json_response(self, 400, {"ok": False, "error": str(exc)})
                 return
             if path in ("/api/settings/payments/delete",):

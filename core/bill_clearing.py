@@ -199,7 +199,12 @@ def clear_bills(bills: list[dict], credits: list[dict], *, overpay_joins: bool =
                 s["left"] = r2(s["left"] - take)
             if s["left"] <= 0.009:
                 qi += 1
-    return {"bills": result, "applied": applied}
+    # What each credit still has after everything above (its refunds taken off as rule 3's
+    # attribution takes them): the open part of a return (core/return_credit.open_returns).
+    # Not part of the shared vectors; the server's result has no such key.
+    left = [{"credit_kind": s["kind"], "credit_id": s["id"], "left": r2(s["left"])}
+            for s in queue if s["kind"] in ("payment", "return") and s["left"] > 0.009]
+    return {"bills": result, "applied": applied, "left": left}
 
 
 def _attribute_queue(sources: list[dict]) -> list[dict]:
@@ -349,7 +354,7 @@ def party_ledgers(
 
 def party_ledger(conn: sqlite3.Connection, kind: str, party_id: int, **kw) -> dict:
     return party_ledgers(conn, kind, [party_id], **kw).get(
-        int(party_id), {"bills": [], "credits": [], "result": {"bills": [], "applied": []}})
+        int(party_id), {"bills": [], "credits": [], "result": {"bills": [], "applied": [], "left": []}})
 
 
 def open_bills(conn: sqlite3.Connection, kind: str, party_id: int,

@@ -1,0 +1,128 @@
+/* Payment: "Refund a return", the payment View box, and the Ledger's second line
+ * ("Cleared: …" / "Paid by: …"), 18 Oct 2026. Rules: docs/SETTINGS_DESIGN.md.
+ * Only theme variables, so light and dark both work. */
+
+/* ── Payment kind: Payment | Refund a return ─────────────────────────────── */
+.pl-kind {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0;
+  margin: 0 0 10px;
+  border: 1px solid var(--accent-soft-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface);
+}
+.pl-kind > button {
+  height: var(--unit-h);
+  padding: 0 14px;
+  border: none;
+  border-right: 1px solid var(--accent-soft-border);
+  background: transparent;
+  color: var(--accent-dark);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pl-kind > button:last-child {
+  border-right: none;
+}
+.pl-kind > button:not(.on):hover {
+  background: var(--accent-soft);
+}
+.pl-kind > button.on {
+  background: var(--accent);
+  color: #fff;
+}
+.pl-kind-note {
+  margin-left: 10px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+/* The open return credit beside "Outstanding due". */
+.pl-credit-box > strong {
+  color: var(--success, var(--accent-dark));
+}
+
+/* The returned medicines under a return's number. */
+.pl-items {
+  display: block;
+  margin-top: 1px;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: normal;
+}
+
+/* ── History marks ───────────────────────────────────────────────────────── */
+.iset-badge.pl-refund {
+  margin-left: 0;
+  background: color-mix(in srgb, var(--warning) 16%, var(--surface));
+  color: color-mix(in srgb, var(--warning) 85%, var(--text-primary));
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
+}
+.pl-party-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+.settings-table td.num.pl-out {
+  color: var(--danger);
+}
+
+/* ── Payment View box ────────────────────────────────────────────────────── */
+.modal-card.pl-details-card {
+  width: min(640px, 96vw);
+  max-height: min(90vh, 720px);
+}
+.pl-details-card .modal-body {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pl-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px 14px;
+  margin: 0;
+}
+.pl-facts > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.pl-facts dt {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--text-secondary);
+}
+.pl-facts dd {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.pl-facts dd.num {
+  font-variant-numeric: tabular-nums;
+}
+.pl-left {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* ── Ledger: what cleared what, as a second line of Particulars ─────────── */
+.pl-ledger-links {
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-muted);
+  white-space: normal;
+}
+.pl-ledger-links.paid-by {
+  color: var(--text-secondary);
+}
