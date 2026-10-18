@@ -58,6 +58,8 @@ import {
   type RecoveredSale,
 } from './SalesDialogs'
 import { TwoStepMedicinePicker } from './TwoStepMedicinePicker'
+import { useBusinessMode } from '../wholesale/mode'
+import { WholesaleSalePage } from '../wholesale/WholesaleSalePage'
 import { RegularManagerDialog, RegularOfferDialog } from './RegularMedicinesDialog'
 import { ReturnTableRows, ReturnsPickDialog, returnsForScreen } from './billReturns'
 import { belowReturnedProblem } from './billLineRules'
@@ -360,7 +362,7 @@ function tabPayload(tab: SaleTab) {
   }
 }
 
-export function SalesPage({
+function RetailSalesPage({
   editSaleId = null,
   onEditConsumed,
   syncRefreshNonce = 0,
@@ -4233,4 +4235,15 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
       />
     </PageRoot>
   )
+}
+
+/** The Sales page: the retail bill as always, or -- in a store switched to wholesale
+ *  mode -- the wholesale tax invoice (desktop/src/wholesale). */
+export function SalesPage(props: Parameters<typeof RetailSalesPage>[0]) {
+  const mode = useBusinessMode()
+  // Wait for the first answer: the retail form would otherwise mount (and offer its
+  // unfinished bills) for a moment in a wholesale store.
+  if (mode.ready === false) return null
+  if (mode.isWholesale) return <WholesaleSalePage {...props} />
+  return <RetailSalesPage {...props} />
 }
