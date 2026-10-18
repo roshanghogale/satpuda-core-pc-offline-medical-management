@@ -342,26 +342,62 @@ def _sign_centred(settings) -> bool:
     return str(settings.get("signature_position") or "center").strip().lower() != "right"
 
 
+def _shop_name_fit(name: str) -> str:
+    """The shop's name sized to the signature box: an SVG whose text scales to the box's
+    width, so a long name shrinks instead of being cut (owner, 18 Oct 2026). A long name
+    of several words goes on two lines, split where the halves are most even."""
+    name = " ".join(str(name or "").upper().split())
+    if not name:
+        return ""
+    words = name.split(" ")
+    lines = [name]
+    if len(name) > 18 and len(words) > 1:
+        best = None
+        for i in range(1, len(words)):
+            a, b = " ".join(words[:i]), " ".join(words[i:])
+            score = max(len(a), len(b))
+            if best is None or score < best[0]:
+                best = (score, [a, b])
+        lines = best[1]
+    # Bold capitals (W, M, &) run up to ~0.75 em: the view box allows that and a margin,
+    # and the box scales it to fit, so the widest name never touches the box's sides.
+    width = max(len(s) for s in lines) * 7.6 + 8
+    height = 12 * len(lines)
+    texts = "".join(
+        f'<text x="50%" y="{10 + 12 * i}" text-anchor="middle">{esc(s)}</text>'
+        for i, s in enumerate(lines)
+    )
+    return (
+        f'<svg class="sign-shop sign-shop-{len(lines)}" viewBox="0 0 {width:.0f} {height}" preserveAspectRatio="xMidYMax meet" '
+        f'role="img" aria-label="{esc(name)}">{texts}</svg>'
+    )
+
+
 def _signature(ctx, settings) -> str:
     if not settings.get("show_signature", True):
         return ""
     sign_caption = (settings.get("signature_caption") or "SIGN OF Q.P.").strip()
-    # In the middle the box is narrow: no "For SHOP" line, the shop's name is on the bill's
-    # head anyway (owner, 18 Oct 2026).
+    # In the middle the box is narrow: no "For SHOP" line. Its foot carries the shop's name,
+    # sized to fit, in place of "SIGN OF Q.P.", and an uploaded signature covers the whole box
+    # over it -- signed by hand on the shop's name (owner, 18 Oct 2026).
     centred = _sign_centred(settings)
     shop = esc(ctx.store_name.upper())
-    # The uploaded signature sits in the gap left for a hand signature, between
-    # "For SHOP" and the caption (owner, 17 Oct 2026).
     sig_src = str(getattr(ctx, "signature_src", "") or "")
-    if sig_src.startswith("data:image/") and settings.get("print_signature_image", True):
+    signed = sig_src.startswith("data:image/") and settings.get("print_signature_image", True)
+    if centred:
+        img = f'<img class="sign-img-cover" src="{sig_src}" alt="">' if signed else ""
+        return f'<div class="sign-shop-box">{_shop_name_fit(ctx.store_name)}{img}</div>'
+    # The old style: the uploaded signature sits in the gap left for a hand signature,
+    # between "For SHOP" and the caption (owner, 17 Oct 2026).
+    if signed:
         return f"""
         <div class="sign-stack">
-        {"" if centred else f'<div class="for-shop for-shop-signed">For {shop}</div>'}
+        <div class="for-shop for-shop-signed">For {shop}</div>
         <div class="sign-img-wrap"><img class="sign-img" src="{sig_src}" alt=""></div>
         <div class="sign-label">{esc(sign_caption)}</div>
         </div>"""
     return f"""
-        {"" if centred else f'<div class="for-shop">For {shop}</div>'}
+        <div class="for-shop">For {shop}</div>
         <div class="sign-label">{esc(sign_caption)}</div>"""
 
 
@@ -1079,6 +1115,11 @@ def render_classic_html(ctx: BillContext, settings: Dict[str, Any] | None = None
     transform: rotate(180deg);
     transform-origin: center center;
   }}
+  /* The copy tag turns with the bill (owner, 18 Oct 2026): it stayed upright and so printed
+     above the turned bill's top edge, upside down to it. */
+  body.for-pdf-save.a5-pdf-one-top .band-a5p-top-copy .copy-tag-frame {{
+    transform: translate(-50%, -50%) rotate(180deg);
+  }}
   body.a5-pdf-one-a6 .bill-page {{
     justify-content: flex-start;
   }}
@@ -1692,6 +1733,38 @@ def render_classic_html(ctx: BillContext, settings: Dict[str, Any] | None = None
     justify-content: flex-end;
   }}
   .bottom-zone-one-row .signature-cell .sign-stack {{ height: 100%; }}
+  /* The middle box: the shop's name at its foot, never wider than the box, and the
+     uploaded signature over the whole box (transparent PNG), as if signed on the name. */
+  .sign-shop-box {{
+    position: relative;
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    min-height: 0;
+    height: 100%;
+  }}
+  .sign-shop {{
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: {9.5 * font_scale * 1.2:.2f}pt;
+    font-family: Arial, 'Segoe UI', Helvetica, sans-serif;
+    font-weight: 900;
+    font-size: 10px;
+    fill: #000;
+    position: relative;
+    z-index: 1;
+  }}
+  .sign-shop.sign-shop-2 {{ max-height: {2 * 8.8 * font_scale * 1.2:.2f}pt; }}
+  .sign-img-cover {{
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    z-index: 2;
+  }}
   .bottom-zone-one-row .totals-cell {{
     grid-column: auto;
     grid-row: auto;

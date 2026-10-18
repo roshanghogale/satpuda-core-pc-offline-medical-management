@@ -38,7 +38,9 @@ class StandardBill(unittest.TestCase):
         body = _standard()
         self.assertIn("bottom-zone-one-row", body)
         self.assertNotIn("For SATPUDA MEDICAL", body)
-        self.assertIn("SIGN OF Q.P.", body)
+        # the shop's name, sized to the box, in place of SIGN OF Q.P. (owner, 18 Oct 2026)
+        self.assertIn('class="sign-shop sign-shop-1"', body)
+        self.assertNotIn("SIGN OF Q.P.", body)
 
     def test_old_keeps_for_shop_on_the_right(self):
         body = _standard(signature_position="right")
