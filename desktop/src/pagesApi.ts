@@ -1308,6 +1308,10 @@ export type PurchaseLinePayload = {
   import_taxable?: number
   import_gst_amt?: number
   _preserve_line_totals?: boolean
+  /** Wholesale sale rates of the line, per pack, GST excluded (core/wholesale_rates.py). */
+  rate_a?: number | null
+  rate_b?: number | null
+  rate_c?: number | null
 }
 
 export type PurchaseCalcResult = {
