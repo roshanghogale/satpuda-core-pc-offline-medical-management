@@ -647,6 +647,7 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                             "/api/sync/status",
                             "/api/license/status",
                             "/api/voice/enabled",
+                            "/api/bill/signature-switch",
                             "/api/reports/gst",
                             "/api/reports/gst/export",
                             "/api/reports/gst/summary",
@@ -789,6 +790,12 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 from core.desktop_license_service import get_license_status
 
                 _json_response(self, 200, get_license_status())
+                return
+            if path == "/api/bill/signature-switch":
+                # Sales -> Tabs & Tools: the signature picture on bills, on / off.
+                from core.bill_signature_look import signature_switch
+
+                _json_response(self, 200, signature_switch())
                 return
             if path == "/api/voice/enabled":
                 # The admin panel's per-store voice switch (see core/voice_switch.py).
@@ -1766,6 +1773,11 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 action = path.rsplit("/", 1)[-1]
                 _json_response(self, 200, getattr(voice_pack, action)() if action != "start"
                                else voice_pack.start_service())
+                return
+            if path == "/api/bill/signature-switch":
+                from core.bill_signature_look import set_signature_switch
+
+                _json_response(self, 200, set_signature_switch(_read_json_body(self).get("on")))
                 return
             if path == "/api/prefs":
                 from core.desktop_ui_prefs import save_desktop_ui_prefs
