@@ -358,6 +358,7 @@ def _migrate_all(cur, conn):
     _migrate_customer_payments(cur)
     _migrate_payment_allocations(cur)
     _migrate_return_credit(cur)
+    _migrate_wholesale(cur)
     _migrate_suppliers(cur)
     _migrate_purchase_items_entry_paid(cur)
     _migrate_purchase_payment_split(cur)
@@ -1075,6 +1076,7 @@ def ensure_recent_columns(conn) -> None:
     cur = conn.cursor()
     _migrate_payment_allocations(cur)
     _migrate_return_credit(cur)
+    _migrate_wholesale(cur)
     conn.commit()
 
 
@@ -1085,6 +1087,16 @@ def _migrate_payment_allocations(cur):
             _alter_if_missing(cur, table, 'allocations', 'TEXT')
         except Exception as e:
             print(f"{table}.allocations migration: {e}")
+
+
+def _migrate_wholesale(cur):
+    """Wholesale mode columns (core/wholesale_schema.py)."""
+    try:
+        from core.wholesale_schema import ensure_wholesale_columns
+
+        ensure_wholesale_columns(cur.connection)
+    except Exception as e:
+        print(f"wholesale columns: {e}")
 
 
 def _migrate_return_credit(cur):
