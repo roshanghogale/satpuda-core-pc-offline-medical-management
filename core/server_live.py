@@ -1626,6 +1626,11 @@ def apply_server_doc(conn, collection: str, doc: dict) -> str:
                         "ON CONFLICT(name) DO UPDATE SET value=excluded.value",
                         (name, raw),
                     )
+                    if name.startswith("profile_bank_"):
+                        # The shop's bank details: the profile column (read first) follows.
+                        from core.pharmacy_profile_io import apply_bank_kv
+
+                        apply_bank_kv(conn, name, raw)
                     conn.commit()
                     return "applied"
                 except Exception as exc:

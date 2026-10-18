@@ -26,7 +26,22 @@ _PROFILE_KEYS = (
     "logo_path",
     "fssai_number",
     "show_fssai_on_bill",
+    "bank_name",
+    "bank_account_no",
+    "bank_ifsc",
+    "bank_branch",
 )
+
+# The shop's own bank details for the bill (owner, 18 Oct 2026), every store --
+# retail and wholesale -- in its own profile. Local columns on pharmacy_profile.
+# The store server's pharmacy_profiles table has no columns for them and drops
+# keys it does not know (syncService.upsertPharmacyProfile), so each value is
+# ALSO kept in the store's key/value settings under BANK_KV[key], which the
+# server stores as they are and hands to the store's other devices. Read: the
+# profile column first, the settings row second.
+BANK_KEYS = ("bank_name", "bank_account_no", "bank_ifsc", "bank_branch")
+BANK_KV_PREFIX = "profile_bank_"
+BANK_KV = {k: BANK_KV_PREFIX + k[len("bank_"):] for k in BANK_KEYS}
 
 _SIDECAR_NAME = "pharmacy_profile.json"
 _LOGO_NAME = "pharmacy_logo"
@@ -50,6 +65,10 @@ def _empty() -> dict[str, Any]:
         # An explicit False from a shop that actually unticked the box is kept,
         # because _normalize only overwrites when the key is present.
         "show_fssai_on_bill": True,
+        "bank_name": "",
+        "bank_account_no": "",
+        "bank_ifsc": "",
+        "bank_branch": "",
     }
 
 
@@ -129,7 +148,8 @@ CREATE TABLE IF NOT EXISTS pharmacy_profile (
     gstin TEXT, dl_number TEXT,
     gst_enabled INTEGER DEFAULT 1, logo_path TEXT,
     fssai_number TEXT, show_fssai_on_bill INTEGER DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    bank_name TEXT, bank_account_no TEXT, bank_ifsc TEXT, bank_branch TEXT
 )
 """
 
@@ -157,6 +177,9 @@ def _normalize(raw: Optional[dict[str, Any]]) -> dict[str, Any]:
             continue
         if k in ("gst_enabled", "show_fssai_on_bill"):
             out[k] = bool(raw.get(k))
+        elif k in BANK_KEYS:
+            text = " ".join(str(raw.get(k) or "").split())
+            out[k] = text.upper() if k == "bank_ifsc" else text
         else:
             out[k] = raw.get(k) or ""
     return out
@@ -431,9 +454,36 @@ def _load_from_conn(conn) -> Optional[dict[str, Any]]:
             "FROM pharmacy_profile LIMIT 1"
         ).fetchone()
         out = _row_to_profile(row)
-        return out if _usable(out) else None
+        if not _usable(out):
+            return None
+        out.update(_bank_columns(conn))
+        return out
     except Exception:
         return None
+
+
+def _bank_columns(conn) -> dict[str, str]:
+    """The bank columns of this store's profile row; blanks where a column is missing.
+
+    Read on their own: a store file from an older build (or the phone) has no
+    such columns, and that must not lose the rest of the profile.
+    """
+    out = {k: "" for k in BANK_KEYS}
+    if conn is None:
+        return out
+    try:
+        have = {r[1] for r in conn.execute("PRAGMA table_info(pharmacy_profile)")}
+        cols = [k for k in BANK_KEYS if k in have]
+        if not cols:
+            return out
+        row = conn.execute(
+            f"SELECT {', '.join(cols)} FROM pharmacy_profile ORDER BY id LIMIT 1"
+        ).fetchone()
+        for k, v in zip(cols, row or ()):
+            out[k] = str(v or "").strip()
+    except Exception as exc:
+        log.debug("bank columns: %s", exc)
+    return out
 
 
 def _load_from_db_file(path: str) -> Optional[dict[str, Any]]:
@@ -511,6 +561,13 @@ def salvage_profile_from_db_path(db_path: str) -> Optional[dict[str, Any]]:
 def remember_local_profile(profile: dict[str, Any]) -> None:
     """Write AppData copy so folder-replace / Online :memory: still has the profile."""
     payload = _normalize(profile)
+    # A profile from the server never carries the bank details (no columns there);
+    # keep the ones this copy already had instead of blanking them.
+    if any(k not in (profile or {}) for k in BANK_KEYS):
+        kept = _read_sidecar() or {}
+        for k in BANK_KEYS:
+            if k not in (profile or {}):
+                payload[k] = str(kept.get(k) or "")
     payload["logo_path"] = _keep_logo_in_appdata(str(payload.get("logo_path") or ""))
     _write_sidecar(payload)
 
@@ -564,7 +621,143 @@ def fetch_profile_from_server() -> Optional[dict[str, Any]]:
 
 def load_pharmacy_profile(conn=None) -> dict[str, Any]:
     """Online: server (required). Offline: local SQLite."""
-    return _repair_logo_path(_apply_fssai_legacy_default(_load_pharmacy_profile(conn)))
+    return _with_bank(
+        _repair_logo_path(_apply_fssai_legacy_default(_load_pharmacy_profile(conn))),
+        conn,
+    )
+
+
+# -- bank details: profile columns first, the store's settings rows second --------
+
+def _bank_kv_names() -> tuple[str, ...]:
+    return tuple(BANK_KV[k] for k in BANK_KEYS)
+
+
+def _server_bank_kv() -> Optional[dict[str, str]]:
+    """Online: the store's profile_bank_* rows from the server (cached), None if unreachable."""
+    try:
+        from core.store_images import _kv_rows_cached
+
+        rows = _kv_rows_cached(_bank_kv_names())
+    except Exception as exc:
+        log.debug("bank kv fetch: %s", exc)
+        return None
+    if rows is None:
+        return None
+    return {
+        str(r.get("name") or ""): str(r.get("value") if r.get("value") is not None else "")
+        for r in rows
+        if str(r.get("name") or "") in BANK_KV.values()
+    }
+
+
+def _forget_server_bank_kv() -> None:
+    try:
+        from core import store_images as si
+
+        with si._lock:
+            si._kv_list_cache.pop((si._store_key(), _bank_kv_names()), None)
+    except Exception:
+        pass
+
+
+def bank_from_kv(conn=None) -> dict[str, Optional[str]]:
+    """The bank details kept in the store's settings rows: {bank_key: value or None}.
+
+    None means no such row (not "blank"). Online the server's rows win over this
+    PC's copy, because the server is where the other devices' saves land.
+    """
+    rows: dict[str, str] = {}
+    if conn is not None:
+        try:
+            for name, value in conn.execute(
+                "SELECT name, value FROM settings WHERE name LIKE ?",
+                (BANK_KV_PREFIX + "%",),
+            ).fetchall():
+                rows[str(name)] = str(value or "")
+        except Exception:
+            pass
+    if _is_online():
+        server = _server_bank_kv()
+        if server:
+            rows.update(server)
+    return {k: (rows[BANK_KV[k]].strip() if BANK_KV[k] in rows else None) for k in BANK_KEYS}
+
+
+def _with_bank(profile: dict[str, Any], conn=None) -> dict[str, Any]:
+    """Fill the bank details the profile columns do not have from the settings rows."""
+    if not isinstance(profile, dict):
+        return profile
+    out = dict(profile)
+    for k in BANK_KEYS:
+        out[k] = str(out.get(k) or "").strip()
+    if all(out[k] for k in BANK_KEYS):
+        return out
+    kv = bank_from_kv(conn)
+    for k in BANK_KEYS:
+        if not out[k] and kv.get(k):
+            out[k] = str(kv[k])
+    return out
+
+
+def _mirror_bank_to_kv(conn, payload: dict[str, Any]) -> None:
+    """Keep the four bank values in the store's settings rows too (they sync shop-wide).
+
+    Offline (offline-first) the settings table's trigger sends a profile_bank_* row
+    to the server; Online it goes straight up, as the wholesale margins do.
+    """
+    from core.desktop_settings_service import _setting_set
+
+    have = bank_from_kv(conn)
+    online = _is_online()
+    for k in BANK_KEYS:
+        value = str(payload.get(k) or "")
+        if have.get(k) == value:
+            continue
+        if have.get(k) is None and not value:
+            continue          # nothing kept and nothing to keep
+        if conn is not None:
+            _setting_set(conn, BANK_KV[k], value)
+        if online:
+            from core.server_live import push_settings_kv
+
+            push_settings_kv(BANK_KV[k], value)
+    if online:
+        _forget_server_bank_kv()
+
+
+def apply_bank_kv(conn, name: str, value: Any) -> bool:
+    """A profile_bank_* row pulled from the server: the profile column follows it.
+
+    The server never carries the bank columns on the profile itself, so without this
+    a change saved on another device would reach this PC's settings row but its
+    profile column -- which is read first -- would go on printing the old value.
+    """
+    key = next((k for k, n in BANK_KV.items() if n == str(name or "")), "")
+    if not key or conn is None:
+        return False
+    text = " ".join(str(value or "").split())
+    if key == "bank_ifsc":
+        text = text.upper()
+    try:
+        have = {r[1] for r in conn.execute("PRAGMA table_info(pharmacy_profile)")}
+        if not have:
+            return False
+        if key not in have:
+            conn.execute(f"ALTER TABLE pharmacy_profile ADD COLUMN {key} TEXT")
+        conn.execute(
+            f"UPDATE pharmacy_profile SET {key}=? "
+            "WHERE id=(SELECT id FROM pharmacy_profile ORDER BY id LIMIT 1)",
+            (text,),
+        )
+    except Exception as exc:
+        log.debug("apply bank kv %s: %s", name, exc)
+        return False
+    side = _read_sidecar()
+    if side and str(side.get(key) or "") != text:
+        side[key] = text
+        _write_sidecar(side)
+    return True
 
 
 def _load_pharmacy_profile(conn=None) -> dict[str, Any]:
@@ -629,6 +822,10 @@ def create_pharmacy_profile_table(conn) -> None:
         ("logo_path", "TEXT"),
         ("fssai_number", "TEXT"),
         ("show_fssai_on_bill", "INTEGER DEFAULT 0"),
+        ("bank_name", "TEXT"),
+        ("bank_account_no", "TEXT"),
+        ("bank_ifsc", "TEXT"),
+        ("bank_branch", "TEXT"),
     ):
         try:
             conn.execute(f"ALTER TABLE pharmacy_profile ADD COLUMN {col} {spec}")
@@ -653,21 +850,23 @@ def _write_sqlite_row(conn, payload: dict[str, Any], *, commit: bool = True) -> 
         payload["logo_path"],
         payload["fssai_number"],
         1 if payload["show_fssai_on_bill"] else 0,
-    )
+    ) + tuple(str(payload.get(k) or "") for k in BANK_KEYS)
     exists = conn.execute("SELECT id FROM pharmacy_profile LIMIT 1").fetchone()
     if exists:
         conn.execute(
             "UPDATE pharmacy_profile SET name=?, address=?, phone=?, email=?, "
             "gstin=?, dl_number=?, gst_enabled=?, logo_path=?, fssai_number=?, "
-            "show_fssai_on_bill=? WHERE id=?",
+            "show_fssai_on_bill=?, bank_name=?, bank_account_no=?, bank_ifsc=?, "
+            "bank_branch=? WHERE id=?",
             vals + (exists[0],),
         )
     else:
         conn.execute(
             "INSERT INTO pharmacy_profile "
             "(name, address, phone, email, gstin, dl_number, gst_enabled, "
-            "logo_path, fssai_number, show_fssai_on_bill) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "logo_path, fssai_number, show_fssai_on_bill, bank_name, "
+            "bank_account_no, bank_ifsc, bank_branch) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             vals,
         )
     if commit:
@@ -709,6 +908,13 @@ def save_pharmacy_profile(conn, profile: dict[str, Any]) -> None:
     payload = _normalize(p)
     if not str(payload.get("name") or "").strip():
         raise RuntimeError("Pharmacy name is required")
+    # A caller that does not mention the bank details (the classic window, a
+    # salvage, an older screen) is not clearing them: keep what the shop has.
+    if any(k not in p for k in BANK_KEYS):
+        kept = _with_bank(_bank_columns(conn), conn)
+        for k in BANK_KEYS:
+            if k not in p:
+                payload[k] = kept.get(k) or ""
     # What the shop pointed at BEFORE this save. Read first, deleted last: a
     # picked-a-new-logo save replaces the old copy, and the only safe order is
     # new file written, everything repointed, old copy removed.
@@ -753,6 +959,7 @@ def save_pharmacy_profile(conn, profile: dict[str, Any]) -> None:
 
         ensure_can_mutate()
         push_pharmacy_profile(payload)
+        _mirror_bank_to_kv(conn, payload)
         _empty_profile_cache = (time.time(), _active_store_key(), dict(payload))
         try:
             from core.sync_status import note_collection_change, note_last_sync
@@ -765,6 +972,7 @@ def save_pharmacy_profile(conn, profile: dict[str, Any]) -> None:
 
     if conn is None:
         raise RuntimeError("No database connection for pharmacy profile")
+    _mirror_bank_to_kv(conn, payload)
     try:
         conn.commit()
     except (OSError, sqlite3.Error):

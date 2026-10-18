@@ -736,6 +736,11 @@ export function SettingsPage({
           spoolerRunning={bundle.pharmacy?.spooler_running}
           saving={saving}
           onSave={(body) => save('pharmacy', body)}
+          upiId={String(salesBilling.upi_id ?? '')}
+          onOpenUpi={() => {
+            forcedRef.current = { section: 'upi_payment' }
+            setTabId('sales_billing')
+          }}
         />
       )
     }

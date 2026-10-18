@@ -64,6 +64,61 @@ type Props = {
   spoolerRunning?: boolean
   saving: boolean
   onSave: (body: Record<string, unknown>) => void
+  /** The shop's UPI ID (Sales & Billing -> UPI Payment QR), shown beside the bank details. */
+  upiId?: string
+  /** Opens Sales & Billing -> UPI Payment QR, where the UPI ID is kept. */
+  onOpenUpi?: () => void
+}
+
+/** Bill print keys that sit beside their own item in the Pharmacy Profile window
+ *  (owner, 18 Oct 2026), so Bill Fields does not offer them a second time. */
+export const PROFILE_WINDOW_BILL_KEYS = new Set([
+  'show_store_name',
+  'show_store_address',
+  'show_store_phone',
+  'show_store_email',
+  'show_store_gstin',
+  'show_store_dl',
+  'show_store_fssai',
+  'show_store_bank',
+  'print_signature_image',
+])
+
+/** A profile box with its label above it and its own "Show on bill" tick. */
+function ProfileField({
+  id,
+  label,
+  span,
+  show,
+  onShow,
+  children,
+}: {
+  id: string
+  label: string
+  span?: boolean
+  show?: boolean
+  onShow?: (v: boolean) => void
+  children: React.ReactNode
+}) {
+  return (
+    <div className={`ph-prof-field${span ? ' ph-span-all' : ''}`}>
+      <div className="ph-prof-head">
+        <label htmlFor={id}>{label}</label>
+        {onShow ? (
+          <label className="ph-show-bill" title="Print this on the bill">
+            <input
+              type="checkbox"
+              aria-label={`Show ${label} on bill`}
+              checked={Boolean(show)}
+              onChange={(e) => onShow(e.target.checked)}
+            />
+            <span>Show on bill</span>
+          </label>
+        ) : null}
+      </div>
+      {children}
+    </div>
+  )
 }
 
 /** Show the picture, not the path.
@@ -290,6 +345,8 @@ export function PharmacyPanel(props: Props) {
     spoolerRunning,
     saving,
     onSave,
+    upiId,
+    onOpenUpi,
   } = props
 
   const [confirmPwd, setConfirmPwd] = useState('')
@@ -306,11 +363,23 @@ export function PharmacyPanel(props: Props) {
 
   const sizeModes = asSizeModes(opts.bill_size_modes)
   const defaults = opts.bill_field_defaults || {}
-  const groups =
+  // The store-header ticks and the signature picture live in the Pharmacy
+  // Profile window beside their own item; nothing is offered in two places.
+  const groups = (
     opts.bill_field_groups ||
     (opts.bill_fields?.length
       ? [{ group: 'Show on Printed Bill', items: opts.bill_fields }]
       : [])
+  )
+    .map((g) => ({
+      ...g,
+      items: g.items.filter((f) => !PROFILE_WINDOW_BILL_KEYS.has(f.key)),
+    }))
+    .filter((g) => g.items.length > 0)
+  const billOn = (key: string) =>
+    Boolean(bill[key] !== undefined ? bill[key] : defaults[key] ?? true)
+  const setBillKey = (key: string, v: boolean) =>
+    setBill((b) => ({ ...b, [key]: v }))
 
   const isDotMatrix = String(bill.bill_size_mode || 'normal') === 'dot_matrix'
   const logoPath = String(profile.logo_path ?? '')
@@ -517,116 +586,159 @@ export function PharmacyPanel(props: Props) {
   }
 
   /* ─── Profile ─────────────────────────────────────────────────────────── */
-  if (sectionId === 'profile') {
+  // One window for the shop's details AND how each one shows on the bill (owner,
+  // 18 Oct 2026: "why a separate Bill Logo section? choose the logo and where it
+  // goes in the profile window itself"). Every item carries its own "Show on
+  // bill" tick, bound to the same bill print keys Bill Fields used to hold; the
+  // old Bill Logo nav entry opens this window.
+  if (sectionId === 'profile' || sectionId === 'bill_logo') {
+    const text = (key: string) => String(profile[key] ?? '')
+    const setText = (key: string) => (
+      e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+    ) => setProfile((p) => ({ ...p, [key]: e.target.value }))
+    // FSSAI has two switches the templates both need (the profile's own flag and
+    // the bill's store-header key). One tick here sets both.
+    const fssaiOn = Boolean(profile.show_fssai_on_bill) && billOn('show_store_fssai')
+    const logoTop = Boolean(bill.show_logo_top_right)
+    const logoMark = Boolean(bill.show_logo_center_watermark)
+    const logoPlace = logoTop && logoMark ? 'both' : logoTop ? 'top_right' : logoMark ? 'watermark' : 'none'
+    const setLogoPlace = (v: string) =>
+      setBill((b) => ({
+        ...b,
+        show_logo_top_right: v === 'top_right' || v === 'both',
+        show_logo_center_watermark: v === 'watermark' || v === 'both',
+      }))
     return (
       <>
         <PanelTitle>Pharmacy Profile</PanelTitle>
         <Frame title="Pharmacy Information">
-          {/* Two columns, label above the box: seven label | box rows made a
-              long ladder (owner's screenshots, 18 Oct 2026). */}
+          {/* Two columns, label above the box, "Show on bill" beside the label. */}
           <div className="ph-grid-2">
-            <div className="ph-span-all">
-              <Field label="Pharmacy Name">
-                <input
-                  className="settings-input"
-                  value={String(profile.name ?? '')}
-                  onChange={(e) =>
-                    setProfile((p) => ({ ...p, name: e.target.value }))
-                  }
-                />
-              </Field>
-            </div>
-            <div className="ph-span-all">
-              <Field label="Address">
-                <textarea
-                  className="settings-input settings-textarea"
-                  rows={3}
-                  value={String(profile.address ?? '')}
-                  onChange={(e) =>
-                    setProfile((p) => ({ ...p, address: e.target.value }))
-                  }
-                />
-              </Field>
-            </div>
-            <Field label="Phone">
-              <input
-                className="settings-input"
-                value={String(profile.phone ?? '')}
-                onChange={(e) =>
-                  setProfile((p) => ({ ...p, phone: e.target.value }))
-                }
+            <ProfileField
+              id="ph-name"
+              label="Pharmacy Name"
+              span
+              show={billOn('show_store_name')}
+              onShow={(v) => setBillKey('show_store_name', v)}
+            >
+              <input id="ph-name" className="settings-input" value={text('name')} onChange={setText('name')} />
+            </ProfileField>
+            <ProfileField
+              id="ph-address"
+              label="Address"
+              span
+              show={billOn('show_store_address')}
+              onShow={(v) => setBillKey('show_store_address', v)}
+            >
+              <textarea
+                id="ph-address"
+                className="settings-input settings-textarea"
+                rows={3}
+                value={text('address')}
+                onChange={setText('address')}
               />
-            </Field>
-            <Field label="Email">
+            </ProfileField>
+            <ProfileField
+              id="ph-phone"
+              label="Phone"
+              show={billOn('show_store_phone')}
+              onShow={(v) => setBillKey('show_store_phone', v)}
+            >
+              <input id="ph-phone" className="settings-input" value={text('phone')} onChange={setText('phone')} />
+            </ProfileField>
+            <ProfileField
+              id="ph-email"
+              label="Email"
+              show={billOn('show_store_email')}
+              onShow={(v) => setBillKey('show_store_email', v)}
+            >
+              <input id="ph-email" className="settings-input" value={text('email')} onChange={setText('email')} />
+            </ProfileField>
+            <ProfileField
+              id="ph-gstin"
+              label="GSTIN"
+              show={billOn('show_store_gstin')}
+              onShow={(v) => setBillKey('show_store_gstin', v)}
+            >
+              <input id="ph-gstin" className="settings-input" value={text('gstin')} onChange={setText('gstin')} />
+            </ProfileField>
+            <ProfileField
+              id="ph-dl"
+              label="DL Number"
+              show={billOn('show_store_dl')}
+              onShow={(v) => setBillKey('show_store_dl', v)}
+            >
+              <input id="ph-dl" className="settings-input" value={text('dl_number')} onChange={setText('dl_number')} />
+            </ProfileField>
+            <ProfileField
+              id="ph-fssai"
+              label="FSSAI Number"
+              show={fssaiOn}
+              onShow={(v) => {
+                setProfile((p) => ({ ...p, show_fssai_on_bill: v }))
+                setBillKey('show_store_fssai', v)
+              }}
+            >
               <input
+                id="ph-fssai"
                 className="settings-input"
-                value={String(profile.email ?? '')}
-                onChange={(e) =>
-                  setProfile((p) => ({ ...p, email: e.target.value }))
-                }
+                value={text('fssai_number')}
+                onChange={setText('fssai_number')}
               />
-            </Field>
-            <Field label="GSTIN">
-              <input
-                className="settings-input"
-                value={String(profile.gstin ?? '')}
-                onChange={(e) =>
-                  setProfile((p) => ({ ...p, gstin: e.target.value }))
-                }
-              />
-            </Field>
-            <Field label="DL Number">
-              <input
-                className="settings-input"
-                value={String(profile.dl_number ?? '')}
-                onChange={(e) =>
-                  setProfile((p) => ({ ...p, dl_number: e.target.value }))
-                }
-              />
-            </Field>
-            <Field label="FSSAI Number">
-              <input
-                className="settings-input"
-                value={String(profile.fssai_number ?? '')}
-                onChange={(e) =>
-                  setProfile((p) => ({ ...p, fssai_number: e.target.value }))
-                }
-              />
-            </Field>
+            </ProfileField>
           </div>
         </Frame>
 
-        <Frame title="Show on Printed Bill">
-          <div className="settings-check-grid-3">
-            <Check
-              label="Print FSSAI on sale bills"
-              checked={Boolean(profile.show_fssai_on_bill)}
-              onChange={(v) =>
-                setProfile((p) => ({ ...p, show_fssai_on_bill: v }))
-              }
-            />
-            <Check
-              label="Print GST amount on sale bills"
-              checked={Boolean(
-                bill.show_gst !== undefined ? bill.show_gst : true,
-              )}
-              onChange={(v) => setBill((b) => ({ ...b, show_gst: v }))}
-            />
-            <Check
-              label="Print applied discount on sale bills"
-              checked={Boolean(
-                bill.show_discount !== undefined ? bill.show_discount : true,
-              )}
-              onChange={(v) => setBill((b) => ({ ...b, show_discount: v }))}
-            />
+        <Frame title="Bank Details">
+          <div className="ph-grid-2">
+            <ProfileField id="ph-bank-name" label="Bank Name">
+              <input
+                id="ph-bank-name"
+                className="settings-input"
+                value={text('bank_name')}
+                onChange={setText('bank_name')}
+              />
+            </ProfileField>
+            <ProfileField id="ph-bank-ac" label="A/c No.">
+              <input
+                id="ph-bank-ac"
+                className="settings-input"
+                value={text('bank_account_no')}
+                onChange={setText('bank_account_no')}
+              />
+            </ProfileField>
+            <ProfileField id="ph-bank-ifsc" label="IFSC">
+              <input
+                id="ph-bank-ifsc"
+                className="settings-input"
+                style={{ textTransform: 'uppercase' }}
+                value={text('bank_ifsc')}
+                onChange={setText('bank_ifsc')}
+              />
+            </ProfileField>
+            <ProfileField id="ph-bank-branch" label="Branch">
+              <input
+                id="ph-bank-branch"
+                className="settings-input"
+                value={text('bank_branch')}
+                onChange={setText('bank_branch')}
+              />
+            </ProfileField>
           </div>
-          <h4>GST</h4>
-          <div className="settings-check-grid-3">
+          <div className="ph-bank-foot">
             <Check
-              label="Calculate GST on sale items"
-              checked={Boolean(profile.gst_enabled)}
-              onChange={(v) => setProfile((p) => ({ ...p, gst_enabled: v }))}
+              label="Show bank details on bill"
+              checked={billOn('show_store_bank')}
+              onChange={(v) => setBillKey('show_store_bank', v)}
             />
+            <span className="ph-upi">
+              UPI ID: <b>{upiId || 'not set'}</b>
+              {onOpenUpi ? (
+                <button type="button" className="ph-link-btn" onClick={onOpenUpi}>
+                  {upiId ? 'Change' : 'Set'} under UPI Payment QR
+                </button>
+              ) : null}
+            </span>
           </div>
         </Frame>
 
@@ -643,7 +755,7 @@ export function PharmacyPanel(props: Props) {
                 // is still live, and an await spends it.
                 onClick={() => logoInputRef.current?.click()}
               >
-                Choose Image
+                {logoPath ? 'Change Logo' : 'Choose Image'}
               </button>
               {logoPath ? (
                 <button
@@ -667,7 +779,73 @@ export function PharmacyPanel(props: Props) {
                 }}
               />
             </div>
-            <Note>Where it prints is set under Bill Logo.</Note>
+            <div className="ph-fields ph-logo-place">
+              <Field label="Where on the bill">
+                <select
+                  className="settings-input"
+                  value={logoPlace}
+                  onChange={(e) => setLogoPlace(e.target.value)}
+                >
+                  <option value="none">Not printed</option>
+                  <option value="top_right">Small, top right</option>
+                  <option value="watermark">Watermark behind medicines</option>
+                  <option value="both">Both</option>
+                </select>
+              </Field>
+              {logoTop ? (
+                <>
+                  <Field label="Top margin (mm)">
+                    <input
+                      className="settings-input ph-num"
+                      type="number"
+                      step={0.5}
+                      min={0}
+                      max={25}
+                      value={Number(bill.logo_top_right_margin_top ?? 1.2)}
+                      onChange={(e) =>
+                        setBill((b) => ({
+                          ...b,
+                          logo_top_right_margin_top: Number(e.target.value),
+                        }))
+                      }
+                    />
+                  </Field>
+                  <Field label="Right margin (mm)">
+                    <input
+                      className="settings-input ph-num"
+                      type="number"
+                      step={0.5}
+                      min={0}
+                      max={25}
+                      value={Number(bill.logo_top_right_margin_right ?? 1.5)}
+                      onChange={(e) =>
+                        setBill((b) => ({
+                          ...b,
+                          logo_top_right_margin_right: Number(e.target.value),
+                        }))
+                      }
+                    />
+                  </Field>
+                </>
+              ) : null}
+              {logoMark ? (
+                <Field label="Watermark transparency %">
+                  <input
+                    className="settings-input ph-num"
+                    type="number"
+                    min={5}
+                    max={80}
+                    value={Number(bill.logo_watermark_opacity ?? 15)}
+                    onChange={(e) =>
+                      setBill((b) => ({
+                        ...b,
+                        logo_watermark_opacity: Number(e.target.value),
+                      }))
+                    }
+                  />
+                </Field>
+              ) : null}
+            </div>
           </Frame>
 
           <Frame title="Bill Signature">
@@ -723,15 +901,30 @@ export function PharmacyPanel(props: Props) {
               />
             </div>
             {sigMsg ? <Note>{sigMsg}</Note> : null}
-            <Note>Use a PNG with a transparent background.</Note>
+            <Check
+              label="Show signature picture on bill"
+              checked={billOn('print_signature_image')}
+              onChange={(v) => setBillKey('print_signature_image', v)}
+            />
             <Help>
-              It prints in the signature box (between &quot;For{' '}
-              {String(profile.name || 'shop')}&quot; and the caption) on every
-              standard bill, not on dot matrix slips. Turn it off for a while
-              with &quot;Signature picture&quot; under Show on Printed Bill.
+              Use a PNG with a transparent background. It prints in the
+              signature box (between{' '}
+              &quot;For {String(profile.name || 'shop')}&quot; and the caption)
+              on every standard bill, not on dot matrix slips. Untick it to
+              leave the box for a hand signature for a while.
             </Help>
           </Frame>
         </div>
+
+        {/* The GST amount and discount rows are bill totals: they are ticked
+            under Bill Fields -> Totals and footer, not here as well. */}
+        <Frame title="GST">
+          <Check
+            label="Calculate GST on sale items"
+            checked={Boolean(profile.gst_enabled)}
+            onChange={(v) => setProfile((p) => ({ ...p, gst_enabled: v }))}
+          />
+        </Frame>
 
         <Frame title="App Login">
           <Note>
@@ -780,8 +973,8 @@ export function PharmacyPanel(props: Props) {
           </Note>
         </Frame>
 
-        {/* One Save for everything on this page (profile, bill checks, login),
-            so it sits under the last frame, with the password error beside it. */}
+        {/* One Save for everything in this window: the profile (bank details
+            too), every "Show on bill" tick, the logo's place, and the login. */}
         <SaveBar
           label="Save Profile"
           saving={saving}
@@ -909,9 +1102,9 @@ export function PharmacyPanel(props: Props) {
             </Note>
           )}
           <Help>
-            Store header, Invoice header, Medicine table, and Totals/footer
-            match the classic Pharmacy Profile → Bill Fields checkboxes (same
-            saved keys).
+            The shop&apos;s own details (name, address, phone, email, GSTIN, DL,
+            FSSAI, bank details), the logo and the signature picture are shown
+            or hidden in Pharmacy Profile, beside each item.
           </Help>
         </Frame>
         <SaveBar
@@ -973,96 +1166,6 @@ export function PharmacyPanel(props: Props) {
             Uncheck “Print on bill” to hide Shree Ganeshay Namah. Same option is
             under Bill Fields → Invoice header.
           </Note>
-        </Frame>
-        <SaveBar
-          label="Save Bill Print Style"
-          saving={saving}
-          onClick={() => onSave({ bill })}
-        />
-      </>
-    )
-  }
-
-  /* ─── Bill Logo ───────────────────────────────────────────────────────── */
-  if (sectionId === 'bill_logo') {
-    return (
-      <>
-        <PanelTitle>Bill Logo</PanelTitle>
-        <Frame title="Bill Logo (from Pharmacy Profile)">
-          <Note>
-            Upload the logo image under Pharmacy Profile. You can enable one or
-            both positions.
-          </Note>
-          {logoPath ? <LogoPreview path={logoPath} stamp={logoStamp} /> : null}
-
-          <h4>Top right</h4>
-          <Check
-            label="Small logo — top right of invoice"
-            checked={Boolean(bill.show_logo_top_right)}
-            onChange={(v) =>
-              setBill((b) => ({ ...b, show_logo_top_right: v }))
-            }
-          />
-          <div className="ph-fields">
-            <Field label="Top margin (mm)">
-              <input
-                className="settings-input ph-num"
-                type="number"
-                step={0.5}
-                min={0}
-                max={25}
-                value={Number(bill.logo_top_right_margin_top ?? 1.2)}
-                onChange={(e) =>
-                  setBill((b) => ({
-                    ...b,
-                    logo_top_right_margin_top: Number(e.target.value),
-                  }))
-                }
-              />
-            </Field>
-            <Field label="Right margin (mm)">
-              <input
-                className="settings-input ph-num"
-                type="number"
-                step={0.5}
-                min={0}
-                max={25}
-                value={Number(bill.logo_top_right_margin_right ?? 1.5)}
-                onChange={(e) =>
-                  setBill((b) => ({
-                    ...b,
-                    logo_top_right_margin_right: Number(e.target.value),
-                  }))
-                }
-              />
-            </Field>
-          </div>
-
-          <h4>Watermark</h4>
-          <Check
-            label="Center watermark behind medicines"
-            checked={Boolean(bill.show_logo_center_watermark)}
-            onChange={(v) =>
-              setBill((b) => ({ ...b, show_logo_center_watermark: v }))
-            }
-          />
-          <div className="ph-fields">
-            <Field label="Watermark transparency %">
-              <input
-                className="settings-input ph-num"
-                type="number"
-                min={5}
-                max={80}
-                value={Number(bill.logo_watermark_opacity ?? 15)}
-                onChange={(e) =>
-                  setBill((b) => ({
-                    ...b,
-                    logo_watermark_opacity: Number(e.target.value),
-                  }))
-                }
-              />
-            </Field>
-          </div>
         </Frame>
         <SaveBar
           label="Save Bill Print Style"

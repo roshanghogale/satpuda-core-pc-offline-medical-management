@@ -46,6 +46,9 @@ DEFAULT_BILL_PRINT_SETTINGS = {
     "show_store_gstin": True,
     "show_store_dl": True,
     "show_store_fssai": True,
+    # The shop's bank details from the Pharmacy Profile (18 Oct 2026). Printed by the
+    # wholesale tax invoice (core.wholesale_sale.shop_profile) when the shop has them.
+    "show_store_bank": True,
     "show_blessing": True,
     "show_pay_mode": True,
     "show_bill_no": True,
@@ -199,6 +202,7 @@ BILL_PRINT_FIELD_OPTIONS = [
         ("show_store_gstin", "Store GSTIN"),
         ("show_store_dl", "Store DL number"),
         ("show_store_fssai", "Store FSSAI"),
+        ("show_store_bank", "Store bank details"),
     ]),
     ("Invoice header", [
         ("show_blessing", "Shree Ganeshay Namah / blessing line"),
