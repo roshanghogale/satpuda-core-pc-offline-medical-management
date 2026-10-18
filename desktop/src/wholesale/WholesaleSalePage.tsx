@@ -25,7 +25,9 @@ import {
   fetchSalesBillHint,
   printSalesBill,
   saveBillPdf,
+  type BillReturn,
   type MedicineBatch,
+  type OpenReturn,
 } from '../pagesApi'
 import { todayLocal } from '../localDate'
 import { showSavedFile } from '../savedFiles'
@@ -36,6 +38,7 @@ import { TwoStepMedicinePicker } from '../pages/TwoStepMedicinePicker'
 import { ModernCombo } from '../pages/ModernCombo'
 import { RowContextMenu } from '../pages/MedicineEditDialog'
 import { AlertDialog, type AlertState } from '../pages/SalesDialogs'
+import { ReturnTableRows, ReturnsPickDialog, returnsForScreen } from '../pages/billReturns'
 import {
   ActionBtn,
   CappedTableWrap,
@@ -50,6 +53,7 @@ import {
   buildWholesaleLine,
   calcWholesale,
   fetchParty,
+  fetchWholesaleOpenReturns,
   loadWholesale,
   saveWholesale,
   searchParties,
@@ -85,6 +89,14 @@ type Form = {
   editingBillNo: string
   /** The due this bill already put on the party (editing): not "previous" due. */
   editingOldDue: number
+  /** A NEW bill: the party's returns whose credit is not used yet (returnsFor = that party's
+   *  id), and the ticked ones -- settled in this bill as Return rows (core/return_credit.py),
+   *  as on the retail bill. */
+  openReturns?: OpenReturn[]
+  useReturns?: number[]
+  returnsFor?: number | null
+  /** A saved bill opened for edit: the returns already settled in it (shown, read only). */
+  billReturns?: BillReturn[]
 }
 
 const NAV = 'wholesale-sale'
@@ -138,6 +150,29 @@ function blankForm(title?: string): Form {
     editingBillNo: '',
     editingOldDue: 0,
   }
+}
+
+/** The returns this bill settles on save: only on a new bill, only for the party they were
+ *  offered for. */
+function formReturnIds(f: Form): number[] {
+  if (f.editingSaleId || !f.returnsFor || f.returnsFor !== f.partyId) return []
+  const open = new Set((f.openReturns || []).map((r) => r.return_id))
+  return (f.useReturns || []).filter((id) => open.has(id))
+}
+
+/** What the ticked returns still have, together (the most they can settle). */
+function formReturnsLeft(f: Form): number {
+  const ids = formReturnIds(f)
+  const sum = (f.openReturns || [])
+    .filter((r) => ids.includes(r.return_id))
+    .reduce((s, r) => s + (Number(r.left) || 0), 0)
+  return Math.round(sum * 100) / 100
+}
+
+/** What the returns already settled in a saved bill came to. */
+function savedReturnsTotal(f: Form): number {
+  if (!f.editingSaleId) return 0
+  return Math.round((f.billReturns || []).reduce((s, r) => s + (Number(r.amount) || 0), 0) * 100) / 100
 }
 
 function isDirty(f: Form) {
@@ -327,6 +362,41 @@ export function WholesaleSalePage({
     }
   }, [form.partyId])
 
+  // ── Return credit: the party's returns not used yet, settled in this bill (as retail) ──
+  const [returnsAsk, setReturnsAsk] = useState(false)
+  /** The party being asked about now, so a re-render does not ask twice. */
+  const returnsAskingRef = useRef<number | null>(null)
+  useEffect(() => {
+    const id = form.partyId
+    if (!id || form.editingSaleId || form.returnsFor === id) return
+    if (returnsAskingRef.current === id) return
+    returnsAskingRef.current = id
+    fetchWholesaleOpenReturns(id)
+      .then((r) => {
+        const list = r.ok && r.supported !== false ? r.returns || [] : []
+        // Every return ticked, on the tab(s) still billing this party.
+        setTabs((all) =>
+          all.map((f) =>
+            f.partyId === id && !f.editingSaleId && f.returnsFor !== id
+              ? { ...f, openReturns: list, useReturns: list.map((x) => x.return_id), returnsFor: id }
+              : f,
+          ),
+        )
+        const now = tabsRef.current[activeRef.current]
+        if (list.length && now?.partyId === id && !now.editingSaleId) setReturnsAsk(true)
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (returnsAskingRef.current === id) returnsAskingRef.current = null
+      })
+  }, [form.partyId, form.editingSaleId, form.returnsFor])
+
+  const closeReturnsAsk = (keep: boolean) => {
+    if (!keep) patch({ useReturns: [] })
+    setReturnsAsk(false)
+    window.setTimeout(() => medRef.current?.focus(), 0)
+  }
+
   // Live totals from the engine.
   const calcBody = useMemo(
     () => ({
@@ -337,6 +407,8 @@ export function WholesaleSalePage({
       payment_mode: form.paymentMode,
       cash_paid: num(form.cash),
       online_paid: num(form.online),
+      returns_total: formReturnsLeft(form) || undefined,
+      returns_settled: savedReturnsTotal(form) || undefined,
       items: form.items.map((it) => ({
         id: it.id,
         qty: num(it.qty),
@@ -397,6 +469,7 @@ export function WholesaleSalePage({
           editingSaleId: r.sale_id,
           editingBillNo: r.bill_no,
           editingOldDue: Number(r.due_amount) || 0,
+          billReturns: r.returns_in_bill || [],
         }
         const all = tabsRef.current
         const cur = all[activeRef.current]
@@ -612,6 +685,8 @@ export function WholesaleSalePage({
         invoice_mode: 'wholesale',
         customer_phone: form.phone.trim(),
         customer_address: form.address.trim(),
+        // the ticked returns, settled in this bill (core/return_credit.py)
+        apply_returns: formReturnIds(form).length ? formReturnIds(form) : undefined,
         buyer_dl: form.dl.trim(),
         transport: form.transport,
         lr_no: form.lrNo,
@@ -620,6 +695,12 @@ export function WholesaleSalePage({
       const res = await saveWholesale(body)
       if (!res.ok || !res.sale_id) {
         setError(res.error || 'The bill was not saved.')
+        // A ticked return was used elsewhere meanwhile: read the party's returns again.
+        if (res.code === 'returns_changed') {
+          setTabs((all) =>
+            all.map((f, i) => (i === savedTab ? { ...f, returnsFor: null, openReturns: [], useReturns: [] } : f)),
+          )
+        }
         return
       }
       const saved = { id: res.sale_id, billNo: res.bill_no || '' }
@@ -634,7 +715,12 @@ export function WholesaleSalePage({
         clearEntry()
         window.setTimeout(() => partyRef.current?.focus(), 0)
       }
-      setNotice(`Bill ${saved.billNo} saved (Rs ${money(res.grand_total)}).${warn ? ' ' + warn : ''}`)
+      const used = Number(res.returns_total) || 0
+      setNotice(
+        `Bill ${saved.billNo} saved (Rs ${money(res.grand_total)}` +
+          (used > 0 ? `, returns Rs ${money(used)}, net Rs ${money(res.net_total)}` : '') +
+          `).${warn ? ' ' + warn : ''}`,
+      )
       if (print) await printBill(saved.id, saved.billNo)
     } catch (e) {
       setError(String((e as Error).message || e))
@@ -785,11 +871,44 @@ export function WholesaleSalePage({
   const prevDue = Math.max(0, (party?.total_due || 0) - (form.editingSaleId ? form.editingOldDue : 0))
   const prevCredit = party?.total_credit || 0
   const paidNow = dueMode ? 0 : num(form.cash) + num(form.online)
-  const totalDue = Math.max(0, prevDue - prevCredit + Math.max(0, (calc?.grand_total || 0) - paidNow))
+  const grand = calc?.grand_total || 0
+  // Returns ticked in the popup: what they settle (the engine's figure; until it answers,
+  // the same rule here), shown as Return rows and as Return total / Net to pay.
+  const retIds = formReturnIds(form)
+  const savedReturns = form.editingSaleId ? form.billReturns || [] : []
+  const retUsed = savedReturns.length
+    ? savedReturnsTotal(form)
+    : !retIds.length
+      ? 0
+      : typeof calc?.returns_total === 'number'
+        ? calc.returns_total
+        : Math.round(Math.min(formReturnsLeft(form), Math.max(0, grand - paidNow)) * 100) / 100
+  const screenReturns = savedReturns.length
+    ? savedReturns
+    : returnsForScreen(form.openReturns || [], retIds, retUsed)
+  const netToPay = Math.round((grand - retUsed) * 100) / 100
+  // The party's credit those returns were is used here, not carried on (a saved bill's party
+  // credit has them taken off already).
+  const creditLeft = Math.max(0, prevCredit - (form.editingSaleId ? 0 : retUsed))
+  const totalDue = Math.max(0, prevDue - creditLeft + Math.max(0, grand - retUsed - paidNow))
+  const openReturnCount =
+    !form.editingSaleId && form.returnsFor && form.returnsFor === form.partyId
+      ? (form.openReturns || []).length
+      : 0
 
   return (
     <PageRoot className="bill-page wholesale-sale-page" navChain={NAV}>
       <AlertDialog alert={alert} onClose={() => setAlert(null)} />
+      <ReturnsPickDialog
+        open={returnsAsk && openReturnCount > 0}
+        party={form.partyText}
+        word="bill"
+        returns={form.openReturns || []}
+        picked={form.useReturns || []}
+        onChange={(ids) => patch({ useReturns: ids })}
+        onUse={() => closeReturnsAsk(true)}
+        onSkip={() => closeReturnsAsk(false)}
+      />
       <DocToolsDialog
         open={toolsOpen}
         title="Wholesale bills & tools"
@@ -976,7 +1095,7 @@ export function WholesaleSalePage({
               className="due-val mono"
               readOnly
               tabIndex={-1}
-              value={prevDue <= 0.009 && prevCredit > 0.009 ? `Credit: ${rs(prevCredit)}` : rs(prevDue)}
+              value={prevDue <= 0.009 && creditLeft > 0.009 ? `Credit: ${rs(creditLeft)}` : rs(prevDue)}
             />
           </Field>
           <Field label="GSTIN" hint={pos ? `POS ${pos}` : undefined}>
@@ -1179,7 +1298,17 @@ export function WholesaleSalePage({
         table
         className="bill-items-panel"
         headRight={
-          <span className="count">
+          <span className="count ret-credit-note">
+            {openReturnCount > 0 ? (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                title="Returns of this party whose credit is not used yet"
+                onClick={() => setReturnsAsk(true)}
+              >
+                Returns {retIds.length}/{openReturnCount}
+              </button>
+            ) : null}
             {form.items.length} item{form.items.length === 1 ? '' : 's'} · qty in strips
           </span>
         }
@@ -1298,6 +1427,13 @@ export function WholesaleSalePage({
                   )
                 })
               )}
+              {form.items.length ? (
+                <ReturnTableRows
+                  returns={screenReturns}
+                  cols={['sr', 'name', 'batch', 'expiry', 'hsn', 'qty', 'free', 'rate', 'disc', 'sch',
+                    'taxable', 'gstpct', 'gst', 'amount', 'del']}
+                />
+              ) : null}
             </tbody>
           </table>
         </CappedTableWrap>
@@ -1429,6 +1565,18 @@ export function WholesaleSalePage({
                 <span className="label">Grand Total</span>
                 <span className="value">{rs(calc?.grand_total)}</span>
               </div>
+              {retUsed > 0 ? (
+                <>
+                  <div className="totals-row" data-returns-total="1">
+                    <span className="label">Return total</span>
+                    <span className="value">− {rs(retUsed)}</span>
+                  </div>
+                  <div className="totals-row emph amt">
+                    <span className="label">Net to pay</span>
+                    <span className="value">{rs(netToPay)}</span>
+                  </div>
+                </>
+              ) : null}
               <div className="totals-row emph due">
                 <span className="label">Total Due</span>
                 <span className="value">{rs(totalDue)}</span>
