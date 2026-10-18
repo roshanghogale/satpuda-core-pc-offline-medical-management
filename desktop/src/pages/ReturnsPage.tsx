@@ -38,7 +38,10 @@ import { dispatchPaymentsChanged } from '../syncRefresh'
 // Return popup on the Sales page, so the two screens cannot drift apart.
 import {
   checkSalesReturnAdd,
+  billInPacks,
   checkSalesReturnSave,
+  packRefundRate,
+  unitsAsPacks,
   discountAsPct,
   matchLabeledBill,
   parseBillSearch,
@@ -350,6 +353,13 @@ export function ReturnsPage({
     [salesReturnItems],
   )
 
+  /** A wholesale tax invoice is returned in strips (packs for a non-strip type): the screen
+   *  shows and takes strips, the lines and the save stay in the bill's units. */
+  const salesInPacks = billInPacks(salesBill)
+  const salesShowQty = (units: number, it: { is_tablet?: boolean; tablets_per_stripe?: number }) =>
+    salesInPacks ? unitsAsPacks(units, it) : units
+  const salesPackWord = (it: { is_tablet?: boolean }) => (it.is_tablet ? 'strips' : 'packs')
+
   const purchaseRefundPreview = useMemo(() => {
     let total = purchaseReturnItems.reduce(
       (sum, it) => sum + (it.amount || it.qty * it.rate),
@@ -468,6 +478,7 @@ export function ReturnsPage({
       salesBillMedId,
       salesBillMedPick,
       salesReturnQtyInput,
+      salesInPacks,
     )
     if (!r.ok) {
       setAlert({ ...r.alert, kind: 'warning' })
@@ -475,7 +486,9 @@ export function ReturnsPage({
     }
     setSalesReturnItems((rows) => [...rows, r.line])
     setSalesReturnQtyInput('')
-    setSalesPickInfo(`Added ${r.line.name} × ${r.line.qty}. Add more or save.`)
+    setSalesPickInfo(
+      `Added ${r.line.name} × ${salesShowQty(r.line.qty, r.line)}${salesInPacks ? ` ${salesPackWord(r.line)}` : ''}. Add more or save.`,
+    )
   }
 
   const removeSalesReturnItem = (medicineId: number) => {
@@ -742,6 +755,7 @@ export function ReturnsPage({
         discountPct: Number(res.discount_pct || 0),
         refund: Number(res.refund_amount || 0),
         credit: res.credit || null,
+        qtyUnit: res.qty_unit || '',
       })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -1604,9 +1618,16 @@ export function ReturnsPage({
       const said = Number(a.qty) || 1
       const tps = Number(item.tablets_per_stripe) || 1
       // A sale counts a strip medicine in tablets: "don patte" is its tablets. A purchase counts strips.
-      const qty = sales && a.unit === 'strip' && item.is_tablet && tps > 1 ? said * tps : said
+      // A wholesale bill is returned in strips: a bare number is strips, tablets become strips.
+      const strip = item.is_tablet && tps > 1 ? tps : 1
+      const qty = sales && salesInPacks
+        ? (a.unit === 'tablet' ? said / strip : said) * strip
+        : sales && a.unit === 'strip' && item.is_tablet && tps > 1 ? said * tps : said
       if (sales) {
-        const r = checkSalesReturnAdd(salesBill, salesReturnItems, item.medicine_id, item.name, String(qty))
+        const r = checkSalesReturnAdd(
+          salesBill, salesReturnItems, item.medicine_id, item.name,
+          String(salesInPacks ? unitsAsPacks(qty, item) : qty), salesInPacks,
+        )
         if (!r.ok) return { ok: false, say: `${item.name}: ${r.alert.message}` }
         setSalesReturnItems((rows) => [...rows, r.line])
         setSalesPickInfo(`Added ${r.line.name} × ${r.line.qty}. Add more or save.`)
@@ -1792,7 +1813,7 @@ export function ReturnsPage({
                       items={(salesBill.items || []).map((it) => ({
                         id: String(it.medicine_id),
                         label: it.name,
-                        meta: `${it.batch} · rem ${salesRemainingQty(it.medicine_id, it.remaining_qty)}`,
+                        meta: `${it.batch} · rem ${salesShowQty(salesRemainingQty(it.medicine_id, it.remaining_qty), it)}`,
                       }))}
                       onChange={(v) => {
                         setSalesBillMedPick(v)
@@ -1807,9 +1828,9 @@ export function ReturnsPage({
                         if (row) {
                           setSalesReturnQtyInput(
                             String(
-                              salesRemainingQty(
-                                row.medicine_id,
-                                row.remaining_qty,
+                              salesShowQty(
+                                salesRemainingQty(row.medicine_id, row.remaining_qty),
+                                row,
                               ),
                             ),
                           )
@@ -1818,11 +1839,12 @@ export function ReturnsPage({
                       onEnter={addSalesReturnItem}
                     />
                   </Field>
-                  <Field label="Return Qty" className="lp-f-qty">
+                  <Field label={salesInPacks ? 'Return Qty (strips)' : 'Return Qty'} className="lp-f-qty">
                     <input
                       className="settings-input"
                       type="number"
                       min={0}
+                      step={salesInPacks ? 1 : undefined}
                       value={salesReturnQtyInput}
                       onChange={(e) => setSalesReturnQtyInput(e.target.value)}
                       onKeyDown={(e) => {
@@ -1838,7 +1860,12 @@ export function ReturnsPage({
                           (x) => Number(x.medicine_id) === salesBillMedId,
                         )
                         return row
-                          ? tabletCountNote(salesReturnQtyInput, row.is_tablet, row.tablets_per_stripe, 'tablet')
+                          ? tabletCountNote(
+                              salesReturnQtyInput,
+                              row.is_tablet,
+                              row.tablets_per_stripe,
+                              salesInPacks ? 'strip' : 'tablet',
+                            )
                           : ''
                       })()}
                     </span>
@@ -1863,9 +1890,9 @@ export function ReturnsPage({
                       <tr>
                         <th>Medicine</th>
                         <th>Batch</th>
-                        <th className="num">Qty Sold</th>
+                        <th className="num">{salesInPacks ? 'Qty Sold (strips)' : 'Qty Sold'}</th>
                         <th className="num">Returnable</th>
-                        <th className="num">Rate</th>
+                        <th className="num">{salesInPacks ? 'Rate / strip' : 'Rate'}</th>
                         <th>Type</th>
                       </tr>
                     </thead>
@@ -1881,9 +1908,9 @@ export function ReturnsPage({
                             setSalesBillMedId(Number(it.medicine_id))
                             setSalesReturnQtyInput(
                               String(
-                                salesRemainingQty(
-                                  it.medicine_id,
-                                  it.remaining_qty,
+                                salesShowQty(
+                                  salesRemainingQty(it.medicine_id, it.remaining_qty),
+                                  it,
                                 ),
                               ),
                             )
@@ -1891,14 +1918,14 @@ export function ReturnsPage({
                         >
                           <td>{it.name}</td>
                           <td>{it.batch}</td>
-                          <td className="num">{it.orig_qty}</td>
+                          <td className="num">{salesShowQty(it.orig_qty, it)}</td>
                           <td className="num">
-                            {salesRemainingQty(
-                              it.medicine_id,
-                              it.remaining_qty,
+                            {salesShowQty(
+                              salesRemainingQty(it.medicine_id, it.remaining_qty),
+                              it,
                             )}
                           </td>
-                          <td className="num">{money(it.rate || 0)}</td>
+                          <td className="num">{money(salesInPacks ? packRefundRate(it) : it.rate || 0)}</td>
                           <td>{it.type || '—'}</td>
                         </tr>
                       ))}
@@ -1920,7 +1947,7 @@ export function ReturnsPage({
                       <th>Medicine</th>
                       <th>Batch</th>
                       <th className="num">Return Qty</th>
-                      <th className="num">Rate</th>
+                      <th className="num">{salesInPacks ? 'Rate / strip' : 'Rate'}</th>
                       <th className="num">Amount</th>
                       <th className="col-actions" />
                     </tr>
@@ -1930,8 +1957,18 @@ export function ReturnsPage({
                       <tr key={it.medicine_id}>
                         <td>{it.name}</td>
                         <td>{it.batch}</td>
-                        <td className="num">{tabletCountNote(it.qty, it.is_tablet, it.tablets_per_stripe, 'tablet') || it.qty}</td>
-                        <td className="num">{money(it.rate)}</td>
+                        <td className="num">
+                          {salesInPacks
+                            ? `${unitsAsPacks(it.qty, it)} ${salesPackWord(it)}`
+                            : tabletCountNote(it.qty, it.is_tablet, it.tablets_per_stripe, 'tablet') || it.qty}
+                        </td>
+                        <td className="num">
+                          {money(
+                            salesInPacks
+                              ? packRefundRate({ ...it, amount: it.orig_amount, orig_qty: it.orig_qty })
+                              : it.rate,
+                          )}
+                        </td>
                         <td className="num">{money(it.amount)}</td>
                         <td className="col-actions">
                           <ActionBtn
@@ -1993,6 +2030,13 @@ export function ReturnsPage({
               </Field>
             </div>
             <p className="settings-note lp-total">Estimated refund: <strong>{money(salesRefundPreview)}</strong></p>
+            {salesInPacks ? (
+              <Note>
+                Wholesale bill: quantities in strips (packs for other types). A strip comes back at the
+                line&apos;s amount per strip, GST included; on a line with free strips that amount is
+                spread over the paid and free strips, so each comes back at the averaged rate.
+              </Note>
+            ) : null}
             {salesSettleHint ? <Note>{salesSettleHint}</Note> : null}
             <ActionBar>
               {/* The key was always bound and never shown. The one button on

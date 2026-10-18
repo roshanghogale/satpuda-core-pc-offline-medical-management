@@ -247,6 +247,7 @@ def sales_return_details(conn: sqlite3.Connection, return_id: int) -> dict[str, 
             (rid,),
         ).fetchall()
     ]
+    in_packs = _in_packs(conn, int(sale_id or 0), items)
     out: dict[str, Any] = {
         "ok": True,
         "kind": "sales",
@@ -264,10 +265,41 @@ def sales_return_details(conn: sqlite3.Connection, return_id: int) -> dict[str, 
         "settle_mode": str(mode or "ledger").strip().lower() or "ledger",
         "discount_pct": float(disc_pct or 0),
         "items": items,
+        # "strip" when the bill was a wholesale tax invoice: items' qty in packs, rate per pack
+        "qty_unit": "strip" if in_packs else "",
     }
     out.update(_totals(items, float(refund or 0)))
     out["credit"] = credit_status(conn, "customer", rid)
     return out
+
+
+def _in_packs(conn: sqlite3.Connection, sale_id: int, items: list[dict]) -> bool:
+    """A return of a wholesale tax invoice is shown in packs, as the invoice sold it (owner,
+    18 Oct 2026: wholesale works in strips): each item's qty becomes packs (``units`` keeps
+    the stored tablets, ``units_per_pack`` the size) and its rate the amount per pack. What
+    is stored is not touched. False (items as stored) for a retail bill."""
+    if sale_id <= 0 or not items:
+        return False
+    try:
+        from core.wholesale_sale import is_wholesale_sale, units_per_pack
+    except Exception:
+        return False
+    if not is_wholesale_sale(conn, sale_id):
+        return False
+    ids = sorted({int(it["medicine_id"]) for it in items if it.get("medicine_id")})
+    size = {int(mid): units_per_pack(mtype, unit) for mid, mtype, unit in conn.execute(
+        f"SELECT id, COALESCE(type,''), COALESCE(unit,'1') FROM medicines "
+        f"WHERE id IN ({','.join('?' * len(ids))})", ids).fetchall()} if ids else {}
+    for it in items:
+        ups = size.get(int(it.get("medicine_id") or 0), 1)
+        units = float(it.get("qty") or 0)
+        packs = round(units / ups, 2)
+        it["units"] = units
+        it["units_per_pack"] = ups
+        it["qty"] = packs
+        if packs > 0:
+            it["rate"] = round(float(it.get("amount") or 0) / packs, 2)
+    return True
 
 
 def print_pdf(path: str) -> str:
