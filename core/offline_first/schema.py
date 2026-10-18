@@ -41,7 +41,8 @@ LINE_TABLES = {
 }
 
 # Settings rows that belong to the shop (all devices), not to one PC.
-# business_mode / ws_margin_*: the wholesale switch and its rate margins (core/wholesale_mode.py).
+# ws_margin_*: the wholesale rate margins (core/wholesale_mode.py). business_mode is the retired
+# same-store switch (wholesale is a separate store now); still carried, read by nothing.
 SHOP_WIDE_SETTING_PREFIXES = ("regular_meds:", "customer_gst:", "gst_filed:", "ws_margin_")
 SHOP_WIDE_SETTING_NAMES = ("billing_layout_prefs", "business_mode")
 # The settings triggers carry the list above in their WHEN; a longer list is a new version.

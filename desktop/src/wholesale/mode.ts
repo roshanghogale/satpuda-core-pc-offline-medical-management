@@ -1,9 +1,11 @@
-/** Is this store wholesale right now? (core/wholesale_mode.py, D:\projects\WHOLESALE_DESIGN.md)
+/** Is the open store a wholesale store? (core/wholesale_mode.py, D:\projects\WHOLESALE_DESIGN.md)
  *
- * GET /api/wholesale/state answers {allowed, mode, margins}: `allowed` is the admin panel's
- * per-store switch, `mode` the store setting business_mode ('retail' | 'wholesale') and reads
- * 'retail' whenever the server does not allow wholesale. Until the first answer, and when the
- * engine does not answer, the store is retail.
+ * Wholesale is a SEPARATE store (its own medicines, rates, purchases, sales and stock).
+ * GET /api/wholesale/state answers {allowed, mode, store_name, companion_name, margins}: `mode`
+ * is the open store's kind, `allowed` says the switch is on offer (the open store is wholesale,
+ * or retail with a wholesale companion), `companion_name` the store the switch opens.
+ * Until the first answer the store is neither (`ready` false); an engine that never answers
+ * reads as retail.
  *
  *   const { allowed, mode, isWholesale, ready } = useBusinessMode()
  *   const st = await fetchBusinessMode()          // ask the engine now
@@ -27,6 +29,9 @@ export type BusinessModeState = {
   isWholesale: boolean
   /** Rate A / B / C margin % over the purchase rate (settings ws_margin_a/b/c). */
   margins: WholesaleMargins
+  /** The open store's name and the other store the switch opens ("" when none). */
+  storeName: string
+  companionName: string
   /** The first check has finished (answered or failed). */
   checked: boolean
   /** Same as `checked` (false only until the first answer arrives). */
@@ -40,6 +45,8 @@ export const DEFAULT_MARGINS: WholesaleMargins = { A: 8, B: 10, C: 12 }
 
 const RECHECK_MS = 5 * 60 * 1000
 const RETRY_MS = 20 * 1000
+const FIRST_RETRY_MS = 1500
+const FIRST_TRIES = 4
 const FOCUS_GAP_MS = 5000
 const TIMEOUT_MS = 6000
 
@@ -48,6 +55,8 @@ let state: BusinessModeState = {
   mode: 'retail',
   isWholesale: false,
   margins: DEFAULT_MARGINS,
+  storeName: '',
+  companionName: '',
   checked: false,
   ready: false,
 }
@@ -56,12 +65,15 @@ let inflight: Promise<BusinessModeState> | null = null
 let timer = 0
 let lastCheckAt = 0
 let started = false
+let failures = 0
 
 function publish(next: BusinessModeState) {
   const same =
     next.allowed === state.allowed &&
     next.mode === state.mode &&
     next.checked === state.checked &&
+    next.storeName === state.storeName &&
+    next.companionName === state.companionName &&
     next.margins.A === state.margins.A &&
     next.margins.B === state.margins.B &&
     next.margins.C === state.margins.C
@@ -78,7 +90,8 @@ function num(v: unknown, fallback: number): number {
 export function parseBusinessMode(v: unknown): BusinessModeState {
   const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>
   const allowed = o.allowed === true
-  const mode: BusinessMode = allowed && o.mode === 'wholesale' ? 'wholesale' : 'retail'
+  // The open store's kind: a wholesale store is wholesale whatever else the answer says.
+  const mode: BusinessMode = o.mode === 'wholesale' ? 'wholesale' : 'retail'
   const m = (o.margins && typeof o.margins === 'object' ? o.margins : {}) as Record<string, unknown>
   return {
     allowed,
@@ -89,6 +102,8 @@ export function parseBusinessMode(v: unknown): BusinessModeState {
       B: num(m.B, DEFAULT_MARGINS.B),
       C: num(m.C, DEFAULT_MARGINS.C),
     },
+    storeName: typeof o.store_name === 'string' ? o.store_name : '',
+    companionName: typeof o.companion_name === 'string' ? o.companion_name : '',
     checked: true,
     ready: true,
   }
@@ -120,18 +135,40 @@ export function fetchBusinessMode(force = true): Promise<BusinessModeState> {
     } finally {
       window.clearTimeout(t)
     }
-    if (!ok) {
-      publish({ ...state, allowed: false, mode: 'retail', isWholesale: false, checked: true, ready: true })
+    if (ok) {
+      failures = 0
+    } else if (!state.checked) {
+      // Not answered yet: a wholesale store must not show the retail screens for a moment,
+      // so wait a few quick retries before reading it as retail.
+      failures += 1
+      if (failures >= FIRST_TRIES) {
+        publish({ ...state, allowed: false, mode: 'retail', isWholesale: false, checked: true, ready: true })
+      }
     }
-    schedule(ok ? RECHECK_MS : RETRY_MS)
+    // An answer once had keeps standing through a failed re-check: the open store's kind
+    // does not change without a switch, and a switch restarts the app.
+    schedule(ok ? RECHECK_MS : state.checked ? RETRY_MS : FIRST_RETRY_MS)
     inflight = null
     return state
   })()
   return inflight
 }
 
-/** POST /api/wholesale/mode. Throws with the engine's message (e.g. not allowed). */
-export async function setBusinessMode(mode: BusinessMode): Promise<BusinessModeState> {
+export type StoreSwitchAnswer = {
+  ok: boolean
+  /** The app restarts after it (the other store is open). */
+  reload: boolean
+  mode: BusinessMode
+  store_name: string
+  /** The other store's own offline-first copy is being made: follow `progress`. */
+  running?: boolean
+  progress?: string
+  unchanged?: boolean
+}
+
+/** POST /api/wholesale/mode: OPEN the other store (the retail store's wholesale companion, or
+ *  back). Throws with the engine's message (e.g. no wholesale store for this one). */
+export async function switchStore(mode: BusinessMode): Promise<StoreSwitchAnswer> {
   const res = await fetch(`${getApiBase()}/api/wholesale/mode`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -139,14 +176,28 @@ export async function setBusinessMode(mode: BusinessMode): Promise<BusinessModeS
   })
   const d = await res.json().catch(() => ({}))
   if (!res.ok || d.ok === false) throw new Error(d.error || `HTTP ${res.status}`)
-  const next = parseBusinessMode(d)
-  publish(next)
-  try {
-    window.dispatchEvent(new CustomEvent(BUSINESS_MODE_EVENT, { detail: next }))
-  } catch {
-    /* no window events (tests) */
+  return {
+    ok: true,
+    reload: d.reload === true,
+    mode: d.mode === 'wholesale' ? 'wholesale' : 'retail',
+    store_name: String(d.store_name || ''),
+    running: d.running === true,
+    progress: typeof d.progress === 'string' ? d.progress : undefined,
+    unchanged: d.unchanged === true,
   }
-  return next
+}
+
+export type SwitchProgress = { running: boolean; steps: string[]; error: string | null }
+
+/** The copy job's progress (GET /api/offline-first/activate/progress). */
+export async function fetchSwitchProgress(path = '/api/offline-first/activate/progress'): Promise<SwitchProgress> {
+  const res = await fetch(`${getApiBase()}${path}`)
+  const d = await res.json().catch(() => ({}))
+  return {
+    running: d.running === true,
+    steps: Array.isArray(d.steps) ? d.steps.map((s: unknown) => String(s)) : [],
+    error: d.error ? String(d.error) : null,
+  }
 }
 
 /** GET /api/wholesale/last-rates: the newest Rate A / B / C a medicine was given. */
@@ -173,7 +224,7 @@ export function suggestedRates(purchaseRate: number, margins: WholesaleMargins =
 }
 
 function onModeEvent() {
-  // setBusinessMode already published its answer; another dispatcher gets a fresh read.
+  // Another screen asked for a fresh read.
   if (Date.now() - lastCheckAt > 500) void fetchBusinessMode(true)
 }
 

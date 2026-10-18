@@ -9,19 +9,49 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
-_job: dict[str, Any] = {"running": False, "steps": [], "result": None, "error": None, "started": 0.0}
+_job: dict[str, Any] = {"running": False, "steps": [], "result": None, "error": None, "started": 0.0,
+                        "kind": ""}
 _job_lock = threading.Lock()
+
+
+def _progress(msg: str) -> None:
+    with _job_lock:
+        _job["steps"].append(msg)
+        _job["steps"] = _job["steps"][-40:]
+
+
+def start_job(kind: str, work: Callable[[Callable[[str], None]], dict]) -> bool:
+    """Run ``work(progress)`` in the background as THE copy job, so the progress endpoint above
+    shows it (the wholesale switch's copy of its companion store uses it too). False when a
+    job is already running."""
+    with _job_lock:
+        if _job["running"]:
+            return False
+        _job.update({"running": True, "steps": [], "result": None, "error": None,
+                     "started": time.time(), "kind": str(kind or "")})
+
+    def run() -> None:
+        try:
+            result = work(_progress)
+            with _job_lock:
+                _job["result"] = result
+        except Exception as exc:
+            with _job_lock:
+                _job["error"] = str(exc)
+        finally:
+            with _job_lock:
+                _job["running"] = False
+
+    threading.Thread(target=run, name=f"offline-first-{kind or 'job'}", daemon=True).start()
+    return True
 
 
 def _run_activate(app_version: str) -> None:
     from core.offline_first.runtime import activate_from_online
 
-    def progress(msg: str) -> None:
-        with _job_lock:
-            _job["steps"].append(msg)
-            _job["steps"] = _job["steps"][-40:]
+    progress = _progress
 
     try:
         result = activate_from_online(progress_cb=progress, app_version=app_version)
@@ -72,7 +102,8 @@ def handle_post(path: str, body: dict, conn) -> Optional[tuple[int, dict]]:
         with _job_lock:
             if _job["running"]:
                 return 200, {"ok": True, "running": True}
-            _job.update({"running": True, "steps": [], "result": None, "error": None, "started": time.time()})
+            _job.update({"running": True, "steps": [], "result": None, "error": None, "started": time.time(),
+                         "kind": "activate"})
         app_version = ""
         try:
             from core.app_version import APP_VERSION

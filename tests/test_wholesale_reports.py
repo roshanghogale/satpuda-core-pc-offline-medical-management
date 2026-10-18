@@ -48,11 +48,12 @@ class _Store(unittest.TestCase):
             mock.patch("core.desktop_export_service._is_online", return_value=False),
             mock.patch("core.pharmacy_profile_io.load_pharmacy_profile",
                        return_value={"name": "TEST WHOLESALE", "gstin": SHOP_GSTIN, "gst_enabled": 1}),
+            # the open store is a wholesale store (core/wholesale_mode.py)
+            mock.patch.dict(os.environ, {"SATPUDA_WHOLESALE_OVERRIDE": "1"}),
         ):
             p.start()
             self.addCleanup(p.stop)
         c = self.conn
-        c.execute("INSERT INTO settings (name, value) VALUES ('business_mode', 'wholesale')")
         c.execute("INSERT INTO customers (id, name, phone, party_type, rate_tier, credit_limit, credit_days)"
                   " VALUES (1, 'Party A', '9000000001', 'medical', 'A', 1000, 30),"
                   " (2, 'Party B', '9000000002', 'medical', 'B', 0, 15),"
@@ -322,8 +323,8 @@ class ExportAndMode(_Store):
 
     def test_a_retail_store_is_refused(self):
         self.assertEqual("", wr.refusal(self.conn))
-        self.conn.execute("UPDATE settings SET value='retail' WHERE name='business_mode'")
-        self.assertIn("wholesale", wr.refusal(self.conn))
+        with mock.patch.dict(os.environ, {"SATPUDA_WHOLESALE_OVERRIDE": "0"}):
+            self.assertIn("wholesale", wr.refusal(self.conn))
 
     def test_unknown_report(self):
         with self.assertRaises(ValueError):
