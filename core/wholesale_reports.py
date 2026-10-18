@@ -457,9 +457,10 @@ def price_list(conn, tier: str = "", in_stock_only: bool = True, search: str = "
     e = "''"
     rows_db = conn.execute(
         f"SELECT COALESCE(m.name,''), COALESCE({col('batch_no', e)},''), COALESCE({col('expiry_date', e)},''), "
-        f"COALESCE({col('hsn_code', e)},''), COALESCE({col('gst_percent', '0')},0), {col('purchase_rate')}, "
+        f"COALESCE({col('hsn_code', e)},''), COALESCE({col('gst_percent', '0')},0), "
+        f"COALESCE({col('purchase_rate')}, {col('rate')}), "
         f"{col('rate_a')}, {col('rate_b')}, {col('rate_c')}, COALESCE({col('stock_qty', '0')},0), "
-        f"COALESCE({col('mrp', '0')},0), COALESCE({col('type', e)},'') "
+        f"COALESCE({col('unit', e)},''), COALESCE({col('type', e)},'') "
         f"FROM medicines m WHERE {' AND '.join(q)} ORDER BY UPPER(m.name), {col('expiry_date', e)}",
         params).fetchall()
 
@@ -471,17 +472,22 @@ def price_list(conn, tier: str = "", in_stock_only: bool = True, search: str = "
         f = float(v or 0)
         return f"{int(f) if f.is_integer() else f}%"
 
+    from core.wholesale_sale import units_per_pack
+
+    def strips(r) -> Any:
+        # Wholesale counts strips (packs), never tablets, and has no MRP (owner, 18 Oct 2026).
+        return _qty(round(float(r[9] or 0) / max(1, units_per_pack(r[11], r[10])), 2))
+
     if tier:
         idx = {"A": 6, "B": 7, "C": 8}[tier]
-        columns = ["Medicine", "Type", "Batch", "Expiry", "HSN", "GST %", f"Rate {tier}", "MRP", "Stock"]
-        rows = [[r[0], r[11], r[1], r[2], r[3], gst(r[4]), money(r[idx]), money(r[10]), _qty(float(r[9] or 0))]
-                for r in rows_db]
+        columns = ["Medicine", "Type", "Batch", "Expiry", "HSN", "GST %", f"Rate {tier}", "Stock (strips)"]
+        rows = [[r[0], r[11], r[1], r[2], r[3], gst(r[4]), money(r[idx]), strips(r)] for r in rows_db]
         title = f"Price list - Rate {tier}"
     else:
         columns = ["Medicine", "Type", "Batch", "Expiry", "HSN", "GST %", "Purchase Rate", "Rate A", "Rate B",
-                   "Rate C", "MRP", "Stock"]
+                   "Rate C", "Stock (strips)"]
         rows = [[r[0], r[11], r[1], r[2], r[3], gst(r[4]), money(r[5]), money(r[6]), money(r[7]), money(r[8]),
-                 money(r[10]), _qty(float(r[9] or 0))] for r in rows_db]
+                 strips(r)] for r in rows_db]
         title = TITLES["price_list"]
     missing = sum(1 for r in rows_db if (r[{"A": 6, "B": 7, "C": 8}[tier]] if tier else r[6]) in (None, 0, 0.0))
     return {"report": "price_list", "title": title,

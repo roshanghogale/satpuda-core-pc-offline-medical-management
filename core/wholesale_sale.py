@@ -417,15 +417,27 @@ def units_per_pack(med_type: Any, unit: Any) -> int:
     return 1
 
 
-def tier_rate(med: dict, tier: str) -> tuple[float, str]:
-    """(rate per pack, where it came from): the tier's rate, else the medicine's rate."""
+def tier_rate(med: dict, tier: str, conn=None) -> tuple[float, str]:
+    """(rate per strip / pack, where it came from): the tier's own rate; without one, the
+    purchase rate plus the shop's margin for that tier -- the purchase screen's prefill.
+    medicines.rate is the PURCHASE rate per strip: selling at it gave the stock away at
+    cost (owner, 18 Oct 2026: wholesale sells strips, never per tablet or by MRP)."""
     t = str(tier or "A").strip().upper()
     if t not in RATE_TIERS:
         t = "A"
     r = _f(med.get(f"rate_{t.lower()}"))
     if r > 0:
         return round(r, 4), t
-    return round(_f(med.get("rate")), 4), ""
+    cost = _f(med.get("purchase_rate")) or _f(med.get("rate"))
+    if cost <= 0:
+        return 0.0, ""
+    try:
+        from core.wholesale_mode import DEFAULT_MARGINS, margins, suggested_rates
+
+        marg = margins(conn) if conn is not None else dict(DEFAULT_MARGINS)
+        return round(_f(suggested_rates(cost, marg).get(t)), 4), ""
+    except Exception:
+        return round(cost, 4), ""
 
 
 def medicine(conn, medicine_id: Any) -> Optional[dict[str, Any]]:
@@ -450,7 +462,7 @@ def build_line(conn, body: dict) -> dict[str, Any]:
     m = medicine(conn, body.get("medicine_id"))
     if not m:
         return {"ok": False, "error": "Medicine not found."}
-    rate, used = tier_rate(m, str(body.get("rate_tier") or "A"))
+    rate, used = tier_rate(m, str(body.get("rate_tier") or "A"), conn)
     line = {
         "id": int(m["id"]),
         "name": str(m.get("name") or ""),

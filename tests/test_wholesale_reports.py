@@ -201,8 +201,10 @@ class PriceList(_Store):
         sec = rep["sections"][0]
         rows = [dict(zip(sec["columns"], r)) for r in sec["rows"]]
         self.assertEqual(["Medicine One", "Medicine Three"], [r["Medicine"] for r in rows])   # Two: no stock
-        self.assertEqual((40.0, 50.0, 48.0, 46.0, "12%", 100, "B1", "3004"),
-                         tuple(rows[0][k] for k in ("Purchase Rate", "Rate A", "Rate B", "Rate C", "GST %", "Stock",
+        # 100 tablets at 10 a strip: 10 strips; no MRP in wholesale (owner, 18 Oct 2026)
+        self.assertNotIn("MRP", sec["columns"])
+        self.assertEqual((40.0, 50.0, 48.0, 46.0, "12%", 10, "B1", "3004"),
+                         tuple(rows[0][k] for k in ("Purchase Rate", "Rate A", "Rate B", "Rate C", "GST %", "Stock (strips)",
                                                     "Batch", "HSN")))
 
     def test_one_tier_without_the_purchase_rate(self):

@@ -2425,7 +2425,7 @@ export function PurchasePage({
     hsn: colOn('HSN'),
     schedule: colOn('Schedule'),
     free: colOn('Free'),
-    mrp: colOn('MRP'),
+    mrp: colOn('MRP') && !ws.isWholesale,
     rate: colOn('Rate'),
     disc: colOn('Disc%'),
     gstPct: colOn('GST%'),
@@ -2928,6 +2928,9 @@ export function PurchasePage({
                 ))}
               </datalist>
             </Field>
+            {/* Wholesale sells whole strips at Rate A / B / C: no MRP, no per-tablet price
+                (owner, 18 Oct 2026). */}
+            {ws.isWholesale ? null : (
             <Field
               label="MRP"
               hint={stripMode ? 'strip / per tab' : undefined}
@@ -2970,12 +2973,13 @@ export function PurchasePage({
                 />
               )}
             </Field>
+            )}
             <Field
-              label="Rate"
-              hint={stripMode ? 'strip / per tab' : 'per unit'}
+              label={ws.isWholesale ? 'Purchase rate' : 'Rate'}
+              hint={ws.isWholesale ? (stripMode ? 'per strip' : 'per pack') : stripMode ? 'strip / per tab' : 'per unit'}
               className="span2"
             >
-              {stripMode ? (
+              {stripMode && !ws.isWholesale ? (
                 <div className="price-split">
                   <div className="price-half">
                     <input
@@ -3015,7 +3019,7 @@ export function PurchasePage({
             {ws.isWholesale ? (
               <Field
                 label="Rate A / B / C"
-                hint="per pack, + GST"
+                hint={stripMode ? 'per strip, + GST' : 'per pack, + GST'}
                 className="span2"
               >
                 <div className="price-split ws-rates3">

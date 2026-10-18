@@ -165,12 +165,14 @@ class SavingAndReading(unittest.TestCase):
         self.assertEqual((p["credit_limit"], p["credit_days"]), (1000.0, 30))
         self.assertEqual(ws.party(self.conn, 2)["state_code"], "24")
 
-    def test_a_line_takes_the_partys_tier_rate_or_the_base_rate(self):
+    def test_a_line_takes_the_partys_tier_rate_or_cost_plus_its_margin(self):
         line = ws.build_line(self.conn, {"medicine_id": 1, "rate_tier": "B"})["line"]
         self.assertEqual((line["rate"], line["rate_tier"], line["units_per_pack"]), (85.0, "B", 10))
         self.assertEqual(line["stock_packs"], 50.0)
         syrup = ws.build_line(self.conn, {"medicine_id": 2, "rate_tier": "C"})["line"]
-        self.assertEqual((syrup["rate"], syrup["rate_tier"]), (40.0, ""))
+        # no Rate C on file: purchase rate 40 per pack + the C margin (12 %), never the cost
+        # itself (owner, 18 Oct 2026)
+        self.assertEqual((syrup["rate"], syrup["rate_tier"]), (44.8, ""))
 
     def test_save_stores_the_invoice_and_takes_stock_in_units(self):
         res = self._save()

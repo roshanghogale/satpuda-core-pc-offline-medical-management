@@ -488,7 +488,7 @@ export function WholesaleSalePage({
         </div>
       </Panel>
 
-      <Panel title="Items" table headRight={<span className="muted">{form.items.length} item{form.items.length === 1 ? '' : 's'} · qty in packs</span>}>
+      <Panel title="Items" table headRight={<span className="muted">{form.items.length} item{form.items.length === 1 ? '' : 's'} · qty in strips (packs for syrups etc.)</span>}>
         <div className="table-wrap" style={{ overflowX: 'auto' }}>
           <table className="sat-table">
             <thead>
