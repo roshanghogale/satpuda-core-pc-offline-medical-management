@@ -435,6 +435,8 @@ def build_sale_payload(conn, sale_id: int) -> Optional[dict]:
     cur.execute('SELECT * FROM customers WHERE id=?', (sale['customer_id'],))
     cr = cur.fetchone()
     customer = _row_dict(cur, cr) if cr else {}
+    from core.wholesale_sale import line_select_sql, line_sync_fields, sale_sync_fields
+
     cur.execute(
         '''
         SELECT
@@ -449,6 +451,7 @@ def build_sale_payload(conn, sale_id: int) -> Optional[dict]:
             m.hsn_code AS med_hsn_code,
             m.schedule AS med_schedule,
             m.manufacturer AS med_manufacturer
+            ''' + line_select_sql(conn) + '''
         FROM sales_items si
         LEFT JOIN medicines m ON si.medicine_id = m.id
         WHERE si.sale_id=?
@@ -474,6 +477,8 @@ def build_sale_payload(conn, sale_id: int) -> Optional[dict]:
                 'amount': item.get('amount', 0),
                 'item_discount': item.get('item_discount', 0),
                 'cost_price': item.get('cost_price', 0),
+                # A wholesale line's free packs, scheme, taxable value... (none on retail)
+                **line_sync_fields(item),
             }
         )
     payload = {
@@ -502,6 +507,8 @@ def build_sale_payload(conn, sale_id: int) -> Optional[dict]:
         'customer_address': customer.get('address'),
         'item_count': len(items),
         'items': items,
+        # A wholesale tax invoice's header (core/wholesale_sale.py); none on retail.
+        **sale_sync_fields(sale),
     }
     try:
         from core.fy_serial import display_sales_bill_no, fy_label
@@ -1933,6 +1940,9 @@ def sync_down_doc(conn, collection: str, doc_id: str, data: dict) -> str:
                 stamp_pulled_fy_fields(cur, 'sales', sale_id, data.get('bill_no'), data.get('bill_date'),
                                        fy_start_year=data.get('fy_start_year'),
                                        fy_serial=data.get('fy_serial'))
+                from core.wholesale_sale import apply_synced_line, apply_synced_sale
+
+                apply_synced_sale(cur, sale_id, data)
                 sale_med_ids = []
                 for item in data.get('items') or []:
                     medicine_id = int(_line_medicine_id(item))
@@ -1967,6 +1977,7 @@ def sync_down_doc(conn, collection: str, doc_id: str, data: dict) -> str:
                         float(item.get('item_discount') or 0),
                         float(item.get('cost_price') or 0),
                     ))
+                    apply_synced_line(cur, cur.lastrowid, item)
                 if _sale_stock_affects(data):
                     _deduct_sale_items_stock(cur, sale_id)
                     # Sales do not auto-hide locally; leave is_hidden as user set it.

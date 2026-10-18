@@ -423,6 +423,9 @@ def _build_sales_docs(conn, ids=None) -> list[dict]:
 
     sale_ids = [int(s["id"]) for s in sales]
     items_by_sale: dict[int, list] = {sid: [] for sid in sale_ids}
+    from core.wholesale_sale import line_select_sql, line_sync_fields, sale_sync_fields
+
+    ws_cols = line_select_sql(conn)
     # Chunk IN lists for SQLite variable limits
     for i in range(0, len(sale_ids), 800):
         chunk = sale_ids[i : i + 800]
@@ -441,6 +444,7 @@ def _build_sales_docs(conn, ids=None) -> list[dict]:
                 m.hsn_code AS med_hsn_code,
                 m.schedule AS med_schedule,
                 m.manufacturer AS med_manufacturer
+                {ws_cols}
             FROM sales_items si
             LEFT JOIN medicines m ON si.medicine_id = m.id
             WHERE si.sale_id IN ({placeholders})
@@ -465,6 +469,8 @@ def _build_sales_docs(conn, ids=None) -> list[dict]:
                     "amount": ir.get("amount", 0),
                     "item_discount": ir.get("item_discount", 0),
                     "cost_price": ir.get("cost_price", 0),
+                    # A wholesale line's own fields (core/wholesale_sale.py); none on retail.
+                    **line_sync_fields(ir),
                 }
             )
 
@@ -501,6 +507,7 @@ def _build_sales_docs(conn, ids=None) -> list[dict]:
                 "item_count": len(items),
                 "items": items,
                 "is_autosave": bool(int(sale.get("is_autosave") or 0)),
+                **sale_sync_fields(sale),
             }
             try:
                 from core.fy_serial import display_sales_bill_no, fy_label

@@ -673,6 +673,17 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 if hit is not None:
                     _json_response(self, hit[0], hit[1])
                     return
+            if path.startswith("/api/wholesale/sale/"):
+                # The wholesale sale screen (core/wholesale_sale_api.py).
+                from urllib.parse import parse_qs
+
+                from core import wholesale_sale_api
+
+                hit = wholesale_sale_api.handle_get(
+                    path, parse_qs(urlparse(self.path).query), _db.get("conn"))
+                if hit is not None:
+                    _json_response(self, hit[0], hit[1])
+                    return
             if path == "/api/backup/close":
                 # The closing backup of the day, asked for by the app shell just
                 # before it quits. It could not live in the engine's own
@@ -791,6 +802,13 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                             "/api/sales/bill/preview",
                             "/api/sales/bill/details",
                             "/api/sales/bill/pdf",
+                            "/api/wholesale/sale/parties",
+                            "/api/wholesale/sale/party",
+                            "/api/wholesale/sale/load",
+                            "/api/wholesale/sale/preview",
+                            "/api/wholesale/sale/line",
+                            "/api/wholesale/sale/calc",
+                            "/api/wholesale/sale/save",
                             "/api/files/save",
                             "/api/files/open",
                             "/api/files/reveal",
@@ -2029,6 +2047,13 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 from core.offline_first import api as of_api
 
                 hit = of_api.handle_post(path, _read_json_body(self), _db.get("conn"))
+                if hit is not None:
+                    _json_response(self, hit[0], hit[1])
+                    return
+            if path.startswith("/api/wholesale/sale/"):
+                from core import wholesale_sale_api
+
+                hit = wholesale_sale_api.handle_post(path, _read_json_body(self), _db.get("conn"))
                 if hit is not None:
                     _json_response(self, hit[0], hit[1])
                     return

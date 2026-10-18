@@ -996,6 +996,18 @@ def save_sale(conn, body: dict[str, Any]) -> dict[str, Any]:
     from core.customer_service import COUNTER_SALE, get_or_create_customer
     from core.sales_form_prefs import load_payment_mode_enabled
 
+    if str(body.get("invoice_mode") or "").strip().lower() == "wholesale":
+        # A wholesale tax invoice (core/wholesale_sale.py). Every other bill below.
+        from core.wholesale_sale import save_sale as save_wholesale_sale
+
+        return save_wholesale_sale(conn, body)
+    if _safe_int(body.get("editing_sale_id")) > 0:
+        from core.wholesale_sale import is_wholesale_sale
+
+        if is_wholesale_sale(conn, _safe_int(body.get("editing_sale_id"))):
+            return {"ok": False, "code": "wholesale_bill",
+                    "error": "This is a wholesale tax invoice: edit it in wholesale mode."}
+
     if not _has_pharmacy_profile(conn):
         return {
             "ok": False,
@@ -1506,6 +1518,14 @@ def load_sale(conn, sale_id: int) -> dict[str, Any]:
             return _load_sale_online_json(conn, int(sale_id))
     except Exception as exc:
         print(f"[desktop_sales] online load failed: {exc}")
+
+    from core.wholesale_sale import is_wholesale_sale
+
+    if is_wholesale_sale(conn, sale_id):
+        # A tax invoice keeps packs, free packs and rates without GST (core/wholesale_sale.py);
+        # the retail form would turn its lines into loose units.
+        return {"ok": False, "code": "wholesale_bill",
+                "error": "This is a wholesale tax invoice: open it in wholesale mode."}
 
     cur = conn.cursor()
     cur.execute(
@@ -2527,6 +2547,19 @@ def get_bill_preview(conn, sale_id: int) -> dict[str, Any]:
         )
 
         slot_settings = get_print_slot_settings(load_bill_print_settings(), 1)
+        from core import wholesale_sale
+
+        if wholesale_sale.is_wholesale_sale(conn, sid):
+            paper = wholesale_sale.invoice_paper(slot_settings)
+            inv = wholesale_sale.invoice_context(conn, sid)
+            from bill_templates.wholesale_invoice import render_wholesale_invoice_html
+
+            return {
+                "ok": True,
+                "bill_no": inv["bill_no"],
+                "html": render_wholesale_invoice_html(inv, paper=paper),
+                "template": "wholesale",
+            }
         # bill_copies, NOT copies. get_print_slot_settings deliberately leaves
         # "copies" as the PAGE copies and puts the slot's bill copies in
         # "bill_copies" -- reading the wrong one made the preview show one
@@ -2628,6 +2661,9 @@ def get_bill_details(conn, sale_id: int) -> dict[str, Any]:
     row = cur.fetchone()
     if not row:
         return {"ok": False, "error": "Bill not found."}
+    from core import wholesale_sale
+
+    ws = wholesale_sale.load_sale(conn, sid) if wholesale_sale.is_wholesale_sale(conn, sid) else None
     cur.execute(
         """
         SELECT COALESCE(m.name, ''), COALESCE(m.batch_no,''), COALESCE(m.type,''),
@@ -2650,6 +2686,15 @@ def get_bill_details(conn, sale_id: int) -> dict[str, Any]:
         }
         for r in cur.fetchall()
     ]
+    if ws and ws.get("ok"):
+        # A tax invoice reads in packs at its rate without GST, with its free packs.
+        items = [
+            {"name": it["name"], "batch": it["batch"], "type": it["type"],
+             "qty": float(it["qty"]), "free": float(it["free"]), "rate": float(it["rate"]),
+             "gst_percent": float(it["gst_percent"]), "taxable": float(it["taxable"]),
+             "amount": float(it["amount"])}
+            for it in ws["items"]
+        ]
     # Returns settled in this bill (core/return_credit.py): Return rows after the items.
     try:
         from core.return_credit import returns_in_bill, returns_total
@@ -2658,7 +2703,14 @@ def get_bill_details(conn, sale_id: int) -> dict[str, Any]:
     except Exception:
         rets = []
     rets_total = returns_total(rets) if rets else 0.0
+    extra: dict[str, Any] = {}
+    if ws and ws.get("ok"):
+        extra = {k: ws[k] for k in (
+            "buyer_gstin", "buyer_dl", "place_of_supply", "due_date", "transport", "lr_no",
+            "eway_bill_no", "taxable_total", "cgst_total", "sgst_total", "igst_total")}
+        extra["invoice_mode"] = "wholesale"
     return {
+        **extra,
         "ok": True,
         "sale_id": sid,
         "returns_in_bill": rets,
