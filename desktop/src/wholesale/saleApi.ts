@@ -1,5 +1,6 @@
 /** The wholesale sale screen's engine calls (core/wholesale_sale_api.py). */
 import { getApiBase } from '../api'
+import type { BillReturn, OpenReturn } from '../pagesApi'
 
 export type WholesaleParty = {
   id: number
@@ -74,6 +75,9 @@ export type WholesaleCalc = {
   amount_in_words: string
   due_date: string
   warnings: string[]
+  /** What the ticked returns settle in this bill (Return total), and grand total less that. */
+  returns_total?: number
+  net_total?: number
   error?: string
 }
 
@@ -107,6 +111,8 @@ export type LoadedWholesale = {
   due_amount?: number
   total_amount: number
   items: WholesaleLine[]
+  /** The returns settled in this bill (shown read only as Return rows). */
+  returns_in_bill?: BillReturn[]
 }
 
 export type WholesaleSaveResult = {
@@ -120,6 +126,10 @@ export type WholesaleSaveResult = {
   customer_due?: number
   next_bill_hint?: string
   warnings?: string[]
+  /** The returns this bill settled: [{return_id, return_no, amount}], their sum, the net. */
+  returns_used?: { return_id: number; return_no: string; amount: number }[]
+  returns_total?: number
+  net_total?: number
 }
 
 function qs(params: Record<string, string | number | undefined>) {
@@ -171,6 +181,13 @@ export function calcWholesale(body: Record<string, unknown>) {
 
 export function saveWholesale(body: Record<string, unknown>) {
   return call<WholesaleSaveResult>('/api/wholesale/sale/save', body)
+}
+
+/** The party's returns whose credit is not used yet, qty in packs (strips). */
+export function fetchWholesaleOpenReturns(customerId: number) {
+  return call<{ ok: boolean; supported?: boolean; returns?: OpenReturn[]; error?: string }>(
+    `/api/wholesale/sale/open-returns${qs({ customer_id: customerId })}`,
+  )
 }
 
 export function loadWholesale(saleId: number) {

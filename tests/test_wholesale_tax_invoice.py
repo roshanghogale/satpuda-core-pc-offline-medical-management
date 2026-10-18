@@ -378,12 +378,18 @@ class UpToTheServerAndBack(unittest.TestCase):
 
 
 class TheTaxInvoice(unittest.TestCase):
+    """The GST invoice laid out like the shop's own wholesale invoice (owner, 18 Oct 2026):
+    always A5 landscape, two to an A4 sheet."""
+
     def setUp(self):
         for p in _offline():
             p.start()
             self.addCleanup(p.stop)
         self.conn = _store()
         self.addCleanup(self.conn.close)
+        self.conn.execute("UPDATE medicines SET manufacturer='TESTCARE' WHERE id=1")
+        self.conn.execute("UPDATE medicines SET mrp=0 WHERE id=2")
+        self.conn.commit()
         from core.desktop_sales_service import save_sale
 
         self.save = lambda **kw: save_sale(self.conn, {
@@ -391,42 +397,214 @@ class TheTaxInvoice(unittest.TestCase):
             "items": _lines(), "payment_mode": "Due", "transport": "TEST ROADWAYS",
             "lr_no": "LR-77", **kw})["sale_id"]
 
-    def test_it_prints_every_block(self):
+    def _html(self, sid, paper="A5", **over):
         from bill_templates.wholesale_invoice import render_wholesale_invoice_html
 
-        html = render_wholesale_invoice_html(ws.invoice_context(self.conn, self.save()))
-        for text in ("TAX INVOICE", "TEST WHOLESALE AGENCY", SHOP_GSTIN, "20B-111, 21B-112",
-                     "TEST MEDICAL ONE", LOCAL_BUYER, "20B-9, 21B-10", "Maharashtra (27)",
-                     "Place of Supply", "Due Date", "17-11-2026", "TEST ROADWAYS", "LR-77",
-                     "30049099", "TB01", "04/28", "CGST", "SGST", "Round Off", "-0.18",
-                     "412.00", "Rupees Four Hundred Twelve Only", "For TEST WHOLESALE AGENCY",
-                     "Authorised Signatory", "10 + 5 sch", "size: A4 portrait"):
-            self.assertIn(text, html)
-        self.assertNotIn("IGST %", html)
-        self.assertNotIn("E-way Bill No.", html)
+        inv = ws.invoice_context(self.conn, sid)
+        inv.update(over)
+        return render_wholesale_invoice_html(inv, paper=paper)
 
-    def test_another_state_prints_igst_on_a5(self):
-        from bill_templates.wholesale_invoice import render_wholesale_invoice_html
-
-        html = render_wholesale_invoice_html(
-            ws.invoice_context(self.conn, self.save(customer_id=2)), paper="A5")
-        self.assertIn("IGST %", html)
-        self.assertIn("Gujarat (24)", html)
-        self.assertIn("Unregistered", html)
-        self.assertNotIn("CGST %", html)
-        self.assertIn("size: 210mm 148mm", html)
-
-    def test_bank_details_print_when_the_shop_has_them(self):
-        self.conn.execute("INSERT INTO settings (name, value) VALUES ('invoice_bank_details', "
-                          "'Bank: TEST BANK\nA/c No: 000111222\nIFSC: TEST0000001')")
+    def _return_in_bill(self, sid, amount=50.0):
+        """A return of one TESTO SYRUP settled in this bill (allocations, as
+        core/return_credit records them)."""
+        self.conn.execute(
+            "INSERT INTO sales_returns (id, return_no, customer_id, return_date, refund_amount, "
+            "allocations) VALUES (1, 'SR1-7', 1, '2026-10-17', ?, ?)",
+            (amount, json.dumps([{"bill_id": sid, "amount": amount}])))
+        self.conn.execute("INSERT INTO sales_return_items (return_id, medicine_id, qty, rate, "
+                          "amount) VALUES (1, 2, 1, ?, ?)", (amount, amount))
         self.conn.commit()
-        from bill_templates.wholesale_invoice import render_wholesale_invoice_html
 
-        html = render_wholesale_invoice_html(ws.invoice_context(self.conn, self.save()))
-        self.assertIn("Bank Details", html)
-        self.assertIn("TEST0000001", html)
+    def test_it_prints_every_block(self):
+        html = self._html(self.save())
+        # header: the shop, the title with the payment, the buyer
+        for text in ("TEST WHOLESALE AGENCY", "Phone : 9000000000", "D.L. : 20B-111, 21B-112",
+                     f"GSTIN : {SHOP_GSTIN}", "GST INVOICE", "(CREDIT)", "Invoice No.",
+                     "18-10-2026", "Due Date", "17-11-2026", "TEST ROADWAYS", "LR-77",
+                     "Buyer Name", "M/s TEST MEDICAL ONE", "MAIN ROAD, TESTPUR",
+                     "PHONE NO. : 9111111111", "D.L.No. : 20B-9, 21B-10",
+                     f"Party GSTIN : {LOCAL_BUYER}"):
+            self.assertIn(text, html)
+        # the item table's columns, in the reference invoice's order
+        heads = ["S.", "PRODUCT NAME", "MFG.", "PACK", "HSN", "BATCH", "EXP.", "MRP", "QTY",
+                 "FREE", "RATE", "SGST%", "CGST%", "GROSS AMT."]
+        self.assertIn("".join(f"<th>{h}</th>" for h in heads), html)
+        self.assertNotIn("IGST%", html)
+        # a line: MFG, PACK, HSN, batch, expiry, the batch's MRP, packs, free, pack rate,
+        # half the GST each side, packs x rate
+        row = ("<td class='c'>1</td><td class='t'>TESTOCIN 500</td><td class='l'>TESTCARE</td>"
+               "<td class='l'>1x10</td><td class='c'>30049099</td><td class='l'>TB01</td>"
+               "<td class='c'>04/28</td><td class='n'>120.00</td><td class='n'>3</td>"
+               "<td class='n'>1</td><td class='n'>85.00</td><td class='n'>6.00</td>"
+               "<td class='n'>6.00</td><td class='n'>255.00</td>")
+        self.assertIn(row, html)
+        # no MRP on the syrup's batch: blank, never 0.00
+        self.assertIn("<td class='c'>12/27</td><td class='n'></td><td class='n'>4</td>", html)
+        self.assertIn("<tr class='filler'>", html)            # the rules run to the footer
+        # GST table: a row for every standard rate, zeros blank
+        self.assertIn("<th>GST%</th><th>TAXABLE</th><th>SGST</th><th>CGST</th><th>TOTAL</th>",
+                      html)
+        self.assertIn("<tr><td>0.00</td><td class='n'></td><td class='n'></td>"
+                      "<td class='n'></td><td class='n'></td></tr>", html)
+        self.assertIn("<tr><td>5.00</td><td class='n'>160.00</td><td class='n'>4.00</td>"
+                      "<td class='n'>4.00</td><td class='n'>168.00</td></tr>", html)
+        self.assertIn("<tr><td>12.00</td><td class='n'>218.02</td><td class='n'>13.08</td>"
+                      "<td class='n'>13.08</td><td class='n'>244.18</td></tr>", html)
+        for pct in ("18.00", "28.00"):
+            self.assertIn(f"<tr><td>{pct}</td>", html)
+        # totals, as the engine stored them
+        for label, value in (("SUB TOTAL", "415.00"), ("Discount", "36.98"), ("Bill Disc", ""),
+                             ("SGST Value", "17.08"), ("CGST Value", "17.08"),
+                             ("CR/DR", "-0.18"), ("CR/DR NOTE", "0.00")):
+            self.assertIn(f"<tr><td>{label}</td><td class='n'>{value}</td></tr>", html)
+        self.assertIn("<tr class='party'><td>PARTY TOTAL</td><td class='n'>412.00</td></tr>", html)
+        for text in ("Rs. Four Hundred Twelve only", "Declaration :-",
+                     "Subject to TESTNAGAR jurisdiction only.",
+                     "Total Item / Quantity : 2 / 7", "LEDGER BAL. : 412.00",
+                     "Sign of Customer", "For TEST WHOLESALE AGENCY", "size: 210mm 148mm"):
+            self.assertIn(text, html)
+        self.assertNotIn("BANK DETAILS", html)                 # none set up
 
-    def test_save_pdf_print_and_preview_use_the_tax_invoice(self):
+    def test_the_shops_own_declaration(self):
+        self.conn.execute("INSERT INTO settings (name, value) VALUES ('invoice_declaration', "
+                          "'TEST TERMS. Subject to {city} courts.')")
+        self.conn.commit()
+        self.assertIn("TEST TERMS. Subject to TESTNAGAR courts.", self._html(self.save()))
+
+    def test_another_state_prints_igst_and_a_paid_bill_says_cash(self):
+        html = self._html(self.save(customer_id=2, payment_mode="Cash", pay_full=True))
+        for text in ("IGST%", "<th>IGST</th>", "IGST Value", "34.16", "(CASH)",
+                     "Place of Supply : Gujarat (24)", "Paid Rs 412.00", "LEDGER BAL. : 0.00"):
+            self.assertIn(text, html)
+        self.assertNotIn("SGST%", html)
+        self.assertNotIn("CGST Value", html)
+        self.assertIn("<td class='n'>12.00</td><td class='n'>255.00</td>", html)
+        # the due date is the bill date for a cash party: not printed twice
+        self.assertNotIn("Due Date", html)
+
+    def test_bank_details_from_the_settings_text(self):
+        self.conn.execute("INSERT INTO settings (name, value) VALUES ('invoice_bank_details', "
+                          "'Bank: TEST BANK\nBranch: TESTNAGAR BR.\nA/c No: 000111222\n"
+                          "IFSC: TEST0000001')")
+        self.conn.commit()
+        html = self._html(self.save())
+        for text in ("BANK DETAILS", "TEST BANK (TESTNAGAR BR.)", "A/C NO. : 000111222",
+                     "IFSC CODE : TEST0000001"):
+            self.assertIn(text, html)
+
+    def test_the_profiles_bank_fields_win(self):
+        cols = {r[1] for r in self.conn.execute("PRAGMA table_info(pharmacy_profile)")}
+        for col in ("bank_name", "bank_account_no", "bank_ifsc", "bank_branch"):
+            if col not in cols:
+                self.conn.execute(f"ALTER TABLE pharmacy_profile ADD COLUMN {col} TEXT")
+        self.conn.execute("UPDATE pharmacy_profile SET bank_name='PROFILE BANK', "
+                          "bank_account_no='999888777', bank_ifsc='PROF0000009', "
+                          "bank_branch='MAIN BR.'")
+        self.conn.execute("INSERT INTO settings (name, value) VALUES ('invoice_bank_details', "
+                          "'Bank: SETTINGS BANK')")
+        self.conn.commit()
+        html = self._html(self.save())
+        for text in ("PROFILE BANK (MAIN BR.)", "A/C NO. : 999888777", "IFSC CODE : PROF0000009"):
+            self.assertIn(text, html)
+        self.assertNotIn("SETTINGS BANK", html)
+
+    def test_a_return_used_in_the_bill_prints_its_rows_and_the_note(self):
+        sid = self.save()
+        self._return_in_bill(sid)
+        inv = ws.invoice_context(self.conn, sid)
+        self.assertEqual((inv["returns_total"], inv["party_total"]), (50.0, 362.0))
+        html = self._html(sid)
+        self.assertIn("Return SR1-7 17-10-2026", html)
+        self.assertIn("<td class='t'>TESTO SYRUP</td>", html)
+        self.assertIn("Return total", html)
+        self.assertEqual(html.count(">-50.00<"), 3)   # the medicine, its total, the CR/DR NOTE
+        self.assertIn("<tr><td>CR/DR NOTE</td><td class='n'>-50.00</td></tr>", html)
+        self.assertIn("<tr class='party'><td>PARTY TOTAL</td><td class='n'>362.00</td></tr>", html)
+        self.assertIn("Rs. Three Hundred Sixty Two only", html)
+        self.assertIn("LEDGER BAL. : 362.00", html)
+
+    def test_a_return_settled_through_the_screen_prints_in_strips(self):
+        from core import desktop_returns_service as returns_svc
+
+        self.conn.execute("UPDATE customers SET credit_limit=0 WHERE id=1")
+        self.conn.commit()
+        first = self.save(payment_mode="Cash", pay_full=True, items=[
+            {"id": 1, "qty": 10, "rate": 90, "gst_percent": 12, "rate_tier": "A"}])
+        loaded = returns_svc.load_sales_bill_for_return(self.conn, first)
+        it = loaded["items"][0]
+        ret = returns_svc.save_sales_return(self.conn, {
+            "sale_id": first, "customer_id": 1, "settle_mode": "ledger", "discount": 0,
+            "items": [{"medicine_id": 1, "qty": 2 * it["tablets_per_stripe"], "rate": it["rate"],
+                       "orig_qty": it["orig_qty"], "orig_amount": it["amount"],
+                       "type": it["type"], "is_tablet": it["is_tablet"]}]})
+        self.assertTrue(ret.get("ok"), ret)                     # 2 strips: 201.60 credit
+        sid = self.save(apply_returns=[ret["return_id"]])
+        inv = ws.invoice_context(self.conn, sid)
+        self.assertEqual((inv["returns_total"], inv["party_total"]), (201.6, 210.4))
+        html = self._html(sid)
+        self.assertIn(f"Return {ret['return_no']}", html)
+        # the medicine that came back, 2 strips (not 20 tablets), minus its amount
+        self.assertIn("<td class='t'>TESTOCIN 500</td>", html)
+        self.assertIn("<td class='n'>2</td>", html)
+        self.assertIn(">-201.60<", html)
+        self.assertIn("<tr><td>CR/DR NOTE</td><td class='n'>-201.60</td></tr>", html)
+        self.assertIn("<tr class='party'><td>PARTY TOTAL</td><td class='n'>210.40</td></tr>", html)
+
+    def test_a_receipt_that_cleared_the_bill_is_shown(self):
+        sid = self.save()
+        self.conn.execute(
+            "INSERT INTO customer_payments (customer_id, payment_date, amount, payment_mode, "
+            "allocations, receipt_no) VALUES (1, '2026-10-19', 100, 'Cash', ?, 'R-15')",
+            (json.dumps([{"bill_id": sid, "amount": 100}]),))
+        self.conn.commit()
+        html = self._html(sid)
+        self.assertIn("Paid Rs 100.00 (Rcpt R-15)", html)
+        # the ledger balance is the one after this bill, not after later payments
+        self.assertIn("LEDGER BAL. : 412.00", html)
+
+    def test_the_signature_is_signed_over_the_shops_name(self):
+        sid = self.save()
+        pic = "data:image/png;base64,iVBORw0KGgo="
+        html = self._html(sid, signature_src=pic, signature_look="transform: rotate(-3deg);")
+        self.assertIn(f"<img class='sign-img' src='{pic}' alt='' "
+                      "style='transform: rotate(-3deg);'><span>For TEST WHOLESALE AGENCY</span>",
+                      html)
+        self.assertNotIn("class='sign-img'", self._html(sid, signature_src=""))
+        with mock.patch("core.bill_config.load_bill_print_settings",
+                        return_value={"print_signature_image": False}):
+            self.assertEqual(ws.invoice_context(self.conn, sid)["signature_src"], "")
+
+    def test_a4_takes_two_invoices_a_sheet_a5_one(self):
+        from bill_templates.wholesale_invoice import render_wholesale_invoices_html
+
+        invs = [ws.invoice_context(self.conn, self.save()) for _ in range(3)]
+        a4 = render_wholesale_invoices_html(invs, paper="A4")
+        self.assertEqual(a4.count("<div class='sheet'>"), 2)
+        self.assertEqual(a4.count("<div class='half'>"), 3)
+        self.assertEqual(a4.count("<div class='cut'></div>"), 1)   # only between two halves
+        self.assertIn("size: 210mm 297mm", a4)
+        a5 = render_wholesale_invoices_html(invs, paper="A5")
+        self.assertEqual(a5.count("<div class='sheet'>"), 3)
+        self.assertNotIn("<div class='cut'>", a5)
+        # one invoice on an A4 slot: the top half of a sheet
+        one = render_wholesale_invoices_html(invs[:1], paper="A4")
+        self.assertEqual((one.count("<div class='sheet'>"), one.count("<div class='half'>")),
+                         (1, 1))
+        for paper, want in (("A4", "A4"), ("A5", "A5"), ("A6", "A5"), ("", "A5")):
+            self.assertEqual(ws.invoice_paper({"paper_size": paper}), want)
+
+    def test_a_long_bill_goes_on_over_more_boxes(self):
+        from bill_templates import wholesale_invoice as tpl
+
+        inv = ws.invoice_context(self.conn, self.save())
+        inv["lines"] = [dict(inv["lines"][0]) for _ in range(tpl.ROWS_PER_PAGE + 1)]
+        html = tpl.render_wholesale_invoices_html([inv], paper="A5")
+        self.assertEqual(html.count("<div class='sheet'>"), 2)
+        self.assertIn("Continued on next page", html)
+        self.assertEqual(html.count("PARTY TOTAL"), 1)          # the totals on the last box
+        self.assertIn("1 of 2", html)
+
+    def test_save_pdf_print_and_preview_use_the_invoice(self):
         from core import bill_output
         from core.desktop_sales_service import get_bill_preview
 
@@ -435,19 +613,57 @@ class TheTaxInvoice(unittest.TestCase):
                 mock.patch.object(bill_output, "_try_pdf_via_browser", return_value=True) as pdf, \
                 mock.patch("core.bill_save_prefs.resolve_sales_bill_save_dir", return_value=tmp), \
                 mock.patch.object(bill_output, "resolve_bill_db_path", return_value=""):
-            pages = bill_output.save_bill_pdf_pages(self.conn, sid, print_slot=1)
+            pages = bill_output.save_bill_pdf_pages(
+                self.conn, sid, print_slot=1, settings_override={"paper_size": "A5"})
             self.assertEqual(len(pages), 1)
             html_path, pdf_path = pages[0]
             with open(html_path, encoding="utf-8") as fh:
-                self.assertIn("TAX INVOICE", fh.read())
+                self.assertIn("GST INVOICE", fh.read())
             self.assertTrue(pdf_path.endswith(".pdf"))
-            self.assertIn(pdf.call_args.kwargs.get("paper_width_mm"), (210.0,))
+            self.assertEqual((pdf.call_args.kwargs.get("paper_width_mm"),
+                              pdf.call_args.kwargs.get("paper_height_mm")), (210.0, 148.0))
+            bill_output.save_bill_pdf_pages(
+                self.conn, sid, print_slot=1, settings_override={"paper_size": "A4"})
+            self.assertEqual(pdf.call_args.kwargs.get("paper_height_mm"), 297.0)
             a6 = bill_output.save_bill_pdf_a6(self.conn, sid)
             self.assertTrue(a6[0].endswith(".html"))
         prev = get_bill_preview(self.conn, sid)
         self.assertTrue(prev["ok"], prev)
         self.assertEqual(prev["template"], "wholesale")
-        self.assertIn("TAX INVOICE", prev["html"])
+        self.assertIn("GST INVOICE", prev["html"])
+
+    def test_print_all_puts_two_invoices_on_an_a4_sheet(self):
+        from core import bill_output, history_print
+
+        ids = [self.save() for _ in range(3)]
+        seen = []
+
+        def fake_pdf(html_path, pdf_path, **kw):
+            with open(html_path, encoding="utf-8") as fh:
+                seen.append((fh.read(), kw.get("paper_height_mm")))
+            with open(pdf_path, "wb") as fh:
+                fh.write(b"%PDF-1.4\n")
+            return True
+
+        with mock.patch.object(bill_output, "_try_pdf_via_browser", side_effect=fake_pdf), \
+                mock.patch.object(bill_output, "resolve_bill_db_path", return_value=""), \
+                mock.patch.object(history_print, "_dot_matrix_mode", return_value=False), \
+                mock.patch.object(history_print, "_remove_later"), \
+                mock.patch("core.printer_manager.PrinterManager.get_printer_for_slot",
+                           return_value="TEST PRINTER"), \
+                mock.patch("core.printer_manager.PrinterManager.print_pdf_silently") as printed, \
+                mock.patch.object(history_print.time, "sleep"):
+            pages, failures = history_print.print_bills_batch(
+                self.conn, ids, paper="A4", copy_label="STORE COPY")
+            self.assertEqual(failures, [])
+            self.assertEqual((pages, printed.call_count), (1, 1))
+            html, height = seen[-1]
+            self.assertEqual(height, 297.0)
+            self.assertEqual(html.count("<div class='sheet'>"), 2)   # 3 invoices, 2 sheets
+            self.assertEqual(html.count("STORE COPY"), 3)
+            history_print.print_bills_batch(self.conn, ids, paper="A5")
+            html, height = seen[-1]
+            self.assertEqual((html.count("<div class='sheet'>"), height), (3, 148.0))
 
 
 if __name__ == "__main__":

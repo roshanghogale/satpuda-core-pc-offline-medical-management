@@ -509,8 +509,10 @@ def _wholesale_invoice_ctx(conn, sale_id, db_path: str | None = None):
 
 def wholesale_invoice_files(conn, sale_id, settings: dict | None = None, *,
                             db_path: str | None = None, save_dir: str | None = None):
-    """(html path, pdf path or None) of a wholesale bill's tax invoice, A4 or A5 by the
-    print slot's paper; None when the bill is not a wholesale one."""
+    """(html path, pdf path or None) of a wholesale bill's GST invoice -- always A5
+    landscape: its own A5 page on an A5 / A6 slot, the top half of an A4 portrait sheet on
+    an A4 slot (core/wholesale_sale.invoice_paper); None when the bill is not a wholesale
+    one."""
     inv = _wholesale_invoice_ctx(conn, sale_id, db_path)
     if inv is None:
         return None
@@ -518,7 +520,8 @@ def wholesale_invoice_files(conn, sale_id, settings: dict | None = None, *,
     from core.wholesale_sale import invoice_paper, paper_mm
 
     paper = invoice_paper(settings)
-    html = render_wholesale_invoice_html(inv, paper=paper)
+    html = render_wholesale_invoice_html(
+        inv, paper=paper, copy_label=str((settings or {}).get("copy_footer_label") or "").strip())
     if not save_dir:
         from core.bill_save_prefs import resolve_sales_bill_save_dir
 
@@ -531,6 +534,42 @@ def wholesale_invoice_files(conn, sale_id, settings: dict | None = None, *,
     w_mm, h_mm = paper_mm(paper)
     ok = _try_pdf_via_browser(html_path, pdf_path, paper_width_mm=w_mm, paper_height_mm=h_mm)
     return html_path, (pdf_path if ok else None)
+
+
+def wholesale_invoices_pdf(conn, sale_ids, settings: dict | None = None, *,
+                           db_path: str | None = None) -> tuple[str, str]:
+    """Print All's wholesale invoices as ONE temporary (html, pdf): two to an A4 portrait
+    sheet (top and bottom, a dashed cut line between) on an A4 slot, one A5 landscape page
+    each otherwise. Raises when the PDF cannot be made; the caller removes both files."""
+    import tempfile
+
+    from bill_templates.wholesale_invoice import render_wholesale_invoices_html
+    from core.wholesale_sale import invoice_paper, paper_mm
+
+    invs = []
+    for sid in sale_ids:
+        inv = _wholesale_invoice_ctx(conn, sid, db_path)
+        if inv is not None:
+            invs.append(inv)
+    if not invs:
+        raise ValueError("No wholesale invoice to print.")
+    paper = invoice_paper(settings)
+    html = render_wholesale_invoices_html(
+        invs, paper=paper, copy_label=str((settings or {}).get("copy_footer_label") or "").strip())
+    fd, html_path = tempfile.mkstemp(suffix=".html", prefix="ws_invoices_")
+    os.close(fd)
+    pdf_path = html_path[:-5] + ".pdf"
+    with open(html_path, "w", encoding="utf-8") as f:
+        f.write(html)
+    w_mm, h_mm = paper_mm(paper)
+    if not _try_pdf_via_browser(html_path, pdf_path, paper_width_mm=w_mm, paper_height_mm=h_mm):
+        for path in (html_path, pdf_path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        raise RuntimeError("PDF could not be created (install Edge or Chrome).")
+    return html_path, pdf_path
 
 
 def _open_bill_pdf_conn(conn, path: str):

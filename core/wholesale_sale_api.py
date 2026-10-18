@@ -2,7 +2,10 @@
 
 GET  /api/wholesale/sale/parties?q=        customers for the party box, medicals first
 GET  /api/wholesale/sale/party?customer_id= the party: GSTIN, DL, state, tier, credit, due
-GET  /api/wholesale/sale/load?sale_id=      a saved tax invoice, for edit / view
+GET  /api/wholesale/sale/load?sale_id=      a saved tax invoice, for edit / view (with the
+                                            returns settled in it, qty in packs)
+GET  /api/wholesale/sale/open-returns?customer_id=  the party's returns whose credit is not
+                                            used yet, qty in packs (core/return_credit.py)
 GET  /api/wholesale/sale/preview?sale_id=   the tax invoice HTML (A4 / A5 by print slot 1)
 POST /api/wholesale/sale/line               {medicine_id, rate_tier, qty?} -> a new line
 POST /api/wholesale/sale/calc               the live totals, place of supply, credit warning
@@ -45,8 +48,13 @@ def handle_get(path: str, qs: dict, conn) -> Optional[tuple[int, dict[str, Any]]
                 "place_of_supply": pos, "place_of_supply_name": ws.state_name(pos),
                 "intra_state": ws.is_intra_state(pos, shop["state"]),
             }
+        if name == "open-returns":
+            return 200, ws.open_returns_for_party(conn, _first(qs, "customer_id"))
         if name == "load":
             res = ws.load_sale(conn, _first(qs, "sale_id"))
+            if res.get("ok"):
+                # the returns settled in this bill: Return rows on the edit screen
+                res["returns_in_bill"] = ws.returns_in_sale(conn, res["sale_id"])
             return (200 if res.get("ok") else 400), res
         if name == "preview":
             from bill_templates.wholesale_invoice import render_wholesale_invoice_html
