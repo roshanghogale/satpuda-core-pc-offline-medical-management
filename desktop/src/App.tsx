@@ -67,6 +67,7 @@ import { DesktopUiPrefsProvider } from './desktopUiPrefsContext'
 import { VoiceBar } from './voice/VoiceBar'
 import { useVoiceEnabled } from './voice/voiceEnabled'
 import { OfflineFirstAutoSwitch, OfflineFirstPill } from './components/OfflineFirst'
+import { WholesaleSwitch } from './wholesale/WholesaleSwitch'
 
 const NAV_LABELS: Record<PageId, string> = {
   home: 'Home',
@@ -560,6 +561,7 @@ export default function App() {
               {meta.sync_mode === 'online' ? 'Online' : 'Offline'}
             </span>
           ) : null}
+          {!IS_DEMO ? <WholesaleSwitch /> : null}
           {meta?.store_name ? (
             <span className="mainnav-store" title={meta.store_name}>
               {meta.store_name}

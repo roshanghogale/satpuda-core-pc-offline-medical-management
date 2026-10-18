@@ -869,6 +869,17 @@ def ensure_store_session(
             "paired_at": _dt.datetime.utcnow().isoformat() + "Z",
         }
         save_session(store_key, session)
+        # The admin panel's wholesale switch rides on the pairing answer too; only an
+        # answer that speaks about it is recorded (core/license_manager).
+        if "wholesale_enabled" in store or "wholesale_enabled" in data:
+            try:
+                from core.license_manager import remember_server_wholesale
+
+                remember_server_wholesale(
+                    store if "wholesale_enabled" in store else data
+                )
+            except Exception:
+                pass
     # The server's name for the store is the one the shop sees from now on, so the
     # next pairing sends that and not a folder key like "Store_Shree_Gajanan_...".
     if store.get("store_name"):

@@ -771,6 +771,8 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                             "/api/sync/status",
                             "/api/license/status",
                             "/api/voice/enabled",
+                            "/api/wholesale/state",
+                            "/api/wholesale/last-rates",
                             "/api/reports/gst",
                             "/api/reports/gst/export",
                             "/api/reports/gst/summary",
@@ -933,6 +935,14 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
 
                 _json_response(self, 200, voice_status())
                 return
+            if path.startswith("/api/wholesale/"):
+                # The wholesale switch and its helpers (core/wholesale_api.py).
+                from core import wholesale_api
+
+                hit = wholesale_api.handle_get(self.path, _db.get("conn"))
+                if hit is not None:
+                    _json_response(self, hit[0], hit[1])
+                    return
             if path == "/api/voice/pack":
                 # The downloadable voice pack (core/voice_pack.py): installed? downloading?
                 from core import voice_pack
@@ -2054,6 +2064,13 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 from core import wholesale_sale_api
 
                 hit = wholesale_sale_api.handle_post(path, _read_json_body(self), _db.get("conn"))
+                if hit is not None:
+                    _json_response(self, hit[0], hit[1])
+                    return
+            if path.startswith("/api/wholesale/"):
+                from core import wholesale_api
+
+                hit = wholesale_api.handle_post(path, _read_json_body(self), _db.get("conn"))
                 if hit is not None:
                     _json_response(self, hit[0], hit[1])
                     return

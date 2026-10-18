@@ -2197,6 +2197,8 @@ def payment_report(conn, kind: str, from_date: str = "", to_date: str = "", part
         number = str(pno or "").strip() or f"#{pid}"
         if str(ref or "").strip():
             number = f"{number} · {str(ref).strip()}"
+        if str(receipt_no or "").strip():
+            number = f"{number} · Rcpt {str(receipt_no).strip()}"
         payments.append({
             "id": int(pid),
             "date": str(pdate or "")[:10],
@@ -2240,8 +2242,10 @@ def _payment_report_lines(rep: dict[str, Any]) -> list[tuple[str, list[Any]]]:
         out.append((kind, cells))
 
     for p in rep["payments"]:
-        add("pay", [p["date"], p["number"], p["party"], p["mode"], p["amount"], "", "", "", ""],
-            p.get("receipt_no") or "")
+        rcpt = str(p.get("receipt_no") or "")
+        # the screen shows "· Rcpt X" in the number; the file has its own Receipt No column
+        number = str(p["number"]).replace(f" · Rcpt {rcpt}", "") if receipts and rcpt else p["number"]
+        add("pay", [p["date"], number, p["party"], p["mode"], p["amount"], "", "", "", ""], rcpt)
         for c in p["cleared"]:
             add("bill", ["", "", "", "", "", short(c.get("bill_no")) or f"#{c.get('bill_id')}",
                          c.get("date") or "", c["amount"],

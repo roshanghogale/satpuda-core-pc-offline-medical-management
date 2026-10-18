@@ -1212,6 +1212,14 @@ def upsert_contact_online(collection: str, doc: dict) -> int:
             for key in ("total_due", "total_credit"):
                 if d.get(key) in (None, "") and existing.get(key) is not None:
                     d[key] = existing.get(key)
+            # Wholesale party fields a save does not mention stay as the server has them
+            # (a retail-mode edit never wipes a party's GST/DL/credit terms).
+            if collection == "customers":
+                from core.wholesale_sync import column_names
+
+                for key in column_names("customers"):
+                    if key not in d and key in existing:
+                        d[key] = existing.get(key)
             # Base the version on the server's own copy and move past it. The
             # server resolves by version alone, so a document carrying a stale
             # version is answered with HTTP 200 and written NOWHERE. That is how

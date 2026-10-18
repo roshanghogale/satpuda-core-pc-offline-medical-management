@@ -9,6 +9,7 @@ back as this PC's own.
 """
 from __future__ import annotations
 
+import re
 import sqlite3
 
 # collection -> local table (they share names on the PC)
@@ -40,8 +41,14 @@ LINE_TABLES = {
 }
 
 # Settings rows that belong to the shop (all devices), not to one PC.
-SHOP_WIDE_SETTING_PREFIXES = ("regular_meds:", "customer_gst:", "gst_filed:")
-SHOP_WIDE_SETTING_NAMES = ("billing_layout_prefs",)
+# business_mode / ws_margin_*: the wholesale switch and its rate margins (core/wholesale_mode.py).
+SHOP_WIDE_SETTING_PREFIXES = ("regular_meds:", "customer_gst:", "gst_filed:", "ws_margin_")
+SHOP_WIDE_SETTING_NAMES = ("billing_layout_prefs", "business_mode")
+# The settings triggers carry the list above in their WHEN; a longer list is a new version.
+_SETTINGS_TRIGGER_VERSION = "v3"
+_RETIRED_SETTINGS_TRIGGERS = (
+    "of_insert_settings", "of_update_settings", "of_insert_settings_v2", "of_update_settings_v2",
+)
 
 # Medicine columns whose change is bookkeeping or stock, not an edit of the medicine itself.
 _MEDICINE_NOT_AN_EDIT = {
@@ -182,7 +189,8 @@ def trigger_sql(conn: sqlite3.Connection) -> list[str]:
         )
         for ev in ("INSERT", "UPDATE"):
             out.append(
-                f"CREATE TRIGGER IF NOT EXISTS of_{ev.lower()}_settings_v2 AFTER {ev} ON settings "
+                f"CREATE TRIGGER IF NOT EXISTS of_{ev.lower()}_settings_{_SETTINGS_TRIGGER_VERSION} "
+                f"AFTER {ev} ON settings "
                 f"WHEN {_CAPTURE_ON} AND ({shop_wide}) BEGIN {_mark('settings', 'NEW.id', 'upsert')} END;"
             )
     return out
@@ -191,12 +199,35 @@ def trigger_sql(conn: sqlite3.Connection) -> list[str]:
 def ensure_schema(conn: sqlite3.Connection) -> None:
     """Create the bookkeeping tables and triggers (idempotent)."""
     conn.executescript(_TABLES)
-    # Retired triggers (replaced by a narrower version).
-    for old in ("of_insert_settings", "of_update_settings"):
+    # Columns a newer build reads and writes (wholesale) exist before the triggers name them.
+    try:
+        from core.wholesale_schema import ensure_wholesale_columns
+
+        ensure_wholesale_columns(conn)
+    except Exception:
+        pass
+    # Retired triggers (replaced by a narrower / wider version).
+    for old in _RETIRED_SETTINGS_TRIGGERS:
         conn.execute(f"DROP TRIGGER IF EXISTS {old}")
+    _drop_stale_medicine_update_trigger(conn)
     for stmt in trigger_sql(conn):
         conn.execute(stmt)
     conn.commit()
+
+
+def _drop_stale_medicine_update_trigger(conn: sqlite3.Connection) -> None:
+    """The medicines update trigger lists the columns that count as an edit when it is made.
+    A column added later (rate_a, rate_b, ... for wholesale) is not in it, so changing only
+    that column would never reach the server. Such a trigger is dropped and made again."""
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='of_upd_medicines'"
+    ).fetchone()
+    if not row or not _table_exists(conn, "medicines"):
+        return
+    sql = str(row[0] or "")
+    cols = [c for c in _columns(conn, "medicines") if c not in _MEDICINE_NOT_AN_EDIT and c != "id"]
+    if any(not re.search(rf"\bNEW\.{re.escape(c)}\b", sql) for c in cols):
+        conn.execute("DROP TRIGGER IF EXISTS of_upd_medicines")
 
 
 def drop_triggers(conn: sqlite3.Connection) -> None:

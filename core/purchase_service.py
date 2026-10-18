@@ -1687,6 +1687,19 @@ def _apply_stock_for_purchase(cur, purchase_id: int):
 
 # ── Purchase record ───────────────────────────────────────────────────────────
 
+def _ws_line_rates(it: dict) -> dict:
+    """Wholesale Rate A / B / C typed on a purchase line ({} when none)."""
+    from core.wholesale_rates import line_rates
+
+    return line_rates(it)
+
+
+def _ws_medicine_rates(it: dict) -> dict:
+    from core.wholesale_rates import medicine_doc_rates
+
+    return medicine_doc_rates(it)
+
+
 def save_purchase_online_now(
     supplier_id: int,
     purchase_date_str: str,
@@ -1801,6 +1814,7 @@ def save_purchase_online_now(
             "discount_pct": float(it.get("discount_pct") or 0),
             "taxable": float(it.get("taxable") or 0),
             "gst_amt": float(it.get("gst_amt") or 0),
+            **_ws_line_rates(it),
             "unit": unit_val,
             "tablets_per_stripe": it.get("tablets_per_stripe"),
             "quantity_value": it.get("quantity_value") or unit_val,
@@ -1838,6 +1852,8 @@ def save_purchase_online_now(
             mp["name"] = name
         if it.get("hsn_code"):
             mp["hsn_code"] = it.get("hsn_code")
+        # Wholesale: the line's Rate A / B / C (and purchase rate) become the batch's.
+        mp.update(_ws_medicine_rates(it))
         # Where this medicine came from, for reference. Only on a line that
         # actually stocked something, so an edit that takes stock back does not
         # rewrite the note.
@@ -2703,6 +2719,7 @@ def update_purchase_online_now(
             "discount_pct": float(it.get("discount_pct") or 0),
             "taxable": float(it.get("taxable") or 0),
             "gst_amt": float(it.get("gst_amt") or 0),
+            **_ws_line_rates(it),
             "unit": unit_val,
             "tablets_per_stripe": it.get("tablets_per_stripe"),
             "quantity_value": it.get("quantity_value") or unit_val,
@@ -2772,6 +2789,7 @@ def update_purchase_online_now(
             val_s = str(it.get(txt_key) or "").strip()
             if val_s:
                 keep[txt_key] = val_s
+        keep.update(_ws_medicine_rates(it))
         if keep:
             attrs_by_med[mid_a] = keep
     supplier_note = _supplier_name_for(None, supplier_id)

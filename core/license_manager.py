@@ -639,6 +639,10 @@ def fetch_server_license() -> dict | None:
                 remember_server_voice(data)
             except Exception:
                 pass
+            try:
+                remember_server_wholesale(data)
+            except Exception:
+                pass
         return data if isinstance(data, dict) else None
     except Exception:
         return None
@@ -855,6 +859,11 @@ def _cache_server_license_locally(lic: dict) -> None:
             remember_server_voice(lic)
         except Exception:
             pass
+    if "wholesale_enabled" in lic:
+        try:
+            remember_server_wholesale(lic)
+        except Exception:
+            pass
 
 
 # ── Voice assistant switch (admin panel, per store) ────────────────────────────
@@ -937,6 +946,70 @@ def live_server_voice(max_age_s: float) -> dict | None:
         return None
     return {'enabled': _VOICE_LIVE.get('enabled') is True,
             'tier': normalize_voice_tier(_VOICE_LIVE.get('tier'))}
+
+
+# ── Wholesale switch (admin panel, per store; 18 Oct 2026) ─────────────────────
+#
+# Same shape as the voice switch: the server sends ``wholesale_enabled`` (bool) in the
+# plain licence and in the /auth pairing answer. The last answer is kept in memory and in
+# wholesale.dat so an offline PC keeps it. Nothing ever heard = OFF. When the server says
+# OFF the store reads as retail (its wholesale data stays; see core/wholesale_mode.py).
+
+_WHOLESALE_LIVE: dict = {}  # last answer from the server in THIS process: enabled, at
+
+
+def _wholesale_cache_path() -> str:
+    return os.path.join(_appdata_dir(), 'wholesale.dat')
+
+
+def wholesale_from_license(lic) -> bool:
+    """True only when the licence dict says wholesale_enabled is true. Missing = OFF."""
+    lic = lic if isinstance(lic, dict) else {}
+    v = lic.get('wholesale_enabled')
+    if v is None and isinstance(lic.get('store'), dict):
+        v = lic['store'].get('wholesale_enabled')
+    return v is True or (not isinstance(v, bool) and str(v).strip().lower() in ('1', 'true'))
+
+
+def read_cached_wholesale() -> bool | None:
+    """The last server answer saved on this PC, or None if there never was one."""
+    path = _wholesale_cache_path()
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, 'rb') as f:
+            data = _decrypt(f.read())
+    except Exception:
+        return None
+    if not isinstance(data, dict) or 'enabled' not in data:
+        return None
+    return data.get('enabled') is True
+
+
+def remember_server_wholesale(lic) -> bool:
+    """Record what the server just said about wholesale: in memory, and on disk when it
+    changed. Only call it with a whole answer for this store (a missing field = OFF)."""
+    enabled = wholesale_from_license(lic)
+    _WHOLESALE_LIVE.clear()
+    _WHOLESALE_LIVE.update(enabled=enabled, at=time.time())
+    if read_cached_wholesale() is not enabled:
+        path = _wholesale_cache_path()
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'wb') as f:
+                f.write(_encrypt({'enabled': enabled,
+                                  'saved_at': time.strftime('%Y-%m-%dT%H:%M:%S')}))
+        except Exception:
+            pass
+    return enabled
+
+
+def live_server_wholesale(max_age_s: float) -> bool | None:
+    """The server's answer from this process, if it is recent enough."""
+    at = _WHOLESALE_LIVE.get('at')
+    if not at or time.time() - float(at) > max_age_s:
+        return None
+    return _WHOLESALE_LIVE.get('enabled') is True
 
 
 def _resolve_remote_store_id(admin_token: str) -> str:

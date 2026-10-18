@@ -75,6 +75,10 @@ def _normalize_items(raw_items: list) -> list[dict[str, Any]]:
             "content_drug": str(it.get("content_drug") or it.get("content") or ""),
             "unit": unit,
         }
+        # Wholesale: Rate A / B / C typed on the line (core/wholesale_rates.py).
+        from core.wholesale_rates import line_rates
+
+        item.update(line_rates(it))
         if is_strip_count_type(med_type):
             tps = _safe_int(it.get("tablets_per_stripe"), 0)
             if tps <= 0:
@@ -548,6 +552,11 @@ def save_purchase_bill(conn, body: dict[str, Any]) -> dict[str, Any]:
         ) + purchase_line_warnings(
             items, purchase_date, medicine_type=medicine_type_lookup(conn)
         )
+        # A wholesale store sells at Rate A / B / C, not MRP: MRP is optional there.
+        from core.wholesale_mode import is_wholesale
+
+        if is_wholesale(conn):
+            warnings = [w for w in warnings if not str(w).startswith("MRP is 0 on:")]
     except Exception:
         warnings = []
 
@@ -632,6 +641,10 @@ def save_purchase_bill(conn, body: dict[str, Any]) -> dict[str, Any]:
                 # Prefer encoded no for subsequent lookups
                 pass
 
+        # Wholesale: the lines' Rate A / B / C onto the lines and the medicine batches.
+        if int(purchase_id or 0) > 0:
+            _save_wholesale_rates(conn, int(purchase_id), items)
+
         returns_used = 0.0
         if returns_plan and int(purchase_id or 0) > 0:
             from core.return_credit import settle_purchase
@@ -693,6 +706,21 @@ def save_purchase_bill(conn, body: dict[str, Any]) -> dict[str, Any]:
         except Exception:
             pass
         return {"ok": False, "error": f"Failed to save purchase: {exc}"}
+
+
+def _save_wholesale_rates(conn, purchase_id: int, items: list, *, to_medicines: bool = True) -> None:
+    """Offline / offline-first: rates onto the saved lines (and batches). Online carries them
+    in the documents it sends (core/purchase_service.save_purchase_online_now)."""
+    try:
+        from core.sync_prefs import is_online_mode
+
+        if is_online_mode():
+            return
+        from core.wholesale_rates import apply_purchase_rates
+
+        apply_purchase_rates(conn, purchase_id, items, to_medicines=to_medicines)
+    except Exception as exc:
+        print(f"[desktop_purchase] wholesale rates: {exc}")
 
 
 def _bill_key(s: Any) -> str:
@@ -839,6 +867,8 @@ def load_purchase(conn, purchase_id: int) -> dict[str, Any]:
     if method not in ("discount_before_gst", "discount_after_gst"):
         method = "discount_before_gst"
 
+    from core.wholesale_rates import rate_select_sql
+
     cur.execute(
         """
         SELECT pi.medicine_id, m.name, pi.type, pi.batch_no, pi.expiry_date,
@@ -851,7 +881,9 @@ def load_purchase(conn, purchase_id: int) -> dict[str, Any]:
                COALESCE(m.content_drug, ''),
                COALESCE(m.unit, ''),
                COALESCE(pi.taxable, 0),
-               COALESCE(pi.gst_amt, 0)
+               COALESCE(pi.gst_amt, 0)"""
+        + rate_select_sql(conn, "pi")
+        + """
         FROM purchase_items pi JOIN medicines m ON pi.medicine_id=m.id
         WHERE pi.purchase_id=?
         """,
@@ -886,6 +918,10 @@ def load_purchase(conn, purchase_id: int) -> dict[str, Any]:
             "gst_amt": float(row[18] or 0),
             "unit": unit,
             "_preserve_line_totals": True,
+            # Wholesale Rate A / B / C of the line (None when it has none).
+            "rate_a": row[19],
+            "rate_b": row[20],
+            "rate_c": row[21],
         }
         if is_strip_count_type(med_type):
             tps = parse_tablets_per_stripe(unit) if unit else 1
@@ -1104,6 +1140,9 @@ def _load_purchase_online(conn, purchase_id: int) -> dict[str, Any]:
             "gst_amt": _safe_float(it.get("gst_amt")),
             "unit": unit,
             "_preserve_line_totals": True,
+            "rate_a": it.get("rate_a"),
+            "rate_b": it.get("rate_b"),
+            "rate_c": it.get("rate_c"),
         }
         if is_strip_count_type(med_type):
             tps = 0
@@ -1259,6 +1298,7 @@ def autosave_purchase(conn, body: dict[str, Any]) -> dict[str, Any]:
                 calc,
                 items,
             )
+            _save_wholesale_rates(conn, autosave_id, items, to_medicines=False)
             return {"ok": True, "autosave_purchase_id": autosave_id, "updated": True}
         result = save_autosave_purchase(
             conn, supplier_id, purchase_date, bill_number, calc, items
@@ -1271,6 +1311,8 @@ def autosave_purchase(conn, body: dict[str, Any]) -> dict[str, Any]:
                 "SELECT id FROM purchases WHERE purchase_no=?", (purchase_no,)
             ).fetchone()
             purchase_id = int(row[0]) if row else 0
+        if int(purchase_id or 0) > 0:
+            _save_wholesale_rates(conn, int(purchase_id), items, to_medicines=False)
         return {
             "ok": True,
             "autosave_purchase_id": int(purchase_id or 0),

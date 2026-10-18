@@ -131,6 +131,7 @@ def attach_ledger_links(conn: sqlite3.Connection, kind: str, party_id: int, rows
     from core.return_refunds import refund_marks
 
     k = _kind(kind)
+    attach_receipt_nos(conn, k, rows)
     try:
         links = ledger_links(conn, k, int(party_id))
         pays = [(int(r["ref_id"]), int(party_id), float(r.get("credit") or 0), str(r.get("reference") or ""))
@@ -181,6 +182,38 @@ def attach_ledger_links(conn: sqlite3.Connection, kind: str, party_id: int, rows
             r["links"] = cleared_text(lines, open_left.get(rid, 0.0), extra)
 
 
+def attach_receipt_nos(conn: sqlite3.Connection, kind: str, rows: list[dict]) -> None:
+    """Ledger payment rows get ``receipt_no`` (the paper receipt's number), and their
+    particulars say it: "Payment (cash) · Rcpt 55". In place; never raises."""
+    table = "customer_payments" if _kind(kind) == "customer" else "supplier_payments"
+    ids = sorted({int(r["ref_id"]) for r in rows if r.get("ref_kind") == "payment" and r.get("ref_id") is not None})
+    if not ids:
+        return
+    try:
+        got = dict(conn.execute(
+            f"SELECT id, COALESCE(receipt_no,'') FROM {table} WHERE id IN ({','.join('?' * len(ids))})", ids
+        ).fetchall())
+    except sqlite3.Error:
+        return
+    for r in rows:
+        if r.get("ref_kind") != "payment" or r.get("ref_id") is None:
+            continue
+        no = str(got.get(int(r["ref_id"])) or "").strip()
+        r["receipt_no"] = no
+        if no:
+            r["particulars"] = f"{r.get('particulars') or 'Payment'} · Rcpt {no}"
+
+
+def _receipt_no(conn: sqlite3.Connection, kind: str, payment_id: int) -> str:
+    """The paper receipt number given or taken with the payment ('' when none)."""
+    table = "customer_payments" if kind == "customer" else "supplier_payments"
+    try:
+        row = conn.execute(f"SELECT COALESCE(receipt_no,'') FROM {table} WHERE id=?", (payment_id,)).fetchone()
+    except sqlite3.Error:
+        return ""
+    return str(row[0] or "") if row else ""
+
+
 def payment_details(conn: sqlite3.Connection, kind: str, payment_id: Any) -> dict[str, Any]:
     """The View box of a payment row: {ok, supported, payment: {id, payment_no, date, party,
     party_id, mode, amount, cash, online, reference, note, refund, chosen (its allocations),
@@ -215,11 +248,12 @@ def payment_details(conn: sqlite3.Connection, kind: str, payment_id: Any) -> dic
     if not row:
         raise ValueError("Payment not found.")
     pay_id, pay_no, pdate, party_id, party, amount, mode, cash, online, ref, note, alloc = row
+    receipt_no = _receipt_no(conn, k, int(pay_id))
     amount = r2(amount)
     out = {"id": int(pay_id), "payment_no": str(pay_no or "") or f"#{int(pay_id)}",
            "date": str(pdate or "")[:10], "party": str(party), "party_id": int(party_id or 0),
            "mode": str(mode), "amount": amount, "cash": r2(cash), "online": r2(online),
-           "reference": str(ref), "note": str(note), "refund": False,
+           "reference": str(ref), "note": str(note), "receipt_no": receipt_no, "refund": False,
            "chosen": clean_allocations(alloc), "cleared": [], "credit_left": 0.0, "refunded": []}
     hit = refund_marks(conn, k, [(int(pay_id), int(party_id or 0), amount, str(ref))]).get(int(pay_id))
     if hit:

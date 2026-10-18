@@ -64,6 +64,8 @@ import {
 import { BillScanProgressOverlay } from '../components/BillScanProgressOverlay'
 import { dispatchDataChanged } from '../syncRefresh'
 import { todayLocal } from '../localDate'
+import { fetchLastRates, suggestedRates, useBusinessMode } from '../wholesale/mode'
+import '../wholesale/wholesale.css'
 
 type LineItem = {
   medicine: string
@@ -90,6 +92,16 @@ type LineItem = {
   rateTab?: number
   tablets_per_stripe?: number
   _preserve_line_totals?: boolean
+  /** Wholesale: the line's sale rates (per pack, GST excluded). */
+  rateA?: number
+  rateB?: number
+  rateC?: number
+}
+
+/** A rate box's text -> a number above zero, or undefined. */
+function wsRate(v: unknown): number | undefined {
+  const n = Number(v)
+  return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : undefined
 }
 
 type PurchaseTab = {
@@ -285,6 +297,9 @@ function lineFromPayload(it: PurchaseLinePayload): LineItem {
     rateTab: isStripType(it.type || '') ? rate / tps : undefined,
     _preserve_line_totals:
       Boolean(it._preserve_line_totals) || amount > 0,
+    rateA: wsRate(it.rate_a),
+    rateB: wsRate(it.rate_b),
+    rateC: wsRate(it.rate_c),
   }
 }
 
@@ -342,6 +357,9 @@ function tabPayload(tab: PurchaseTab) {
       taxable: it.taxable,
       gst_amt: it.gstAmt,
       _preserve_line_totals: it._preserve_line_totals,
+      ...(it.rateA || it.rateB || it.rateC
+        ? { rate_a: it.rateA ?? null, rate_b: it.rateB ?? null, rate_c: it.rateC ?? null }
+        : {}),
     })),
   }
 }
@@ -441,6 +459,12 @@ export function PurchasePage({
   const [tabletMrp, setTabletMrp] = useState('')
   const [tabletRate, setTabletRate] = useState('')
   const [discPct, setDiscPct] = useState('0')
+  // Wholesale: Rate A / B / C of the line being entered (per pack, GST excluded).
+  const ws = useBusinessMode()
+  const [rateA, setRateA] = useState('')
+  const [rateB, setRateB] = useState('')
+  const [rateC, setRateC] = useState('')
+  const wsTypedRef = useRef(false)
   const [content, setContent] = useState('')
   const [vaccineUnit, setVaccineUnit] = useState('ml')
   const [calc, setCalc] = useState<PurchaseCalcResult | null>(null)
@@ -799,9 +823,41 @@ export function PurchasePage({
     setTabletMrp('')
     setTabletRate('')
     setDiscPct('0')
+    setRateA('')
+    setRateB('')
+    setRateC('')
+    wsTypedRef.current = false
     setContent('')
   }
   clearMedicineFieldsRef.current = clearMedicineFields
+
+  /** Wholesale: fill Rate A / B / C (unless typed) from the medicine's last rates, else the
+   *  purchase rate + the store's margins. */
+  const prefillWholesaleRates = (purchaseRate: string) => {
+    if (!ws.isWholesale || wsTypedRef.current) return
+    const pr = Number(purchaseRate) || 0
+    const name = medicine.trim()
+    const fromMargins = () => {
+      const s = suggestedRates(pr, ws.margins)
+      setRateA(s.rate_a ? String(s.rate_a) : '')
+      setRateB(s.rate_b ? String(s.rate_b) : '')
+      setRateC(s.rate_c ? String(s.rate_c) : '')
+    }
+    if (!name) {
+      fromMargins()
+      return
+    }
+    void fetchLastRates(name).then((last) => {
+      if (wsTypedRef.current) return
+      if (last.found && Number(last.rate_a) > 0) {
+        setRateA(String(last.rate_a ?? ''))
+        setRateB(String(last.rate_b || ''))
+        setRateC(String(last.rate_c || ''))
+      } else {
+        fromMargins()
+      }
+    })
+  }
 
   const onMedTypeChange = (next: string) => {
     const prevMeta = typeMetaFor(medType, prefs)
@@ -1104,6 +1160,14 @@ export function PurchasePage({
       tablets_per_stripe: meta.strip ? tpsN : undefined,
       mrpTab: meta.strip ? mrpN / tpsN : undefined,
       rateTab: meta.strip ? rateN / tpsN : undefined,
+      ...(ws.isWholesale
+        ? rateA || rateB || rateC
+          ? { rateA: wsRate(rateA), rateB: wsRate(rateB), rateC: wsRate(rateC) }
+          : (() => {
+              const s = suggestedRates(rateN, ws.margins)
+              return { rateA: wsRate(s.rate_a), rateB: wsRate(s.rate_b), rateC: wsRate(s.rate_c) }
+            })()
+        : {}),
     }
     void registerPurchaseMedicine({
       name: line.name,
@@ -1255,6 +1319,10 @@ export function PurchasePage({
     setTabletRate(it.rateTab != null ? String(it.rateTab) : '')
     setTabletMrp(it.mrpTab != null ? String(it.mrpTab) : '')
     setDiscPct(String(it.discPct ?? '0'))
+    setRateA(it.rateA ? String(it.rateA) : '')
+    setRateB(it.rateB ? String(it.rateB) : '')
+    setRateC(it.rateC ? String(it.rateC) : '')
+    wsTypedRef.current = Boolean(it.rateA || it.rateB || it.rateC)
     setContent(String(it.content ?? ''))
     // Land on Quantity: a line is nearly always reopened to correct the count
     // or the rate, and both are a step apart from there.
@@ -2944,6 +3012,43 @@ export function PurchasePage({
                 />
               )}
             </Field>
+            {ws.isWholesale ? (
+              <Field
+                label="Rate A / B / C"
+                hint="per pack, + GST"
+                className="span2"
+              >
+                <div className="price-split ws-rates3">
+                  {(
+                    [
+                      ['A', rateA, setRateA],
+                      ['B', rateB, setRateB],
+                      ['C', rateC, setRateC],
+                    ] as const
+                  ).map(([tier, value, setValue]) => (
+                    <div className="price-half" key={tier}>
+                      <input
+                        type="text"
+                        className="mono"
+                        inputMode="decimal"
+                        aria-label={`Rate ${tier}`}
+                        placeholder={tier}
+                        value={value}
+                        data-nav-order={19}
+                        data-nav-chain={NAV}
+                        onFocus={() => {
+                          if (!rateA && !rateB && !rateC) prefillWholesaleRates(rate)
+                        }}
+                        onChange={(e) => {
+                          wsTypedRef.current = true
+                          setValue(e.target.value.replace(/[^0-9.]/g, ''))
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </Field>
+            ) : null}
             <Field label="Discount %">
               <input
                 type="text"
@@ -3222,6 +3327,13 @@ export function PurchasePage({
                     {showCol.rate ? (
                       <td className="numsm mono">
                         {it.rate.toFixed(2)}
+                        {ws.isWholesale && (it.rateA || it.rateB || it.rateC) ? (
+                          <div className="ws-line-rates" title="Rate A / B / C">
+                            {[it.rateA, it.rateB, it.rateC]
+                              .map((r) => (r ? r.toFixed(2) : '—'))
+                              .join(' / ')}
+                          </div>
+                        ) : null}
                       </td>
                     ) : null}
                     {showCol.disc ? (

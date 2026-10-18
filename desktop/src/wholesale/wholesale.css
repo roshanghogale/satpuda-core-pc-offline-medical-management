@@ -1,0 +1,89 @@
+/* Wholesale mode: the Retail | Wholesale switch beside the Online status, the badge, and the
+   wholesale-only fields (customer party form, purchase Rate A / B / C). */
+
+.ws-switch {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  margin-right: 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.ws-switch button {
+  border: 0;
+  background: transparent;
+  color: var(--text-muted, #6f7382);
+  padding: 2px 8px;
+  font: inherit;
+  cursor: pointer;
+}
+.ws-switch button.on {
+  background: color-mix(in srgb, var(--accent, #2f5aa8) 16%, transparent);
+  color: var(--accent, #2f5aa8);
+  cursor: default;
+}
+.ws-switch button:disabled:not(.on) {
+  opacity: 0.6;
+  cursor: wait;
+}
+.ws-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  padding: 2px 8px;
+  margin-right: 8px;
+  border-radius: 3px;
+  background: #6a3fb5;
+  color: #fff;
+}
+
+/* the customer's party fields (Settings -> Contacts -> Customers) */
+.ws-party {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border);
+}
+.ws-party .settings-input {
+  min-width: 0;
+}
+.ws-party .ws-narrow {
+  width: 90px;
+}
+.ws-party-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  align-self: flex-end;
+  padding-bottom: 4px;
+}
+.ws-tier {
+  display: inline-block;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+  background: color-mix(in srgb, var(--accent, #2f5aa8) 14%, transparent);
+  color: var(--accent, #2f5aa8);
+}
+
+/* purchase table: the line's Rate A / B / C under its purchase rate */
+.ws-line-rates {
+  font-size: 10px;
+  color: var(--accent, #2f5aa8);
+  white-space: nowrap;
+}
+
+/* purchase entry: Rate A / B / C side by side */
+.price-split.ws-rates3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
