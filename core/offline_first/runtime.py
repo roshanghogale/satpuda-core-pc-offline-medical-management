@@ -136,6 +136,7 @@ def activate_from_online(progress_cb: ProgressCb = None, app_version: str = "") 
     conn = sqlite3.connect(path, timeout=30)
     try:
         conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")  # the bookkeeping tables and triggers: one sync, not one each
         info = register_and_prepare(conn, head_revision=head, app_version=app_version,
                                     progress_cb=progress_cb)
     finally:

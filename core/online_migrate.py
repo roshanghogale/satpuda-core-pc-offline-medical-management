@@ -644,8 +644,15 @@ def download_store_for_offline(
     guard = _preserved_sync_watermarks() if preserve_sync_state else contextlib.nullcontext()
     with guard, allow_local_store_db():
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        conn = sqlite3.connect(path)
+        conn = sqlite3.connect(path, timeout=30)
         try:
+            # WAL, as the engine opens every store (desktop_api._open_conn): in the old
+            # rollback journal each of initialise()'s ~650 CREATE/ALTERs was its own synced
+            # commit with a journal file made and deleted -- 10-50 s before the first record
+            # on a shop PC, 2 s in WAL (18 Oct 2026). It also lets the app's own readers
+            # look at the file while the copy is written instead of blocking it.
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
             from core.db_setup import initialise
 
             initialise(conn)
