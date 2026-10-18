@@ -1,6 +1,6 @@
 """The wholesale sale: a B2B tax invoice to another medical shop (owner, 18 Oct 2026).
 
-Only a store in wholesale mode (core/wholesale_schema.get_business_mode) makes these; a
+Only a wholesale store (core/wholesale_schema.get_business_mode: the open store's kind) makes these; a
 retail bill is saved, stored and printed exactly as before. See
 D:\\projects\\WHOLESALE_DESIGN.md.
 

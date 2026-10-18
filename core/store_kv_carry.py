@@ -15,7 +15,8 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-# business_mode / ws_margin_*: the wholesale switch and its rate margins (core/wholesale_mode.py).
+# ws_margin_*: the wholesale rate margins (core/wholesale_mode.py). business_mode is the retired
+# same-store switch (wholesale is a separate store now); still carried, read by nothing.
 PREFIXES = ("regular_meds:", "customer_gst:", "gst_filed:", "business_mode", "ws_margin_")
 
 

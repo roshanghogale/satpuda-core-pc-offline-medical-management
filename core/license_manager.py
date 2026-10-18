@@ -859,7 +859,7 @@ def _cache_server_license_locally(lic: dict) -> None:
             remember_server_voice(lic)
         except Exception:
             pass
-    if "wholesale_enabled" in lic:
+    if speaks_about_wholesale(lic):
         try:
             remember_server_wholesale(lic)
         except Exception:
@@ -948,68 +948,202 @@ def live_server_voice(max_age_s: float) -> dict | None:
             'tier': normalize_voice_tier(_VOICE_LIVE.get('tier'))}
 
 
-# ── Wholesale switch (admin panel, per store; 18 Oct 2026) ─────────────────────
+# ── Wholesale: which kind of store, and its companion (admin panel, per store) ─
 #
-# Same shape as the voice switch: the server sends ``wholesale_enabled`` (bool) in the
-# plain licence and in the /auth pairing answer. The last answer is kept in memory and in
-# wholesale.dat so an offline PC keeps it. Nothing ever heard = OFF. When the server says
-# OFF the store reads as retail (its wholesale data stays; see core/wholesale_mode.py).
+# Wholesale is a SEPARATE store on the server (D:\projects\WHOLESALE_DESIGN.md, "Wholesale is
+# a SEPARATE store"): a retail store the admin switched wholesale on for has a companion
+# wholesale store with its own medicines, rates, purchases, sales and stock. The licence and
+# the /auth pairing answer of a store say, beside ``wholesale_enabled``:
+#
+#   store_kind       'retail' | 'wholesale'                        missing = 'retail'
+#   wholesale_store  {store_id, store_key, store_name, android_key} a retail store's companion
+#   retail_store     {...}                                          a wholesale store's retail one
+#
+# Kept PER LOCAL STORE KEY -- a PC with both stores holds an answer for each -- in memory and
+# in wholesale_stores.dat, so an offline PC keeps it. Nothing ever heard = retail, no companion.
 
-_WHOLESALE_LIVE: dict = {}  # last answer from the server in THIS process: enabled, at
+_WHOLESALE_LIVE: dict = {}  # store_key -> {enabled, store_kind, wholesale_store, retail_store, at}
+_WHOLESALE_FIELDS = ('wholesale_enabled', 'store_kind', 'wholesale_store', 'retail_store')
 
 
 def _wholesale_cache_path() -> str:
-    return os.path.join(_appdata_dir(), 'wholesale.dat')
+    return os.path.join(_appdata_dir(), 'wholesale_stores.dat')
+
+
+def _wholesale_store_key(store_key: str | None = None) -> str:
+    if store_key:
+        return str(store_key)
+    try:
+        from core.store_manager import get_active_store_key
+
+        return str(get_active_store_key() or '')
+    except Exception:
+        return ''
+
+
+def _lic_field(lic: dict, name: str):
+    """A field of the answer: top level first, then its ``store`` object (pairing answer)."""
+    if name in lic:
+        return lic.get(name)
+    store = lic.get('store')
+    if isinstance(store, dict):
+        return store.get(name)
+    return None
+
+
+def speaks_about_wholesale(lic) -> bool:
+    """Does this answer say anything about wholesale? (a hand-built partial licence does not)"""
+    if not isinstance(lic, dict):
+        return False
+    store = lic.get('store') if isinstance(lic.get('store'), dict) else {}
+    return any(k in lic or k in store for k in _WHOLESALE_FIELDS)
 
 
 def wholesale_from_license(lic) -> bool:
     """True only when the licence dict says wholesale_enabled is true. Missing = OFF."""
     lic = lic if isinstance(lic, dict) else {}
-    v = lic.get('wholesale_enabled')
-    if v is None and isinstance(lic.get('store'), dict):
-        v = lic['store'].get('wholesale_enabled')
+    v = _lic_field(lic, 'wholesale_enabled')
     return v is True or (not isinstance(v, bool) and str(v).strip().lower() in ('1', 'true'))
 
 
-def read_cached_wholesale() -> bool | None:
-    """The last server answer saved on this PC, or None if there never was one."""
+def normalize_companion(v) -> dict | None:
+    """{store_id, store_key, store_name, android_key} or None (no companion). A companion this
+    PC cannot open -- no SC- key, no name -- is no companion."""
+    if not isinstance(v, dict):
+        return None
+    out = {k: str(v.get(k) if v.get(k) is not None else '').strip()
+           for k in ('store_id', 'store_key', 'store_name', 'android_key')}
+    if not out['store_id'] and v.get('id') is not None:
+        out['store_id'] = str(v.get('id')).strip()
+    if not out['android_key'] or not (out['store_name'] or out['store_key']):
+        return None
+    if not out['store_name']:
+        out['store_name'] = out['store_key']
+    return out
+
+
+def wholesale_info_from_license(lic) -> dict:
+    """{enabled, store_kind, wholesale_store, retail_store} from one whole answer."""
+    lic = lic if isinstance(lic, dict) else {}
+    kind = str(_lic_field(lic, 'store_kind') or '').strip().lower()
+    kind = 'wholesale' if kind == 'wholesale' else 'retail'
+    return {
+        'enabled': wholesale_from_license(lic),
+        'store_kind': kind,
+        # a retail store offers its wholesale companion; a wholesale store links back
+        'wholesale_store': normalize_companion(_lic_field(lic, 'wholesale_store')) if kind == 'retail' else None,
+        'retail_store': normalize_companion(_lic_field(lic, 'retail_store')) if kind == 'wholesale' else None,
+    }
+
+
+def _clean_info(raw) -> dict | None:
+    if not isinstance(raw, dict):
+        return None
+    kind = 'wholesale' if str(raw.get('store_kind') or '').lower() == 'wholesale' else 'retail'
+    return {
+        'enabled': raw.get('enabled') is True,
+        'store_kind': kind,
+        'wholesale_store': normalize_companion(raw.get('wholesale_store')) if kind == 'retail' else None,
+        'retail_store': normalize_companion(raw.get('retail_store')) if kind == 'wholesale' else None,
+    }
+
+
+def _read_wholesale_file() -> dict:
     path = _wholesale_cache_path()
     if not os.path.isfile(path):
-        return None
+        return {}
     try:
         with open(path, 'rb') as f:
             data = _decrypt(f.read())
     except Exception:
+        return {}
+    stores = data.get('stores') if isinstance(data, dict) else None
+    return stores if isinstance(stores, dict) else {}
+
+
+def read_cached_wholesale_info(store_key: str | None = None) -> dict | None:
+    """The last answer saved on this PC for that store (default: the open one), or None."""
+    key = _wholesale_store_key(store_key)
+    if not key:
         return None
-    if not isinstance(data, dict) or 'enabled' not in data:
+    return _clean_info(_read_wholesale_file().get(key))
+
+
+def read_cached_wholesale(store_key: str | None = None) -> bool | None:
+    """wholesale_enabled as last saved for that store, or None if never heard."""
+    info = read_cached_wholesale_info(store_key)
+    return None if info is None else info['enabled']
+
+
+def _save_wholesale_info(key: str, info: dict) -> None:
+    """On disk only when it changed (same value, no write -- like expiry.dat)."""
+    stores = _read_wholesale_file()
+    if _clean_info(stores.get(key)) == info:
+        return
+    stores[key] = {**info, 'saved_at': time.strftime('%Y-%m-%dT%H:%M:%S')}
+    path = _wholesale_cache_path()
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + '.tmp'
+        with open(tmp, 'wb') as f:
+            f.write(_encrypt({'stores': stores}))
+        os.replace(tmp, path)
+    except Exception:
+        pass
+
+
+def remember_server_wholesale(lic, store_key: str | None = None) -> bool:
+    """Record what the server just said about wholesale for that store (default: the open
+    one): in memory, and on disk when it changed. Only call it with a whole answer for that
+    store (a missing field = OFF / retail / no companion). Returns wholesale_enabled."""
+    info = wholesale_info_from_license(lic)
+    key = _wholesale_store_key(store_key)
+    if not key:
+        return info['enabled']
+    _WHOLESALE_LIVE[key] = {**info, 'at': time.time()}
+    _save_wholesale_info(key, info)
+    return info['enabled']
+
+
+def note_store_wholesale_info(store_key: str, info: dict, *, only_if_unknown: bool = True) -> None:
+    """What this PC learnt about a store from ANOTHER store's answer (the companion just
+    added): kept until that store's own answer arrives, which then replaces it."""
+    key = str(store_key or '')
+    clean = _clean_info(info)
+    if not key or clean is None:
+        return
+    if only_if_unknown and (key in _WHOLESALE_LIVE or read_cached_wholesale_info(key) is not None):
+        return
+    _save_wholesale_info(key, clean)
+
+
+def live_wholesale_info(max_age_s: float, store_key: str | None = None) -> dict | None:
+    """The server's answer for that store from this process, if it is recent enough."""
+    entry = _WHOLESALE_LIVE.get(_wholesale_store_key(store_key))
+    if not entry or not entry.get('at') or time.time() - float(entry['at']) > max_age_s:
         return None
-    return data.get('enabled') is True
+    return _clean_info(entry)
 
 
-def remember_server_wholesale(lic) -> bool:
-    """Record what the server just said about wholesale: in memory, and on disk when it
-    changed. Only call it with a whole answer for this store (a missing field = OFF)."""
-    enabled = wholesale_from_license(lic)
-    _WHOLESALE_LIVE.clear()
-    _WHOLESALE_LIVE.update(enabled=enabled, at=time.time())
-    if read_cached_wholesale() is not enabled:
-        path = _wholesale_cache_path()
-        try:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, 'wb') as f:
-                f.write(_encrypt({'enabled': enabled,
-                                  'saved_at': time.strftime('%Y-%m-%dT%H:%M:%S')}))
-        except Exception:
-            pass
-    return enabled
+def live_server_wholesale(max_age_s: float, store_key: str | None = None) -> bool | None:
+    info = live_wholesale_info(max_age_s, store_key)
+    return None if info is None else info['enabled']
 
 
-def live_server_wholesale(max_age_s: float) -> bool | None:
-    """The server's answer from this process, if it is recent enough."""
-    at = _WHOLESALE_LIVE.get('at')
-    if not at or time.time() - float(at) > max_age_s:
-        return None
-    return _WHOLESALE_LIVE.get('enabled') is True
+def store_wholesale_info(store_key: str | None = None, *, max_age_s: float = 10 * 60) -> dict:
+    """{enabled, store_kind, wholesale_store, retail_store, source}: the recent server answer,
+    else the saved one, else retail with no companion. Never raises."""
+    try:
+        live = live_wholesale_info(max_age_s, store_key)
+        if live is not None:
+            return {**live, 'source': 'server'}
+        cached = read_cached_wholesale_info(store_key)
+        if cached is not None:
+            return {**cached, 'source': 'cache'}
+    except Exception:
+        pass
+    return {'enabled': False, 'store_kind': 'retail', 'wholesale_store': None,
+            'retail_store': None, 'source': 'default'}
 
 
 def _resolve_remote_store_id(admin_token: str) -> str:

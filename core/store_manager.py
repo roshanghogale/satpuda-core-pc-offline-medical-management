@@ -12,6 +12,8 @@ import re
 import sys
 import json
 import shutil
+import threading
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Optional
 
@@ -365,7 +367,33 @@ def is_satellite_device() -> bool:
     return get_device_role() == 'satellite'
 
 
+# One thread may work for another store of this PC while the rest of the app stays on the
+# open one: the wholesale switch copies the companion store for offline-first in a background
+# thread BEFORE the registry is pointed at it, so a failed copy leaves the PC where it was
+# (core/wholesale_store_switch). Every "which store / which file / which key" question asked
+# in that thread -- server_api.store_token_for_active, online_migrate.store_db_path,
+# store_link.get_local_android_key -- answers for that store; other threads are untouched.
+_acting = threading.local()
+
+
+@contextmanager
+def acting_for_store(store_key: str):
+    """Inside this block, in THIS thread only, the active store is ``store_key``."""
+    key = str(store_key or '').strip()
+    if not key or not _find_store_by_key(key):
+        raise ValueError(f'Store "{store_key}" is not on this PC.')
+    prev = getattr(_acting, 'key', '')
+    _acting.key = key
+    try:
+        yield key
+    finally:
+        _acting.key = prev
+
+
 def get_active_store_key() -> str:
+    acting = getattr(_acting, 'key', '')
+    if acting:
+        return acting
     reg = load_registry()
     key = (reg.get('active_store_key') or '').strip()
     if key:

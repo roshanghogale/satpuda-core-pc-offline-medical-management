@@ -39,6 +39,8 @@ def _offline():
     return [
         mock.patch("core.sync_prefs.is_online_mode", return_value=False),
         mock.patch("core.offline_first.runtime.is_active", return_value=False),
+        # the open store is a wholesale store (core/wholesale_mode.py)
+        mock.patch.dict(os.environ, {"SATPUDA_WHOLESALE_OVERRIDE": "1"}),
     ]
 
 
@@ -258,9 +260,8 @@ class SavingAndReading(unittest.TestCase):
         self.assertEqual(res.get("code"), "insufficient_stock", res)
 
     def test_a_retail_store_cannot_make_one(self):
-        self.conn.execute("UPDATE settings SET value='retail' WHERE name=?", (BUSINESS_MODE_KEY,))
-        self.conn.commit()
-        self.assertEqual(self._save().get("code"), "not_wholesale")
+        with mock.patch.dict(os.environ, {"SATPUDA_WHOLESALE_OVERRIDE": "0"}):
+            self.assertEqual(self._save().get("code"), "not_wholesale")
 
     def test_a_retail_bill_is_saved_as_before(self):
         from core.desktop_sales_service import save_sale

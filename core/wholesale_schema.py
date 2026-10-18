@@ -1,9 +1,9 @@
 """Wholesale mode: the columns every part of it reads and writes (owner, 18 Oct 2026).
 
-A store the server has allowed (stores.wholesale_enabled) can be switched from retail to
-wholesale with the switch beside the Online status. The switch is the store setting
-``business_mode`` ('retail' | 'wholesale', settings kv). Retail bills, stock and reports work
-exactly as before; a wholesale store sells to other medical shops:
+Wholesale is a SEPARATE store (its own medicines, rates, purchases, sales and stock): the
+switch beside the Online status opens the retail store's wholesale companion, and the open
+store's kind (core/wholesale_mode.py) decides which screens show. Retail bills, stock and
+reports work exactly as before; a wholesale store sells to other medical shops:
 
 * no MRP / per-tablet rate on the sale: whole packs at Rate A / B / C, GST added on top
   (rates exclude GST), the buyer's rate tier picks which rate comes first;
@@ -19,7 +19,7 @@ See D:\\projects\\WHOLESALE_DESIGN.md. Each step is an ALTER only when the colum
 """
 from __future__ import annotations
 
-BUSINESS_MODE_KEY = "business_mode"
+BUSINESS_MODE_KEY = "business_mode"   # the retired same-store switch; no longer read
 RETAIL = "retail"
 WHOLESALE = "wholesale"
 RATE_TIERS = ("A", "B", "C")
@@ -94,10 +94,15 @@ def ensure_wholesale_columns(conn) -> None:
     conn.commit()
 
 
-def get_business_mode(conn) -> str:
+def get_business_mode(conn=None) -> str:
+    """'wholesale' when the OPEN store is a wholesale store, else 'retail'.
+
+    Wholesale is a separate store now (core/wholesale_mode.py): the answer is the open store's
+    ``store_kind`` from the server, not the old ``business_mode`` settings row, which is no
+    longer read. ``conn`` is kept for the callers; it is the open store's connection."""
     try:
-        row = conn.execute("SELECT value FROM settings WHERE name = ?", (BUSINESS_MODE_KEY,)).fetchone()
+        from core.wholesale_mode import current_mode
+
+        return WHOLESALE if current_mode(conn) == WHOLESALE else RETAIL
     except Exception:
         return RETAIL
-    v = str(row[0] if row else "").strip().lower()
-    return WHOLESALE if v == WHOLESALE else RETAIL

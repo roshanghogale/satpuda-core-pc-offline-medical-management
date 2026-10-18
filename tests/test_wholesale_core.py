@@ -1,8 +1,9 @@
 """Wholesale mode, the core part (D:\\projects\\WHOLESALE_DESIGN.md).
 
-* the admin panel's switch reaches the PC (licence / pairing answer -> wholesale.dat), missing = OFF;
-* the store's ``business_mode`` setting: read as retail whenever the server does not allow it,
-  refused when not allowed, and carried to the server like the other shop-wide settings;
+* the server's word about each store (licence / pairing answer -> wholesale_stores.dat, per
+  store key): store_kind, wholesale_store / retail_store; missing = retail, no companion;
+* the mode is the OPEN store's kind (wholesale is a separate store); the old business_mode
+  row is not read; the rate margins travel like the other shop-wide settings;
 * a customer as a wholesale party (party type, GSTIN, DL, state, tier, credit terms);
 * a wholesale purchase's Rate A / B / C on its lines and on the medicine batch;
 * a payment's paper receipt number, both modes: history, View box, ledger, report;
@@ -70,20 +71,34 @@ class _Base(unittest.TestCase):
         self.addCleanup(self.conn.close)
 
 
-# ── 1. the server's switch ────────────────────────────────────────────────────
+# ── 1. the server's word: kept per store ─────────────────────────────────────
 
-class TheServerSwitch(unittest.TestCase):
+COMPANION = {"store_id": "9_wholesale", "store_key": "TEST_STORE_Wholesale",
+             "store_name": "TEST STORE WHOLESALE", "android_key": "SC-W0000001"}
+RETAIL_LINK = {"store_id": "9", "store_key": "TEST_STORE", "store_name": "TEST STORE",
+               "android_key": "SC-R0000001"}
+
+
+class _Stores(unittest.TestCase):
+    """AppData in a temp folder; the open store is whatever ``self.active['key']`` says."""
+
     def setUp(self):
         self.appdata = tempfile.mkdtemp()
+        self.active = {"key": "Store_Retail"}
         for p in (
             mock.patch("core.license_manager._appdata_dir", lambda: self.appdata),
             mock.patch("core.sync_prefs.get_sync_mode", lambda: "offline"),
+            mock.patch("core.store_manager.get_active_store_key", lambda: self.active["key"]),
             mock.patch.dict(os.environ, {wm.OVERRIDE_ENV: ""}),
         ):
             p.start()
             self.addCleanup(p.stop)
         lm._WHOLESALE_LIVE.clear()
         self.addCleanup(lm._WHOLESALE_LIVE.clear)
+
+
+class TheServerSwitch(_Stores):
+    """What the licence / pairing answer says about wholesale is kept per local store key."""
 
     def test_missing_is_off(self):
         self.assertFalse(lm.wholesale_from_license({}))
@@ -94,65 +109,120 @@ class TheServerSwitch(unittest.TestCase):
         self.assertTrue(lm.wholesale_from_license({"store": {"wholesale_enabled": True}}))
         st = wm.allowed_status(refresh=False)
         self.assertEqual(st, {"allowed": False, "source": "default"})
+        self.assertEqual(wm.current_mode(), "retail")
 
     def test_the_licence_answer_is_kept_on_disk(self):
-        lm._cache_server_license_locally({"wholesale_enabled": True})
+        lm._cache_server_license_locally({"wholesale_enabled": True, "store_kind": "retail",
+                                          "wholesale_store": COMPANION})
         self.assertTrue(lm.read_cached_wholesale())
-        self.assertEqual(wm.allowed_status(refresh=False)["source"], "server")
+        self.assertEqual(wm.allowed_status(refresh=False), {"allowed": True, "source": "server"})
         lm._WHOLESALE_LIVE.clear()  # a new process, offline
         self.assertEqual(wm.allowed_status(refresh=False), {"allowed": True, "source": "cache"})
+        self.assertEqual(wm.store_info()["wholesale_store"], COMPANION)
         # an answer that does not speak about wholesale changes nothing
         lm._cache_server_license_locally({"expiry_enabled": True})
         self.assertTrue(lm.read_cached_wholesale())
+        # wholesale switched off: the server stops offering the companion
         lm._cache_server_license_locally({"wholesale_enabled": False})
         self.assertFalse(lm.read_cached_wholesale())
         self.assertFalse(wm.is_allowed(refresh=False))
+        self.assertIsNone(wm.store_info()["wholesale_store"])
 
-    def test_a_pairing_answer_that_carries_it(self):
+    def test_a_pairing_answer_that_carries_it_is_kept_for_that_store(self):
         from core import server_api as api
 
         with mock.patch.object(api, "pair_store", return_value={
-                "token": "t", "store": {"store_id": 9, "store_name": "TEST STORE", "wholesale_enabled": True}}), \
+                "token": "t", "store": {"store_id": 9, "store_name": "TEST STORE WHOLESALE",
+                                        "wholesale_enabled": True, "store_kind": "wholesale",
+                                        "retail_store": RETAIL_LINK}}), \
                 mock.patch.object(api, "load_session", return_value={}), \
                 mock.patch.object(api, "save_session"), \
                 mock.patch("core.store_manager.adopt_server_display_name"):
-            api.ensure_store_session(store_key="Store_T", android_key="SC-T", store_name="TEST STORE",
+            api.ensure_store_session(store_key="Store_Wholesale", android_key="SC-W", store_name="X",
                                      device_id="dev", force_pair=True)
-        self.assertTrue(lm.read_cached_wholesale())
+        # kept for the store that paired -- not for the open one
+        self.assertIsNone(lm.read_cached_wholesale_info("Store_Retail"))
+        info = lm.read_cached_wholesale_info("Store_Wholesale")
+        self.assertEqual((info["store_kind"], info["retail_store"]), ("wholesale", RETAIL_LINK))
+        self.assertEqual(wm.current_mode(), "retail")
+        self.active["key"] = "Store_Wholesale"
+        self.assertEqual(wm.current_mode(), "wholesale")
+
+    def test_two_stores_keep_their_own_answer(self):
+        lm.remember_server_wholesale({"wholesale_enabled": True, "store_kind": "retail",
+                                      "wholesale_store": COMPANION}, store_key="Store_Retail")
+        lm.remember_server_wholesale({"wholesale_enabled": True, "store_kind": "wholesale",
+                                      "retail_store": RETAIL_LINK}, store_key="Store_Wholesale")
+        lm._WHOLESALE_LIVE.clear()
+        self.assertEqual(lm.read_cached_wholesale_info("Store_Retail")["wholesale_store"], COMPANION)
+        self.assertEqual(lm.read_cached_wholesale_info("Store_Wholesale")["retail_store"], RETAIL_LINK)
+
+    def test_missing_fields_mean_retail_with_no_companion(self):
+        info = lm.wholesale_info_from_license({"wholesale_enabled": True})
+        self.assertEqual(info, {"enabled": True, "store_kind": "retail", "wholesale_store": None,
+                                "retail_store": None})
+        # a companion this PC could not open (no SC- key) is no companion
+        info = lm.wholesale_info_from_license({"wholesale_store": {"store_name": "X"}})
+        self.assertIsNone(info["wholesale_store"])
+        # a retail store never links "back"; a wholesale store never offers a wholesale store
+        info = lm.wholesale_info_from_license({"store_kind": "retail", "retail_store": RETAIL_LINK})
+        self.assertIsNone(info["retail_store"])
+        info = lm.wholesale_info_from_license({"store_kind": "WHOLESALE", "wholesale_store": COMPANION})
+        self.assertEqual((info["store_kind"], info["wholesale_store"]), ("wholesale", None))
+        self.assertTrue(lm.speaks_about_wholesale({"store": {"store_kind": "retail"}}))
+        self.assertFalse(lm.speaks_about_wholesale({"expiry_enabled": True}))
 
 
-# ── 2. the store's mode ───────────────────────────────────────────────────────
+# ── 2. the mode is the open store's kind ─────────────────────────────────────
 
-class NotAllowed(_Base):
-    allowed = False
-
-    def test_the_store_reads_retail_and_cannot_switch(self):
+class TheMode(_Stores):
+    def test_mode_and_state_follow_the_open_store(self):
         from core import wholesale_api
 
-        self.conn.execute("INSERT INTO settings (name, value) VALUES ('business_mode', 'wholesale')")
-        self.conn.commit()
-        st = wm.state(self.conn)
-        self.assertEqual((st["allowed"], st["mode"], st["stored_mode"]), (False, "retail", "wholesale"))
-        self.assertFalse(wm.is_wholesale(self.conn))
-        code, body = wholesale_api.handle_post("/api/wholesale/mode", {"mode": "wholesale"}, self.conn)
-        self.assertEqual(code, 403)
-        self.assertEqual(body["code"], "not_allowed")
+        lm.remember_server_wholesale({"wholesale_enabled": True, "store_kind": "retail",
+                                      "wholesale_store": COMPANION}, store_key="Store_Retail")
+        lm.remember_server_wholesale({"wholesale_enabled": True, "store_kind": "wholesale",
+                                      "retail_store": RETAIL_LINK}, store_key="Store_Wholesale")
+        with mock.patch.object(wm, "_store_name", return_value="TEST STORE"):
+            st = wm.state(None)
+            self.assertEqual((st["allowed"], st["mode"], st["companion_name"], st["store_name"]),
+                             (True, "retail", "TEST STORE WHOLESALE", "TEST STORE"))
+            self.active["key"] = "Store_Wholesale"
+            code, st = wholesale_api.handle_get("/api/wholesale/state", None)
+            self.assertEqual((code, st["allowed"], st["mode"], st["companion_name"]),
+                             (200, True, "wholesale", "TEST STORE"))
+        self.assertTrue(wm.is_wholesale())
+        from core.wholesale_schema import get_business_mode
 
+        self.assertEqual(get_business_mode(None), "wholesale")
 
-class TheMode(_Base):
-    def test_switch_and_back(self):
+    def test_the_old_business_mode_row_is_not_read(self):
+        conn = _store()
+        conn.execute("INSERT INTO settings (name, value) VALUES ('business_mode', 'wholesale')")
+        from core.wholesale_schema import get_business_mode
+
+        self.assertEqual(get_business_mode(conn), "retail")
+        self.assertFalse(wm.is_wholesale(conn))
+
+    def test_the_override_marks_the_open_store(self):
+        with mock.patch.dict(os.environ, {wm.OVERRIDE_ENV: "1"}):
+            self.assertEqual(wm.current_mode(), "wholesale")
+            self.assertTrue(wm.state(None)["allowed"])
+        with mock.patch.dict(os.environ, {wm.OVERRIDE_ENV: "0"}):
+            lm.remember_server_wholesale({"store_kind": "wholesale"}, store_key="Store_Retail")
+            self.assertEqual(wm.current_mode(), "retail")
+            self.assertFalse(wm.state(None)["allowed"])
+
+    def test_no_companion_is_refused_clearly(self):
         from core import wholesale_api
 
-        self.assertEqual(wm.state(self.conn)["mode"], "retail")
-        code, body = wholesale_api.handle_post("/api/wholesale/mode", {"mode": "wholesale"}, self.conn)
-        self.assertEqual((code, body["mode"], body["allowed"]), (200, "wholesale", True))
-        self.assertTrue(wm.is_wholesale(self.conn))
-        code, body = wholesale_api.handle_get("/api/wholesale/state", self.conn)
-        self.assertEqual((code, body["mode"]), (200, "wholesale"))
-        self.assertEqual(wholesale_api.handle_post("/api/wholesale/mode", {"mode": "x"}, self.conn)[0], 400)
-        wm.set_mode(self.conn, "retail")
-        self.assertEqual(wm.state(self.conn)["mode"], "retail")
+        code, body = wholesale_api.handle_post("/api/wholesale/mode", {"mode": "wholesale"}, None)
+        self.assertEqual((code, body["code"]), (403, "no_companion"))
+        self.assertIn("no wholesale store", body["error"])
+        self.assertEqual(wholesale_api.handle_post("/api/wholesale/mode", {"mode": "x"}, None)[0], 400)
 
+
+class TheMargins(_Base):
     def test_margins(self):
         self.assertEqual(wm.margins(self.conn), {"A": 8.0, "B": 10.0, "C": 12.0})
         wm.set_margins(self.conn, {"A": 5, "C": "15"})
@@ -161,28 +231,24 @@ class TheMode(_Base):
         with self.assertRaises(ValueError):
             wm.set_margins(self.conn, {"B": -1})
 
-    def test_the_setting_goes_up_and_comes_down_like_other_shop_settings(self):
+    def test_the_margins_go_up_and_come_down_like_other_shop_settings(self):
         from core import server_live, store_kv_carry
         from core.offline_first import outbox, schema
 
         schema.ensure_schema(self.conn)
-        wm.set_mode(self.conn, "wholesale")
         wm.set_margins(self.conn, {"B": 11})
         noted = self.conn.execute("SELECT local_id FROM of_dirty WHERE collection='settings'").fetchall()
         docs = [outbox.build_doc(self.conn, "settings", i) for (i,) in noted]
-        self.assertIn({"name": "business_mode", "value": "wholesale"}, docs)
         self.assertIn({"name": "ws_margin_b", "value": "11"}, docs)
         # a PC-only row is still not sent
         self.conn.execute("DELETE FROM of_dirty")
         self.conn.execute("INSERT INTO settings (name, value) VALUES ('startup_migration_x', '1')")
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM of_dirty").fetchone()[0], 0)
-        # the other device
+        # the other device of the same store
         other = _store()
-        self.assertEqual(server_live.apply_server_doc(other, "settings", {"name": "business_mode",
-                                                                          "value": "wholesale"}), "applied")
-        self.assertEqual(wm.stored_mode(other), "wholesale")
-        # a mode switch carries it too
-        self.assertTrue(store_kv_carry._carried("business_mode"))
+        self.assertEqual(server_live.apply_server_doc(other, "settings", {"name": "ws_margin_b",
+                                                                          "value": "11"}), "applied")
+        self.assertEqual(wm.margins(other)["B"], 11.0)
         self.assertTrue(store_kv_carry._carried("ws_margin_a"))
 
     def test_an_old_medicine_trigger_is_made_again_with_the_new_columns(self):
@@ -209,7 +275,6 @@ class TheParty(_Base):
         return settings.mutate_contact(self.conn, body)
 
     def test_add_with_party_fields_and_list(self):
-        wm.set_mode(self.conn, "wholesale")
         out = self.add(party_type="medical", gstin=GSTIN_GJ, dl_numbers="20B-1, 21B-2",
                        rate_tier="b", credit_limit="50000", credit_days="30", state_code="27")
         c = [x for x in out["customers"] if x["name"] == "TEST MEDICAL"][0]

@@ -1,20 +1,24 @@
-"""Is this store wholesale right now? -- GET /api/wholesale/state, POST /api/wholesale/mode.
+"""Is the open store wholesale? -- GET /api/wholesale/state, POST /api/wholesale/mode.
 
-Two things decide it (D:\\projects\\WHOLESALE_DESIGN.md):
+Wholesale is a SEPARATE store (owner, 18 Oct 2026; D:\\projects\\WHOLESALE_DESIGN.md, "Wholesale
+is a SEPARATE store"): its own medicines, rates, purchases, sales and stock. So:
 
-  allowed   the admin panel's per-store switch (stores.wholesale_enabled). The server sends
-            it in the licence and the pairing answer; core.license_manager keeps the last
-            answer in memory and in wholesale.dat. Never heard = not allowed.
-  mode      the store setting ``business_mode`` ('retail' | 'wholesale'), a row in the
-            store's settings key/value table, so it reaches the server and the store's other
-            devices like every other shop-wide setting (offline-first: the settings trigger,
-            core/offline_first/schema.py; Online: PUT /api/sync/settings/kv).
+  mode      the OPEN store's kind. The server says ``store_kind`` ('retail' | 'wholesale') in
+            each store's licence and pairing answer; core.license_manager keeps it per local
+            store key (memory + wholesale_stores.dat). Never heard = retail.
+  allowed   the switch is on offer: the open store is wholesale, or it is retail and the
+            server named its ``wholesale_store`` (the admin turned wholesale on for it).
+  switch    POST /api/wholesale/mode OPENS THE OTHER STORE (core/wholesale_store_switch);
+            nothing is copied between the two.
 
-The store reads as retail whenever the server does not allow wholesale -- its wholesale data
-(rates, parties, receipt numbers) stays where it is and comes back when it is allowed again.
+The old ``business_mode`` settings row of the same store is no longer read or written; a
+store that still has it is unaffected by it.
 
-The rate margins a wholesale purchase pre-fills Rate A / B / C with are store settings too:
+The rate margins a wholesale purchase pre-fills Rate A / B / C with are store settings:
 ``ws_margin_a`` / ``ws_margin_b`` / ``ws_margin_c`` (% over the purchase rate; 8 / 10 / 12).
+
+``SATPUDA_WHOLESALE_OVERRIDE`` (the test copy and tests only): '1' makes the open store read as
+wholesale, '0' as retail with no companion.
 """
 from __future__ import annotations
 
@@ -24,7 +28,7 @@ import threading
 import time
 from typing import Any
 
-from core.wholesale_schema import BUSINESS_MODE_KEY, RETAIL, WHOLESALE, get_business_mode
+from core.wholesale_schema import RETAIL, WHOLESALE
 
 log = logging.getLogger(__name__)
 
@@ -36,8 +40,8 @@ _KV_TTL = 20.0
 
 MARGIN_KEYS = {"A": "ws_margin_a", "B": "ws_margin_b", "C": "ws_margin_c"}
 DEFAULT_MARGINS = {"A": 8.0, "B": 10.0, "C": 12.0}
-# Store settings that belong to the whole shop (every device): sync + mode-switch carry.
-SHOP_WIDE_NAMES = (BUSINESS_MODE_KEY,)
+# Store settings that belong to the whole shop (every device of THAT store).
+SHOP_WIDE_NAMES: tuple[str, ...] = ()
 SHOP_WIDE_PREFIXES = ("ws_margin_",)
 
 _lock = threading.Lock()
@@ -47,10 +51,10 @@ _kv_cache: dict[str, Any] = {"at": 0.0, "store": None, "rows": {}}
 
 
 class NotAllowed(PermissionError):
-    """The server has not switched wholesale on for this store."""
+    """There is no companion store to open (the server has not offered one)."""
 
 
-# ── allowed (the server's word) ──────────────────────────────────────────────
+# ── the server's word about the open store ───────────────────────────────────
 
 def _sync_mode() -> str:
     try:
@@ -65,8 +69,31 @@ def _online() -> bool:
     return _sync_mode() == "online"
 
 
+def _store_key() -> str:
+    try:
+        from core.store_manager import get_active_store_key
+
+        return str(get_active_store_key() or "")
+    except Exception:
+        return ""
+
+
+def _store_name(store_key: str = "") -> str:
+    try:
+        from core.store_manager import get_active_display_name, list_stores
+
+        if not store_key:
+            return str(get_active_display_name() or "")
+        for s in list_stores():
+            if s.get("store_key") == store_key:
+                return str(s.get("display_name") or store_key)
+    except Exception:
+        pass
+    return store_key
+
+
 def _refresh() -> None:
-    """Ask the server for this store's licence (Online and offline-first only: a plain
+    """Ask the server for the open store's licence (Online and offline-first only: a plain
     Offline shop is never sent to the network for this)."""
     if _sync_mode() not in ("online", "offline_first"):
         return
@@ -74,9 +101,11 @@ def _refresh() -> None:
         from core import license_manager as lm
         from core import server_api as api
 
+        key = _store_key()
         data = api.get_license(api.store_token_for_active())
-        if isinstance(data, dict):
-            lm.remember_server_wholesale(data)
+        # the store may have been switched while the answer was on its way
+        if isinstance(data, dict) and key and key == _store_key():
+            lm.remember_server_wholesale(data, store_key=key)
     except Exception as exc:
         log.debug("wholesale licence refresh: %s", exc)
 
@@ -98,43 +127,93 @@ def _maybe_refresh(*, now: float | None = None) -> None:
         worker.join(FIRST_WAIT_S)
 
 
-def allowed_status(*, refresh: bool = True) -> dict[str, Any]:
-    """{allowed, source}: override | server | cache | default. Never raises."""
+def _override() -> str:
     ov = os.environ.get(OVERRIDE_ENV, "").strip().lower()
     if ov in ("1", "true", "on", "yes"):
-        return {"allowed": True, "source": "override"}
+        return WHOLESALE
     if ov in ("0", "false", "off", "no"):
-        return {"allowed": False, "source": "override"}
+        return RETAIL
+    return ""
+
+
+def store_info(store_key: str = "", *, refresh: bool = False) -> dict[str, Any]:
+    """{store_kind, enabled, wholesale_store, retail_store, source} of a store of this PC
+    (default: the open one). Never raises."""
+    key = store_key or _store_key()
+    ov = _override()
+    info = None
     try:
         from core import license_manager as lm
 
-        if refresh:
+        if refresh and not store_key and not ov:
             _maybe_refresh()
-        live = lm.live_server_wholesale(LIVE_FOR_S)
-        if live is not None:
-            return {"allowed": bool(live), "source": "server"}
-        cached = lm.read_cached_wholesale()
-        if cached is not None:
-            return {"allowed": bool(cached), "source": "cache"}
+        if key:
+            info = lm.store_wholesale_info(key, max_age_s=LIVE_FOR_S)
     except Exception:
-        pass
-    return {"allowed": False, "source": "default"}
+        info = None
+    info = dict(info or {"enabled": False, "store_kind": RETAIL, "wholesale_store": None,
+                         "retail_store": None, "source": "default"})
+    if ov and (not store_key or store_key == _store_key()):
+        info["store_kind"] = ov
+        info["source"] = "override"
+        info["wholesale_store"] = None
+        if ov == RETAIL:
+            info["retail_store"] = None
+    return info
+
+
+def companion(info: dict[str, Any]) -> dict | None:
+    """The store the switch opens from this one: a retail store's wholesale companion, or a
+    wholesale store's retail one."""
+    if info.get("store_kind") == WHOLESALE:
+        return info.get("retail_store") or None
+    return info.get("wholesale_store") or None
+
+
+def allowed_status(*, refresh: bool = True) -> dict[str, Any]:
+    """{allowed, source}: the switch is on offer. Never raises."""
+    info = store_info(refresh=refresh)
+    allowed = info.get("store_kind") == WHOLESALE or bool(info.get("wholesale_store"))
+    return {"allowed": allowed, "source": info.get("source") or "default"}
 
 
 def is_allowed(*, refresh: bool = True) -> bool:
     return bool(allowed_status(refresh=refresh)["allowed"])
 
 
-# ── the store settings (mode, margins) ───────────────────────────────────────
+def current_mode(conn=None, *, refresh: bool = False) -> str:
+    """The open store's kind: 'wholesale' only for a wholesale store."""
+    return WHOLESALE if store_info(refresh=refresh).get("store_kind") == WHOLESALE else RETAIL
 
-def _store_key() -> str:
-    try:
-        from core.store_manager import get_active_store_key
 
-        return str(get_active_store_key() or "")
-    except Exception:
-        return ""
+def is_wholesale(conn=None, *, refresh: bool = False) -> bool:
+    return current_mode(conn, refresh=refresh) == WHOLESALE
 
+
+def state(conn) -> dict[str, Any]:
+    """{ok, allowed, mode, store_name, companion_name, source, margins}."""
+    info = store_info(refresh=True)
+    mode = WHOLESALE if info.get("store_kind") == WHOLESALE else RETAIL
+    other = companion(info)
+    return {
+        "ok": True,
+        "allowed": mode == WHOLESALE or bool(info.get("wholesale_store")),
+        "mode": mode,
+        "store_name": _store_name(),
+        "companion_name": str((other or {}).get("store_name") or ""),
+        "source": info.get("source") or "default",
+        "margins": margins(conn) if conn is not None else dict(DEFAULT_MARGINS),
+    }
+
+
+def set_mode(conn, mode: Any) -> dict[str, Any]:
+    """Open the store of that kind (core/wholesale_store_switch.switch_to)."""
+    from core.wholesale_store_switch import switch_to
+
+    return switch_to(mode)
+
+
+# ── the store settings (margins) ─────────────────────────────────────────────
 
 def _server_kv(force: bool = False) -> dict[str, str]:
     """Online: the store's wholesale settings rows from the server (cached briefly)."""
@@ -149,7 +228,7 @@ def _server_kv(force: bool = False) -> dict[str, str]:
     from core.server_live import _token
     from core.store_images import _kv_rows
 
-    names = (BUSINESS_MODE_KEY, *MARGIN_KEYS.values())
+    names = tuple(MARGIN_KEYS.values())
     res = api._request("GET", "/api/sync/settings/kv?names=" + quote(",".join(names), safe=","),
                        token=_token(), timeout=15)
     if not isinstance(res, dict) or not res.get("ok"):
@@ -177,7 +256,7 @@ def _kv_get(conn, name: str, default: str = "") -> str:
 
 def _kv_set(conn, name: str, value: str) -> None:
     """Store-wide: Online straight to the server; otherwise the settings table, which the
-    offline-first trigger sends to the server (and so to the other devices)."""
+    offline-first trigger sends to the server (and so to the store's other devices)."""
     from core.desktop_settings_service import _setting_set
 
     if _online():
@@ -189,52 +268,6 @@ def _kv_set(conn, name: str, value: str) -> None:
         _kv_cache.update(rows=rows)
     _setting_set(conn, name, value)
     conn.commit()
-
-
-def stored_mode(conn) -> str:
-    """The setting as saved, whatever the server allows."""
-    if _online():
-        raw = _kv_get(conn, BUSINESS_MODE_KEY, "")
-        return WHOLESALE if raw.strip().lower() == WHOLESALE else RETAIL
-    return get_business_mode(conn)
-
-
-def current_mode(conn, *, refresh: bool = True) -> str:
-    """'wholesale' only when the store is set to it AND the server allows it."""
-    if not is_allowed(refresh=refresh):
-        return RETAIL
-    return stored_mode(conn)
-
-
-def is_wholesale(conn, *, refresh: bool = False) -> bool:
-    return current_mode(conn, refresh=refresh) == WHOLESALE
-
-
-def state(conn) -> dict[str, Any]:
-    st = allowed_status()
-    stored = RETAIL
-    try:
-        stored = stored_mode(conn)
-    except Exception:
-        pass
-    return {
-        "ok": True,
-        "allowed": bool(st["allowed"]),
-        "mode": stored if st["allowed"] else RETAIL,
-        "stored_mode": stored,
-        "source": st["source"],
-        "margins": margins(conn),
-    }
-
-
-def set_mode(conn, mode: Any) -> dict[str, Any]:
-    m = str(mode or "").strip().lower()
-    if m not in (RETAIL, WHOLESALE):
-        raise ValueError("mode must be 'retail' or 'wholesale'")
-    if not is_allowed(refresh=True):
-        raise NotAllowed("Wholesale is not switched on for this store. Ask Satpuda to enable it.")
-    _kv_set(conn, BUSINESS_MODE_KEY, m)
-    return state(conn)
 
 
 def margins(conn) -> dict[str, float]:
