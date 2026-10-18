@@ -33,7 +33,7 @@ from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Iterable, Optional
 
-from core.bill_gst import ZERO, printed_bill_gst, split_tax, to_paise
+from core.bill_gst import ZERO, BillGst, LineGst, printed_bill_gst, split_tax, to_paise
 from core.customer_gst import STATES, clean_gstin, gstin_for_bill, state_of
 
 SERIES_GAP = 100                         # numbers missing in a row before a series is split
@@ -119,6 +119,10 @@ class SaleLine:
     amount: Decimal          # what the line sold for, tax included, before the bill discount
     rate: Decimal            # GST %
     rate_from: str           # "line" | "master" | "none"
+    # A wholesale tax invoice line keeps its own taxable value and GST (rates exclude GST,
+    # core/wholesale_schema.py): those are its figures, nothing is backed out of an amount.
+    taxable: Optional[Decimal] = None
+    tax: Optional[Decimal] = None
 
 
 @dataclass
@@ -134,6 +138,9 @@ class Bill:
     lines: list
     gstin: str = ""
     pos: str = ""
+    wholesale: bool = False      # sales.invoice_mode = 'wholesale'
+    buyer_gstin: str = ""        # sales.buyer_gstin: the GSTIN printed on the invoice
+    buyer_pos: str = ""          # sales.place_of_supply (two-digit state code)
 
 
 @dataclass
@@ -265,22 +272,43 @@ def _sale_lines_offline(conn, sale_ids: list) -> dict:
             f"""SELECT si.sale_id, si.medicine_id, {_c(conn, 'medicines', 'm', 'name', "''")},
                        {_c(conn, 'medicines', 'm', 'hsn_code', "''")}, {_c(conn, 'medicines', 'm', 'type', "''")},
                        COALESCE(si.qty,0), {_c(conn, 'sales_items', 'si', 'amount')},
-                       {_raw(conn, 'sales_items', 'si', 'gst_percent')}, {_raw(conn, 'medicines', 'm', 'gst_percent')}
+                       {_raw(conn, 'sales_items', 'si', 'gst_percent')}, {_raw(conn, 'medicines', 'm', 'gst_percent')},
+                       {_raw(conn, 'sales_items', 'si', 'taxable')}, {_raw(conn, 'sales_items', 'si', 'gst_amt')},
+                       {_raw(conn, 'sales_items', 'si', 'hsn_code')}
                 FROM sales_items si LEFT JOIN medicines m ON m.id = si.medicine_id
                 WHERE si.sale_id IN ({q})
                 ORDER BY si.sale_id, si.id""", chunk):
             line_rate, master_rate = r[7], r[8]
             rate_from = "line" if line_rate is not None else ("master" if master_rate is not None else "none")
             rate = line_rate if line_rate is not None else (master_rate or 0)
-            out[int(r[0])].append(SaleLine(int(r[1] or 0), str(r[2]), _hsn(r[3]), str(r[4]),
-                                           Decimal(str(r[5] or 0)), _d(r[6]), _rate(rate), rate_from))
+            out[int(r[0])].append(SaleLine(int(r[1] or 0), str(r[2]), _hsn(r[11] or r[3]), str(r[4]),
+                                           Decimal(str(r[5] or 0)), _d(r[6]), _rate(rate), rate_from,
+                                           None if r[9] is None else _d(r[9]),
+                                           None if r[10] is None else _d(r[10])))
     return out
 
 
 def _sale_head(conn) -> str:
     return (f"SELECT id, bill_no, bill_date, {_c(conn, 'sales', '', 'customer_id')}, "
             f"{_c(conn, 'sales', '', 'customer_name', chr(39) * 2)}, {_c(conn, 'sales', '', 'discount')}, "
-            f"{_c(conn, 'sales', '', 'rounding')}, {_c(conn, 'sales', '', 'total_amount')} FROM sales")
+            f"{_c(conn, 'sales', '', 'rounding')}, {_c(conn, 'sales', '', 'total_amount')}, "
+            f"{_c(conn, 'sales', '', 'invoice_mode', chr(39) * 2)}, {_c(conn, 'sales', '', 'buyer_gstin', chr(39) * 2)}, "
+            f"{_c(conn, 'sales', '', 'place_of_supply', chr(39) * 2)} FROM sales")
+
+
+def _head_bill(r, lines: dict) -> Bill:
+    return Bill(int(r[0]), _shown_no(r[1]), _iso(r[2]), int(r[3] or 0), str(r[4]), _d(r[5]), _d(r[6]),
+                _d(r[7]), lines.get(int(r[0]), []), wholesale=_is_wholesale(r[8]),
+                buyer_gstin=clean_gstin(r[9]), buyer_pos=_state_code(r[10]))
+
+
+def _is_wholesale(mode) -> bool:
+    return str(mode or "").strip().lower() == "wholesale"
+
+
+def _state_code(value) -> str:
+    s = re.sub(r"\D", "", str(value or ""))[:2]
+    return s.zfill(2) if s else ""
 
 
 def _bills_offline(conn, start: str, end: str) -> list:
@@ -288,17 +316,14 @@ def _bills_offline(conn, start: str, end: str) -> list:
         f"""{_sale_head(conn)} WHERE {_live(conn, 'sales')}
              AND bill_date >= ? AND bill_date <= ? ORDER BY bill_date, id""", (start, end)).fetchall()
     lines = _sale_lines_offline(conn, [int(r[0]) for r in rows])
-    return [Bill(int(r[0]), _shown_no(r[1]), _iso(r[2]), int(r[3] or 0), str(r[4]), _d(r[5]), _d(r[6]),
-                 _d(r[7]), lines.get(int(r[0]), [])) for r in rows]
+    return [_head_bill(r, lines) for r in rows]
 
 
 def _bill_by_id_offline(conn, sale_id: int) -> Optional[Bill]:
     r = conn.execute(f"{_sale_head(conn)} WHERE id=?", (int(sale_id),)).fetchone()
     if not r:
         return None
-    lines = _sale_lines_offline(conn, [int(r[0])])
-    return Bill(int(r[0]), _shown_no(r[1]), _iso(r[2]), int(r[3] or 0), str(r[4]), _d(r[5]), _d(r[6]),
-                _d(r[7]), lines.get(int(r[0]), []))
+    return _head_bill(r, _sale_lines_offline(conn, [int(r[0])]))
 
 
 def _medicine_master_online(mid: int) -> dict:
@@ -324,10 +349,14 @@ def _bill_from_doc(doc: dict) -> Bill:
         lines.append(SaleLine(mid, str(it.get("name") or it.get("medicine_name") or master.get("name") or ""),
                               _hsn(it.get("hsn_code") or master.get("hsn_code")),
                               str(it.get("type") or master.get("type") or ""),
-                              Decimal(str(it.get("qty") or 0)), _d(it.get("amount")), _rate(rate), rate_from))
+                              Decimal(str(it.get("qty") or 0)), _d(it.get("amount")), _rate(rate), rate_from,
+                              None if it.get("taxable") is None else _d(it.get("taxable")),
+                              None if it.get("gst_amt") is None else _d(it.get("gst_amt"))))
     return Bill(int(doc.get("id") or doc.get("local_id") or 0), _shown_no(doc.get("bill_no")),
                 _iso(doc.get("bill_date")), int(doc.get("customer_id") or 0), str(doc.get("customer_name") or ""),
-                _d(doc.get("discount")), _d(doc.get("rounding")), _d(doc.get("total_amount")), lines)
+                _d(doc.get("discount")), _d(doc.get("rounding")), _d(doc.get("total_amount")), lines,
+                wholesale=_is_wholesale(doc.get("invoice_mode")), buyer_gstin=clean_gstin(doc.get("buyer_gstin")),
+                buyer_pos=_state_code(doc.get("place_of_supply")))
 
 
 def _bills_online(start: str, end: str) -> list:
@@ -609,9 +638,15 @@ def load_period(conn, start: str, end: str) -> Period:
                                else _purchase_returns_offline(conn, start, end, pby))
     gst_of = all_customer_gst(conn)
     for b in period.bills + [n.bill for n in period.notes if n.bill]:
-        entry = gst_of.get(b.customer_id)
-        b.gstin = gstin_for_bill(entry, b.date)
-        b.pos = (entry or {}).get("state") if b.gstin else shop["state"]
+        if b.buyer_gstin and len(b.buyer_gstin) == 15:
+            # The GSTIN printed on the invoice (a wholesale tax invoice keeps it on the bill)
+            # is the bill's own; the customer's GSTIN list is only for bills without one.
+            b.gstin = b.buyer_gstin
+            b.pos = b.buyer_pos or state_of(b.gstin)
+        else:
+            entry = gst_of.get(b.customer_id)
+            b.gstin = gstin_for_bill(entry, b.date)
+            b.pos = (entry or {}).get("state") if b.gstin else (b.buyer_pos or shop["state"])
         b.pos = b.pos or shop["state"]
     _collect_checks(period)
     return period
@@ -661,8 +696,29 @@ def _collect_checks(p: Period) -> None:
 # ── computing ───────────────────────────────────────────────────────────────────────────
 
 def bill_tax(b: Bill):
-    """The printed bill's own figures for each line."""
+    """The printed bill's own figures for each line.
+
+    A retail bill's lines are MRP amounts with the tax inside: it is backed out after the bill
+    discount (core.bill_gst). A wholesale tax invoice's rates exclude GST and each line keeps
+    the taxable value and GST it printed (sales_items.taxable / gst_amt): those are taken as
+    they are."""
+    if b.wholesale and b.lines and all(ln.taxable is not None for ln in b.lines):
+        return _wholesale_tax(b)
     return printed_bill_gst([(ln.amount, ln.rate) for ln in b.lines], b.discount)
+
+
+def _wholesale_tax(b: Bill) -> BillGst:
+    out = []
+    for ln in b.lines:
+        taxable = ln.taxable if ln.taxable is not None else ZERO
+        tax = ln.tax if ln.tax is not None else _d(taxable * ln.rate / 100)
+        c, s = split_tax(tax)
+        out.append(LineGst(taxable + tax, ZERO, taxable + tax, ln.rate, taxable, tax, c, s))
+
+    def total(name: str) -> Decimal:
+        return sum((getattr(line, name) for line in out), ZERO)
+
+    return BillGst(tuple(out), total("net"), total("taxable"), total("tax"), total("cgst"), total("sgst"))
 
 
 def note_tax(n: Note):
