@@ -835,6 +835,8 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                             "/api/returns/purchase/delete",
                             "/api/returns/purchase/replace",
                             "/api/returns/purchase/return/pdf",
+                            "/api/returns/sales/return",
+                            "/api/returns/sales/return/pdf",
                             "/api/returns/disposal/lookup",
                             "/api/returns/disposal/submit",
                             "/api/returns/bulk/prefill",
@@ -1414,6 +1416,7 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 "/api/returns/purchase/search",
                 "/api/returns/purchase/load",
                 "/api/returns/purchase/return",
+                "/api/returns/sales/return",
                 "/api/returns/bulk/prefill",
                 "/api/general-products",
                 "/api/medicines/search",
@@ -1940,6 +1943,19 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                     status = 200 if result.get("ok") else 404
                     _json_response(self, status, result)
                     return
+                if path == "/api/returns/sales/return":
+                    # A saved sales return for its View details dialog: header, lines,
+                    # totals and how its credit stands (core/return_details.py).
+                    from urllib.parse import parse_qs
+
+                    from core import desktop_returns_service as ret_svc
+
+                    qs = parse_qs(urlparse(self.path).query)
+                    rid = int((qs.get("return_id") or ["0"])[0] or 0)
+                    result = ret_svc.get_sales_return_details(conn, rid)
+                    status = 200 if result.get("ok") else 404
+                    _json_response(self, status, result)
+                    return
                 if path == "/api/returns/bulk/prefill":
                     from urllib.parse import parse_qs
 
@@ -2345,6 +2361,7 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 "/api/returns/purchase/delete",
                 "/api/returns/purchase/replace",
                 "/api/returns/purchase/return/pdf",
+                "/api/returns/sales/return/pdf",
                 "/api/returns/disposal/lookup",
                 "/api/returns/disposal/submit",
             ):
@@ -2366,8 +2383,15 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 elif path == "/api/returns/purchase/replace":
                     result = ret_svc.replace_purchase_return(conn, body)
                 elif path == "/api/returns/purchase/return/pdf":
+                    # print: View details -> Print (saved, then sent to the printer).
                     result = ret_svc.save_purchase_return_pdf(
-                        conn, int(body.get("return_id") or body.get("id") or 0)
+                        conn, int(body.get("return_id") or body.get("id") or 0),
+                        print_it=bool(body.get("print")),
+                    )
+                elif path == "/api/returns/sales/return/pdf":
+                    result = ret_svc.save_sales_return_pdf(
+                        conn, int(body.get("return_id") or body.get("id") or 0),
+                        print_it=bool(body.get("print")),
                     )
                 elif path == "/api/returns/disposal/lookup":
                     result = ret_svc.lookup_disposal_medicine(conn, body)

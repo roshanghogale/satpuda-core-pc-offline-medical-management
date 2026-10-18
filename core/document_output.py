@@ -163,6 +163,35 @@ def _supplier_document_settings(*, doc_kind: str) -> dict:
             "footer_strip_line": "GOODS RETURNED - CREDIT TO ACCOUNT",
             "signature_caption": "AUTH. SIGN.",
         })
+    elif doc_kind == "sales_return":
+        # The customer's slip, laid out as the purchase return (owner, 18 Oct 2026). The
+        # footer and the total's label follow how the return was settled
+        # (_sales_return_html_from sets them).
+        settings.update({
+            "supplier_doc_compact": True,
+            "compact_supplier_footer": True,
+            "hide_party_meta": True,
+            "show_party_on_left_panel": True,
+            "hide_blessing": True,
+            "show_blessing": False,
+            "show_store_address": False,
+            "show_store_phone": False,
+            "show_store_email": False,
+            "show_store_gstin": False,
+            "show_store_dl": False,
+            "show_recovery_wish": False,
+            "show_signature": False,
+            "show_gst_strip": False,
+            "document_title": "SALES RETURN",
+            "meta_bill_no_label": "RETURN NO.",
+            "meta_date_label": "RETURN DATE",
+            "total_label": "CREDIT AMT",
+            "discount_label": "LESS DISC",
+            "medicine_mrp_header": "RATE",
+            "medicine_amount_header": "AMT",
+            "footer_strip_line": SALES_RETURN_CREDIT_LINE,
+            "signature_caption": "AUTH. SIGN.",
+        })
     elif doc_kind == "reorder":
         settings.update({
             "supplier_doc_compact": True,
@@ -353,6 +382,113 @@ def _purchase_return_html_from(profile, head: dict, lines: list) -> str:
     return _render_supplier_bill_html(ctx, settings)
 
 
+SALES_RETURN_CREDIT_LINE = "GOODS RETURNED - CREDIT TO CUSTOMER"
+SALES_RETURN_REFUND_LINES = {
+    "cash": "GOODS RETURNED - REFUNDED IN CASH",
+    "online": "GOODS RETURNED - REFUNDED ONLINE",
+    "cash/online": "GOODS RETURNED - REFUNDED IN CASH/ONLINE",
+}
+
+
+def _money_text(v) -> str:
+    return f"Rs.{float(v or 0):.2f}"
+
+
+def render_sales_return_html(conn, return_id: int) -> str:
+    """The sales return slip (offline / offline-first store), as the purchase return's."""
+    from core.pharmacy_profile_io import fetch_pharmacy_profile_row
+    from core.return_details import sales_return_details
+
+    d = sales_return_details(conn, int(return_id))
+    if not d.get("ok"):
+        raise ValueError(f"Sales return {return_id} not found")
+    return _sales_return_html_from(fetch_pharmacy_profile_row(conn), d, d.get("items") or [])
+
+
+def _sales_return_html_from(profile, head: dict, lines: list) -> str:
+    """Render a sales return from plain values (core/return_details.sales_return_details):
+    the customer and the bill on the left, the medicines that came back, the totals, and
+    in the footer how it was settled -- kept as the customer's credit, or refunded."""
+    from core.bill_config import BillContext, BillItem
+
+    bill_items = []
+    sub_total = 0.0
+    for ln in lines:
+        amt = float(ln.get("amount") or 0)
+        sub_total += amt
+        rate = float(ln.get("rate") or 0)
+        bill_items.append(BillItem(
+            name=ln.get("name") or "",
+            batch=ln.get("batch") or ln.get("batch_no") or "",
+            expiry=ln.get("expiry") or "",
+            qty=float(ln.get("qty") or 0),
+            rate=rate,
+            # The column is headed RATE: what the customer paid for it.
+            mrp=rate,
+            amount=amt,
+        ))
+    sub_total = round(sub_total, 2)
+    refund = round(float(head.get("refund_amount") or 0), 2)
+    discount_amt = round(max(0.0, sub_total - refund), 2)
+
+    credit = head.get("credit") or {}
+    mode = str(credit.get("settle_mode") or head.get("settle_mode") or "ledger").lower()
+    paid_out = round(float(credit.get("paid_out") or 0), 2)
+    paid_mode = str(credit.get("paid_out_mode") or mode)
+    refunded = mode in ("cash", "online") or paid_out > 0.009
+
+    left_panel = [("Customer", (head.get("customer") or "").upper())]
+    if head.get("phone"):
+        left_panel.append(("Phone", head.get("phone")))
+    if head.get("address"):
+        left_panel.append(("Address", head.get("address")))
+    left_panel.append(("Bill", head.get("bill_no") or ""))
+    if head.get("bill_date"):
+        left_panel.append(("Bill Dt", _fmt_doc_date(head.get("bill_date"))))
+    if head.get("reason"):
+        left_panel.append(("Reason", head.get("reason")))
+    if paid_out > 0.009:
+        word = {"online": "ONLINE", "cash": "CASH"}.get(paid_mode, "CASH/ONLINE")
+        left_panel.append(("Refund", f"{word} {_money_text(paid_out)}"))
+    settled = [s for s in credit.get("settled") or [] if float(s.get("amount") or 0) > 0.009]
+    if settled:
+        left_panel.append(("Settled", ", ".join(
+            f"{s.get('bill_no')} {_money_text(s.get('amount'))}" for s in settled)))
+    if float(credit.get("left") or 0) > 0.009:
+        left_panel.append(("Credit", f"{_money_text(credit.get('left'))} open"))
+
+    if refunded and paid_out > 0.009:
+        footer = SALES_RETURN_REFUND_LINES.get(paid_mode, SALES_RETURN_REFUND_LINES["cash/online"])
+    elif refunded:
+        footer = SALES_RETURN_REFUND_LINES.get(mode, SALES_RETURN_REFUND_LINES["cash/online"])
+    else:
+        footer = SALES_RETURN_CREDIT_LINE
+
+    store = _store_fields_from_profile(profile)
+    store["gst_enabled"] = False
+    return_date = head.get("return_date")
+    ctx = BillContext(
+        **store,
+        document_title="SALES RETURN",
+        left_panel_lines=left_panel,
+        footer_strip_line=footer,
+        bill_no=str(head.get("return_no") or ""),
+        bill_date=_fmt_doc_date(return_date),
+        bill_date_landscape=_fmt_doc_date(return_date),
+        items=bill_items,
+        sub_total=sub_total,
+        discount=discount_amt,
+        taxable_amount=refund,
+        gst_amount=0.0,
+        grand_total=refund,
+        amount_paid=0.0,
+    )
+    settings = _supplier_document_settings(doc_kind="sales_return")
+    settings["footer_strip_line"] = footer
+    settings["total_label"] = "REFUND AMT" if refunded else "CREDIT AMT"
+    return _render_supplier_bill_html(ctx, settings)
+
+
 def render_reorder_order_html(conn, group_id) -> str:
     from core.bill_config import BillContext, BillItem
     from core.pharmacy_profile_io import fetch_pharmacy_profile_row
@@ -431,6 +567,18 @@ def save_supplier_document(html: str, default_name: str) -> tuple[str | None, st
     from core.bill_save_prefs import resolve_supplier_doc_save_dir
 
     save_dir = resolve_supplier_doc_save_dir()
+    base_path = os.path.join(save_dir, _safe_doc_filename(default_name))
+    w_mm, h_mm = SUPPLIER_DOC_PAPER_MM
+    return save_html_as_pdf(html, base_path, paper_width_mm=w_mm, paper_height_mm=h_mm)
+
+
+def save_customer_document(html: str, default_name: str) -> tuple[str | None, str]:
+    """Write a sales return slip PDF/HTML to the bill folder (sales_returns subdir), on the
+    same A6 landscape sheet as the supplier documents."""
+    from core.bill_save_prefs import resolve_sales_bill_save_dir
+
+    save_dir = os.path.join(resolve_sales_bill_save_dir(), "sales_returns")
+    os.makedirs(save_dir, exist_ok=True)
     base_path = os.path.join(save_dir, _safe_doc_filename(default_name))
     w_mm, h_mm = SUPPLIER_DOC_PAPER_MM
     return save_html_as_pdf(html, base_path, paper_width_mm=w_mm, paper_height_mm=h_mm)

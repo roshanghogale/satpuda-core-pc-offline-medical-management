@@ -1254,6 +1254,11 @@ def save_sales_return(conn, body: dict[str, Any]) -> dict[str, Any]:
     customer_id = _safe_int(body.get("customer_id"))
     if sale_id <= 0:
         return {"ok": False, "error": "Load a bill first."}
+    if customer_id <= 0:
+        # A caller that left the customer out: the bill's own customer, so the return is
+        # still that customer's credit and is offered in their next bill (return_credit).
+        _row = conn.execute("SELECT customer_id FROM sales WHERE id=?", (sale_id,)).fetchone()
+        customer_id = _safe_int(_row[0]) if _row else 0
     why = _sales_return_request_error(conn, sale_id, body, online=False)
     if why:
         return {"ok": False, "error": why}
@@ -3431,7 +3436,7 @@ def get_purchase_return_details(conn, return_id: int) -> dict[str, Any]:
         """,
         (rid,),
     ).fetchall()
-    return {
+    out = {
         "ok": True,
         "id": rid,
         "return_no": header[0] or "",
@@ -3454,6 +3459,22 @@ def get_purchase_return_details(conn, return_id: int) -> dict[str, Any]:
             for r in lines
         ],
     }
+    # View details (owner, 18 Oct 2026): the purchase entry no, expiry, totals and how the
+    # credit stands. Extra keys only; Edit / Load Purchase read the ones above.
+    try:
+        from core.return_details import purchase_return_more
+
+        more = purchase_return_more(conn, rid)
+    except Exception:
+        more = {}
+    for it, exp in zip(out["items"], more.pop("expiry_by_line", []) or []):
+        it["expiry"] = exp
+    out.update(more)
+    sub = round(sum(float(it["amount"] or 0) for it in out["items"]), 2)
+    out["subtotal"] = sub
+    out["discount_amount"] = round(max(0.0, sub - float(out["refund_amount"] or 0)), 2)
+    out["settle_mode"] = (out.get("credit") or {}).get("settle_mode") or "ledger"
+    return out
 
 
 def _save_purchase_return_pdf_online(conn, rid: int) -> dict[str, Any]:
@@ -3521,8 +3542,35 @@ def _save_purchase_return_pdf_online(conn, rid: int) -> dict[str, Any]:
     }
 
 
-def save_purchase_return_pdf(conn, return_id: int) -> dict[str, Any]:
-    """Save purchase-return PDF via document_output (headless)."""
+def save_purchase_return_pdf(conn, return_id: int, *, print_it: bool = False) -> dict[str, Any]:
+    """Save purchase-return PDF via document_output (headless); print_it also sends it to
+    the shop's printer (View details -> Print)."""
+    from core.return_details import finish_pdf
+
+    return finish_pdf(_save_purchase_return_pdf(conn, return_id), print_it)
+
+
+def get_sales_return_details(conn, return_id: int) -> dict[str, Any]:
+    """Header + lines + totals + credit of a saved sales return (View details)."""
+    from core.return_details import sales_return_details
+
+    try:
+        return sales_return_details(conn, return_id)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def save_sales_return_pdf(conn, return_id: int, *, print_it: bool = False) -> dict[str, Any]:
+    """The sales return slip as PDF (and on the printer when asked)."""
+    from core.return_details import sales_return_pdf
+
+    try:
+        return sales_return_pdf(conn, return_id, print_it=print_it)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def _save_purchase_return_pdf(conn, return_id: int) -> dict[str, Any]:
     try:
         rid = int(return_id or 0)
     except (TypeError, ValueError):

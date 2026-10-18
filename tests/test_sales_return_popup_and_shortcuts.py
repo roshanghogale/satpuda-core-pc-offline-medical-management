@@ -220,11 +220,13 @@ class TheSalesReturnPopup(unittest.TestCase):
         self.assertIn("void actions.current.save()", keys)
         self.assertIn("actions.current.requestClose()", keys)
 
-    def test_no_pdf_because_returns_offers_none_for_a_sales_return(self):
+    def test_the_popup_offers_the_slip_pdf_as_returns_does(self):
+        # Owner, 18 Oct 2026: a sales return has a PDF slip on Returns (View details / Save
+        # PDF), so the popup offers it too, for the return it just saved.
         api = src(*UI, "pagesApi.ts")
-        self.assertNotRegex(api, r"[Ss]alesReturnPdf",
-                            "Returns now has a sales-return PDF: offer it in the popup too")
-        self.assertNotIn("Pdf", self.dlg)
+        self.assertIn("export function saveSalesReturnPdf(", api)
+        self.assertIn("saveSalesReturnPdf(savedReturnId)", self.dlg)
+        self.assertIn("showSavedFile({ path })", self.dlg)
 
 
 class TheSalesReturnKey(unittest.TestCase):

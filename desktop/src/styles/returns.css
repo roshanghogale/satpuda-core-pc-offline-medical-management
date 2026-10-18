@@ -1,0 +1,255 @@
+/* ─── Returns: View details of a saved return, 18 Oct 2026 ───────────────────
+ * Purchase and sales returns (pages/ReturnDetailsDialog.tsx). Rules in
+ * docs/SETTINGS_DESIGN.md: a header of label / value cells, the medicines as a
+ * table (sticky uppercase header, zebra rows, numbers right-aligned in tabular
+ * figures), totals and the credit side by side (stacked on a narrow window),
+ * one bar of buttons with the destructive one in a red outline, one scroll (the
+ * dialog body), theme variables only. Reuses .modal-*, .btn and .sat-table as
+ * they are; every rule here is scoped under .rd-card. */
+
+.modal-card.rd-card {
+  width: min(880px, 96vw);
+  max-height: 92vh;
+}
+
+.rd-card .rd-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ── Header: return no, date, party, original bill (and the reason) ──────── */
+.rd-card .rd-head {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px 16px;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-alt);
+}
+.rd-card .rd-head-cell {
+  min-width: 0;
+}
+.rd-card .rd-head-full {
+  grid-column: 1 / -1;
+}
+.rd-card .rd-head dt {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--text-secondary);
+  margin: 0 0 3px;
+}
+.rd-card .rd-head dd {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.rd-card .rd-head dd.rd-reason {
+  font-weight: 500;
+}
+.rd-card .rd-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+@media (max-width: 720px) {
+  .rd-card .rd-head {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* ── Sections ───────────────────────────────────────────────────────────── */
+.rd-card .rd-section {
+  min-width: 0;
+}
+.rd-card .rd-title {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--accent-dark);
+}
+.rd-card .rd-num,
+.rd-card .rd-table td.num,
+.rd-card .rd-table th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ── Medicines table ────────────────────────────────────────────────────── */
+.rd-card .rd-table-wrap {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.rd-card .rd-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;
+}
+.rd-card .rd-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--surface-2) 70%, var(--surface));
+  padding: 6px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+.rd-card .rd-table tbody td {
+  padding: 5px 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  vertical-align: top;
+}
+.rd-card .rd-table tbody tr:nth-child(even) > td {
+  background: color-mix(in srgb, var(--surface-2) 40%, var(--surface));
+}
+.rd-card .rd-table tbody tr:last-child > td {
+  border-bottom: none;
+}
+.rd-card .rd-table .rd-col-sr {
+  width: 28px;
+  color: var(--text-secondary);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.rd-card .rd-table td.rd-med {
+  font-weight: 600;
+}
+.rd-card .rd-table td.dt-empty {
+  text-align: center;
+  color: var(--text-secondary);
+  padding: 12px 8px;
+}
+
+/* ── Credit (left) and Totals (right) ───────────────────────────────────── */
+.rd-card .rd-bottom {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+  gap: 14px;
+  align-items: start;
+}
+@media (max-width: 720px) {
+  .rd-card .rd-bottom {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.rd-card .rd-credit,
+.rd-card .rd-totals {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.rd-card .rd-line {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.rd-card .rd-tone-open {
+  color: var(--accent-dark);
+  font-weight: 700;
+}
+.rd-card .rd-tone-done {
+  color: var(--success, var(--text-primary));
+  font-weight: 700;
+}
+.rd-card .rd-tone-muted {
+  color: var(--text-secondary);
+}
+.rd-card .rd-figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 6px;
+  margin: 0 0 8px;
+}
+.rd-card .rd-fig {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+}
+.rd-card .rd-fig > span {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--text-secondary);
+}
+.rd-card .rd-fig > strong {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+.rd-card .rd-fig.rd-fig-open {
+  border-color: var(--accent-soft-border);
+  background: var(--accent-soft);
+}
+.rd-card .rd-fig.rd-fig-open > strong {
+  color: var(--accent-dark);
+}
+.rd-card .rd-settled {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.rd-card .rd-total-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 4px 0;
+  font-size: 12px;
+}
+.rd-card .rd-total-row + .rd-total-row {
+  border-top: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
+}
+.rd-card .rd-total-row.rd-grand {
+  margin-top: 2px;
+  padding-top: 7px;
+  border-top: 1px solid var(--border);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent-dark);
+}
+
+/* ── Buttons: one bar, primary first, Delete in a red outline, Close at the end ── */
+.rd-card .rd-foot {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.rd-card .rd-foot .btn {
+  min-height: 30px;
+}
+.rd-card .rd-foot .btn.rd-danger {
+  margin-left: 10px;
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger) 55%, var(--border));
+  box-shadow: none;
+}
+.rd-card .rd-foot .btn.rd-danger:hover:not(:disabled) {
+  background: var(--danger-soft);
+}
+.rd-card .rd-foot .btn.rd-close {
+  margin-left: auto;
+}

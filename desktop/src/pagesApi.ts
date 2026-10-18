@@ -606,6 +606,48 @@ export function replacePurchaseReturn(body: Record<string, unknown>) {
   }>('/api/returns/purchase/replace', body)
 }
 
+/** How a saved return's credit stands (core/return_details.credit_status): the bills
+ *  it went into (how = 'chosen': ticked in that bill; 'oldest': it paid a due on its own),
+ *  money handed back for it, and what the next bill is still offered. */
+export type ReturnCreditSettlement = {
+  bill_id: number
+  bill_no: string
+  supplier_bill_no?: string
+  date: string
+  amount: number
+  how: string
+}
+export type ReturnCreditStatus = {
+  settle_mode: string
+  refund: number
+  party_id: number
+  settled: ReturnCreditSettlement[]
+  settled_total: number
+  paid_out: number
+  paid_out_mode: string
+  left: number
+}
+export type ReturnDetailItem = {
+  medicine_id: number
+  name: string
+  batch: string
+  expiry?: string
+  qty: number
+  rate: number
+  amount: number
+}
+export type ReturnPdfResult = {
+  ok: boolean
+  error?: string
+  path?: string
+  pdf_path?: string
+  html_path?: string
+  return_no?: string
+  /** Asked to print: true when it went to the printer, else print_error says why. */
+  printed?: boolean
+  print_error?: string
+}
+
 export function fetchPurchaseReturnDetails(returnId: number) {
   return getJson<{
     ok: boolean
@@ -619,25 +661,57 @@ export function fetchPurchaseReturnDetails(returnId: number) {
     reason?: string
     purchase_id?: number
     supplier_id?: number
-    items?: {
-      medicine_id: number
-      name: string
-      batch: string
-      qty: number
-      rate: number
-      amount: number
-    }[]
+    items?: ReturnDetailItem[]
+    // View details (offline / offline-first stores)
+    purchase_entry_no?: string
+    supplier_bill_no?: string
+    purchase_date?: string
+    subtotal?: number
+    discount_amount?: number
+    discount_pct?: number
+    settle_mode?: string
+    credit?: ReturnCreditStatus
   }>(`/api/returns/purchase/return${qs({ return_id: returnId })}`)
 }
 
-export function savePurchaseReturnPdf(returnId: number) {
-  return postJson<{
+export function savePurchaseReturnPdf(returnId: number, opts: { print?: boolean } = {}) {
+  return postJson<ReturnPdfResult>(
+    '/api/returns/purchase/return/pdf',
+    opts.print ? { return_id: returnId, print: true } : { return_id: returnId },
+  )
+}
+
+/** A saved sales return for its View details dialog. */
+export function fetchSalesReturnDetails(returnId: number) {
+  return getJson<{
     ok: boolean
     error?: string
-    path?: string
-    pdf_path?: string
+    id?: number
     return_no?: string
-  }>('/api/returns/purchase/return/pdf', { return_id: returnId })
+    return_date?: string
+    bill_no?: string
+    bill_date?: string
+    sale_id?: number
+    customer_id?: number
+    customer?: string
+    phone?: string
+    reason?: string
+    settle_mode?: string
+    items?: ReturnDetailItem[]
+    subtotal?: number
+    discount_amount?: number
+    discount_pct?: number
+    refund_amount?: number
+    credit?: ReturnCreditStatus
+  }>(`/api/returns/sales/return${qs({ return_id: returnId })}`)
+}
+
+/** The sales return slip as PDF (print: also sent to the shop's printer). */
+export function saveSalesReturnPdf(returnId: number, opts: { print?: boolean } = {}) {
+  return postJson<ReturnPdfResult>(
+    '/api/returns/sales/return/pdf',
+    opts.print ? { return_id: returnId, print: true } : { return_id: returnId },
+  )
 }
 
 export function lookupDisposalMedicine(body: Record<string, unknown>) {

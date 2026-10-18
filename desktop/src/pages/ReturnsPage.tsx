@@ -10,6 +10,7 @@ import {
   fetchBulkPurchasePrefill,
   fetchPurchaseReturnDetails,
   fetchReturnsSummary,
+  fetchSalesReturnDetails,
   loadPurchaseReturnBill,
   loadSalesReturnBill,
   lookupDisposalMedicine,
@@ -17,6 +18,7 @@ import {
   savePurchaseReturn,
   savePurchaseReturnPdf,
   saveSalesReturn,
+  saveSalesReturnPdf,
   searchMedicines,
   searchPurchaseReturnBills,
   searchSalesReturnBills,
@@ -27,6 +29,8 @@ import {
   type ReturnsBundle,
 } from '../pagesApi'
 import { ModernCombo } from './ModernCombo'
+import { RowContextMenu } from './MedicineEditDialog'
+import { ReturnDetailsDialog, type ReturnDetailView } from './ReturnDetailsDialog'
 import { AlertDialog, type AlertState } from './SalesDialogs'
 import { partTabletProblem, tabletCountNote } from './tabletCount'
 import { dispatchPaymentsChanged } from '../syncRefresh'
@@ -117,21 +121,11 @@ export function ReturnsPage({
   }, [])
   const [salesHistSel, setSalesHistSel] = useState<number | null>(null)
   const [purchaseHistSel, setPurchaseHistSel] = useState<number | null>(null)
-  const [purchaseDetail, setPurchaseDetail] = useState<{
-    return_no: string
-    return_date: string
-    purchase_no: string
-    supplier: string
-    refund_amount: number
-    reason: string
-    items: {
-      name: string
-      batch: string
-      qty: number
-      rate: number
-      amount: number
-    }[]
-  } | null>(null)
+  /** View details of a saved return (purchase or sales), opened from its list. */
+  const [detail, setDetail] = useState<ReturnDetailView | null>(null)
+  /** Right-click on a row of the sales / purchase returns list. */
+  const [rowMenu, setRowMenu] = useState<{ x: number; y: number; kind: 'sales' | 'purchase'; id: number } | null>(null)
+  const closeDetail = useCallback(() => setDetail(null), [])
 
   // Sales return workflow
   const [salesQuery, setSalesQuery] = useState('')
@@ -533,26 +527,28 @@ export function ReturnsPage({
     }
   }
 
-  const deleteSelectedSalesReturn = async () => {
+  /** Delete Return: the selected row, or the return a View details dialog shows. */
+  const deleteSelectedSalesReturn = async (pickedId = 0): Promise<boolean> => {
     const ids = data?.sales_returns.row_ids || []
+    const at = pickedId ? ids.findIndex((x) => Number(x) === pickedId) : (salesHistSel ?? -1)
     const id =
-      salesHistSel != null && salesHistSel >= 0 ? Number(ids[salesHistSel] || 0) : 0
+      pickedId || (salesHistSel != null && salesHistSel >= 0 ? Number(ids[salesHistSel] || 0) : 0)
     if (!id) {
       setAlert({
         title: 'Delete Return',
         message: 'Select a sales return in history first.',
         kind: 'error',
       })
-      return
+      return false
     }
-    const row = data?.sales_returns.rows?.[salesHistSel!] || []
-    const label = String(row[0] || id)
+    const row = (at >= 0 ? data?.sales_returns.rows?.[at] : null) || []
+    const label = String(row[0] || (pickedId && detail?.kind === 'sales' && detail.id === pickedId ? detail.returnNo : '') || id)
     if (
       !window.confirm(
         `Delete sales return ${label}?\nStock will be reduced again and the return will sync as deleted.`,
       )
     ) {
-      return
+      return false
     }
     setSaving(true)
     setError('')
@@ -564,7 +560,7 @@ export function ReturnsPage({
           message: res.error || 'Could not delete return.',
           kind: 'error',
         })
-        return
+        return false
       }
       if (res.warning) {
         // The return was deleted but the refund entry could not be checked on
@@ -584,35 +580,40 @@ export function ReturnsPage({
       }
       setSalesHistSel(null)
       await refreshSummary()
+      return true
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
+      return false
     } finally {
       setSaving(false)
     }
   }
 
-  const deleteSelectedPurchaseReturn = async () => {
+  /** Delete Return: the selected row, or the return a View details dialog shows. */
+  const deleteSelectedPurchaseReturn = async (pickedId = 0): Promise<boolean> => {
     const ids = data?.purchase_returns.row_ids || []
+    const at = pickedId ? ids.findIndex((x) => Number(x) === pickedId) : (purchaseHistSel ?? -1)
     const id =
-      purchaseHistSel != null && purchaseHistSel >= 0
+      pickedId ||
+      (purchaseHistSel != null && purchaseHistSel >= 0
         ? Number(ids[purchaseHistSel] || 0)
-        : 0
+        : 0)
     if (!id) {
       setAlert({
         title: 'Delete Return',
         message: 'Select a purchase return in history first.',
         kind: 'error',
       })
-      return
+      return false
     }
-    const row = data?.purchase_returns.rows?.[purchaseHistSel!] || []
-    const label = String(row[0] || id)
+    const row = (at >= 0 ? data?.purchase_returns.rows?.[at] : null) || []
+    const label = String(row[0] || (pickedId && detail?.kind === 'purchase' && detail.id === pickedId ? detail.returnNo : '') || id)
     if (
       !window.confirm(
         `Delete purchase return ${label}?\nStock will be increased again and the return will sync as deleted.`,
       )
     ) {
-      return
+      return false
     }
     setSaving(true)
     setError('')
@@ -624,7 +625,7 @@ export function ReturnsPage({
           message: res.error || 'Could not delete return.',
           kind: 'error',
         })
-        return
+        return false
       }
       setNote(
         res.queued
@@ -633,8 +634,10 @@ export function ReturnsPage({
       )
       setPurchaseHistSel(null)
       await refreshSummary()
+      return true
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
+      return false
     } finally {
       setSaving(false)
     }
@@ -646,8 +649,15 @@ export function ReturnsPage({
     return Number(ids[purchaseHistSel] || 0)
   }
 
-  const viewPurchaseReturnDetails = async () => {
-    const id = selectedPurchaseReturnId()
+  const selectedSalesReturnId = () => {
+    const ids = data?.sales_returns.row_ids || []
+    if (salesHistSel == null || salesHistSel < 0) return 0
+    return Number(ids[salesHistSel] || 0)
+  }
+
+  /** View Details (button, double-click, right-click): the saved return in a dialog. */
+  const viewPurchaseReturnDetails = async (pickedId = 0) => {
+    const id = pickedId || selectedPurchaseReturnId()
     if (!id) {
       setAlert({
         title: 'View Details',
@@ -666,49 +676,121 @@ export function ReturnsPage({
         })
         return
       }
-      setPurchaseDetail({
-        return_no: res.return_no || '',
-        return_date: res.return_date || '',
-        purchase_no: res.purchase_no || '',
-        supplier: res.supplier || '',
-        refund_amount: Number(res.refund_amount || 0),
+      const items = res.items || []
+      const sub =
+        res.subtotal ?? Math.round(items.reduce((t, it) => t + (Number(it.amount) || 0), 0) * 100) / 100
+      const refund = Number(res.refund_amount || 0)
+      setDetail({
+        kind: 'purchase',
+        id,
+        returnNo: res.return_no || '',
+        returnDate: res.return_date || '',
+        party: res.supplier || '',
+        billNo: res.purchase_entry_no || res.purchase_no || '',
+        billDate: res.purchase_date || '',
+        supplierBillNo:
+          res.supplier_bill_no && res.supplier_bill_no !== (res.purchase_entry_no || '')
+            ? res.supplier_bill_no
+            : '',
         reason: res.reason || '',
-        items: (res.items || []).map((it) => ({
-          name: it.name,
-          batch: it.batch,
-          qty: it.qty,
-          rate: it.rate,
-          amount: it.amount,
-        })),
+        items,
+        subtotal: sub,
+        discount: res.discount_amount ?? Math.max(0, Math.round((sub - refund) * 100) / 100),
+        discountPct: Number(res.discount_pct || 0),
+        refund,
+        credit: res.credit || null,
       })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
   }
 
-  const saveSelectedPurchaseReturnPdf = async () => {
-    const id = selectedPurchaseReturnId()
+  /** View Details of a saved sales return, opened the same ways as a purchase return. */
+  const viewSalesReturnDetails = async (pickedId = 0) => {
+    const id = pickedId || selectedSalesReturnId()
     if (!id) {
       setAlert({
-        title: 'Save PDF',
-        message: 'Select a purchase return in history first.',
+        title: 'View Details',
+        message: 'Select a sales return in history first.',
+        kind: 'error',
+      })
+      return
+    }
+    try {
+      const res = await fetchSalesReturnDetails(id)
+      if (!res.ok) {
+        setAlert({
+          title: 'Not Found',
+          message: res.error || 'Return record not found.',
+          kind: 'warning',
+        })
+        return
+      }
+      setDetail({
+        kind: 'sales',
+        id,
+        returnNo: res.return_no || '',
+        returnDate: res.return_date || '',
+        party: res.customer || '',
+        billNo: res.bill_no || '',
+        billDate: res.bill_date || '',
+        supplierBillNo: '',
+        reason: res.reason || '',
+        items: res.items || [],
+        subtotal: Number(res.subtotal || 0),
+        discount: Number(res.discount_amount || 0),
+        discountPct: Number(res.discount_pct || 0),
+        refund: Number(res.refund_amount || 0),
+        credit: res.credit || null,
+      })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  /** Save PDF / Print of a saved return (the list's buttons, its right-click menu and the
+   *  View details dialog). The PDF lands in the bill folder and the File saved box says
+   *  where; Print saves it the same way and sends it to the shop's printer. */
+  const returnDocument = async (kind: 'sales' | 'purchase', pickedId: number, print: boolean) => {
+    const title = print ? 'Print' : 'Save PDF'
+    const id = pickedId || (kind === 'sales' ? selectedSalesReturnId() : selectedPurchaseReturnId())
+    if (!id) {
+      setAlert({
+        title,
+        message: `Select a ${kind === 'sales' ? 'sales' : 'purchase'} return in history first.`,
         kind: 'error',
       })
       return
     }
     setSaving(true)
     try {
-      const res = await savePurchaseReturnPdf(id)
+      const res =
+        kind === 'sales'
+          ? await saveSalesReturnPdf(id, { print })
+          : await savePurchaseReturnPdf(id, print ? { print } : {})
       if (!res.ok) {
         setAlert({
-          title: 'Save PDF',
+          title,
           message: res.error || 'Could not save PDF.',
           kind: 'error',
         })
         return
       }
-      setNote(`PDF saved: ${res.path || res.pdf_path || res.return_no || ''}`)
       const savedPath = String(res.path || res.pdf_path || '')
+      if (print) {
+        if (res.printed) {
+          setNote(`Return ${res.return_no || id} sent to the printer.`)
+        } else {
+          setAlert({
+            title: 'Print',
+            message: res.print_error || 'Could not print. The PDF was saved; open it to print.',
+            kind: 'warning',
+          })
+          if (savedPath) showSavedFile({ path: savedPath })
+        }
+        return
+      }
+      setNote(`PDF saved: ${res.path || res.pdf_path || res.return_no || ''}`)
       if (savedPath) showSavedFile({ path: savedPath })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -716,6 +798,8 @@ export function ReturnsPage({
       setSaving(false)
     }
   }
+
+  const saveSelectedPurchaseReturnPdf = () => returnDocument('purchase', 0, false)
 
   /** Load a saved purchase return for EDITING (Save then replaces it). */
   const editPurchaseReturnById = async (id: number) => {
@@ -1928,6 +2012,18 @@ export function ReturnsPage({
                 onClick={clearSalesForm}
               />
               <ActionBtn
+                label="View Details"
+                variant="neutral"
+                disabled={saving || salesHistSel == null}
+                onClick={() => void viewSalesReturnDetails()}
+              />
+              <ActionBtn
+                label="Save PDF"
+                variant="neutral"
+                disabled={saving || salesHistSel == null}
+                onClick={() => void returnDocument('sales', 0, false)}
+              />
+              <ActionBtn
                 label="Delete Return"
                 variant="warning"
                 className="lp-danger"
@@ -1947,6 +2043,17 @@ export function ReturnsPage({
                 empty="No recent sales returns"
                 selectedRowIndex={salesHistSel}
                 onRowClick={setSalesHistSel}
+                onRowDoubleClick={(i) => {
+                  const id = Number(data?.sales_returns.row_ids?.[i] || 0)
+                  setSalesHistSel(i)
+                  if (id) void viewSalesReturnDetails(id)
+                }}
+                onRowContextMenu={(i, e) => {
+                  const id = Number(data?.sales_returns.row_ids?.[i] || 0)
+                  if (!id) return
+                  setSalesHistSel(i)
+                  setRowMenu({ x: e.clientX, y: e.clientY, kind: 'sales', id })
+                }}
               />
             </div>
           </SectionFrame>
@@ -2275,6 +2382,17 @@ export function ReturnsPage({
                 empty="No recent purchase returns"
                 selectedRowIndex={purchaseHistSel}
                 onRowClick={setPurchaseHistSel}
+                onRowDoubleClick={(i) => {
+                  const id = Number(data?.purchase_returns.row_ids?.[i] || 0)
+                  setPurchaseHistSel(i)
+                  if (id) void viewPurchaseReturnDetails(id)
+                }}
+                onRowContextMenu={(i, e) => {
+                  const id = Number(data?.purchase_returns.row_ids?.[i] || 0)
+                  if (!id) return
+                  setPurchaseHistSel(i)
+                  setRowMenu({ x: e.clientX, y: e.clientY, kind: 'purchase', id })
+                }}
               />
             </div>
           </SectionFrame>
@@ -2496,57 +2614,68 @@ export function ReturnsPage({
         </>
       )}
 
-      <AlertDialog alert={alert} onClose={() => setAlert(null)} />
-      {purchaseDetail ? (
-        <div className="modal-backdrop" role="presentation">
-          <div className="modal-card" role="dialog" aria-modal="true">
-            <h3>Return {purchaseDetail.return_no}</h3>
-            <p className="muted">
-              Date: {purchaseDetail.return_date} | Purchase:{' '}
-              {purchaseDetail.purchase_no} | Supplier: {purchaseDetail.supplier}
-              <br />
-              Credit: ₹{money(purchaseDetail.refund_amount)} | Reason:{' '}
-              {purchaseDetail.reason || '—'}
-            </p>
-            <div className="settings-table-wrap">
-              <table className="settings-table">
-                <thead>
-                  <tr>
-                    <th>Medicine</th>
-                    <th>Batch</th>
-                    <th className="num">Qty</th>
-                    <th className="num">Rate</th>
-                    <th className="num">Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {purchaseDetail.items.map((it, i) => (
-                    <tr key={`${it.name}-${i}`}>
-                      <td>{it.name}</td>
-                      <td>{it.batch || '—'}</td>
-                      <td className="num">{it.qty.toFixed(2)}</td>
-                      <td className="num">{it.rate.toFixed(2)}</td>
-                      <td className="num">{it.amount.toFixed(2)}</td>
-                    </tr>
-                  ))}
-                  {!purchaseDetail.items.length ? (
-                    <tr>
-                      <td colSpan={5}>No lines</td>
-                    </tr>
-                  ) : null}
-                </tbody>
-              </table>
-            </div>
-            <ActionBar>
-              <ActionBtn
-                label="Close"
-                variant="neutral"
-                onClick={() => setPurchaseDetail(null)}
-              />
-            </ActionBar>
-          </div>
-        </div>
+      {detail ? (
+        <ReturnDetailsDialog
+          view={detail}
+          busy={saving}
+          onClose={closeDetail}
+          onPdf={() => void returnDocument(detail.kind, detail.id, false)}
+          onPrint={() => void returnDocument(detail.kind, detail.id, true)}
+          onEdit={
+            detail.kind === 'purchase'
+              ? () => {
+                  const id = detail.id
+                  setDetail(null)
+                  void editPurchaseReturnById(id)
+                }
+              : undefined
+          }
+          onDelete={() => {
+            const { kind, id } = detail
+            void (kind === 'sales'
+              ? deleteSelectedSalesReturn(id)
+              : deleteSelectedPurchaseReturn(id)
+            ).then((gone) => {
+              if (gone) setDetail(null)
+            })
+          }}
+        />
       ) : null}
+      <RowContextMenu
+        menu={rowMenu}
+        onClose={() => setRowMenu(null)}
+        items={
+          rowMenu
+            ? [
+                {
+                  label: 'View Details',
+                  onClick: () =>
+                    void (rowMenu.kind === 'sales'
+                      ? viewSalesReturnDetails(rowMenu.id)
+                      : viewPurchaseReturnDetails(rowMenu.id)),
+                },
+                { label: 'Save PDF', onClick: () => void returnDocument(rowMenu.kind, rowMenu.id, false) },
+                { label: 'Print', onClick: () => void returnDocument(rowMenu.kind, rowMenu.id, true) },
+                ...(rowMenu.kind === 'purchase'
+                  ? [
+                      { label: 'Load Purchase', onClick: () => void loadPurchaseReturnFromHistory() },
+                      { label: 'Edit Return', onClick: () => void editPurchaseReturnById(rowMenu.id) },
+                    ]
+                  : []),
+                { label: '', separator: true },
+                {
+                  label: 'Delete Return',
+                  danger: true,
+                  onClick: () =>
+                    void (rowMenu.kind === 'sales'
+                      ? deleteSelectedSalesReturn(rowMenu.id)
+                      : deleteSelectedPurchaseReturn(rowMenu.id)),
+                },
+              ]
+            : []
+        }
+      />
+      <AlertDialog alert={alert} onClose={() => setAlert(null)} />
     </PageRoot>
   )
 }
