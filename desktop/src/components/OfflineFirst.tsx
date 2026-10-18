@@ -128,6 +128,46 @@ export function OfflineFirstPill() {
 
 type Progress = { running?: boolean; steps?: string[]; result?: unknown; error?: string | null }
 
+/** How far the switch-over is, from the step lines the engine reports (owner, 18 Oct 2026:
+ *  "no progress bar"). The download of the store's lists is most of the time: "Downloading
+ *  sales (3/13)…" says where in it we are. Never goes back. */
+export function switchProgress(steps: string[]): { pct: number; label: string } {
+  let pct = 0
+  let label = ''
+  const fixed: [RegExp, number][] = [
+    [/^Checking the server/, 2],
+    [/^Copying the store/, 4],
+    [/^Preparing local store/, 6],
+    [/^Clearing local store/, 8],
+    [/^Correcting stock/, 87],
+    [/^Regular medicines/, 89],
+    [/^Offline copy ready/, 90],
+    [/^Registering this PC/, 93],
+    [/^Reserving/, 96],
+    [/^Done/, 100],
+  ]
+  let part = { i: 0, n: 0, name: '' }
+  for (const raw of steps) {
+    const st = String(raw || '').trim()
+    let p = -1
+    const m = /^Downloading ([^(.…]+?)\s*\((\d+)\/(\d+)\)/.exec(st)
+    if (m) {
+      part = { i: Number(m[2]), n: Number(m[3]), name: m[1].trim() }
+      p = 10 + (75 * (part.i - 1)) / Math.max(1, part.n)
+      label = `Copying ${part.name} (${part.i} of ${part.n})`
+    } else if (part.n && /^Downloading .* page \d+/.test(st)) {
+      p = 10 + (75 * (part.i - 1 + 0.4)) / part.n
+    } else if (part.n && /^Merging /.test(st)) {
+      p = 10 + (75 * (part.i - 0.2)) / part.n
+    } else {
+      for (const [re, v] of fixed) if (re.test(st)) p = v
+      if (p >= 0) label = st.replace(/\s*\(app band karu naka\)/, '')
+    }
+    if (p > pct) pct = p
+  }
+  return { pct: Math.min(100, Math.round(pct)), label }
+}
+
 /** First start of this version on an Online PC: copy the store and switch to offline-first.
  *  Blocks the screen while it runs (closing the app half way would only mean it starts
  *  again next time; the mode changes only at the end). */
@@ -135,7 +175,15 @@ export function OfflineFirstAutoSwitch({ enabled }: { enabled: boolean }) {
   const [state, setState] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
   const [steps, setSteps] = useState<string[]>([])
   const [error, setError] = useState('')
+  const [startedAt, setStartedAt] = useState(0)
+  const [now, setNow] = useState(Date.now())
   const started = useRef(false)
+
+  useEffect(() => {
+    if (state !== 'running') return
+    const id = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(id)
+  }, [state])
 
   useEffect(() => {
     if (!enabled || started.current) return
@@ -145,6 +193,7 @@ export function OfflineFirstAutoSwitch({ enabled }: { enabled: boolean }) {
       /* ignore */
     }
     started.current = true
+    setStartedAt(Date.now())
     setState('running')
     let alive = true
     void (async () => {
@@ -192,6 +241,22 @@ export function OfflineFirstAutoSwitch({ enabled }: { enabled: boolean }) {
               <b> app band karu naka.</b>
             </p>
           ) : null}
+          {state !== 'error' ? (() => {
+            const pr = state === 'done' ? { pct: 100, label: 'Done' } : switchProgress(steps)
+            const secs = startedAt ? Math.max(0, Math.round((now - startedAt) / 1000)) : 0
+            return (
+              <div className="of-progress" aria-label="Progress">
+                <div className="of-progress-bar" role="progressbar" aria-valuenow={pr.pct} aria-valuemin={0} aria-valuemax={100}>
+                  <div className="of-progress-fill" style={{ width: `${pr.pct}%` }} />
+                </div>
+                <div className="of-progress-text">
+                  <b>{pr.pct}%</b>
+                  <span>{pr.label || 'Starting…'}</span>
+                  <span className="muted">{Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}</span>
+                </div>
+              </div>
+            )
+          })() : null}
           {state === 'done' ? <p>Done. Opening the store…</p> : null}
           {state === 'error' ? (
             <>

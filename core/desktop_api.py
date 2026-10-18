@@ -389,6 +389,24 @@ def _conn_fresh_read(conn: sqlite3.Connection | None) -> None:
             pass
 
 
+# The "no key" complaints a background read or link attempt records while a PC is being
+# activated, before the shop's SC- key is saved. They stayed on the Home screen as two red
+# boxes for a while after a successful activation (owner, 18 Oct 2026); once the key is
+# there they are about the past, not this PC.
+_NO_KEY_MARKS = ("No Android store key", "is not connected to a shop on the Satpuda server")
+
+
+def _stale_no_key(message: str) -> bool:
+    if not message or not any(m in message for m in _NO_KEY_MARKS):
+        return False
+    try:
+        from core.store_link import get_local_android_key
+
+        return bool((get_local_android_key() or "").strip())
+    except Exception:
+        return False
+
+
 def _catalog_error_text() -> str:
     """Last online-catalog read failure, or "". Never raises: this is a poll."""
     try:
@@ -398,7 +416,8 @@ def _catalog_error_text() -> str:
             return ""
         from core import online_catalog
 
-        return str(online_catalog.last_error() or "")
+        msg = str(online_catalog.last_error() or "")
+        return "" if _stale_no_key(msg) else msg
     except Exception:
         return ""
 
@@ -412,7 +431,8 @@ def _store_link_error_text() -> str:
             return ""
         from core import server_live as live
 
-        return str(live.last_link_error() or "")
+        msg = str(live.last_link_error() or "")
+        return "" if _stale_no_key(msg) else msg
     except Exception:
         return ""
 

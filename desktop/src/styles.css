@@ -1083,3 +1083,31 @@
 .settings-type-filter {
   max-width: 260px;
 }
+
+/* Offline-first switch-over: a real progress bar (owner, 18 Oct 2026). */
+.of-progress {
+  margin: 10px 0 8px;
+}
+.of-progress-bar {
+  height: 12px;
+  border-radius: 999px;
+  background: var(--surface-sunken, #e5e7eb);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.of-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.6s ease;
+}
+.of-progress-text {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  margin-top: 6px;
+  font-size: 12.5px;
+}
+.of-progress-text .muted {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
