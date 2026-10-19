@@ -250,22 +250,95 @@ def resolve_sales_bill_save_dir() -> str:
     return fallback
 
 
-def resolve_supplier_doc_save_dir() -> str:
-    """Purchase return / reorder PDFs — subfolder under sales bill save dir."""
-    path = os.path.join(resolve_sales_bill_save_dir(), "supplier_docs")
-    os.makedirs(path, exist_ok=True)
-    return path
+# Sub-folders of the shop's save folder (owner, 19 Oct 2026: "for bills and exports there
+# should be separate folders inside the selected folder so the user can find files easily;
+# in the bills folder a date-wise folder, so today's bills are in today's folder"):
+#
+#   <save folder>\Bills\2026-10-19\Bill_123.pdf     sales bills, by the BILL's date
+#   <save folder>\Purchase Bills\...                 documents for a supplier (reorder lists)
+#   <save folder>\Returns\...                        sales and purchase return slips
+#   <save folder>\Exports\..._2026-10-19_14-32.pdf   reports, CSV / Excel / PDF exports,
+#                                                    GST reports, Print All "Save PDF"
+#
+# Each is made when something is first saved into it. Files saved before (bills at the top
+# level, reports\, supplier_docs\, sales_returns\) stay where they are.
+BILLS_FOLDER = "Bills"
+PURCHASE_BILLS_FOLDER = "Purchase Bills"
+RETURNS_FOLDER = "Returns"
+EXPORTS_FOLDER = "Exports"
 
 
-def resolve_sales_report_save_dir() -> str:
-    """Schedule / sales export PDFs — reports subfolder under document save folder."""
-    base = resolve_sales_bill_save_dir()
-    path = os.path.join(base, "reports")
+def _save_subdir(*parts: str) -> str:
+    path = os.path.join(resolve_sales_bill_save_dir(), *parts)
     try:
         os.makedirs(path, exist_ok=True)
     except OSError:
         pass
     return path
+
+
+def bill_day_folder_name(bill_date=None) -> str:
+    """YYYY-MM-DD of a bill date as the app keeps it ("2026-10-19", "2026-10-19 14:05:00")
+    or prints it ("19/10/26", "19-10-2026"); today when there is none or it cannot be read."""
+    import datetime as _dt
+    import re
+
+    if isinstance(bill_date, _dt.datetime):
+        return bill_date.strftime("%Y-%m-%d")
+    if isinstance(bill_date, _dt.date):
+        return bill_date.isoformat()
+    raw = str(bill_date or "").strip()
+    m = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})", raw)
+    if m:
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    else:
+        m = re.match(r"^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4}|\d{2})(?!\d)", raw)
+        if m:
+            d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            if y < 100:
+                y += 2000
+        else:
+            y = mo = d = 0
+    try:
+        return _dt.date(y, mo, d).isoformat()
+    except ValueError:
+        return _dt.date.today().isoformat()
+
+
+def resolve_bills_save_dir() -> str:
+    """<save folder>\\Bills -- the day folders sit inside it."""
+    return _save_subdir(BILLS_FOLDER)
+
+
+def resolve_bill_day_save_dir(bill_date=None) -> str:
+    """<save folder>\\Bills\\<YYYY-MM-DD of the bill>: a reprint of an old bill lands in its
+    own day's folder, not today's."""
+    return _save_subdir(BILLS_FOLDER, bill_day_folder_name(bill_date))
+
+
+def resolve_returns_save_dir() -> str:
+    """<save folder>\\Returns -- sales return and purchase return slips."""
+    return _save_subdir(RETURNS_FOLDER)
+
+
+def resolve_purchase_bills_save_dir() -> str:
+    """<save folder>\\Purchase Bills -- documents for a supplier (reorder lists)."""
+    return _save_subdir(PURCHASE_BILLS_FOLDER)
+
+
+def resolve_exports_save_dir() -> str:
+    """<save folder>\\Exports -- reports and every CSV / Excel / PDF export."""
+    return _save_subdir(EXPORTS_FOLDER)
+
+
+def resolve_supplier_doc_save_dir() -> str:
+    """Documents for a supplier (reorder lists) -- <save folder>\\Purchase Bills."""
+    return resolve_purchase_bills_save_dir()
+
+
+def resolve_sales_report_save_dir() -> str:
+    """Schedule / sales report PDFs -- <save folder>\\Exports."""
+    return resolve_exports_save_dir()
 
 
 def schedule_report_save_folder_hint() -> str:

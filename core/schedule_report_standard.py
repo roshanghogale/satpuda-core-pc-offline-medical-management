@@ -355,11 +355,13 @@ table.grid {{ width: 100%; margin: 0 auto; border-collapse: collapse; table-layo
 
 
 def save_pdf(html: str, base_name: str, orientation: str) -> tuple[str | None, str]:
-    """Saved where the schedule reports go (Documents save folder -> reports)."""
+    """Saved where the schedule reports go (<save folder>\\Exports), with the save time in
+    the name so it never replaces an older one; no HTML is left once the PDF is made."""
     from core.bill_save_prefs import resolve_sales_report_save_dir
     from core.document_output import _safe_doc_filename, save_html_as_pdf
+    from core.saved_files import dated_path
 
     save_dir = resolve_sales_report_save_dir()
-    base_path = os.path.join(save_dir, _safe_doc_filename(base_name))
+    base_path = dated_path(os.path.join(save_dir, _safe_doc_filename(base_name) + ".pdf"))
     w, h = (297.0, 210.0) if orientation == "landscape" else (210.0, 297.0)
     return save_html_as_pdf(html, base_path, paper_width_mm=w, paper_height_mm=h)

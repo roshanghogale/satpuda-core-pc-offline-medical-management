@@ -343,7 +343,7 @@ def _save_all_csv(parent, sections):
         parent=parent,
         defaultextension='.csv',
         filetypes=[('CSV files', '*.csv')],
-        initialfile='export_all.csv')
+        initialfile=_dated_initial('export_all.csv'))
     if not path:
         return
     try:
@@ -378,7 +378,7 @@ def _save_all_xlsx(parent, sections):
         parent=parent,
         defaultextension='.xlsx',
         filetypes=[('Excel files', '*.xlsx')],
-        initialfile='export_all.xlsx')
+        initialfile=_dated_initial('export_all.xlsx'))
     if not path:
         return
     try:
@@ -470,7 +470,7 @@ def _save_csv(parent, headers, rows, default_name):
         parent=parent,
         defaultextension='.csv',
         filetypes=[('CSV files', '*.csv')],
-        initialfile=f'{default_name}.csv')
+        initialfile=_dated_initial(f'{default_name}.csv'))
     if not path:
         return
     try:
@@ -504,7 +504,7 @@ def _save_xlsx(parent, headers, rows, default_name):
         parent=parent,
         defaultextension='.xlsx',
         filetypes=[('Excel files', '*.xlsx')],
-        initialfile=f'{default_name}.xlsx')
+        initialfile=_dated_initial(f'{default_name}.xlsx'))
     if not path:
         return
     try:
@@ -561,7 +561,7 @@ def _write_export_pdf(parent, html: str, default_name: str) -> None:
         parent=parent,
         defaultextension='.pdf',
         filetypes=[('PDF files', '*.pdf'), ('HTML files', '*.html')],
-        initialfile=f'{default_name}.pdf')
+        initialfile=_dated_initial(f'{default_name}.pdf'))
     if not path:
         return
     if path.lower().endswith('.html'):
@@ -660,14 +660,22 @@ def downloads_folder() -> str:
     return path
 
 
+def _dated_initial(name: str) -> str:
+    """The name a save dialog offers, with the save time in it (core/saved_files.dated_name)."""
+    try:
+        from core.saved_files import dated_name
+
+        return dated_name(name)
+    except Exception:
+        return name
+
+
 def _voice_export_path(default_name: str, fmt: str, folder: str = "") -> str:
-    from datetime import datetime
+    """name_YYYY-MM-DD_HH-MM.ext in `folder` (Downloads when none), never over an older file."""
+    from core.saved_files import dated_path
+
     safe = re.sub(r'[^\w\-]+', '_', (default_name or "export").strip())[:60]
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    ext = fmt if fmt == "pdf" else fmt
-    if fmt == "pdf":
-        ext = "pdf"
-    return os.path.join(folder or downloads_folder(), f"{safe}_{ts}.{ext}")
+    return dated_path(os.path.join(folder or downloads_folder(), f"{safe}.{fmt or 'csv'}"))
 
 
 def export_data_direct(parent, title, headers, rows, default_name="export", fmt="csv", *,

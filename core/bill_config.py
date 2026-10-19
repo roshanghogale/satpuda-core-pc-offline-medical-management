@@ -291,6 +291,8 @@ class BillContext:
     bill_no: str = ""
     bill_date: str = ""
     bill_date_landscape: str = ""
+    # The date as the sale keeps it ("2026-10-19"): the bill PDF goes in that day's folder.
+    bill_date_raw: str = ""
     cust_name: str = ""
     cust_phone: str = ""
     cust_addr: str = ""

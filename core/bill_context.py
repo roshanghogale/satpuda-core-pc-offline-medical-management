@@ -144,6 +144,7 @@ def _build_bill_context(profile, bill_info, items, pay_mode, cursor):
         bill_no=bill_no,
         bill_date=bill_date,
         bill_date_landscape=bill_date,
+        bill_date_raw=str(bill_info[1] or "")[:10],
         cust_name=cust_name,
         cust_phone=cust_phone,
         cust_addr=cust_addr,

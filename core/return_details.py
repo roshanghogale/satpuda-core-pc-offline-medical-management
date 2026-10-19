@@ -332,7 +332,7 @@ def finish_pdf(result: dict[str, Any], print_it: bool) -> dict[str, Any]:
 
 
 def sales_return_pdf(conn: sqlite3.Connection, return_id: int, *, print_it: bool = False) -> dict[str, Any]:
-    """Save the sales return slip as PDF (sales bill folder\\sales_returns), print it if asked."""
+    """Save the sales return slip as PDF (<save folder>\\Returns), print it if asked."""
     d = sales_return_details(conn, return_id)
     if not d.get("ok"):
         return {"ok": False, "error": d.get("error") or "Return not found."}

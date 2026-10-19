@@ -506,7 +506,7 @@ export function GstReportsDialog({ open, onClose }: { open: boolean; onClose: ()
       if (!res.ok || data.ok === false) throw new Error(data.error || `HTTP ${res.status}`)
       if (data.content_base64 && data.filename) {
         const saved = await saveFileAndShow(data.filename, data.mime || 'application/octet-stream', data.content_base64)
-        setMsg(saved ? `${data.filename} save zali: ${saved.folder || ''}` : `${data.filename} save zali (Downloads)`)
+        setMsg(saved ? `${saved.file_name || data.filename} save zali: ${saved.folder || ''}` : `${data.filename} save zali (Downloads)`)
       } else {
         setMsg(data.message || 'Print la pathavle')
       }

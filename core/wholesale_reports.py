@@ -575,5 +575,6 @@ def export(conn, body: dict) -> dict:
         stem = rep["title"].lower().replace(" - ", "_").replace(" ", "_").replace("-", "_")
         if not stem.startswith("wholesale"):
             stem = f"wholesale_{stem}"
-        res["filename"] = f"{stem}_{date.today().isoformat()}.{res.get('format') or 'csv'}"
+        # no date here: the save adds the date and time (core/saved_files.dated_name)
+        res["filename"] = f"{stem}.{res.get('format') or 'csv'}"
     return res

@@ -447,9 +447,51 @@ def _carry_forward_contexts(ctx, per_items: int):
     return out
 
 
-def _render_bill_files(bill_no, ctx, html_settings, save_dir: str, *, page_index: int = 0, page_count: int = 1):
-    """Write one HTML (+ PDF) for a bill context. Multi-page stems get _p2, _p3, …"""
+def discard_html_after_pdf(html_path: str, pdf_path: str | None) -> str:
+    """Delete the HTML a PDF was made from (owner, 19 Oct 2026: "after printing the HTML
+    files are not needed, only PDF -- reduce the number of files"). Returns "" once it is
+    gone; the path itself when it stays -- no PDF, so the HTML is the only copy there is."""
+    if not html_path:
+        return ""
+    try:
+        if not (pdf_path and os.path.isfile(pdf_path) and os.path.getsize(pdf_path) > 0):
+            return html_path
+    except OSError:
+        return html_path
+    try:
+        os.remove(html_path)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        return html_path
+    return ""
+
+
+def _sale_bill_date(ctx) -> str:
+    """The date a bill was made (its context prints it as dd/mm/yy)."""
+    for attr in ("bill_date_raw", "bill_date"):
+        val = getattr(ctx, attr, None) if not isinstance(ctx, dict) else ctx.get(attr)
+        if val:
+            return str(val)
+    return ""
+
+
+def bill_day_save_dir(bill_date=None) -> str:
+    """<save folder>\\Bills\\<YYYY-MM-DD of the bill> (core/bill_save_prefs)."""
+    from core.bill_save_prefs import resolve_bill_day_save_dir
+
+    return resolve_bill_day_save_dir(bill_date)
+
+
+def _render_bill_files(bill_no, ctx, html_settings, save_dir: str | None = None, *,
+                       page_index: int = 0, page_count: int = 1):
+    """Write one PDF for a bill context into its day's folder (Bills\\YYYY-MM-DD, by the
+    bill's date) -- through an HTML that is deleted once the PDF is made; it stays, and
+    comes back as the first path, only when no PDF could be made. Multi-page stems get
+    _p2, _p3, …"""
     html = render_bill_html(ctx, html_settings)
+    if not save_dir:
+        save_dir = bill_day_save_dir(_sale_bill_date(ctx))
     stem = _safe_bill_stem(bill_no)
     if page_count > 1:
         stem = f"{stem}_p{page_index + 1}"
@@ -470,7 +512,7 @@ def _render_bill_files(bill_no, ctx, html_settings, save_dir: str, *, page_index
         ) else None
     else:
         pdf_saved = pdf_path if _try_pdf_via_browser(html_path, pdf_path) else None
-    return html_path, pdf_saved
+    return discard_html_after_pdf(html_path, pdf_saved), pdf_saved
 
 
 def _wholesale_invoice_ctx(conn, sale_id, db_path: str | None = None):
@@ -512,7 +554,8 @@ def wholesale_invoice_files(conn, sale_id, settings: dict | None = None, *,
     """(html path, pdf path or None) of a wholesale bill's GST invoice -- always A5
     landscape: its own A5 page on an A5 / A6 slot, the top half of an A4 portrait sheet on
     an A4 slot (core/wholesale_sale.invoice_paper); None when the bill is not a wholesale
-    one."""
+    one. Saved in the bill's day folder (Bills\\YYYY-MM-DD); the HTML is deleted once the
+    PDF is made, so html path is "" then."""
     inv = _wholesale_invoice_ctx(conn, sale_id, db_path)
     if inv is None:
         return None
@@ -523,9 +566,7 @@ def wholesale_invoice_files(conn, sale_id, settings: dict | None = None, *,
     html = render_wholesale_invoice_html(
         inv, paper=paper, copy_label=str((settings or {}).get("copy_footer_label") or "").strip())
     if not save_dir:
-        from core.bill_save_prefs import resolve_sales_bill_save_dir
-
-        save_dir = resolve_sales_bill_save_dir()
+        save_dir = bill_day_save_dir(inv.get("bill_date"))
     stem = _safe_bill_stem(inv.get("bill_no") or sale_id)
     html_path = os.path.join(save_dir, f"{stem}.html")
     pdf_path = os.path.join(save_dir, f"{stem}.pdf")
@@ -533,14 +574,16 @@ def wholesale_invoice_files(conn, sale_id, settings: dict | None = None, *,
         f.write(html)
     w_mm, h_mm = paper_mm(paper)
     ok = _try_pdf_via_browser(html_path, pdf_path, paper_width_mm=w_mm, paper_height_mm=h_mm)
-    return html_path, (pdf_path if ok else None)
+    pdf_saved = pdf_path if ok else None
+    return discard_html_after_pdf(html_path, pdf_saved), pdf_saved
 
 
 def wholesale_invoices_pdf(conn, sale_ids, settings: dict | None = None, *,
                            db_path: str | None = None) -> tuple[str, str]:
     """Print All's wholesale invoices as ONE temporary (html, pdf): two to an A4 portrait
     sheet (top and bottom, a dashed cut line between) on an A4 slot, one A5 landscape page
-    each otherwise. Raises when the PDF cannot be made; the caller removes both files."""
+    each otherwise. The temporary HTML is deleted as soon as the PDF is made (html comes
+    back ""); the caller removes the PDF. Raises when the PDF cannot be made."""
     import tempfile
 
     from bill_templates.wholesale_invoice import render_wholesale_invoices_html
@@ -569,7 +612,7 @@ def wholesale_invoices_pdf(conn, sale_ids, settings: dict | None = None, *,
             except OSError:
                 pass
         raise RuntimeError("PDF could not be created (install Edge or Chrome).")
-    return html_path, pdf_path
+    return discard_html_after_pdf(html_path, pdf_path), pdf_path
 
 
 def _open_bill_pdf_conn(conn, path: str):
@@ -688,8 +731,6 @@ def save_bill_pdf_pages(
         conn, sale_id, settings_override, print_slot=effective_slot, db_path=db_path,
     )
 
-    from core.bill_save_prefs import resolve_sales_bill_save_dir
-
     slot_cfg = (load_bill_print_settings().get(f"print_slot_{effective_slot}") or {})
     if isinstance(slot_cfg, dict) and slot_cfg.get("copies") is not None:
         slot_copies = int(slot_cfg.get("copies") or 1)
@@ -697,7 +738,7 @@ def save_bill_pdf_pages(
         slot_copies = int(settings.get("bill_copies") or 1)
     html_settings = apply_print_bill_layout(settings, print_slot_copies=slot_copies)
 
-    save_dir = resolve_sales_bill_save_dir()
+    save_dir = bill_day_save_dir(_sale_bill_date(ctx))
 
     per_items = _items_per_bill_page(html_settings)
     contexts = _carry_forward_contexts(ctx, per_items)
@@ -1099,7 +1140,7 @@ def print_bill_silent_with_slot(
     for html_path, pdf_path in pages:
         if not pdf_path:
             raise RuntimeError(
-                'Bill HTML was saved to Downloads, but PDF could not be created for printing.\n'
+                'Bill HTML was saved in the Bills folder, but PDF could not be created for printing.\n'
                 'Install Microsoft Edge (or Google Chrome) and try again.'
             )
         PrinterManager.print_pdf_silently(pdf_path, printer, copies=page_copies)
@@ -1142,7 +1183,7 @@ def print_bill_with_slot(
                 for html_path, pdf_path in pages:
                     if not pdf_path:
                         raise RuntimeError(
-                            'Bill HTML was saved to Downloads, but PDF could not be created for printing.\n'
+                            'Bill HTML was saved in the Bills folder, but PDF could not be created for printing.\n'
                             'Install Microsoft Edge (or Google Chrome) and try again.'
                         )
                     PrinterManager.print_pdf_silently(pdf_path, printer, copies=page_copies)
@@ -1171,7 +1212,7 @@ def print_bill_with_slot(
     for html_path, pdf_path in pages:
         if not pdf_path:
             raise RuntimeError(
-                'Bill HTML was saved to Downloads, but PDF could not be created for printing.\n'
+                'Bill HTML was saved in the Bills folder, but PDF could not be created for printing.\n'
                 'Install Microsoft Edge (or Google Chrome) and try again.'
             )
         _open_system_print_dialog(
@@ -1199,7 +1240,7 @@ def save_bill_pdf_a6(
     db_path: str | None = None,
 ) -> tuple[str, str | None]:
     """Save an A6 landscape bill PDF to the configured sales bill folder."""
-    from core.bill_save_prefs import PDF_LAYOUT_ONE_A6, resolve_sales_bill_save_dir
+    from core.bill_save_prefs import PDF_LAYOUT_ONE_A6
 
     override = {
         "for_pdf_save": True,
@@ -1218,7 +1259,7 @@ def save_bill_pdf_a6(
     html_settings = dict(settings)
     html_settings.update(override)
 
-    save_dir = resolve_sales_bill_save_dir()
+    save_dir = bill_day_save_dir(_sale_bill_date(ctx))
     per_items = _items_per_bill_page(html_settings)
     contexts = _carry_forward_contexts(ctx, per_items)
 
@@ -1248,7 +1289,7 @@ def prepare_and_print_bill(conn, sale_id, hwnd_owner: int = 0) -> tuple[str, str
     html_path, pdf_path = save_bill_to_downloads(conn, sale_id)
     if not pdf_path:
         raise RuntimeError(
-            'Bill HTML was saved to Downloads, but PDF could not be created for printing.\n'
+            'Bill HTML was saved in the Bills folder, but PDF could not be created for printing.\n'
             'Install Microsoft Edge (or Google Chrome) and try again.'
         )
     page_copies = get_page_copies()
@@ -1266,7 +1307,7 @@ def open_bill_for_print(
             return _print_bill_dot_matrix_with_slot(conn, sale_id, 1, fallback_to_html=True)
         if not pdf_path:
             raise RuntimeError(
-                'Bill HTML was saved to Downloads, but PDF could not be created for printing.\n'
+                'Bill HTML was saved in the Bills folder, but PDF could not be created for printing.\n'
                 'Install Microsoft Edge (or Google Chrome) and try again.'
             )
         _open_system_print_dialog(

@@ -68,9 +68,19 @@ def _print_bills_batch(conn, sale_ids, *, paper, slot, hwnd_owner=0, settings_ov
             pdf_path = html_path.replace(".html", ".pdf")
             with open(html_path, "w", encoding="utf-8") as fh:
                 fh.write(html)
-            if not _try_pdf_via_browser(html_path, pdf_path):
-                raise RuntimeError("Could not create PDF for batch print.")
+            try:
+                if not _try_pdf_via_browser(html_path, pdf_path):
+                    raise RuntimeError("Could not create PDF for batch print.")
+            finally:
+                # The temporary HTML is not needed once there is a PDF (or none can be made).
+                try:
+                    os.remove(html_path)
+                except OSError:
+                    pass
             PrinterManager.print_pdf_silently(pdf_path, printer, copies=1)
+            from core.saved_files import remove_later
+
+            remove_later(pdf_path)
             pages += 1
         except Exception as exc:
             label = ", ".join(str(x) for x in chunk[:4])

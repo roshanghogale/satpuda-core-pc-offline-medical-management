@@ -16,7 +16,12 @@ def save_html_as_pdf(
     paper_width_mm: float | None = None,
     paper_height_mm: float | None = None,
 ) -> tuple[str | None, str]:
-    """Write HTML and try headless-browser PDF. Returns (pdf_path or None, html_path)."""
+    """Write HTML and try headless-browser PDF. Returns (pdf_path or None, html_path).
+
+    Once the PDF is made the HTML is deleted and html_path comes back "" (owner, 19 Oct
+    2026: "after printing the HTML files are not needed, only PDF"). The HTML stays only
+    when no PDF could be made -- then it is the one copy there is.
+    """
     pdf_path = pdf_path if pdf_path.lower().endswith(".pdf") else f"{pdf_path}.pdf"
     html_path = pdf_path.rsplit(".", 1)[0] + ".html"
     with open(html_path, "w", encoding="utf-8") as f:
@@ -32,7 +37,9 @@ def save_html_as_pdf(
     except Exception:
         ok = False
     if ok and os.path.isfile(pdf_path):
-        return pdf_path, html_path
+        from core.bill_output import discard_html_after_pdf
+
+        return pdf_path, discard_html_after_pdf(html_path, pdf_path)
     return None, html_path
 
 
@@ -562,31 +569,32 @@ def _safe_doc_filename(name: str) -> str:
     return (safe[:80] or "document")
 
 
-def save_supplier_document(html: str, default_name: str) -> tuple[str | None, str]:
-    """Write supplier PDF/HTML to configured bill folder (supplier_docs subdir)."""
-    from core.bill_save_prefs import resolve_supplier_doc_save_dir
+def save_supplier_document(html: str, default_name: str, *, kind: str = "return") -> tuple[str | None, str]:
+    """Write a document for a supplier as PDF (HTML only when no PDF could be made): a
+    purchase return slip (kind "return") into <save folder>\\Returns, anything else (a
+    reorder list) into <save folder>\\Purchase Bills."""
+    from core.bill_save_prefs import resolve_purchase_bills_save_dir, resolve_returns_save_dir
 
-    save_dir = resolve_supplier_doc_save_dir()
+    save_dir = resolve_returns_save_dir() if kind == "return" else resolve_purchase_bills_save_dir()
     base_path = os.path.join(save_dir, _safe_doc_filename(default_name))
     w_mm, h_mm = SUPPLIER_DOC_PAPER_MM
     return save_html_as_pdf(html, base_path, paper_width_mm=w_mm, paper_height_mm=h_mm)
 
 
 def save_customer_document(html: str, default_name: str) -> tuple[str | None, str]:
-    """Write a sales return slip PDF/HTML to the bill folder (sales_returns subdir), on the
-    same A6 landscape sheet as the supplier documents."""
-    from core.bill_save_prefs import resolve_sales_bill_save_dir
+    """Write a sales return slip PDF (HTML only when no PDF could be made) into
+    <save folder>\\Returns, on the same A6 landscape sheet as the supplier documents."""
+    from core.bill_save_prefs import resolve_returns_save_dir
 
-    save_dir = os.path.join(resolve_sales_bill_save_dir(), "sales_returns")
-    os.makedirs(save_dir, exist_ok=True)
+    save_dir = resolve_returns_save_dir()
     base_path = os.path.join(save_dir, _safe_doc_filename(default_name))
     w_mm, h_mm = SUPPLIER_DOC_PAPER_MM
     return save_html_as_pdf(html, base_path, paper_width_mm=w_mm, paper_height_mm=h_mm)
 
 
-def offer_supplier_document(parent, html: str, default_name: str) -> None:
+def offer_supplier_document(parent, html: str, default_name: str, *, kind: str = "return") -> None:
     """After save: auto-save PDF then offer Open / Print / Close."""
-    pdf_path, html_path = save_supplier_document(html, default_name)
+    pdf_path, html_path = save_supplier_document(html, default_name, kind=kind)
     target = pdf_path or html_path
     if not target or not os.path.isfile(target):
         messagebox.showwarning(
@@ -947,11 +955,13 @@ def save_schedule_report_document(
     *,
     page_layout: str = SCHEDULE_LAYOUT_PORTRAIT,
 ) -> tuple[str | None, str]:
-    """Save schedule report PDF/HTML under Documents save folder → reports/."""
+    """Save schedule report PDF under <save folder>\\Exports, with the save time in its
+    name (Schedule_H1_P_2026-10-19_14-32.pdf) so it never replaces an older one."""
     from core.bill_save_prefs import resolve_sales_report_save_dir
+    from core.saved_files import dated_path
 
     save_dir = resolve_sales_report_save_dir()
-    base_path = os.path.join(save_dir, _safe_doc_filename(default_name))
+    base_path = dated_path(os.path.join(save_dir, _safe_doc_filename(default_name) + ".pdf"))
     w_mm, h_mm = _schedule_paper_mm(page_layout)
     return save_html_as_pdf(
         html,
@@ -1043,7 +1053,7 @@ def deliver_schedule_report_pdf(
     page_layout: str = SCHEDULE_LAYOUT_PORTRAIT,
     dot_matrix_print=None,
 ) -> str | None:
-    """Save PDF/HTML to documents/reports first; print via dot matrix RAW or PDF spooler."""
+    """Save the PDF to <save folder>\\Exports first; print via dot matrix RAW or PDF spooler."""
     from core.bill_save_prefs import resolve_sales_report_save_dir
 
     save_dir = resolve_sales_report_save_dir()
@@ -1109,4 +1119,4 @@ def offer_purchase_return_document(parent, conn, return_id: int) -> None:
 
 def offer_reorder_document(parent, conn, group_id, default_name: str) -> None:
     html = render_reorder_order_html(conn, group_id)
-    offer_supplier_document(parent, html, default_name)
+    offer_supplier_document(parent, html, default_name, kind="reorder")

@@ -1340,8 +1340,8 @@ function AlertsExportDialog({
         return
       }
       if (res.content_base64 && res.filename) {
-        await saveFileAndShow(res.filename, res.mime || 'application/octet-stream', res.content_base64)
-        onDone(`Saved ${res.filename}`)
+        const saved = await saveFileAndShow(res.filename, res.mime || 'application/octet-stream', res.content_base64)
+        onDone(`Saved ${saved?.file_name || res.filename}`)
       } else {
         onDone(res.message || 'Printed.')
       }
@@ -2369,8 +2369,8 @@ export function PaymentPanel({
         format,
       })
       if (res.content_base64 && res.filename) {
-        await saveFileAndShow(res.filename, res.mime || 'application/octet-stream', res.content_base64)
-        setMsg(`Saved ${res.filename}`)
+        const saved = await saveFileAndShow(res.filename, res.mime || 'application/octet-stream', res.content_base64)
+        setMsg(`Saved ${saved?.file_name || res.filename}`)
       } else {
         setErr(res.error || 'Report not saved.')
       }

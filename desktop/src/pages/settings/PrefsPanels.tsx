@@ -1245,6 +1245,11 @@ export function SalesBillingPanel({
                 }
               />
             </Field>
+            <p className="prefs-check-hint">
+              Inside this folder: Bills\YYYY-MM-DD (each bill in its bill date&apos;s folder),
+              Purchase Bills, Returns and Exports (reports and exports, with the date and time in
+              the file name).
+            </p>
           </div>
         </Frame>
         <SaveBar label={saveLabel} saving={saving} onClick={save} />

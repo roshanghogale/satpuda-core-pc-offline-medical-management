@@ -46,15 +46,24 @@ class SavedFiles(_Reports):
         res = self.sf.save_base64("Sales Report.pdf", base64.b64encode(b"%PDF-1.4 x").decode())
         self.assertTrue(res["ok"], res)
         self.assertEqual(os.path.dirname(res["path"]), self.reports)
-        self.assertEqual(res["file_name"], "Sales Report.pdf")
+        # the save time is in the name (19 Oct 2026), so it never replaces an older one
+        self.assertRegex(res["file_name"], r"^Sales Report_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}\.pdf$")
         with open(res["path"], "rb") as fh:
             self.assertEqual(fh.read(), b"%PDF-1.4 x")
 
     def test_a_second_save_does_not_overwrite_the_first(self):
-        a = self.sf.save_base64("x.csv", base64.b64encode(b"1").decode())["path"]
-        b = self.sf.save_base64("x.csv", base64.b64encode(b"2").decode())["path"]
+        from datetime import datetime
+
+        # two saves in the same minute: the second gets (2) after its dated name
+        with mock.patch.object(self.sf, "datetime") as clock:
+            clock.now.return_value = datetime(2026, 10, 19, 14, 32)
+            a = self.sf.save_base64("x.csv", base64.b64encode(b"1").decode())["path"]
+            b = self.sf.save_base64("x.csv", base64.b64encode(b"2").decode())["path"]
         self.assertNotEqual(a, b)
-        self.assertTrue(b.endswith("x (2).csv"))
+        self.assertEqual(os.path.basename(a), "x_2026-10-19_14-32.csv")
+        self.assertEqual(os.path.basename(b), "x_2026-10-19_14-32 (2).csv")
+        with open(a, "rb") as fh:
+            self.assertEqual(fh.read(), b"1")
 
     def test_a_name_cannot_climb_out_of_the_folder(self):
         res = self.sf.save_base64("..\\..\\evil.csv", base64.b64encode(b"1").decode())
