@@ -6674,7 +6674,14 @@ def import_action(
 
             return start_mobile_server()
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            reason = f"The WiFi receiver could not start on this PC: {exc}"
+            return {"ok": False, "running": False, "url": "", "qr": "", "problem": reason,
+                    "error": reason}
+    if action == "mobile_open":
+        # The Mobile Import screen opened: receiver on, QR on screen, no button to press.
+        from core.desktop_mobile_import_service import open_mobile_server
+
+        return open_mobile_server()
     if action == "stop_mobile":
         from core.desktop_mobile_import_service import stop_mobile_server
 

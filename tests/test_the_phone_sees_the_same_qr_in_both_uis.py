@@ -245,8 +245,10 @@ class TheTauriPanelShowsItNextToTheAddress(unittest.TestCase):
     def test_the_panel_renders_the_png_the_engine_sends(self):
         text = shown_text(self.panel())
         self.assertIn("src={mobileQr}", text)
-        # Both answers set it: the start and the refresh.
-        self.assertEqual(text.count("setMobileQr(String(res.qr || ''))"), 2)
+        # One helper puts every receiver answer on screen -- the open, the start and the
+        # refresh all go through it, so they cannot disagree.
+        self.assertEqual(text.count("setMobileQr(String(res.qr || ''))"), 1)
+        self.assertGreaterEqual(text.count("showMobileAnswer(res)"), 3)
 
     def test_the_address_stays_beside_the_qr(self):
         text = shown_text(self.panel())

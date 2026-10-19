@@ -179,3 +179,45 @@
 .dropItem:hover { background: #eff6ff; }
 .dropName { font-size: 12px; color: #1f2937; font-weight: 600; }
 .dropSub  { font-size: 10px; color: #6b7280; }
+
+.footerBtns { display: flex; gap: 8px; flex-wrap: wrap; }
+.missingCell .cellInput { border-color: #dc2626; background: #fef2f2; }
+
+/*
+ * A phone that scanned the PC's Mobile Import QR: each medicine line becomes a card of
+ * labelled boxes, two to a row, instead of a table wider than the screen. 16px text so the
+ * phone does not zoom into every box it focuses.
+ */
+@media (max-width: 720px) {
+  .section { padding: 10px; }
+  .headerGrid { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .input, .cellInput { font-size: 16px; padding: 8px; min-height: 40px; }
+  .cellInput { border: 1px solid #d0d7de; min-width: 0; }
+  .cellSelect { min-height: 40px; }
+  .saveAllBtn, .copyBtn, .addBillBtn, .addRowBtn { font-size: 14px; padding: 9px 14px; }
+  .saveMsg { max-width: none; font-size: 13px; }
+  .medComboWrap { min-width: 0; }
+  .tableWrap { overflow: visible; }
+  .table thead { display: none; }
+  .table, .table tbody { display: block; width: 100%; }
+  .table tr.itemRow {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px;
+    border: 1px solid #d0d7de; border-radius: 8px; padding: 8px;
+    margin-bottom: 10px; background: #ffffff;
+  }
+  .table tr:hover td { background: transparent; }
+  .table td { display: block; border-bottom: none; padding: 0; min-width: 0; }
+  .table td::before {
+    content: attr(data-label); display: block;
+    font-size: 11px; font-weight: 600; color: #4b5563; margin-bottom: 2px;
+  }
+  .table td.rowNum { grid-column: 1 / -1; text-align: left; width: auto; font-weight: 700; color: #2563eb; }
+  .table td.rowNum::before { content: 'Medicine #'; display: inline; margin-right: 4px; }
+  .table td.wideCell { grid-column: 1 / -1; }
+  .table td.amount { padding: 0; align-self: end; }
+  .table td.removeCell { align-self: end; text-align: right; }
+  .table td.removeCell::before { content: none; }
+  .removeRow { font-size: 22px; padding: 4px 10px; }
+  .tableFooter { flex-direction: column; align-items: stretch; gap: 8px; }
+  .grandTotal { font-size: 15px; }
+}

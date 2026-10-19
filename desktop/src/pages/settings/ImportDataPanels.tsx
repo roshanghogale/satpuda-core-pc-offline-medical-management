@@ -153,6 +153,8 @@ export function ImportPanel({
   const [mobileInfo, setMobileInfo] = useState('')
   const [mobileQr, setMobileQr] = useState('')
   const [mobileQrError, setMobileQrError] = useState('')
+  const [mobileProblem, setMobileProblem] = useState('')
+  const [mobileKind, setMobileKind] = useState('')
   const [mobileJson, setMobileJson] = useState('')
   const [mobilePreview, setMobilePreview] = useState('')
   const [fileStatus, setFileStatus] = useState('')
@@ -196,6 +198,22 @@ export function ImportPanel({
 
   const scheduleList = schedules?.length ? schedules : []
 
+  /**
+   * The engine's answer about the WiFi receiver, on screen: the address, its QR, why a
+   * phone could not use it (no network, the receiver could not start, no QR encoder) and
+   * which kind of store the phone will be entering for. Start, open and refresh all
+   * answer in this one shape, so they cannot disagree about what is shown.
+   */
+  function showMobileAnswer(res: Record<string, unknown>) {
+    const url = String(res.url || '')
+    // A receiver that is down leaves no dead address (and no QR) on the screen.
+    setMobileInfo(url)
+    setMobileQr(String(res.qr || ''))
+    setMobileQrError(String(res.qr_error || ''))
+    setMobileProblem(String(res.problem || (res.ok === false ? res.error || '' : '')))
+    setMobileKind(String(res.store_kind || ''))
+  }
+
   async function runImport(action: string, extra: Record<string, unknown> = {}) {
     setBusy(true)
     setErr('')
@@ -221,24 +239,19 @@ export function ImportPanel({
           }
         }
       } else if (action === 'start_mobile') {
+        // Before, a failed start put the raw JSON answer in the address box, under a note
+        // that blamed the QR. Now the reason is shown as the reason.
+        showMobileAnswer(res)
         const url = String(res.url || '')
-        setMobileInfo(url || JSON.stringify(res))
-        setMobileQr(String(res.qr || ''))
-        setMobileQrError(String(res.qr_error || ''))
-        setMsg(url ? `WiFi URL: ${url}` : 'Mobile import server started.')
+        if (url) setMsg(`WiFi URL: ${url}`)
       } else if (action === 'stop_mobile') {
         setMobileInfo('')
         setMobileQr('')
         setMobileQrError('')
-        setMsg('WiFi receiver stopped.')
+        setMobileProblem('')
+        setMsg('WiFi receiver stopped. Press Start WiFi receiver to show the QR again.')
       } else if (action === 'mobile_status') {
-        const url = String(res.url || '')
-        if (url) setMobileInfo(url)
-        // The engine says the receiver is down: do not leave a dead address
-        // (and its QR) on the screen for the shop to type into the phone.
-        else if (res.running === false) setMobileInfo('')
-        setMobileQr(String(res.qr || ''))
-        setMobileQrError(String(res.qr_error || ''))
+        if (res.url || res.running === false) showMobileAnswer(res)
         if (res.last_preview) {
           setMobilePreview(JSON.stringify(res.last_preview, null, 2))
         }
@@ -256,9 +269,15 @@ export function ImportPanel({
           res.skipped ? `skipped ${res.skipped}` : null,
         ].filter(Boolean)
         setMsg(
-          `${parts.join(', ')}. Refresh Inventory to see medicines.` +
-            (res.sync_warning ? ` Online sync: ${res.sync_warning}` : ''),
+          res.export_type === 'purchases'
+            ? `Saved ${res.saved ?? 0} of ${res.total ?? 0} purchase bill(s). Open Purchase History to see them.`
+            : `${parts.join(', ')}. Refresh Inventory to see medicines.` +
+                (res.sync_warning ? ` Online sync: ${res.sync_warning}` : ''),
         )
+        // A bill the PC refused (a wholesale line without Rate A, a missing supplier)
+        // used to vanish behind "Inserted 0"; say which and why.
+        const importErrors = Array.isArray(res.errors) ? res.errors.map(String) : []
+        if (importErrors.length) setErr(importErrors.join('; '))
         // The receiver keeps the last payload; remember it was imported so the
         // background check does not put the same list back on screen.
         if (res.ok !== false) importedRawRef.current = mobileJson
@@ -412,6 +431,32 @@ export function ImportPanel({
   // nothing is waiting to be imported -- no spinner, no message unless
   // something actually arrived. A payload already imported is not offered again.
   const importedRawRef = useRef('')
+
+  // The QR is there when the screen opens. It used to wait for "Start WiFi receiver":
+  // the screen opened on buttons and an empty box -- no QR anywhere, which is what the
+  // owner kept reporting -- and after every restart of the app it was gone again. The
+  // engine starts the receiver if it is not running and answers with the QR either way.
+  useEffect(() => {
+    if (sectionId !== 'mobile') return
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await importAction({ action: 'mobile_open' })
+        if (!cancelled) showMobileAnswer(res)
+      } catch (e) {
+        if (!cancelled) {
+          setMobileProblem(
+            `The WiFi receiver could not be asked for its address: ${e instanceof Error ? e.message : String(e)}`,
+          )
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sectionId])
+
   useEffect(() => {
     if (sectionId !== 'mobile' || !mobileInfo || mobileJson) return
     let cancelled = false
@@ -424,6 +469,8 @@ export function ImportPanel({
           setMobileQr('')
           return
         }
+        // The open store can change under the screen (the Retail | Wholesale switch).
+        setMobileKind(String(res.store_kind || ''))
         const raw = String(res.last_raw || '')
         if (res.has_payload && raw && raw !== importedRawRef.current) {
           const preview = (res.last_preview || {}) as Record<string, unknown>
@@ -706,15 +753,77 @@ export function ImportPanel({
     return (
       <>
         <PanelTitle>Mobile Import</PanelTitle>
-        <Frame title="Receive from Android (WiFi)">
+        <Frame title="Receive from a phone (WiFi)">
           <Note>
-            Start the receiver, then on the phone open Satpuda &rarr; Settings
-            &rarr; Mobile Import and type this PC&apos;s address.
+            Scan this QR with the phone&apos;s camera: it opens the entry page on the
+            phone. Or scan it in the Satpuda Loader app (Send to PC &rarr; Scan the
+            PC&apos;s QR). What the phone sends shows up below for you to Import.
           </Note>
           <Help>
-            The QR below carries the same address for a scanner app. Or paste /
-            load JSON exported from the Satpuda Android app.
+            The receiver starts by itself when this screen opens. The Satpuda Android
+            app can also type the address in Settings &rarr; Mobile Import, or paste /
+            load JSON exported from it below.
           </Help>
+          {mobileInfo ? (
+            <div className="mobile-receiver">
+              {mobileQr ? (
+                <img
+                  className="mobile-qr"
+                  src={mobileQr}
+                  alt="QR code of this PC's Mobile Import address"
+                  width={220}
+                  height={220}
+                />
+              ) : null}
+              <div className="mobile-receiver-address">
+                {mobileKind ? (
+                  <div className={`mobile-kind mobile-kind-${mobileKind}`}>
+                    {mobileKind === 'wholesale'
+                      ? 'Wholesale store: the phone asks for strips, purchase rate per strip, MRP (optional) and Rate A / B / C (Rate A required).'
+                      : 'Retail store: the phone asks for quantity, rate and MRP.'}
+                  </div>
+                ) : null}
+                <label className="settings-note" htmlFor="mobile-receive-url">
+                  PC address (the same thing the QR carries)
+                </label>
+                {mobileQr ? (
+                  <input
+                    id="mobile-receive-url"
+                    className="settings-input"
+                    readOnly
+                    value={mobileInfo}
+                    onFocus={(e) => e.currentTarget.select()}
+                  />
+                ) : (
+                  <input
+                    id="mobile-receive-url"
+                    className="settings-input mobile-url-big"
+                    readOnly
+                    value={mobileInfo}
+                    onFocus={(e) => e.currentTarget.select()}
+                  />
+                )}
+                {!mobileQr ? (
+                  <div className="mobile-problem">
+                    No QR on this PC: open the address above in the phone&apos;s browser
+                    instead &mdash; it is the same thing.
+                    {mobileQrError ? ` (Reason: ${mobileQrError})` : ''}
+                  </div>
+                ) : null}
+                {mobileProblem ? <div className="mobile-problem">{mobileProblem}</div> : null}
+                <Note>
+                  Phone and PC must be on the same network: shop router, home
+                  WiFi, or turn on the phone hotspot and connect this PC to it.
+                  No internet needed. If the phone cannot open the page, allow
+                  Satpuda in Windows Firewall (Private networks).
+                </Note>
+              </div>
+            </div>
+          ) : mobileProblem ? (
+            <div className="mobile-problem mobile-problem-big">{mobileProblem}</div>
+          ) : (
+            <Note>Starting the WiFi receiver&hellip;</Note>
+          )}
           <div className="iset-row">
             <button
               type="button"
@@ -722,7 +831,7 @@ export function ImportPanel({
               disabled={busy}
               onClick={() => runImport('start_mobile')}
             >
-              Start WiFi receiver
+              {mobileInfo ? 'Restart WiFi receiver' : 'Start WiFi receiver'}
             </button>
             <button
               type="button"
@@ -741,43 +850,6 @@ export function ImportPanel({
               Stop server
             </button>
           </div>
-          {mobileInfo ? (
-            <div className="mobile-receiver">
-              {mobileQr ? (
-                <img
-                  className="mobile-qr"
-                  src={mobileQr}
-                  alt="QR code of this PC's Mobile Import address"
-                  width={180}
-                  height={180}
-                />
-              ) : null}
-              <div className="mobile-receiver-address">
-                <label className="settings-note" htmlFor="mobile-receive-url">
-                  PC address (type this on the phone)
-                </label>
-                <input
-                  id="mobile-receive-url"
-                  className="settings-input"
-                  readOnly
-                  value={mobileInfo}
-                  onFocus={(e) => e.currentTarget.select()}
-                />
-                {!mobileQr ? (
-                  <Note>
-                    The QR could not be drawn on this PC. Type the address
-                    above on the phone instead &mdash; it is the same thing.
-                    {mobileQrError ? ` (${mobileQrError})` : ''}
-                  </Note>
-                ) : null}
-                <Note>
-                  Phone and PC must be on the same network: shop router, home
-                  WiFi, or turn on the phone hotspot and connect this PC to it.
-                  No internet needed. Allow Windows Firewall if it asks.
-                </Note>
-              </div>
-            </div>
-          ) : null}
         </Frame>
         <Frame title="JSON payload">
           <textarea

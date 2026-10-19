@@ -56,12 +56,53 @@ export async function loadRuntimeCatalog() {
         schedules,
         medTypes,
         supplierCount: suppliers.length,
+        ...storeInfo(data),
       }
     }
   } catch (e) {
     console.warn('catalog.json load failed:', e)
   }
   return loadAllCatalogsFromApi()
+}
+
+/**
+ * Who served this page and for which kind of store.
+ *
+ * The PC's Mobile Import receiver (core/mobile_import_server.py) serves this same page to a
+ * phone that scanned its QR, and its catalog says so: source 'mobile_import', the address to
+ * send bills to, and store_kind -- 'wholesale' when the PC has a wholesale store open, which
+ * turns the bill into strips + purchase rate per strip + Rate A / B / C (Rate A required).
+ * The Web Entry server on the PC itself says nothing of the kind: retail, Save All as before.
+ */
+export function storeInfo(data) {
+  const kind = String(data?.store_kind || '').toLowerCase() === 'wholesale' ? 'wholesale' : 'retail'
+  const m = data?.margins || {}
+  const num = (v, d) => (Number.isFinite(Number(v)) && v !== '' && v != null ? Number(v) : d)
+  return {
+    phone: data?.source === 'mobile_import',
+    postTo: String(data?.post_to || '/mobile-import'),
+    storeKind: kind,
+    storeName: String(data?.store_name || ''),
+    margins: { A: num(m.A, 8), B: num(m.B, 10), C: num(m.C, 12) },
+  }
+}
+
+/** Send the bills to the PC that served this page; it shows them for Import there. */
+export async function sendToPc(payload, postTo = '/mobile-import') {
+  try {
+    const res = await fetch(postTo, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || data.ok === false) {
+      return { ok: false, error: data.error || `The PC answered ${res.status}` }
+    }
+    return { ok: true, ...data }
+  } catch (e) {
+    return { ok: false, error: `Could not reach the PC: ${e?.message || e}` }
+  }
 }
 
 async function fetchJson(path) {
@@ -164,6 +205,34 @@ export const ALL_MEDICINE_FIELDS = [
 ]
 
 export const DEFAULT_FIELD_ORDER = ALL_MEDICINE_FIELDS.map(f => f.key)
+
+/**
+ * A wholesale store's purchase line (WHOLESALE_DESIGN.md): counted in strips (packs) with no
+ * loose tablets and no per-tablet rate; the purchase rate is per strip; MRP is optional; Rate
+ * A / B / C are per strip, GST extra, and Rate A is required. A fixed order -- the per-supplier
+ * layouts on the Settings page were made for the retail columns.
+ */
+export const WHOLESALE_MEDICINE_FIELDS = [
+  { key: 'medicine_name',  label: 'Medicine Name',             type: 'text',   required: true  },
+  { key: 'type',           label: 'Type',                      type: 'select', required: true  },
+  { key: 'quantity_value', label: 'Pack (e.g. 1x10)',          type: 'text',   required: false },
+  { key: 'batch_no',       label: 'Batch No',                  type: 'text',   required: true  },
+  { key: 'expiry_date',    label: 'Expiry (MM/YY)',            type: 'text',   required: true  },
+  { key: 'qty',            label: 'Strips',                    type: 'number', required: true  },
+  { key: 'free_qty',       label: 'Free strips',               type: 'number', required: false },
+  { key: 'rate',           label: 'Purchase rate / strip',     type: 'number', required: true  },
+  { key: 'mrp',            label: 'MRP (optional)',            type: 'number', required: false },
+  { key: 'rate_a',         label: 'Rate A *',                  type: 'number', required: true  },
+  { key: 'rate_b',         label: 'Rate B',                    type: 'number', required: false },
+  { key: 'rate_c',         label: 'Rate C',                    type: 'number', required: false },
+  { key: 'gst_percent',    label: 'GST%',                      type: 'number', required: false },
+  { key: 'item_discount',  label: 'Disc%',                     type: 'number', required: false },
+  { key: 'hsn_code',       label: 'HSN Code',                  type: 'text',   required: false },
+  { key: 'manufacturer',   label: 'Mfg',                       type: 'text',   required: false },
+  { key: 'schedule',       label: 'Schedule',                  type: 'select', required: false },
+]
+
+export const WHOLESALE_FIELD_ORDER = WHOLESALE_MEDICINE_FIELDS.map(f => f.key)
 
 export function getMedicineTypes() {
   return getMedTypes()

@@ -52,6 +52,7 @@ def preview_mobile_data(data: dict[str, Any]) -> dict[str, Any]:
             "export_type": kind,
             "device_name": device,
             "export_date": export_date,
+            "store_kind": str(data.get("store_kind") or ""),
             "count": len(meds),
             "preview": preview,
         }
@@ -72,6 +73,7 @@ def preview_mobile_data(data: dict[str, Any]) -> dict[str, Any]:
         "export_type": kind,
         "device_name": device,
         "export_date": export_date,
+        "store_kind": str(data.get("store_kind") or ""),
         "count": len(purchases),
         "preview": preview,
     }
@@ -84,6 +86,35 @@ def apply_mobile_data(conn, data: dict[str, Any]) -> dict[str, Any]:
     if kind == "purchases":
         return _apply_purchases(conn, data)
     return {"ok": False, "error": "Unknown mobile import format."}
+
+
+def _pc_is_wholesale() -> bool:
+    """The PC's open store is a wholesale store (core/wholesale_mode)."""
+    try:
+        from core.wholesale_mode import is_wholesale
+
+        return bool(is_wholesale())
+    except Exception:
+        return False
+
+
+def _medicine_rates(med: dict[str, Any]) -> dict[str, float]:
+    """Wholesale fields of one loader / phone medicine row: purchase_rate, rate_a/b/c.
+
+    The loader sends them as top-level keys of the medicine for a wholesale store
+    (purchase rate per strip, Rate A/B/C per strip, GST extra). Only values above zero are
+    returned; {} for a retail row. ``rate`` stands in for the purchase rate when a row has
+    rates but no purchase_rate of its own.
+    """
+    from core.wholesale_rates import _num, line_rates
+
+    rates: dict[str, float] = dict(line_rates(med))
+    pr = _num(med.get("purchase_rate"))
+    if pr is None and rates:
+        pr = _num(med.get("rate"))
+    if pr is not None:
+        rates["purchase_rate"] = pr
+    return rates
 
 
 def _medicine_cols(cur) -> set[str]:
@@ -200,6 +231,7 @@ def _apply_medicines_online(data: dict[str, Any]) -> dict[str, Any]:
 
     inserted = updated = skipped = 0
     errors: list[str] = []
+    wholesale = _pc_is_wholesale()
     for med in medicines:
         try:
             row = _row_values(med)
@@ -229,6 +261,9 @@ def _apply_medicines_online(data: dict[str, Any]) -> dict[str, Any]:
                 "is_hidden": 0,
                 "deleted": 0,
             }
+            if wholesale:
+                # Top-level keys, as every other wholesale medicine document carries them.
+                doc.update(_medicine_rates(med))
             if existing:
                 doc["id"] = int(existing.get("id") or existing.get("local_id") or 0)
                 doc["local_id"] = doc["id"]
@@ -274,6 +309,13 @@ def _apply_medicines(conn, data: dict[str, Any]) -> dict[str, Any]:
     cols = _medicine_cols(cur)
     has_hidden = "is_hidden" in cols
     has_deleted = "deleted" in cols
+    # Wholesale store: the batch keeps its purchase rate and Rate A/B/C (the same columns a
+    # wholesale purchase writes, core/wholesale_rates.apply_purchase_rates). A retail store
+    # never takes them, even from a phone that was last paired with a wholesale one.
+    rate_cols = (
+        [c for c in ("purchase_rate", "rate_a", "rate_b", "rate_c") if c in cols]
+        if _pc_is_wholesale() else []
+    )
     inserted = updated = skipped = 0
     errors: list[str] = []
     touched_ids: list[int] = []
@@ -312,6 +354,8 @@ def _apply_medicines(conn, data: dict[str, Any]) -> dict[str, Any]:
             gst = float(
                 med.get("gst_percent", med.get("gst_pct", 0)) or 0
             )
+            rates = _medicine_rates(med) if rate_cols else {}
+            rates = {k: v for k, v in rates.items() if k in rate_cols}
             if existing:
                 med_id, _, stored_name = existing
                 if stored_name and str(stored_name).strip():
@@ -348,6 +392,9 @@ def _apply_medicines(conn, data: dict[str, Any]) -> dict[str, Any]:
                 if supplier_note:
                     sets.append("supplier_name=?")
                     vals.append(supplier_note)
+                for col, val in rates.items():
+                    sets.append(f"{col}=?")
+                    vals.append(val)
                 if has_hidden:
                     sets.append("is_hidden=0")
                 if has_deleted:
@@ -395,6 +442,9 @@ def _apply_medicines(conn, data: dict[str, Any]) -> dict[str, Any]:
                 if "location" in cols:
                     fields.append("location")
                     vals.append("")
+                for col, val in rates.items():
+                    fields.append(col)
+                    vals.append(val)
                 if has_hidden:
                     fields.append("is_hidden")
                     vals.append(0)
@@ -471,6 +521,11 @@ def _apply_purchases(conn, data: dict[str, Any]) -> dict[str, Any]:
     supplier_lookup = {
         str(s.get("name") or "").strip(): s for s in (data.get("suppliers") or [])
     }
+    # Wholesale store: each line carries Rate A/B/C (per strip, GST extra) and Rate A is
+    # required, exactly as on the PC's own Purchase page (desktop_purchase_service).
+    wholesale = _pc_is_wholesale()
+    from core.wholesale_rates import line_rates, rate_a_required_answer
+
     saved = 0
     errors: list[str] = []
     for i, purchase in enumerate(purchases):
@@ -496,6 +551,22 @@ def _apply_purchases(conn, data: dict[str, Any]) -> dict[str, Any]:
             raw_items = purchase.get("items") or []
             if not raw_items:
                 raise ValueError("No items in purchase")
+            if wholesale:
+                # Checked before anything is written, so a refused bill leaves no trace.
+                named = [
+                    {"name": str(it.get("name") or it.get("medicine_name") or "").strip(),
+                     **line_rates(it)}
+                    for it in raw_items if isinstance(it, dict)
+                ]
+                refused = rate_a_required_answer(named)
+                if refused:
+                    missing = [named[i]["name"] for i in refused["missing_rows"]]
+                    raise ValueError(
+                        "Rate A missing for " + ", ".join(missing[:3])
+                        + (f" and {len(missing) - 3} more" if len(missing) > 3 else "")
+                        + ". A wholesale purchase needs Rate A on every medicine; "
+                        "type it on the phone and send again"
+                    )
             items = []
             for it in raw_items:
                 med_type = it.get("type", "")
@@ -533,6 +604,8 @@ def _apply_purchases(conn, data: dict[str, Any]) -> dict[str, Any]:
                 }
                 if not item["name"]:
                     raise ValueError("Purchase item missing medicine name")
+                if wholesale:
+                    item.update(line_rates(it))
                 item["medicine_id"] = get_or_create_medicine(
                     conn,
                     item["name"],
@@ -588,6 +661,8 @@ def _apply_purchases(conn, data: dict[str, Any]) -> dict[str, Any]:
                 result,
                 items,
             )
+            if wholesale:
+                _save_line_rates(conn, supplier_id, items)
             saved += 1
         except Exception as exc:
             bill_no = purchase.get("bill_number", f"#{i + 1}")
@@ -600,6 +675,27 @@ def _apply_purchases(conn, data: dict[str, Any]) -> dict[str, Any]:
         "total": len(purchases),
         "errors": errors[:20],
     }
+
+
+def _save_line_rates(conn, supplier_id, items: list) -> None:
+    """Rate A/B/C onto the purchase just saved and its medicine batches, the way the PC's own
+    wholesale purchase save does (desktop_purchase_service._save_wholesale_rates). Online
+    carries them in the documents it sends, so there is nothing to write here then."""
+    try:
+        from core.sync_prefs import is_online_mode
+
+        if is_online_mode():
+            return
+        from core.wholesale_rates import apply_purchase_rates
+
+        row = conn.execute(
+            "SELECT id FROM purchases WHERE supplier_id=? ORDER BY id DESC LIMIT 1",
+            (int(supplier_id),),
+        ).fetchone()
+        if row:
+            apply_purchase_rates(conn, int(row[0]), items)
+    except Exception as exc:
+        print(f"[mobile import] wholesale rates: {exc}")
 
 
 def _exported_pack(it: dict[str, Any], med_type: str) -> dict[str, Any]:
