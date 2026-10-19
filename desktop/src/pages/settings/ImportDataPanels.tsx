@@ -26,6 +26,7 @@ import { IS_DEMO } from '../../demoMode'
 import { beginStoreSwitch } from '../../components/StoreSwitchDialog'
 import { fetchBusinessMode } from '../../wholesale/mode'
 import '../../styles/interactive-settings.css'
+import { VoicePackPanel } from '../../voice/VoicePackPanel'
 
 /** A box with its label above it (rows of boxes, tool bars). */
 function StackField({
@@ -2802,6 +2803,8 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
     return (
       <>
         <PanelTitle>My Assist</PanelTitle>
+        {/* The voice pack: the ONLY place that offers its download (Voice Commands sends here). */}
+        <VoicePackPanel />
         <Frame title="Voice assistant">
           <div className="settings-check-grid-3">
             <Check

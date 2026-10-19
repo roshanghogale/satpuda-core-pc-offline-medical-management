@@ -44,6 +44,7 @@ import { useLayoutRowCount } from '../layoutRows'
 import { registerVoicePage, type VoiceHandler } from '../voice/voiceBus'
 import { voicePicked } from '../voice/voiceField'
 import { SHORTCUTS_EVENT, shortcutBadge, voiceShortcuts, type ShortcutMap } from '../voice/voiceClient'
+import { useVoiceReady } from '../voice/voiceReady'
 import {
   billDiscountLossMessages,
   billMargin,
@@ -388,7 +389,13 @@ function RetailSalesPage({
   const [defaults, setDefaults] = useState<SalesFormDefaults | null>(null)
   // Voice shortcuts ("doctor 2"): upper-cased doctor name -> its number, shown as a badge.
   const [doctorNumbers, setDoctorNumbers] = useState<Record<string, string>>({})
+  // No voice pack / voice off: no badges, nothing asked of the voice service.
+  const voiceReady = useVoiceReady().ready
   useEffect(() => {
+    if (!voiceReady) {
+      setDoctorNumbers({})
+      return
+    }
     const take = (m: ShortcutMap) => {
       const out: Record<string, string> = {}
       for (const [n, name] of Object.entries(m.doctor || {})) out[name.trim().toUpperCase()] = n
@@ -406,7 +413,7 @@ function RetailSalesPage({
       alive = false
       window.removeEventListener(SHORTCUTS_EVENT, on)
     }
-  }, [])
+  }, [voiceReady])
   const [prefs, setPrefs] = useState<SalesRuntimePrefs | null>(null)
   const [customers, setCustomers] = useState<CustomerDetail[]>([])
   const [selectedMedId, setSelectedMedId] = useState<number | null>(null)

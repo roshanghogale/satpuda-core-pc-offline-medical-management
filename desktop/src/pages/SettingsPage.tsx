@@ -167,6 +167,17 @@ export function SettingsPage({
     setNestedId(forced?.nested || tab.nestedTabs?.[0]?.id || 'low')
   }, [tabId, tab, initialSection, initialToggle])
 
+  /** Voice Commands -> "Open Assistant settings": Data & System > My Assist, where the
+   *  voice pack is downloaded. The tab-change reset would put the first section back. */
+  const openAssistant = useCallback(() => {
+    if (tabIdRef.current === 'data_system') {
+      setSectionId('my_assist')
+      return
+    }
+    forcedRef.current = { section: 'my_assist' }
+    setTabId('data_system')
+  }, [])
+
   // ── Voice (test build): "printer settings ughad", "customer ledger", "expired alerts" ──
   // Sets the same tab / section / sub-tab state the buttons above set.
   const voiceHandlerRef = useRef<VoiceHandler>(async () => null)
@@ -888,7 +899,11 @@ export function SettingsPage({
     }
 
     if (tabId === 'shortcuts') {
-      return sectionId === 'voice' && voiceOn ? <VoiceCommandsPanel /> : <ShortcutsPanel />
+      return sectionId === 'voice' && voiceOn ? (
+        <VoiceCommandsPanel onOpenAssistant={openAssistant} />
+      ) : (
+        <ShortcutsPanel />
+      )
     }
 
     if (tabId === 'alerts') {

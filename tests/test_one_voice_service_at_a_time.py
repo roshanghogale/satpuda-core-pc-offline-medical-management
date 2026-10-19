@@ -17,6 +17,10 @@ import core.voice_pack as vp  # noqa: E402
 class StartingTwice(unittest.TestCase):
     def setUp(self):
         self.addCleanup(setattr, vp, "_service", None)
+        # voice ready (store allowed + whole pack): the gate itself is tested in test_voice_ready_gate
+        p = mock.patch.object(vp, "voice_ready", return_value={"ready": True, "allowed": True, "reason": "ready"})
+        p.start()
+        self.addCleanup(p.stop)
 
     def test_a_service_still_loading_is_not_started_again(self):
         loading = mock.Mock()

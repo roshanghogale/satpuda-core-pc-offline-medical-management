@@ -9,7 +9,7 @@
  * "No" or Esc drops it. A command the parser was unsure of asks too, and a
  * medicine that matched several names shows them numbered: "1, 2 ki 3".
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { AppNavigate } from '../App'
 import { fetchMedicineBatches, fetchSalesHistory, lookupCustomerByName } from '../pagesApi'
 import {
@@ -59,6 +59,17 @@ import { engineWord, msText, reloadVoiceLevel, useVoiceLevel } from './voiceLeve
 import { useVoiceEnabled, voiceSourceNote } from './voiceEnabled'
 import { VoiceLevelPanel } from './VoiceLevelPanel'
 import { VoicePackCard } from './VoicePackPanel'
+import {
+  EDGE,
+  clampPoint,
+  fabPoint,
+  isDrag,
+  loadFabPoint,
+  placePopup,
+  saveFabPoint,
+  type Pt,
+  type Size,
+} from './voiceDock'
 import { PAGE_NAV, type PageId } from '../keyboard'
 import { SETTINGS_TABS } from '../pages/settings/settingsConfig'
 import { forSpeech, getVoiceGender, sayCancel, sayKey, setVoiceGender, type Gender } from './sayClip'
@@ -2134,9 +2145,112 @@ export function VoiceBar({ page, navigate }: { page: string; navigate: AppNaviga
             : phase === 'thinking' ? 'Samajun gheto…'
               : `Band · F1 tap = Voice ON · F1 dharun bola · ${health?.medicines ?? 0} aushadha`
 
+  // ── Where the button sits and where the popup opens (voiceDock.ts) ──
+  // The button can be dropped anywhere (remembered on this PC); the popup opens next to it
+  // on the side with room, and can itself be dragged by its header until it is made small.
+  const [fabSaved, setFabSaved] = useState<Pt | null>(loadFabPoint)
+  const [win, setWin] = useState<Size>(() => ({ w: window.innerWidth, h: window.innerHeight }))
+  // The app's UI scale is a CSS zoom on the window div: the bar's own pixels are the window's / zoom.
+  const [zoom, setZoom] = useState(1)
+  const view: Size = { w: win.w / zoom, h: win.h / zoom }
+  const [fabSize, setFabSize] = useState<Size>({ w: 64, h: 36 })
+  const [popSize, setPopSize] = useState<Size>({ w: 380, h: 300 })
+  const [popManual, setPopManual] = useState<Pt | null>(null)
+  const [fabDrag, setFabDrag] = useState<Pt | null>(null)
+  const fabRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const press = useRef<{ start: Pt; origin: Pt; moved: boolean; what: 'fab' | 'pop' } | null>(null)
+  const swallowClick = useRef(false)
+  useEffect(() => {
+    const on = () => setWin({ w: window.innerWidth, h: window.innerHeight })
+    window.addEventListener('resize', on)
+    return () => window.removeEventListener('resize', on)
+  }, [])
+  useEffect(() => {
+    if (!open) setPopManual(null)
+  }, [open])
+  // Measured after every render: the popup grows and shrinks with what it shows.
+  useLayoutEffect(() => {
+    const el = open ? panelRef.current : fabRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    if (el.offsetWidth > 0 && r.width > 0) {
+      const z = Math.round((r.width / el.offsetWidth) * 100) / 100
+      setZoom((prev) => (Math.abs(prev - z) < 0.01 ? prev : z))
+    }
+    const s = { w: el.offsetWidth, h: Math.max(el.offsetHeight, open ? el.scrollHeight + 2 : 0) }
+    if (s.w <= 0 || s.h <= 0) return
+    const set = open ? setPopSize : setFabSize
+    set((prev) => (prev.w === s.w && prev.h === s.h ? prev : s))
+  })
+  const fabAt = fabDrag ?? fabPoint(fabSaved, fabSize, view)
+  const place = placePopup({ left: fabAt.x, top: fabAt.y, width: fabSize.w, height: fabSize.h }, popSize, view)
+  const popMaxH = popManual ? view.h - 2 * EDGE : place.maxH
+  const popAt = popManual
+    ? clampPoint(popManual, { w: popSize.w, h: Math.min(popSize.h, popMaxH) }, view)
+    : { x: place.x, y: place.y }
+
+  const pressDown = (what: 'fab' | 'pop', origin: Pt) => (e: ReactPointerEvent<HTMLElement>) => {
+    if (e.button !== 0) return
+    if (what === 'pop' && (e.target as HTMLElement).closest('button, select, input, textarea, a, label')) return
+    swallowClick.current = false
+    press.current = { start: { x: e.clientX, y: e.clientY }, origin, moved: false, what }
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId)
+    } catch {
+      /* no capture: the drag still follows while the pointer is over it */
+    }
+  }
+  const pressMove = (e: ReactPointerEvent<HTMLElement>) => {
+    const p = press.current
+    if (!p) return
+    const to = { x: e.clientX, y: e.clientY }
+    if (!p.moved && !isDrag(p.start, to)) return
+    p.moved = true
+    const at = { x: p.origin.x + (to.x - p.start.x) / zoom, y: p.origin.y + (to.y - p.start.y) / zoom }
+    if (p.what === 'fab') setFabDrag(clampPoint(at, fabSize, view))
+    else setPopManual(clampPoint(at, { w: popSize.w, h: Math.min(popSize.h, view.h - 2 * EDGE) }, view))
+  }
+  const pressUp = (e: ReactPointerEvent<HTMLElement>) => {
+    const p = press.current
+    press.current = null
+    if (!p?.moved) return
+    if (p.what === 'fab') {
+      // A drag, not a click: the click that follows does not open the popup.
+      swallowClick.current = true
+      const at = clampPoint(
+        { x: p.origin.x + (e.clientX - p.start.x) / zoom, y: p.origin.y + (e.clientY - p.start.y) / zoom }, fabSize, view,
+      )
+      setFabSaved(at)
+      saveFabPoint(at)
+      setFabDrag(null)
+    }
+  }
+  const pressCancel = () => {
+    press.current = null
+    setFabDrag(null)
+  }
+
   if (!open) {
     return (
-      <button type="button" className="vb-fab" onClick={() => setOpen(true)} title="Voice (F1)">
+      <button
+        ref={fabRef}
+        type="button"
+        className={`vb-fab${fabDrag ? ' vb-dragging' : ''}`}
+        style={{ left: fabAt.x, top: fabAt.y, right: 'auto', bottom: 'auto' }}
+        onPointerDown={pressDown('fab', fabAt)}
+        onPointerMove={pressMove}
+        onPointerUp={pressUp}
+        onPointerCancel={pressCancel}
+        onClick={() => {
+          if (swallowClick.current) {
+            swallowClick.current = false
+            return
+          }
+          setOpen(true)
+        }}
+        title="Voice (F1) — drag to move"
+      >
         <span className={dot} /> 🎤{handsFree ? ' ON' : ''}
       </button>
     )
@@ -2144,11 +2258,21 @@ export function VoiceBar({ page, navigate }: { page: string; navigate: AppNaviga
 
   return (
     <div
+      ref={panelRef}
       className={`vb-panel${phase === 'listening' || hearing ? ' vb-listening' : ''}${
         handsFree && !svcDown && gates.waiting ? ' vb-wake-wait' : ''
       }`}
+      data-side={`${place.below ? 'below' : 'above'}-${place.toLeft ? 'left' : 'right'}`}
+      style={{ left: popAt.x, top: popAt.y, right: 'auto', bottom: 'auto', maxHeight: popMaxH }}
     >
-      <div className="vb-head">
+      <div
+        className="vb-head"
+        title="Drag here to move"
+        onPointerDown={pressDown('pop', popAt)}
+        onPointerMove={pressMove}
+        onPointerUp={pressUp}
+        onPointerCancel={pressCancel}
+      >
         <span className={dot} />
         <span className="vb-status">{status}</span>
         {hearing ? (
