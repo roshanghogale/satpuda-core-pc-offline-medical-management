@@ -66,10 +66,12 @@ export const SETTINGS_TABS: TabDef[] = [
     id: 'shelf',
     label: 'Shelf Management',
     ctrlDigit: 3,
-    layout: 'split',
+    // No section list: "Medicines at location" is the right half of this same
+    // screen, so a button for it beside "Shelf Structure" was a duplicate, and a
+    // list of one is no list (owner, 19 Oct 2026). The screen gets the full width.
+    layout: 'scroll',
     sections: [
       { id: 'structure', label: 'Shelf Structure' },
-      { id: 'medicines', label: 'Medicines at location' },
     ],
   },
   {

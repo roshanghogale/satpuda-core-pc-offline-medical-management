@@ -22,6 +22,7 @@ import {
   SaveBtn,
 } from './SettingsChrome'
 import { ListEditor } from './ListEditor'
+import { FolderInput } from './FolderInput'
 import '../../styles/prefs-settings.css'
 
 type Opts = SettingsBundle['options']
@@ -49,6 +50,7 @@ const SALES_PARTIAL_KEYS: Record<string, string[]> = {
     'billing_margin_loss_warning',
     'billing_margin_display_mode',
     'require_doctor_for_other_schedules',
+    'default_doctor',
   ],
   batch_picker: ['batch_sort_order', 'show_zero_stock'],
   sales_return: ['sales_return_lookup_days'],
@@ -64,6 +66,62 @@ const SALES_SAVE_LABELS: Record<string, string> = {
   sales_bills: 'Save Sales Bill Settings',
   upi_payment: 'Save UPI Settings',
   autosave: 'Save Autosave Settings',
+}
+
+/** Settings > Sales & Billing: the doctor a new Sales bill starts with. */
+function DefaultDoctorField({
+  value,
+  doctors,
+  onChange,
+}: {
+  value: string
+  doctors?: { name: string; phone?: string; reg_no?: string }[]
+  onChange: (v: string) => void
+}) {
+  const names: { name: string; extra: string }[] = []
+  const seen = new Set<string>()
+  for (const d of doctors || []) {
+    const name = String(d.name || '').trim()
+    if (!name || seen.has(name.toUpperCase())) continue
+    seen.add(name.toUpperCase())
+    const extra = [d.phone, d.reg_no ? `Reg ${d.reg_no}` : '']
+      .map((x) => String(x || '').trim())
+      .filter(Boolean)
+      .join(' · ')
+    names.push({ name, extra })
+  }
+  names.sort((a, b) => a.name.localeCompare(b.name))
+  const cur = value.trim()
+  // A saved doctor since removed from the list still shows, so the box never
+  // claims "None" while new bills keep starting with that name.
+  const missing = Boolean(cur) && !seen.has(cur.toUpperCase())
+  return (
+    <div className="prefs-default-doctor">
+      <Field label="Default doctor">
+        <select
+          className="settings-input"
+          value={missing ? cur : names.find((n) => n.name.toUpperCase() === cur.toUpperCase())?.name ?? ''}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={!doctors && !cur}
+        >
+          <option value="">None — new bills start without a doctor</option>
+          {missing ? <option value={cur}>{cur} (not in the doctors list)</option> : null}
+          {names.map((n) => (
+            <option key={n.name} value={n.name}>
+              {n.extra ? `${n.name} — ${n.extra}` : n.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <p className="prefs-check-hint">
+        {doctors
+          ? names.length
+            ? 'Every new Sales bill starts with this doctor and their number. Clear or change it on a bill when needed.'
+            : 'No doctors saved yet. Add them in Contacts > Doctors.'
+          : 'Loading the doctors list…'}
+      </p>
+    </div>
+  )
 }
 
 function pickKeys(
@@ -496,6 +554,8 @@ export function LayoutListsPanel({
 }) {
   const pages = opts.column_pages || []
   const [exportPage, setExportPage] = useState(pages[0]?.key || '')
+  const [screenPage, setScreenPage] = useState(pages[0]?.key || '')
+  const screenPageKey = screenPage || pages[0]?.key || ''
 
   const exportPageKey = exportPage || pages[0]?.key || ''
   // The export report's OWN columns. Using the screen list here meant an
@@ -538,122 +598,129 @@ export function LayoutListsPanel({
   )
 
   if (sectionId === 'columns') {
+    // One page at a time, picked from a dropdown, the way the Export dialog
+    // lays out its choices (owner, 19 Oct 2026: every page's ticks at once
+    // took the whole screen). Same column_visibility keys as before.
+    const vis = (layoutLists.column_visibility || {}) as Record<
+      string,
+      Record<string, boolean>
+    >
+    const pageVis = vis[screenPageKey] || {}
+    const cols = opts.table_columns?.[screenPageKey] || []
+    // An unsaved key is not automatically "shown": a few columns ship
+    // hidden, and rendering those ticked told the shop the opposite
+    // of what the screen was doing.
+    const shown = (key: string) =>
+      pageVis[key] ?? opts.column_defaults?.[screenPageKey]?.[key] ?? true
+    const shownCount = cols.filter((c) => shown(c.key)).length
+    const exportShown = exportCols.filter((c) => exportPageVis[c.key] !== false).length
+    const pageSelect = (value: string, onPick: (k: string) => void, label: string) => (
+      <label className="prefs-colvis-page">
+        <span>Page</span>
+        <select
+          className="settings-input"
+          aria-label={label}
+          value={value}
+          onChange={(e) => onPick(e.target.value)}
+        >
+          {pages.map((p) => (
+            <option key={p.key} value={p.key}>
+              {p.label}
+            </option>
+          ))}
+        </select>
+      </label>
+    )
+    const onScreenTick = (colKey: string, v: boolean) =>
+      setLayoutLists((l) => ({
+        ...l,
+        column_visibility: {
+          ...((l.column_visibility as object) || {}),
+          [screenPageKey]: {
+            ...(((l.column_visibility as Record<string, Record<string, boolean>>) || {})[
+              screenPageKey
+            ] || {}),
+            [colKey]: v,
+          },
+        },
+      }))
+    const onExportTick = (colKey: string, v: boolean) =>
+      setLayoutLists((l) => {
+        const root = {
+          ...((l.export_column_visibility as Record<string, Record<string, unknown>>) || {}),
+        }
+        const reports = opts.export_reports?.[exportPageKey] || []
+        const cur: Record<string, unknown> = {
+          ...(root[exportPageKey] || {}),
+        }
+        // Same tick into every report for this page, because that
+        // is the shape the engine reads and this panel has no
+        // per-report control.
+        for (const rk of reports) {
+          const existing = cur[rk]
+          cur[rk] = {
+            ...(existing && typeof existing === 'object'
+              ? (existing as Record<string, boolean>)
+              : exportPageVis),
+            [colKey]: v,
+          }
+        }
+        // Drop any stray flat booleans left by the old shape.
+        for (const k of Object.keys(cur)) {
+          if (typeof cur[k] === 'boolean') delete cur[k]
+        }
+        root[exportPageKey] = cur
+        return { ...l, export_column_visibility: root }
+      })
     return (
       <>
         <PanelTitle>Column Visibility</PanelTitle>
-        <Frame title="On-screen table columns">
-          <Note>
-            Check columns to show on each screen (same as Tk Column Visibility).
-          </Note>
-          {pages.map((page) => {
-            const vis = (layoutLists.column_visibility || {}) as Record<
-              string,
-              Record<string, boolean>
-            >
-            const pageVis = vis[page.key] || {}
-            const cols = opts.table_columns?.[page.key] || []
-            // An unsaved key is not automatically "shown": a few columns ship
-            // hidden, and rendering those ticked told the shop the opposite
-            // of what the screen was doing.
-            const shown = (key: string) =>
-              pageVis[key] ?? opts.column_defaults?.[page.key]?.[key] ?? true
-            const shownCount = cols.filter((c) => shown(c.key)).length
-            return (
-              <div key={page.key} className="settings-column-page prefs-col-group">
-                <h4>
-                  {page.label}
-                  <span className="prefs-count">
-                    {shownCount} of {cols.length} shown
-                  </span>
-                </h4>
-                <div className="settings-check-grid-3">
-                  {cols.map((col) => (
-                    <Check
-                      key={col.key}
-                      label={col.label}
-                      checked={shown(col.key)}
-                      onChange={(v) =>
-                        setLayoutLists((l) => ({
-                          ...l,
-                          column_visibility: {
-                            ...((l.column_visibility as object) || {}),
-                            [page.key]: {
-                              ...(((l.column_visibility as Record<
-                                string,
-                                Record<string, boolean>
-                              >) || {})[page.key] || {}),
-                              [col.key]: v,
-                            },
-                          },
-                        }))
-                      }
-                    />
-                  ))}
-                </div>
-              </div>
-            )
-          })}
-        </Frame>
-        <Frame title="Export report columns">
-          <Note>The columns an exported report of the chosen page has.</Note>
-          <Field label="Page">
-            <select
-              className="settings-input"
-              value={exportPageKey}
-              onChange={(e) => setExportPage(e.target.value)}
-            >
-              {pages.map((p) => (
-                <option key={p.key} value={p.key}>
-                  {p.label}
-                </option>
+        <div className="prefs-colvis">
+          <fieldset className="export-fieldset prefs-colvis-box">
+            <legend>On-screen table columns</legend>
+            <div className="prefs-colvis-head">
+              {pageSelect(screenPageKey, setScreenPage, 'On-screen columns page')}
+              <span className="prefs-count">
+                {shownCount} of {cols.length} shown
+              </span>
+            </div>
+            <div className="prefs-colvis-grid">
+              {cols.map((col) => (
+                <label key={col.key} className="export-option prefs-colvis-opt">
+                  <input
+                    type="checkbox"
+                    checked={shown(col.key)}
+                    onChange={(e) => onScreenTick(col.key, e.target.checked)}
+                  />
+                  <span>{col.label}</span>
+                </label>
               ))}
-            </select>
-          </Field>
-          <div className="settings-check-grid-3">
-            {exportCols.map((col) => (
-              <Check
-                key={col.key}
-                label={col.label}
-                checked={exportPageVis[col.key] !== false}
-                onChange={(v) =>
-                  setLayoutLists((l) => {
-                    const root = {
-                      ...((l.export_column_visibility as Record<
-                        string,
-                        Record<string, unknown>
-                      >) || {}),
-                    }
-                    const reports = opts.export_reports?.[exportPageKey] || []
-                    const cur: Record<string, unknown> = {
-                      ...(root[exportPageKey] || {}),
-                    }
-                    // Same tick into every report for this page, because that
-                    // is the shape the engine reads and this panel has no
-                    // per-report control.
-                    for (const rk of reports) {
-                      const existing = cur[rk]
-                      cur[rk] = {
-                        ...(existing && typeof existing === 'object'
-                          ? (existing as Record<string, boolean>)
-                          : exportPageVis),
-                        [col.key]: v,
-                      }
-                    }
-                    // Drop any stray flat booleans left by the old shape.
-                    for (const k of Object.keys(cur)) {
-                      if (typeof cur[k] === 'boolean') delete cur[k]
-                    }
-                    root[exportPageKey] = cur
-                    return { ...l, export_column_visibility: root }
-                  })
-                }
-              />
-            ))}
-          </div>
-          {!exportCols.length ? (
-            <Note>No columns for this page.</Note>
-          ) : null}
-        </Frame>
+            </div>
+            {!cols.length ? <Note>No on-screen columns for this page.</Note> : null}
+          </fieldset>
+          <fieldset className="export-fieldset prefs-colvis-box">
+            <legend>Export report columns</legend>
+            <div className="prefs-colvis-head">
+              {pageSelect(exportPageKey, setExportPage, 'Export columns page')}
+              <span className="prefs-count">
+                {exportShown} of {exportCols.length} in the export
+              </span>
+            </div>
+            <div className="prefs-colvis-grid">
+              {exportCols.map((col) => (
+                <label key={col.key} className="export-option prefs-colvis-opt">
+                  <input
+                    type="checkbox"
+                    checked={exportPageVis[col.key] !== false}
+                    onChange={(e) => onExportTick(col.key, e.target.checked)}
+                  />
+                  <span>{col.label}</span>
+                </label>
+              ))}
+            </div>
+            {!exportCols.length ? <Note>No columns for this page.</Note> : null}
+          </fieldset>
+        </div>
         {saveBtn}
       </>
     )
@@ -956,6 +1023,7 @@ export function SalesBillingPanel({
   opts,
   saving,
   onSavePartial,
+  doctors,
 }: {
   sectionId: string
   salesBilling: Record<string, unknown>
@@ -963,6 +1031,8 @@ export function SalesBillingPanel({
   opts: Opts
   saving: boolean
   onSavePartial: (partialBody: Record<string, unknown>) => void
+  /** Settings > Contacts > Doctors; undefined while it loads. */
+  doctors?: { name: string; phone?: string; reg_no?: string }[]
 }) {
   const keys = SALES_PARTIAL_KEYS[sectionId]
   const saveLabel = SALES_SAVE_LABELS[sectionId]
@@ -1137,6 +1207,11 @@ export function SalesBillingPanel({
               }))
             }
           />
+          <DefaultDoctorField
+            value={String(salesBilling.default_doctor ?? '')}
+            doctors={doctors}
+            onChange={(v) => setSalesBilling((s) => ({ ...s, default_doctor: v }))}
+          />
         </Frame>
         <SaveBar label={saveLabel} saving={saving} onClick={save} />
       </>
@@ -1234,13 +1309,13 @@ export function SalesBillingPanel({
           </Field>
           <div className="prefs-wide">
             <Field label="Save folder">
-              <input
-                className="settings-input"
+              <FolderInput
                 value={String(salesBilling.sales_bill_save_dir ?? '')}
-                onChange={(e) =>
+                title="Choose the folder sales bill PDFs are saved in"
+                onChange={(v) =>
                   setSalesBilling((s) => ({
                     ...s,
-                    sales_bill_save_dir: e.target.value,
+                    sales_bill_save_dir: v,
                   }))
                 }
               />

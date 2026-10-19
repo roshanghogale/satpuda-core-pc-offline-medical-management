@@ -267,11 +267,23 @@ function fmtMoney2(n: number) {
   return (Number(n) || 0).toFixed(2)
 }
 
+/** Settings > Sales & Billing > Default doctor, with the number picking that
+ *  doctor would bring. A new bill starts with it; the bill may clear it. */
+function defaultDoctorOf(d: SalesFormDefaults | null | undefined): {
+  doctor: string
+  doctorPhone: string
+} {
+  const name = String(d?.default_doctor || '').trim()
+  if (!name) return { doctor: '', doctorPhone: '' }
+  return { doctor: name, doctorPhone: d?.doctor_phones?.[name.toUpperCase()] || '' }
+}
+
 function newTab(
   n: number,
   billDate = '',
   hint = '',
   defaultVillage = '',
+  startDoctor: { doctor: string; doctorPhone: string } = { doctor: '', doctorPhone: '' },
 ): SaleTab {
   return {
     id: `t-${Date.now()}-${n}`,
@@ -279,8 +291,8 @@ function newTab(
     customer: '',
     customerId: null,
     phone: '',
-    doctor: '',
-    doctorPhone: '',
+    doctor: startDoctor.doctor,
+    doctorPhone: startDoctor.doctorPhone,
     address: defaultVillage,
     paymentMode: 'Cash',
     billDate,
@@ -687,6 +699,7 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
     setDefaults(nextDefaults)
     setPrefs(p)
     setCustomers(d.customer_details || [])
+    const startDoctor = defaultDoctorOf(d)
     setTabs((all) =>
       all.map((t) => ({
         ...t,
@@ -696,6 +709,16 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
           : invoiceDisplay(t.billNoHint, hint),
         paymentMode: t.paymentMode || d.form.payment_mode || 'Cash',
         address: t.address || d.default_village || '',
+        // The first tab is made before the settings arrive. Only a bill nobody
+        // has touched takes the default doctor, so one the shop cleared stays clear.
+        ...(!t.dirty &&
+        !t.doctor.trim() &&
+        !t.items.length &&
+        !t.editingSaleId &&
+        !t.autosaveSaleId &&
+        startDoctor.doctor
+          ? startDoctor
+          : {}),
       })),
     )
     return { d: nextDefaults, p }
@@ -1102,6 +1125,7 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
           f.bill_date || defaults?.form.bill_date || '',
           res.bill_no || '',
           defaults?.default_village || '',
+          defaultDoctorOf(defaults),
         ),
         title: res.bill_no || rec.bill_no || 'Recovered',
         customer: f.customer_name,
@@ -1476,6 +1500,7 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
       defaults?.form.bill_date || '',
       nextHint,
       defaults?.default_village || '',
+      defaultDoctorOf(defaults),
     )
     // Keep the tab's own name ("Sale 2") across a Clear, but never a bill
     // number. A tab that was editing a bill, or had autosaved one, carries that
@@ -2229,6 +2254,7 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
         defaults?.form.bill_date || '',
         defaults?.next_bill_hint || '',
         defaults?.default_village || '',
+        defaultDoctorOf(defaults),
       ),
     ])
     setActiveTab(tabs.length)
@@ -3657,7 +3683,20 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
               onChange={(v) => {
                 // A name typed out in full is as good as picked: its number comes too.
                 const known = defaults?.doctor_phones?.[v.trim().toUpperCase()]
-                patchTab(known ? { doctor: v, doctorPhone: known } : { doctor: v })
+                // Emptying the name takes the number that came with a doctor
+                // (the default doctor, or one picked) -- not one typed by hand.
+                const ph = tab.doctorPhone.trim()
+                const dropPhone =
+                  !v.trim() &&
+                  Boolean(ph) &&
+                  Object.values(defaults?.doctor_phones || {}).includes(ph)
+                patchTab(
+                  known
+                    ? { doctor: v, doctorPhone: known }
+                    : dropPhone
+                      ? { doctor: v, doctorPhone: '' }
+                      : { doctor: v },
+                )
               }}
               onPick={(it) => {
                 // Picking a doctor brings their number; it used to fill the

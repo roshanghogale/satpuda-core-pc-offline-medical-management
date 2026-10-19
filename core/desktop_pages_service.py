@@ -3219,6 +3219,16 @@ def _next_sales_bill_hint(conn, bill_date: Any = None) -> str:
         return "SCB1"
 
 
+def _sales_default_doctor() -> str:
+    """Settings > Sales & Billing > Default doctor: what a new bill starts with."""
+    try:
+        from core.billing_layout_prefs import load_default_doctor
+
+        return load_default_doctor()
+    except Exception:
+        return ""
+
+
 def sales_form_defaults(conn) -> dict[str, Any]:
     customers: list[dict[str, Any]] = []
     doctors: list[str] = []
@@ -3292,6 +3302,7 @@ def sales_form_defaults(conn) -> dict[str, Any]:
                 "doctor_phones": doctor_phones,
                 "villages": villages,
                 "default_village": default_village,
+                "default_doctor": _sales_default_doctor(),
                 "medicines": medicines,
                 "payment_modes": payment_modes,
                 "form": {"bill_date": today},
@@ -3371,6 +3382,7 @@ def sales_form_defaults(conn) -> dict[str, Any]:
         "doctor_phones": doctor_phones,
         "villages": villages,
         "default_village": default_village,
+        "default_doctor": _sales_default_doctor(),
         "medicines": medicines,
         "payment_modes": payment_modes,
         "form": {

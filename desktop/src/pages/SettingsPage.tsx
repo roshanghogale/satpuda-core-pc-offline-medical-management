@@ -301,7 +301,12 @@ export function SettingsPage({
     let cancelled = false
     void (async () => {
       try {
-        if (tabId === 'contacts' && !bundle.contacts) {
+        // Sales & Billing > Default doctor picks from the saved doctors list.
+        const needsContacts =
+          tabId === 'contacts' ||
+          (tabId === 'sales_billing' &&
+            (sectionId === 'billing_layout' || sectionId === 'sales_screen'))
+        if (needsContacts && !bundle.contacts) {
           const c = await fetchContacts()
           if (!cancelled) {
             setBundle((b) => (b ? { ...b, contacts: c } : b))
@@ -356,7 +361,7 @@ export function SettingsPage({
     return () => {
       cancelled = true
     }
-  }, [tabId, toggleId, bundle])
+  }, [tabId, toggleId, sectionId, bundle])
 
   // Keep Appearance selects aligned with Use Dark / Use Light and live previews.
   useEffect(() => {
@@ -828,6 +833,7 @@ export function SettingsPage({
           setSalesBilling={setSalesBilling}
           opts={opts}
           saving={saving}
+          doctors={bundle.contacts?.doctors}
           onSavePartial={(partial) => save('sales_billing', partial)}
         />
       )

@@ -980,6 +980,7 @@ def get_sales_billing() -> dict[str, Any]:
         "require_doctor_for_other_schedules": bool(
             prefs.get("require_doctor_for_other_schedules", True)
         ),
+        "default_doctor": str(prefs.get("default_doctor") or ""),
         "billing_layout_version": int(prefs.get("version") or 1),
         "batch_sort_order": load_batch_sort_order(),
         "show_zero_stock": load_show_zero_stock_in_sales(),
@@ -1023,8 +1024,11 @@ def save_sales_billing(data: dict[str, Any]) -> dict[str, Any]:
         "billing_margin_loss_warning",
         "billing_margin_display_mode",
         "require_doctor_for_other_schedules",
+        "default_doctor",
     )
     layout_updates = {k: data[k] for k in layout_keys if k in data}
+    if "default_doctor" in layout_updates:
+        layout_updates["default_doctor"] = str(layout_updates["default_doctor"] or "")
     # _normalize() puts this key through bool() (billing_layout_prefs.py), and
     # bool("false") is True -- so a JSON string would persist as "always require
     # a doctor" while the Settings screen showed the box unchecked.

@@ -38,6 +38,9 @@ _DEFAULTS: dict[str, Any] = {
     "billing_margin_display_mode": MARGIN_DISPLAY_RUPEES,
     # When False, doctor name is required only for H1 and X (not other schedules).
     "require_doctor_for_other_schedules": True,
+    # Doctor a new Sales bill starts with (name as in the doctors list); "" = none.
+    # The bill can still clear or change it (owner, 19 Oct 2026).
+    "default_doctor": "",
     "version": 1,
 }
 
@@ -229,6 +232,7 @@ def _normalize(data: dict[str, Any] | None) -> dict[str, Any]:
         "sales_margin_ui_v2",
     ):
         base[key] = bool(base.get(key, _DEFAULTS[key]))
+    base["default_doctor"] = " ".join(str(base.get("default_doctor") or "").split())
     try:
         base["version"] = max(1, int(base.get("version") or 1))
     except (TypeError, ValueError):
@@ -507,6 +511,14 @@ def margin_display_mode_label(mode: str | None = None) -> str:
     if m == MARGIN_DISPLAY_PERCENT:
         return "Percentage (%)"
     return "Rupees (₹)"
+
+
+def load_default_doctor(conn: Optional[sqlite3.Connection] = None) -> str:
+    """The doctor a new Sales bill starts with, or "" for none."""
+    try:
+        return str(load_billing_layout_prefs(conn).get("default_doctor") or "").strip()
+    except Exception:
+        return ""
 
 
 _ALWAYS_REQUIRE_DOCTOR = frozenset({"H1", "X"})
