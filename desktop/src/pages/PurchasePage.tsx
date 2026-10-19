@@ -3364,6 +3364,14 @@ export function PurchasePage({
                         .filter(Boolean)
                         .join(' ') || undefined
                     }
+                    title="Double-click (or Enter) to edit this line"
+                    // A mouse user opens the line with a double click, no Enter needed
+                    // (owner, 19 Oct 2026). The remove button keeps its own click.
+                    onDoubleClick={(e) => {
+                      if ((e.target as HTMLElement).closest('button')) return
+                      e.preventDefault()
+                      startLineEdit(i)
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault()
