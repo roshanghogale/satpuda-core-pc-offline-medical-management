@@ -30,6 +30,8 @@ type Props = {
    *  keyboard from behind another one. An optional prop defaulting to true
    *  let exactly that omission through the compiler. */
   active: boolean
+  /** The open store's name: it heads the Home page (it is not in the top bar any more). */
+  storeName?: string
 }
 
 type QaStyle =
@@ -125,7 +127,7 @@ function StatCell({ card }: { card: DashboardCard }) {
   )
 }
 
-export function HomePage({ onNavigate, syncRefreshNonce = 0, active }: Props) {
+export function HomePage({ onNavigate, syncRefreshNonce = 0, active, storeName = '' }: Props) {
   const [todayCards, setTodayCards] = useState<DashboardCard[]>([])
   const [periodCards, setPeriodCards] = useState<DashboardCard[]>([])
   const [quickActions, setQuickActions] = useState<HomeQuickAction[]>(
@@ -366,6 +368,13 @@ export function HomePage({ onNavigate, syncRefreshNonce = 0, active }: Props) {
               : undefined
           }
         >
+          {storeName.trim() ? (
+            <div className="home-store-chip" title={`Open store: ${storeName}`}>
+              <span className="home-store-label">Store</span>
+              <strong className="home-store-name">{storeName}</strong>
+              {isWholesale ? <span className="ws-badge">WHOLESALE</span> : null}
+            </div>
+          ) : null}
           {bannerSrc && !bannerFailed ? (
             <img
               className="home-banner-img"

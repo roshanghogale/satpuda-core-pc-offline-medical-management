@@ -235,11 +235,52 @@ button {
   font-family: var(--font-mono);
   opacity: 0.75;
 }
+/* 1280 / 1366 wide: a little less padding per tab, so the status, the Retail | Wholesale
+   switch, the WHOLESALE badge and the theme button fit beside them. */
+@media (max-width: 1440px) {
+  .mainnav {
+    padding: 0 10px;
+    gap: 2px;
+  }
+  .nav-item {
+    padding: 6px 9px;
+  }
+  .nav-item .nav-key {
+    margin-left: 4px;
+  }
+}
 .mainnav-right {
   margin-left: auto;
+  padding-left: 8px;
   display: flex;
   align-items: center;
   gap: 6px;
+  /* Shrinks before the row overflows: only the status pill gives way (ellipsis, the whole
+     status in its tooltip); the switch, the badge and the theme button keep their size. */
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.mainnav-right > * {
+  flex: 0 0 auto;
+}
+.mainnav-right > .mainnav-sync-wrap,
+.mainnav-right > .mainnav-sync {
+  flex: 0 1 auto;
+  min-width: 64px;
+}
+.mainnav-sync-wrap {
+  display: flex;
+}
+.mainnav-sync-wrap > .mainnav-sync {
+  min-width: 0;
+  max-width: 100%;
+}
+/* Use Dark / Use Light: a moon / sun and one word. */
+.mainnav-theme.btn {
+  padding: 0 8px;
+  gap: 5px;
+}
+.mainnav-theme svg {
   flex: 0 0 auto;
 }
 /* Demonstration build. Deliberately loud: nobody should be able to mistake the
@@ -256,16 +297,10 @@ button {
   color: #fff;
 }
 
-.mainnav-store {
-  font-size: 11px;
-  color: var(--text-muted);
-  margin-right: 8px;
-  max-width: 280px;
+.mainnav-sync {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.mainnav-sync {
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.02em;

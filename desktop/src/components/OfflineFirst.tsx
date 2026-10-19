@@ -80,12 +80,13 @@ export function OfflineFirstPill() {
         : 'Synced'
   const cls = st.flagged || errRecent ? 'mainnav-sync-offline' : 'mainnav-sync-online'
   return (
-    <span style={{ position: 'relative' }}>
+    <span className="mainnav-sync-wrap" style={{ position: 'relative' }}>
       <button
         type="button"
         className={`mainnav-sync ${cls}`}
         style={{ cursor: 'pointer' }}
-        title="Offline-first sync: this PC works on its own copy and keeps it in step with the server"
+        // The pill may be cut short on a narrow window: the whole status is in the tooltip.
+        title={`${label}. Offline-first sync: this PC works on its own copy and keeps it in step with the server`}
         onClick={() => setOpen((v) => !v)}
       >
         {label}

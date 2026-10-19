@@ -457,6 +457,8 @@ export function PurchasePage({
   const [expiry, setExpiry] = useState('')
   const [rate, setRate] = useState('0')
   const [mrp, setMrp] = useState('0')
+  // Wholesale MRP box: a 0 MRP shows as empty ("optional") unless the box is being typed in.
+  const [wsMrpFocus, setWsMrpFocus] = useState(false)
   const [tabletMrp, setTabletMrp] = useState('')
   const [tabletRate, setTabletRate] = useState('')
   const [discPct, setDiscPct] = useState('0')
@@ -2484,7 +2486,8 @@ export function PurchasePage({
     hsn: colOn('HSN'),
     schedule: colOn('Schedule'),
     free: colOn('Free'),
-    mrp: colOn('MRP') && !ws.isWholesale,
+    // Wholesale shows it too: the MRP box is editable there (owner, 19 Oct 2026).
+    mrp: colOn('MRP'),
     rate: colOn('Rate'),
     disc: colOn('Disc%'),
     gstPct: colOn('GST%'),
@@ -2988,9 +2991,36 @@ export function PurchasePage({
                 ))}
               </datalist>
             </Field>
-            {/* Wholesale sells whole strips at Rate A / B / C: no MRP, no per-tablet price
-                (owner, 18 Oct 2026). */}
-            {ws.isWholesale ? null : (
+            {/* Wholesale sells whole strips at Rate A / B / C: no per-tablet price (owner,
+                18 Oct 2026). The MRP is one box per strip / pack, optional, so a wrongly
+                imported MRP can be corrected (owner, 19 Oct 2026); it takes one cell, so the
+                row keeps its height. */}
+            {ws.isWholesale ? (
+              <Field label="MRP" hint={stripMode ? 'per strip' : 'per pack'} className="ws-mrp">
+                <input
+                  type="text"
+                  className="mono"
+                  inputMode="decimal"
+                  aria-label={`MRP ${stripMode ? 'per strip' : 'per pack'} (optional)`}
+                  title="Optional. The MRP printed on the strip / pack; correct it here if the import read it wrong."
+                  placeholder="optional"
+                  value={!wsMrpFocus && !(Number(mrp) > 0) ? '' : mrp}
+                  data-nav-order={16}
+                  data-nav-chain={NAV}
+                  onFocus={(e) => {
+                    setWsMrpFocus(true)
+                    // No MRP yet: start from an empty box, not a "0" to type after.
+                    if (!(Number(mrp) > 0)) setMrp('')
+                    else e.currentTarget.select()
+                  }}
+                  onChange={(e) => onStripMrpChange(e.target.value.replace(/[^0-9.]/g, ''))}
+                  onBlur={() => {
+                    setWsMrpFocus(false)
+                    checkRateAgainstHistory()
+                  }}
+                />
+              </Field>
+            ) : (
             <Field
               label="MRP"
               hint={stripMode ? 'strip / per tab' : undefined}
@@ -3413,7 +3443,8 @@ export function PurchasePage({
                     ) : null}
                     {showCol.mrp ? (
                       <td className="numsm mono">
-                        {it.mrp.toFixed(2)}
+                        {/* Wholesale: optional, so no MRP reads blank, never 0.00. */}
+                        {ws.isWholesale && !(Number(it.mrp) > 0) ? '' : it.mrp.toFixed(2)}
                       </td>
                     ) : null}
                     {showCol.rate ? (
