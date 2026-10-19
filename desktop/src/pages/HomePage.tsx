@@ -312,8 +312,7 @@ export function HomePage({ onNavigate, syncRefreshNonce = 0, active, storeName =
           sales prospect to "Restart with npm run tauri:dev". */}
       {error && !IS_DEMO ? (
         <div className="error">
-          Local data: {error}. Restart with <code>npm run tauri:dev</code> from{' '}
-          <code>desktop</code>.
+          Could not open your shop data: {error}. Close and reopen the app.
         </div>
       ) : null}
 

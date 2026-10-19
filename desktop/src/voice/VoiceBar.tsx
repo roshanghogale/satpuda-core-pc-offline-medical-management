@@ -200,9 +200,9 @@ function understoodLine(cmd: VoiceCommand): string {
     case 'udhari': return 'Udhari (Due)'
     case 'search': return `Search: ${up(a.query)}`
     case 'navigate': return `Page: ${PAGE_WORDS[PAGE_ALIASES[String(a.page)] || String(a.page)] || a.page}`
-    case 'open_settings': return `Settings: ${[a.tab, a.section].filter(Boolean).join(' / ')}`
-    case 'page_filter': return `Filter: ${a.filter ?? ''}${a.value != null ? ` = ${a.value}` : ''}`
-    case 'page_action': return `Kaam: ${a.action ?? ''}`
+    case 'open_settings': return settingsWords(a)
+    case 'page_filter': return 'Filter'
+    case 'page_action': return 'Kaam'
     case 'today_sales': return 'Aajchi vikri'
     case 'sales_total': return `${SALES_PERIOD[String(a.period || 'today')]?.[a.what === 'profit' ? 'profit' : a.what === 'bills' ? 'bills' : 'sales'] || 'Vikri'}`
     case 'due_query': return `Baki: ${up(a.name) || '?'}`
@@ -211,7 +211,7 @@ function understoodLine(cmd: VoiceCommand): string {
     case 'load_bill': return `Bill load: ${a.bill_no ?? '?'}`
     case 'stock_query': return `Stock: ${up(a.medicine)}`
     case 'expiry_query': return `Expiry: ${up(a.medicine)}`
-    case 'list_options': return `Yaadi: ${a.kind ?? ''}${a.query ? ` "${a.query}"` : ''}`
+    case 'list_options': return `Yaadi${a.query ? `: "${a.query}"` : ''}`
     case 'focus_field': return `Field: ${fieldWord(String(a.field || ''))}${a.text ? ` "${up(a.text)}"` : ''}`
     case 'type_text': return `Type: "${up(a.text)}"`
     case 'clear_field': return a.field ? `${fieldWord(String(a.field))} pusa` : 'Field rikama'
@@ -231,8 +231,21 @@ function understoodLine(cmd: VoiceCommand): string {
     case 'unknown_medicine': return `Aushadh sapadla nahi${a.medicine ? `: ${up(a.medicine)}` : ''}`
     case 'ask': return 'Parat vicharla'
     case 'refuse': return 'Suraksha: voice sathi band'
-    default: return cmd.intent
+    default: return 'Kaam'
   }
+}
+
+/** "Settings: Pharmacy Profile / Printer Setup" from the tab and section the voice named (never the ids). */
+function settingsWords(a: Record<string, unknown>): string {
+  const tabId = String(a.tab || '').trim().toLowerCase()
+  const secId = String(a.section || '').trim().toLowerCase()
+  const inTab = (t: (typeof SETTINGS_TABS)[number]) =>
+    [...(t.sections || []), ...(t.toggles || []), ...(t.nestedTabs || [])].find((x) => x.id === secId)
+  const tab =
+    SETTINGS_TABS.find((t) => t.id === tabId) || (!tabId && secId ? SETTINGS_TABS.find((t) => inTab(t)) : undefined)
+  const sec = tab && secId ? inTab(tab) : undefined
+  const words = [tab?.label.replace(/^[^A-Za-z]+/, ''), sec?.label].filter(Boolean).join(' / ')
+  return words ? `Settings: ${words}` : 'Settings'
 }
 
 /** Why the page could not do it, in the shop's words, with the app's own reason:
@@ -2132,7 +2145,7 @@ export function VoiceBar({ page, navigate }: { page: string; navigate: AppNaviga
         : phase === 'listening' ? 'vb-dot vb-rec'
           : phase === 'thinking' ? 'vb-dot vb-think' : 'vb-dot vb-ok'
   const status =
-    phase === 'loading' ? 'Model load hot aahe…'
+    phase === 'loading' ? 'Voice tayar hot aahe…'
       : phase === 'offline' ? 'Voice service band aahe'
         : handsFree
           ? working ? 'Samajun gheto…'
@@ -2346,8 +2359,8 @@ export function VoiceBar({ page, navigate }: { page: string; navigate: AppNaviga
                 void poll()
               }}
             >
-              <option value="small">small — ~1.5 s (shifaras)</option>
-              <option value="large-v3-turbo">large-v3-turbo — ~6 s, jast achuk</option>
+              <option value="small">Jalad</option>
+              <option value="large-v3-turbo">Jast achuk</option>
             </select>
           </label>
           <label className="vb-check">
@@ -2377,7 +2390,7 @@ export function VoiceBar({ page, navigate }: { page: string; navigate: AppNaviga
               const r = await voiceRefreshVocab()
               note(
                 '',
-                r.ok ? `Yaadi taaji: ${r.medicines} aushadha, ${r.customers} grahak` : `Engine: ${r.error}`,
+                r.ok ? `Yaadi taaji: ${r.medicines} aushadha, ${r.customers} grahak` : r.error || 'Yaadi taaji zali nahi',
                 r.ok,
                 r.ok ? 'list_refreshed' : { key: 'list_refresh_failed', cue: 'error' },
               )
@@ -2460,9 +2473,9 @@ export function VoiceBar({ page, navigate }: { page: string; navigate: AppNaviga
           {last.understood ? <div className="vb-understood">Samajla: {last.understood}</div> : null}
           <div className="vb-say" style={last.tone === 'refuse' ? { color: '#e5484d' } : undefined}>{last.say}</div>
           {last.alt ? <div className="vb-alt">{last.alt}</div> : null}
-          {last.secs || last.engine ? (
+          {last.secs ? (
             <div className="vb-secs" title={last.gate}>
-              {[last.secs ? `${last.secs.toFixed(1)} s` : '', last.engine || ''].filter(Boolean).join(' · ')}
+              {`${last.secs.toFixed(1)} s`}
             </div>
           ) : null}
         </div>
@@ -2542,7 +2555,6 @@ function replyMeta(reply: VoiceReply): ReplyMeta | null {
   if (g) {
     const parts: string[] = []
     if (g.wake != null) parts.push(g.wake ? 'Satpuda aikla' : 'Satpuda nahi')
-    if (g.speaker != null && Number.isFinite(Number(g.speaker))) parts.push(`awaj julla ${Number(g.speaker).toFixed(2)}`)
     if (parts.length) out.gate = parts.join(' · ')
   }
   return out.engine || out.alt || out.gate ? out : null
@@ -2558,8 +2570,7 @@ function altLine(alt: VoiceAlt | undefined): string {
   } catch {
     /* an odd command from the other engine: still show that it answered */
   }
-  const how = [engineWord(alt.engine), msText(alt.ms)].filter(Boolean).join(' ')
-  return `Dusre: ${text}${how ? ` (${how})` : ''}`
+  return `Dusre: ${text}`
 }
 
 /** Noise the service passed on (nothing heard, nothing understood) is not worth a spoken "Samajla nahi". */

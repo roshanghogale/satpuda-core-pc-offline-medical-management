@@ -69,7 +69,7 @@ async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`)
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
-    throw new Error((data as { error?: string }).error || `HTTP ${res.status}`)
+    throw new Error((data as { error?: string }).error || "Could not reach the app's data. Try again.")
   }
   return data as T
 }
@@ -163,7 +163,7 @@ export async function savePrefs(updates: Partial<DesktopUiPrefs>) {
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
-    throw new Error((data as { error?: string }).error || `HTTP ${res.status}`)
+    throw new Error((data as { error?: string }).error || "Could not reach the app's data. Try again.")
   }
   return data as DesktopUiPrefs
 }
@@ -259,7 +259,7 @@ export async function activateLicense(body: {
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
-    throw new Error((data as { error?: string }).error || `HTTP ${res.status}`)
+    throw new Error((data as { error?: string }).error || "Could not reach the app's data. Try again.")
   }
   return data as ActivateLicenseResult
 }
@@ -328,7 +328,7 @@ export async function pairWithStoreKey(androidKey: string, confirm: boolean) {
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
-    throw new Error((data as { error?: string }).error || `HTTP ${res.status}`)
+    throw new Error((data as { error?: string }).error || "Could not reach the app's data. Try again.")
   }
   return data as PairStoreKeyResult
 }
@@ -338,7 +338,7 @@ export async function recheckLicense() {
   const res = await fetch(`${API_BASE}/api/license/recheck`, { method: 'POST' })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
-    throw new Error((data as { error?: string }).error || `HTTP ${res.status}`)
+    throw new Error((data as { error?: string }).error || "Could not reach the app's data. Try again.")
   }
   return data as LicenseStatusResponse
 }
@@ -361,7 +361,7 @@ export async function verifyAppLogin(username: string, password: string) {
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
-    throw new Error((data as { error?: string }).error || `HTTP ${res.status}`)
+    throw new Error((data as { error?: string }).error || "Could not reach the app's data. Try again.")
   }
   return data as { ok: boolean; authenticated?: boolean }
 }

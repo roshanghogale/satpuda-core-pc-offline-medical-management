@@ -585,11 +585,7 @@ export function SettingsPage({
         if (onThemePackChange) onThemePackChange(savedPack)
         const fontSize = Number(body.font_size ?? next.font_size ?? 10)
         applyFontSize(fontSize)
-        setMsg(
-          savedTheme
-            ? `Appearance saved. Theme: ${savedTheme} · Pack: ${savedPack}`
-            : 'Appearance saved.',
-        )
+        setMsg('Appearance saved.')
         window.dispatchEvent(new Event('satpuda:home-banner-changed'))
         await reload()
         // After reload, force the theme we saved (don't let disk lag flip UI).
@@ -644,13 +640,8 @@ export function SettingsPage({
             await new Promise((r) => setTimeout(r, 400))
             try {
               const st = await systemAction({ action: 'online_switch_status' })
-              const step = Number(st.step || 0)
-              const total = Number(st.steps_total || 4)
-              const raw = String(st.message || 'Working…')
-              const message =
-                step > 0 && !raw.startsWith(`${step}/`)
-                  ? `${step}/${total} ${raw}`
-                  : raw
+              // Just the words: no "2/4" step counter in front.
+              const message = String(st.message || 'Working…').replace(/^\s*\d+\s*\/\s*\d+\s+/, '')
               setOnlineSwitchMsg(message)
               if (st.done) {
                 setOnlineSwitchBusy(false)
@@ -660,7 +651,7 @@ export function SettingsPage({
                     : st.needs_migrate
                       ? 'Local data found — choose Push to Server or Delete Local.'
                       : st.server_sync_started
-                        ? 'Online ready — lists load from server; live hints started.'
+                        ? 'Online mode is on.'
                         : message || 'Online mode saved.',
                 )
                 if (st.needs_migrate) {
@@ -693,7 +684,7 @@ export function SettingsPage({
         if (ph.bill) setBill(ph.bill)
         if (ph.login) setLogin({ ...ph.login, password: '' })
         if (ph.printer) setPrinter(ph.printer)
-        setMsg('Saved — same files as the Python app.')
+        setMsg('Saved.')
         await reload()
         return
       }
@@ -719,7 +710,7 @@ export function SettingsPage({
         <p className="muted">
           {error
             ? 'Local data unavailable — see message above.'
-            : 'Starting local data… settings will appear in a moment.'}
+            : 'Loading settings…'}
         </p>
       )
     }
@@ -1019,9 +1010,7 @@ export function SettingsPage({
       {/* Developer wording, so never on the demonstration site. */}
       {error && !IS_DEMO ? (
         <div className="error">
-          Could not load settings from the same store as the Python app: {error}.
-          Close this window and run <code>npm run tauri:dev</code> again (it
-          replaces a stale local engine automatically).
+          Could not load settings: {error}. Close and reopen the app.
         </div>
       ) : null}
       <div className="settings-notebook" role="tablist">
@@ -1058,10 +1047,6 @@ export function SettingsPage({
             <strong>Switching to Online…</strong>
             <p className="settings-note" style={{ margin: '6px 0 0' }}>
               {onlineSwitchMsg || 'Connecting to Satpuda Core Server…'}
-            </p>
-            <p className="muted" style={{ margin: '4px 0 0' }}>
-              Steps: check server → pair store → adopt server revision → start
-              live hints. No full database download into SQLite.
             </p>
           </div>
         ) : null}

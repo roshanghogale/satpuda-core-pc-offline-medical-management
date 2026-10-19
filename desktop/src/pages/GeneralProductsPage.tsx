@@ -165,8 +165,7 @@ export function GeneralProductsPage() {
 
       <SectionFrame title="General products (non-medicine items)">
         <Note>
-          Reference rates only — not used in billing, purchase, or stock (same as
-          classic General Products).
+          Reference rates only — not used in billing, purchase, or stock.
         </Note>
         <FilterBar className="lp-filterbar">
           <Field label="Search" className="lp-f-search">

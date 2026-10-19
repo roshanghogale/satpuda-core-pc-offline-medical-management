@@ -185,7 +185,7 @@ export function VoicePackPanel() {
   if (!pack) {
     return (
       <Frame title="Voice pack">
-        <p className="muted">{failed ? `Engine did not answer: ${failed}` : 'Loading…'}</p>
+        <p className="muted">{failed ? `Voice did not answer: ${failed}` : 'Loading…'}</p>
       </Frame>
     )
   }

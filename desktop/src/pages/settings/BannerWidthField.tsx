@@ -129,16 +129,7 @@ export function BannerWidthField({
         {drawnTall ? <> and about {drawnTall} px tall</> : null} — {shownPct}% of
         the {frame} px beside Quick Actions. It changes on Home as you type; Save
         Appearance keeps it.
-        {isLegacy ? (
-          <>
-            {' '}
-            Saved by an older version as {legacyPx} px
-            {legacyPx > frame
-              ? `, wider than the ${frame} px there is — so every value above ${frame} drew this same full-width banner`
-              : ''}
-            . Type a percentage to change it.
-          </>
-        ) : null}
+        {isLegacy ? ' Type a percentage to set the width.' : null}
       </Note>
       {imgOk ? (
         <div

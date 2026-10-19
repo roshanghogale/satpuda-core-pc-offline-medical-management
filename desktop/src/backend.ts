@@ -58,7 +58,6 @@ export async function ensureLocalEngine(
   }
 
   const start = Date.now()
-  let last = 'Waiting for local data…'
   while (Date.now() - start < timeoutMs) {
     if (cachedReady && Date.now() - cachedReadyAt < READY_CACHE_MS) {
       return { ok: true }
@@ -69,9 +68,6 @@ export async function ensureLocalEngine(
         markReady()
         return { ok: true }
       }
-      last = h.ok
-        ? 'Stale local engine (missing settings). Restart the desktop window.'
-        : 'Local engine not ready'
       // Ask Tauri again to replace a stale process.
       if (isTauri()) {
         try {
@@ -80,15 +76,13 @@ export async function ensureLocalEngine(
           /* ignore */
         }
       }
-    } catch (e) {
-      last = e instanceof Error ? e.message : String(e)
+    } catch {
+      /* not up yet — keep waiting */
     }
     await new Promise((r) => setTimeout(r, 400))
   }
   return {
     ok: false,
-    error: isTauri()
-      ? `Local data engine not ready. ${last}`
-      : `Open with npm run tauri:dev (not the browser alone). ${last}`,
+    error: 'The app is still starting. If this stays, close and reopen Satpuda.',
   }
 }

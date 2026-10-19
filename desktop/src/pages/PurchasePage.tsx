@@ -680,9 +680,7 @@ export function PurchasePage({
               },
               { quiet: true },
             )
-            setNote(
-              `Autosaved draft ${res.purchase_no || res.autosave_purchase_id}`,
-            )
+            setNote('Draft saved automatically')
           }
         } catch {
           /* ignore */
@@ -1059,7 +1057,7 @@ export function PurchasePage({
       const sug = await searchPurchaseMedicines(q.trim(), 50)
       setMedSuggestions(sug.medicines || [])
       if (prefsRef.current?.app_mode === 'medical' && sug.master_ready === false) {
-        setNote('Loading medicines… (master list preparing)')
+        setNote('Loading medicines…')
       }
     } catch {
       /* ignore */
@@ -1783,7 +1781,8 @@ export function PurchasePage({
       dirty: Boolean(opts?.dirty),
     })
     setNote(
-      opts?.note || `Loaded ${loaded.purchase_no || loaded.purchase_id} for edit`,
+      opts?.note ||
+        (loaded.purchase_no ? `Loaded purchase ${loaded.purchase_no} for edit` : 'Loaded purchase for edit'),
     )
   }
 
@@ -1860,12 +1859,12 @@ export function PurchasePage({
         setNote(
           pf.order_no
             ? `Reorder ${pf.order_no} — enter batch/expiry and add line`
-            : 'Reorder prefill loaded — enter batch/expiry and add line',
+            : 'Reorder items loaded — enter batch/expiry and add each line',
         )
       } catch (e) {
         if (!cancelled) {
           showAlert({
-            title: 'Reorder prefill',
+            title: 'Reorder',
             message: e instanceof Error ? e.message : String(e),
             kind: 'error',
           })
@@ -2825,7 +2824,7 @@ export function PurchasePage({
                     })
                   }
                   tabIndex={-1}
-                  title="Not in Classic Enter chain — change with mouse if needed"
+                  title="Skipped by Enter — click to change"
                 >
                   {(
                     prefs?.gst_calc_methods || [
@@ -2862,7 +2861,7 @@ export function PurchasePage({
                 enterPicksHighlight={false}
                 placeholder={
                   masterListLoading
-                    ? 'Loading medicines… (local list available)'
+                    ? 'Loading medicines… you can type to search'
                     : 'Click or type to search medicine…'
                 }
                 minChars={0}
@@ -2873,13 +2872,14 @@ export function PurchasePage({
                 listLabel="Medicines"
                 emptyText={
                   masterListLoading
-                    ? 'Loading master list… type to search local medicines'
+                    ? 'Loading medicines… you can type to search'
                     : 'No matches — type a name or pick from the list'
                 }
                 items={medSuggestions.map((m, i) => ({
                   id: String(m.id ?? `${m.name}-${i}`),
                   label: m.name,
-                  meta: m.source || undefined,
+                  meta:
+                    m.source === 'master' ? 'Catalogue' : m.source === 'local' ? 'In stock' : undefined,
                 }))}
                 onFocus={() => void refreshMedicineSuggestions(medicine)}
                 onChange={(v) => setMedicine(v)}

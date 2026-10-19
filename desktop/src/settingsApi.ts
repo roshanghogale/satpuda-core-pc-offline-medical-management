@@ -203,7 +203,7 @@ async function jsonFetch<T>(
     if (passTypedErrors && typed.ok === false && typeof typed.code === 'string' && typed.code) {
       return data as T
     }
-    throw new Error((data as { error?: string }).error || `HTTP ${res.status}`)
+    throw new Error((data as { error?: string }).error || "Could not reach the app's data. Try again.")
   }
   return data as T
 }

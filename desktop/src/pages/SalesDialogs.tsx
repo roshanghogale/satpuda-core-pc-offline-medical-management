@@ -335,7 +335,7 @@ export function RecoveredSalesDialog({
                 {sales.map((s) => (
                   <tr key={s.token}>
                     <td className="mono">
-                      {s.held ? 'Not saved' : s.bill_no || s.sale_id}
+                      {s.held ? 'Not saved' : s.bill_no || 'Unsaved bill'}
                       {s.stale ? (
                         <div className="muted" style={{ fontSize: 11 }}>
                           from {s.bill_date}
@@ -517,7 +517,7 @@ export function QuickSaleDialog({
             </label>
           </div>
           <p className="hint-text" style={{ marginTop: 8 }}>
-            Creates inventory on Save (same as classic quick-sale).
+            Adds this medicine to stock when you save.
           </p>
           <div className="modal-foot" style={{ padding: '12px 0 0' }}>
             <button type="button" className="btn-neutral" onClick={onClose}>

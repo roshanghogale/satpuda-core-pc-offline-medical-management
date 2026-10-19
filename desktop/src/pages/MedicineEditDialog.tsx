@@ -282,7 +282,7 @@ export function MedicineEditDialog({
     setAlert({
       title: 'Delete Medicine',
       message:
-        'Hide this medicine from inventory? (Same as classic — soft delete / hide.)',
+        'Hide this medicine from inventory?',
       kind: 'confirm',
       confirmLabel: 'Delete',
       cancelLabel: 'Cancel',

@@ -1044,7 +1044,9 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
             setNote(
               res.counter
                 ? `Autosaved into today's counter bill ${res.bill_no || ''}`.trim()
-                : `Autosaved bill ${res.bill_no || res.autosave_sale_id}`,
+                : res.bill_no
+                  ? `Autosaved bill ${res.bill_no}`
+                  : 'Bill autosaved',
             )
           } else if (!res.ok && res.code === 'bill_discarded' && res.error) {
             // The refused bill from this tab was discarded in Settings → Sync: nothing more
@@ -1176,7 +1178,7 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
       setNote(
         rec.counter
           ? `Resumed your part of today's counter bill ${res.bill_no || ''}`.trim()
-          : `Resumed unfinished bill ${res.bill_no || rec.sale_id}`,
+          : `Resumed unfinished bill ${res.bill_no || ''}`.trim(),
       )
     } catch (e) {
       showAlert({
@@ -1197,7 +1199,7 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
     showAlert({
       title: 'Discard Unfinished Sale',
       message:
-        `${rec.held ? 'Unsaved sale' : `Bill ${rec.bill_no || rec.sale_id}`} — ${rec.items} item(s), ` +
+        `${rec.held || !rec.bill_no ? 'Unsaved sale' : `Bill ${rec.bill_no}`} — ${rec.items} item(s), ` +
         `₹${(Number(rec.total) || 0).toFixed(2)}.\n\n` +
         (rec.held
           ? 'Only the kept form is cleared. No bill was saved, so no stock or balance moves.'
@@ -1216,7 +1218,7 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
             // Settings → Sync, not here).
             if (!out.ok) throw new Error(out.error || 'The bill could not be reversed.')
             setRecovered((all) => all.filter((r) => r.token !== rec.token))
-            setNote(`Discarded unfinished bill ${rec.bill_no || rec.sale_id}`)
+            setNote(`Discarded unfinished bill ${rec.bill_no || ''}`.trim())
           } catch (e) {
             showAlert({
               title: 'Discard Unfinished Sale',
@@ -1573,7 +1575,7 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
       title: loaded.bill_no || tab.title,
       dirty: false,
     })
-    setNote(`Loaded ${loaded.bill_no || loaded.sale_id} for edit`)
+    setNote(loaded.bill_no ? `Loaded bill ${loaded.bill_no} for edit` : 'Loaded unsaved bill for edit')
   }
 
   useEffect(() => {
@@ -2139,13 +2141,7 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
       }
       const slotPrefs =
         slot === 1 ? prefsRef.current?.print_slot_1 : prefsRef.current?.print_slot_2
-      const via = (res as { dot_matrix?: boolean }).dot_matrix
-        ? 'dot-matrix'
-        : 'PDF/printer'
-      setNote(
-        `Saved ${res.bill_no} · ${slotPrefs?.label || `Print ${slot}`} (${via})` +
-          (prefsRef.current?.upi_qr_enabled ? ' · UPI QR from Settings' : ''),
-      )
+      setNote(`Saved ${res.bill_no} · sent to ${slotPrefs?.label || `Print Sales ${slot}`}`)
       // A long bill is split across sheets and pdf_path is only the LAST one,
       // so naming it read as "the first pages were not saved". Show the folder
       // whenever the file is not obviously the whole bill.
@@ -2213,10 +2209,7 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
         showAlert({ title: 'Reprint', message: res.error || 'Failed', kind: 'error' })
         return
       }
-      const via = (res as { dot_matrix?: boolean }).dot_matrix
-        ? 'dot-matrix'
-        : 'silent PDF'
-      setNote(`Reprinted ${res.bill_no || last.bill_no} (${via}, Print Sales 1)`)
+      setNote(`Reprinted bill ${res.bill_no || last.bill_no}`)
     } catch (e) {
       showAlert({
         title: 'Reprint',

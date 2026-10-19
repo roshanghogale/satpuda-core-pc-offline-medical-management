@@ -208,7 +208,7 @@ export default function App() {
     }
   }, [])
   const [splashOpen, setSplashOpen] = useState(true)
-  const [splashStatus, setSplashStatus] = useState('Starting local engine…')
+  const [splashStatus, setSplashStatus] = useState('Starting Satpuda…')
   const [licenseBlocked, setLicenseBlocked] = useState(false)
   const [accessBlocked, setAccessBlocked] = useState(false)
   // A lost licence file is not an expiry; the blocked screen says which.
@@ -269,7 +269,7 @@ export default function App() {
     let cancelled = false
     const boot = async () => {
       setSplashOpen(true)
-      setSplashStatus('Starting local engine…')
+      setSplashStatus('Starting Satpuda…')
       const engine = await ensureLocalEngine()
       if (cancelled) return
       if (!engine.ok) {
@@ -576,10 +576,7 @@ export default function App() {
       <main className={`content${LIST_PAGES.has(page) ? ' content-list' : ''}`} key={storeEpoch}>
         {apiOk === false && !IS_DEMO ? (
           <div className="error" style={{ margin: '12px 16px 0' }}>
-            Local data engine is not running. Close the browser tab and start from{' '}
-            <code>desktop</code> with <code>npm run tauri:dev</code> (not{' '}
-            <code>npm run dev</code>). That launches the same store engine as the
-            Python app.
+            Satpuda could not start its data service. Close the app and open it again.
           </div>
         ) : null}
         {meta?.store_auto_selected && !storePickConfirmed && !IS_DEMO ? (

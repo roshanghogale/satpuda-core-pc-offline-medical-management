@@ -37,8 +37,8 @@ export function OnlineMigrateDialog({ onResolved }: Props) {
     setBusy(true)
     setProgress(
       action === 'online_migrate_push'
-        ? 'Pushing local data to the server…'
-        : 'Removing local database…',
+        ? "Pushing this PC's copy to the server…"
+        : "Removing this PC's copy…",
     )
     try {
       await runMigrate(action)
@@ -57,24 +57,24 @@ export function OnlineMigrateDialog({ onResolved }: Props) {
         className="modal-card modal-card-wide"
         role="dialog"
         aria-modal="true"
-        aria-label="Local data found — Online is server-only"
+        aria-label="This PC has its own copy of the shop"
       >
         <div className="modal-head">
-          <h2>Local data found — Online is server-only</h2>
+          <h2>This PC has its own copy of the shop</h2>
         </div>
         <div className="modal-body">
           <p className="note">
-            This PC still has a local store database. Online mode uses the
+            This PC still has its own copy of the shop. Online mode uses the
             server only. Choose:
           </p>
           <ul className="note">
             <li>
-              <strong>Push to Server</strong> — upload local data, then delete
-              the local DB
+              <strong>Push to Server</strong> — upload this PC&apos;s copy, then
+              remove this PC&apos;s copy
             </li>
             <li>
-              <strong>Delete Local</strong> — discard local data and use server
-              data only
+              <strong>Delete Local</strong> — remove this PC&apos;s copy and use
+              the server only
             </li>
           </ul>
           {progress ? <p className="note">{progress}</p> : null}
@@ -99,7 +99,7 @@ export function OnlineMigrateDialog({ onResolved }: Props) {
               // that was printed whether or not the push had verified, so a
               // shop could be told it was safe and then destroy the evidence.
               const ok = window.confirm(
-                'Delete the local database?\n\n' +
+                "Remove this PC's copy?\n\n" +
                   'This removes the only copy on this PC. Do it only after ' +
                   '"Push to Server" has finished and reported success.\n\n' +
                   'If you are not sure the server has everything, press Cancel ' +

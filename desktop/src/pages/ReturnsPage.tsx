@@ -587,7 +587,7 @@ export function ReturnsPage({
       } else {
         setNote(
           res.queued
-            ? `Return ${label} delete queued — will sync.`
+            ? `Return ${label} deleted. It will reach the server when the internet is back.`
             : `Return ${label} deleted.`,
         )
       }
@@ -642,7 +642,7 @@ export function ReturnsPage({
       }
       setNote(
         res.queued
-          ? `Return ${label} delete queued — will sync.`
+          ? `Return ${label} deleted. It will reach the server when the internet is back.`
           : `Return ${label} deleted.`,
       )
       setPurchaseHistSel(null)
@@ -1813,7 +1813,7 @@ export function ReturnsPage({
                       items={(salesBill.items || []).map((it) => ({
                         id: String(it.medicine_id),
                         label: it.name,
-                        meta: `${it.batch} · rem ${salesShowQty(salesRemainingQty(it.medicine_id, it.remaining_qty), it)}`,
+                        meta: `${it.batch} · ${salesShowQty(salesRemainingQty(it.medicine_id, it.remaining_qty), it)} left`,
                       }))}
                       onChange={(v) => {
                         setSalesBillMedPick(v)
@@ -2169,7 +2169,7 @@ export function ReturnsPage({
                       items={(purchaseBill.items || []).map((it) => ({
                         id: String(it.medicine_id),
                         label: it.name,
-                        meta: `${it.batch} · rem ${purchaseRemainingQty(it.medicine_id, it.remaining_qty)}`,
+                        meta: `${it.batch} · ${purchaseRemainingQty(it.medicine_id, it.remaining_qty)} left`,
                       }))}
                       onChange={(v) => {
                         setPurchaseBillMedPick(v)
@@ -2543,8 +2543,8 @@ export function ReturnsPage({
         <>
           <SectionFrame title="Near / Expiry — grouped by purchase bill" className="lp-step">
             <Note>
-              Same flow as classic Bulk Purchase Return: one tab per purchase
-              bill, then write-offs for stock with no purchase record.
+              One tab per purchase bill, then write-offs for stock with no
+              purchase record.
             </Note>
             <ActionBar>
               <ActionBtn

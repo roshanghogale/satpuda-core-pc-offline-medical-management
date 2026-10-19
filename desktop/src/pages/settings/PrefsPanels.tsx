@@ -231,7 +231,7 @@ export function AppearancePanel({
             className="settings-action-btn prefs-btn-secondary"
             onClick={() =>
               onRequestRestart(
-                'Restart the desktop app to fully reload all pages and the local data engine.',
+                'Restart Satpuda to apply everything.',
               )
             }
           >
@@ -327,10 +327,8 @@ export function AppearancePanel({
             </p>
           </div>
           <Help title="About theme packs">
-            Packs rematch the same 20 themes: Classic (original), Accessible
-            (clearer chrome + high-contrast status), Modern (deeper dark / soft
-            light panels + vivid accents). Use Dark / Use Light still flips the
-            family variant only.
+            Classic, Accessible (higher contrast) and Modern give the same
+            colours a different look.
           </Help>
         </Frame>
         {saveBtn}
@@ -381,7 +379,7 @@ export function AppearancePanel({
             setAppearance={setAppearance}
           />
           <Check
-            label="Use default banner (assets/home_banner.png)"
+            label="Use the Satpuda banner"
             checked={useDefault}
             onChange={(v) =>
               setAppearance((a) => ({
@@ -444,7 +442,7 @@ export function AppearancePanel({
                             appearance.home_banner_size ?? 1500,
                           ),
                         })
-                        setBannerNote('Using default banner (assets/home_banner.png).')
+                        setBannerNote('Using the Satpuda banner.')
                         window.dispatchEvent(
                           new Event('satpuda:home-banner-changed'),
                         )
@@ -465,8 +463,7 @@ export function AppearancePanel({
           </div>
           {bannerNote ? <Note>{bannerNote}</Note> : null}
           <Help>
-            Browse copies the image into the app config folder (same as the Python
-            app). After Browse or Clear, open Home to see the banner (or click
+            Browse keeps a copy of the picture. After Browse or Clear, open Home to see the banner (or click
             Retry if it was blank).
           </Help>
         </Frame>
@@ -583,7 +580,7 @@ export function LayoutListsPanel({
 
   if (sectionId === 'thresholds') {
     if (!bundle.thresholds) {
-      return <p className="muted">Thresholds unavailable (DB offline).</p>
+      return <p className="muted">Alert limits could not be loaded.</p>
     }
     return (
       <ThresholdsPanel

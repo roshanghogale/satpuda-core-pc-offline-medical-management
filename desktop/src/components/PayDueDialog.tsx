@@ -93,7 +93,7 @@ export function PayDueDialog({
       })
       const d = (await res.json()) as { ok?: boolean; error?: string; message?: string }
       if (!res.ok || d.ok === false) {
-        setError(d.error || `Could not save (HTTP ${res.status}).`)
+        setError(d.error || "Could not reach the app's data. Try again.")
         setSaving(false)
         return
       }

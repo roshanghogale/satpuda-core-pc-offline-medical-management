@@ -791,7 +791,7 @@ export function ActivationDialog({ onActivated }: Props) {
             <p className="activation-hint">
               Type the shop's SC- key. It is on the Satpuda admin panel next to
               the shop, and on any device already connected to it under
-              Settings → Database → Administrator → Android Store Connection Key.
+              Settings → Data & System → Administrator → Android Store Connection Key.
             </p>
             <input
               className="activation-plain"
@@ -894,7 +894,7 @@ export function ActivationDialog({ onActivated }: Props) {
               On Android Satpuda Core activation enter the SAME store name and
               paste this key.
               <br />
-              Also available later: Settings → Database → Administrator → Android
+              Also available later: Settings → Data & System → Administrator → Android
               Store Connection Key.
             </p>
             {androidKey ? (

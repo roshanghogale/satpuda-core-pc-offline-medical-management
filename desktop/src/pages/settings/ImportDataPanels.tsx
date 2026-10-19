@@ -46,13 +46,39 @@ function StackField({
   )
 }
 
+/** Header row of the Verify Server Sync table (StatusBar shows that table fixed-width). */
+const SYNC_TABLE_HEAD = `${'What'.padEnd(20)} ${'This PC'.padStart(7)} ${'Server'.padStart(7)}`
+
+/** Collection names from Verify Server Sync, in the shop's words. */
+const SYNC_WORDS: Record<string, string> = {
+  customers: 'Customers',
+  suppliers: 'Suppliers',
+  medicines: 'Medicines',
+  doctors: 'Doctors',
+  sales: 'Sales bills',
+  purchases: 'Purchase bills',
+  customer_payments: 'Customer payments',
+  supplier_payments: 'Supplier payments',
+  sales_returns: 'Sales returns',
+  purchase_returns: 'Purchase returns',
+}
+
+/** What the phone sent, in plain words (never the raw export_type). */
+function phoneKind(t: unknown): string {
+  const k = String(t || '').toLowerCase()
+  if (k === 'medicines') return 'medicines'
+  if (k === 'purchases') return 'purchase bills'
+  if (k === 'sales') return 'sales bills'
+  return 'items'
+}
+
 /** What the last action said, kept in sight at the bottom of the panel. */
 function StatusBar({ msg, err, busy }: { msg?: string; err?: string; busy?: boolean }) {
   if (!msg && !err) return null
   if (err) return <div className="iset-statusbar err">{err}</div>
   const text = String(msg)
   // The server sync check is a small fixed-width table.
-  if (text.includes('Collection')) {
+  if (text.includes(SYNC_TABLE_HEAD)) {
     return (
       <div className="iset-statusbar">
         <pre className="mobile-preview">{text}</pre>
@@ -159,7 +185,6 @@ export function ImportPanel({
   const [mobileProblem, setMobileProblem] = useState('')
   const [mobileKind, setMobileKind] = useState('')
   const [mobileJson, setMobileJson] = useState('')
-  const [mobilePreview, setMobilePreview] = useState('')
   const [fileStatus, setFileStatus] = useState('')
   const [fileJson, setFileJson] = useState('')
   const [fileToken, setFileToken] = useState('')
@@ -255,16 +280,12 @@ export function ImportPanel({
         setMsg('WiFi receiver stopped. Press Start WiFi receiver to show the QR again.')
       } else if (action === 'mobile_status') {
         if (res.url || res.running === false) showMobileAnswer(res)
-        if (res.last_preview) {
-          setMobilePreview(JSON.stringify(res.last_preview, null, 2))
-        }
         if (res.has_payload && res.last_raw) {
           setMobileJson(String(res.last_raw))
-          setMsg('Received JSON from phone.')
+          setMsg('Received data from phone.')
         }
       } else if (action === 'parse_mobile') {
-        setMobilePreview(JSON.stringify(res, null, 2))
-        setMsg(`Detected ${res.export_type || 'data'} (${res.count ?? 0} items).`)
+        setMsg(`Found ${res.count ?? 0} ${phoneKind(res.export_type)}.`)
       } else if (action === 'import_mobile') {
         const parts = [
           `Inserted ${res.inserted ?? res.saved ?? 0}`,
@@ -285,7 +306,6 @@ export function ImportPanel({
         // background check does not put the same list back on screen.
         if (res.ok !== false) importedRawRef.current = mobileJson
         setMobileJson('')
-        setMobilePreview('')
       } else if (action === 'status') {
         setFileStatus(String(res.message || 'OK'))
       } else if (action === 'parse_file_import') {
@@ -478,9 +498,8 @@ export function ImportPanel({
         if (res.has_payload && raw && raw !== importedRawRef.current) {
           const preview = (res.last_preview || {}) as Record<string, unknown>
           setMobileJson(raw)
-          setMobilePreview(JSON.stringify(preview, null, 2))
           const count = Number(preview.count ?? 0)
-          const kind = String(preview.export_type || 'data')
+          const kind = phoneKind(preview.export_type)
           const device = String(preview.device_name || 'the phone')
           setMsg(`Received ${count} ${kind} from ${device}. Check the preview, then press Import.`)
         }
@@ -585,8 +604,8 @@ export function ImportPanel({
           />
           <Note>
             {importPrefs.gemini_configured
-              ? 'API key is built into this app (same as EXE / web). Store users do not enter a key.'
-              : 'Bill photo import is not available in this build.'}
+              ? 'Bill photo reading is ready.'
+              : 'Bill photo reading is not available.'}
           </Note>
           <Field label="Fallback schedule">
             {scheduleList.length ? (
@@ -621,9 +640,8 @@ export function ImportPanel({
             )}
           </Field>
           <Help>
-            File / image purchase bill import runs in Purchase (Shift+F2) using
-            the same Python parsers as classic. Photo reading is included in the
-            build — only enable/disable and fallback schedule are saved here.
+            File / image purchase bill import runs in Purchase (Shift+F2). Only
+            enable/disable and fallback schedule are saved here.
           </Help>
         </Frame>
         <SaveBar
@@ -669,8 +687,8 @@ export function ImportPanel({
         <Frame title="Import purchase JSON">
           <Note>
             Paste or load JSON with{' '}
-            <code>{'{"bills": [ ... ]}'}</code> — same format as classic Settings
-            → Import Data. Review each bill, then submit all at once.
+            <code>{'{"bills": [ ... ]}'}</code>. Review each bill, then submit all
+            at once.
           </Note>
           <input
             ref={fileInputRef}
@@ -854,13 +872,13 @@ export function ImportPanel({
             </button>
           </div>
         </Frame>
-        <Frame title="JSON payload">
+        <Frame title="Received data">
           <textarea
             className="settings-input iset-textarea"
             rows={8}
             value={mobileJson}
             onChange={(e) => setMobileJson(e.target.value)}
-            placeholder='Paste {"export_type":"medicines", ...} here'
+            placeholder="Data from the phone appears here (or paste it)"
           />
           <div className="iset-row">
             <button
@@ -882,9 +900,6 @@ export function ImportPanel({
               Parse preview
             </button>
           </div>
-          {mobilePreview ? (
-            <pre className="settings-note mobile-preview">{mobilePreview}</pre>
-          ) : null}
         </Frame>
         <StatusBar msg={msg} err={err} />
       </>
@@ -1402,11 +1417,6 @@ export function DataSystemPanel({
   const [expiryAdminUser, setExpiryAdminUser] = useState('')
   const [expiryAdminPass, setExpiryAdminPass] = useState('')
   const [activationDate, setActivationDate] = useState('')
-  const [serverProject, setServerProject] = useState('')
-  // Shown, not hard-coded: the PC may be on the direct host or, after a
-  // failover, on the slower tunnel. A fixed hostname here would lie.
-  const [serverApiBase, setServerApiBase] = useState('')
-  const [serverStoreId, setServerStoreId] = useState('')
   const [serverConfigured, setServerConfigured] = useState(false)
   const [serverSource, setServerSource] = useState('')
   const [, setServerJson] = useState('')
@@ -1548,7 +1558,7 @@ export function DataSystemPanel({
                   ? ' A USB drive is connected, so Backup Now still saves a copy there.'
                   : '')
               : res.folder_ok && !res.creds_ok
-                ? 'Google Drive credentials are missing or invalid on this PC (backup_creds.dat).'
+                ? 'Google Drive credentials are missing or invalid on this PC.'
                 : 'Google Drive backup is not configured on this PC: no Drive folder and no credentials.',
         )
       } catch {
@@ -1579,9 +1589,6 @@ export function DataSystemPanel({
       setActivationDate(String(ex.activation_date || ''))
 
       const credsRes = await systemAction({ action: 'admin_get_server_creds' })
-      setServerProject(String(credsRes.project_id || ''))
-      setServerApiBase(String(credsRes.api_base || ''))
-      setServerStoreId(String(credsRes.store_id || ''))
       setServerConfigured(Boolean(credsRes.configured))
       setServerSource(String(credsRes.source || ''))
       setServerJson(String(credsRes.json_text || ''))
@@ -1739,12 +1746,7 @@ export function DataSystemPanel({
       (action === 'verify_server_sync' || action === 'verify_server_sync') &&
       res.collections
     ) {
-      const lines: string[] = [
-        `Store: ${String(res.store_id || '')}`,
-        '',
-        'Collection           Local  Server  ',
-        '----------------------------------------',
-      ]
+      const lines: string[] = [SYNC_TABLE_HEAD, '-'.repeat(48)]
       const cols = res.collections as Record<
         string,
         { local?: number; server?: number; match?: boolean }
@@ -1752,19 +1754,19 @@ export function DataSystemPanel({
       for (const [col, row] of Object.entries(cols).sort(([a], [b]) =>
         a.localeCompare(b),
       )) {
-        const mark = row.match ? 'OK' : 'DIFF'
+        const mark = row.match ? 'OK' : 'Different'
         const remote = row.server ?? 0
         lines.push(
-          `${col.padEnd(20)} ${String(row.local ?? 0).padStart(6)} ${String(remote).padStart(8)}  ${mark}`,
+          `${(SYNC_WORDS[col] || col).padEnd(20)} ${String(row.local ?? 0).padStart(7)} ${String(remote).padStart(7)}  ${mark}`,
         )
       }
       if (res.sales_total_local != null && res.sales_total_server != null) {
         lines.push('')
         lines.push(
-          `Sales total local:    ${Number(res.sales_total_local).toLocaleString('en-IN')}`,
+          `Sales total this PC:  ${Number(res.sales_total_local).toLocaleString('en-IN')}`,
         )
         lines.push(
-          `Sales total Server:   ${Number(res.sales_total_server).toLocaleString('en-IN')}`,
+          `Sales total server:   ${Number(res.sales_total_server).toLocaleString('en-IN')}`,
         )
       }
       const issues = Array.isArray(res.issues) ? res.issues : []
@@ -1905,10 +1907,9 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
         <PanelTitle>Stores &amp; Startup Alerts</PanelTitle>
         <Frame title="Stores">
           <Note>
-            Active store: <strong>{activeKey || '—'}</strong>
+            Active store: <strong>{activeStoreName || activeKey || '—'}</strong>
             {'. '}
-            Switching reopens the store database immediately. Use Restart App
-            for a full clean UI reload.
+            Switching opens the other store.
           </Note>
           <div className="iset-row">
             <button
@@ -1917,7 +1918,7 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
               disabled={busy}
               onClick={() =>
                 onRequestRestart?.(
-                  'Restart the desktop app to fully reload all pages and the local data engine.',
+                  'Restart Satpuda to apply everything.',
                 )
               }
             >
@@ -1977,7 +1978,6 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
             <thead>
               <tr>
                 <th>Name</th>
-                <th>Key</th>
                 <th className="act">Actions</th>
               </tr>
             </thead>
@@ -1992,7 +1992,6 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
                       {name}
                       {isActive ? <span className="iset-badge ok">active</span> : null}
                     </td>
-                    <td className="mono">{key}</td>
                     <td className="act">
                       <button
                         type="button"
@@ -2134,7 +2133,7 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
                 if (
                   !window.confirm(
                     'Forget which store on the server this PC belongs to?\n\n' +
-                      'It will go back to matching by store key on the next ' +
+                      'It will find its store again by name on the next ' +
                       'connection. Use this only if this PC was connected to ' +
                       'the wrong store.',
                   )
@@ -2162,8 +2161,6 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
                   <tr>
                     <th style={{ width: 28 }} />
                     <th>Store on the server</th>
-                    <th>Id</th>
-                    <th>Key</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2207,8 +2204,6 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
                             </div>
                           ) : null}
                         </td>
-                        <td className="mono">{s.store_id}</td>
-                        <td className="mono">{s.store_key}</td>
                       </tr>
                     )
                   })}
@@ -2222,7 +2217,7 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
                     <strong>
                       {serverStores.find((s) => s.store_id === joinPickId)?.store_name}
                     </strong>{' '}
-                    (id {joinPickId}) as the store{' '}
+                    as the store{' '}
                     <strong>{activeStoreName || activeKey}</strong>. Two shops
                     can share a name, so type the store name exactly as it is
                     shown above to confirm. <em>Add as another store</em> keeps
@@ -2448,7 +2443,7 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
       <>
         <PanelTitle>Data Maintenance</PanelTitle>
         <Frame title="Maintenance">
-          <Note>Normalizes medicine names in the active database.</Note>
+          <Note>Tidies medicine names (spacing and capital letters).</Note>
           <div className="iset-row">
             <button
               type="button"
@@ -2627,10 +2622,7 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
         </Frame>
         {backupOnlineMode && backupServerConfigured ? (
           <Frame title="Satpuda Core Server">
-            <Note>
-              Online: each save pushes live; SyncEngine pulls revision deltas
-              (WebSocket + 45s safety).
-            </Note>
+            <Note>Online, every save reaches the server by itself.</Note>
             <Help>
               Manual: Push to Server / Push All Stores. Pull from Server =
               disaster-recovery full replace only. Verify compares counts.
@@ -2644,8 +2636,7 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
                   if (
                     window.confirm(
                       'PUSH — Upload the ACTIVE store only to Satpuda Core Server?\n\n' +
-                        'Each store has its own server partition (store_pk). ' +
-                        'Data does not mix with other stores.\n\n' +
+                        'Each store is kept separately on the server.\n\n' +
                         'Use “Push All Stores” for every store on this PC.',
                     )
                   ) {
@@ -2663,8 +2654,7 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
                   if (
                     window.confirm(
                       'PUSH ALL — Upload EVERY local store on this PC?\n\n' +
-                        'Each store is paired separately and written only under ' +
-                        'that store’s store_pk. Data is not merged across stores.',
+                        'Each store is kept separately on the server.',
                     )
                   ) {
                     void run('push_all_stores_to_server')
@@ -2689,7 +2679,7 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
                   if (
                     window.confirm(
                       'PULL FROM SERVER — disaster recovery full replace?\n\n' +
-                        'Day-to-day sync is automatic (revision SyncEngine). ' +
+                        'Online, every save reaches the server by itself. ' +
                         'Use this only when this PC is badly out of date or recovering.\n\n' +
                         'Local business rows are cleared, then a clean download runs.',
                     )
@@ -2704,8 +2694,7 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
           </Frame>
         ) : backupOnlineMode ? (
           <Note>
-            Online: each save pushes live; SyncEngine pulls revision deltas
-            (WebSocket + 45s safety). Manual: Push to Server / Push All Stores.
+            Online, every save reaches the server by itself. Manual: Push to Server / Push All Stores.
             Pull from Server = disaster-recovery full replace only. Verify compares
             counts.
           </Note>
@@ -2862,7 +2851,7 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
         {!adminLoggedIn ? (
           <Frame title="Administrator login">
             <Note>
-              Restricted tools: Drive backup folder, expiry.dat editor, sync mode,
+              Restricted tools: Drive backup folder, Licence expiry, sync mode,
               server connection info, and Android store connection key.
             </Note>
             <Field label="Username">
@@ -2910,7 +2899,7 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
           <>
             <p className="iset-callout">
               Logged in as administrator. Restricted tools: Drive backup folder,
-              expiry.dat editor, sync mode, server connection info, and Android
+              Licence expiry, sync mode, server connection info, and Android
               store connection key.
             </p>
             <Frame title="Global Master Medicines">
@@ -2918,8 +2907,8 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
                 Server holds one global catalog. Normal Push/Pull never touches it.
               </Note>
               <Help>
-                Download replaces the local snapshot; Push stock enriches the server
-                from inventory.
+                Download replaces this PC&apos;s catalogue; Push adds your stock medicines
+                to it.
               </Help>
               <div className="iset-row">
                 <button
@@ -3091,20 +3080,6 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
             <Frame title="Server Connection">
               <div className="iset-summary">
                 <div className="iset-stat">
-                  <span>API</span>
-                  <strong style={{ fontSize: 12 }}>{serverApiBase || '—'}</strong>
-                </div>
-                <div className="iset-stat">
-                  <span>Project</span>
-                  <strong style={{ fontSize: 12 }}>
-                    {serverProject || 'satpuda-core-server'}
-                  </strong>
-                </div>
-                <div className="iset-stat">
-                  <span>Store</span>
-                  <strong style={{ fontSize: 12 }}>{serverStoreId || '—'}</strong>
-                </div>
-                <div className="iset-stat">
                   <span>Ready</span>
                   <strong style={{ fontSize: 12 }}>
                     {serverConfigured ? 'Yes' : 'No'}
@@ -3112,10 +3087,6 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
                   </strong>
                 </div>
               </div>
-              <Note>
-                Online is server-first: lists load from the server; switching
-                Online does not download the full DB into SQLite.
-              </Note>
             </Frame>
             <Frame title="Android Store Connection Key">
               <Note>
@@ -3202,7 +3173,7 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
       <>
         <PanelTitle>Danger Zone</PanelTitle>
         <div className="iset-danger-zone">
-          <Frame title="Delete All Tables">
+          <Frame title="Delete all data">
             <p className="iset-callout warn">
               This will permanently delete <strong>all local data</strong> for this
               store. Server cloud data is not wiped here (use the admin dashboard).

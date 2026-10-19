@@ -1103,8 +1103,7 @@ export function PharmacyPanel(props: Props) {
             ))
           ) : (
             <Note>
-              Bill field groups did not load. Restart the desktop window so the
-              local engine refreshes.
+              Bill field groups did not load. Restart the app.
             </Note>
           )}
           <Help>
@@ -1194,9 +1193,9 @@ export function PharmacyPanel(props: Props) {
               whatever was chosen on this pane, so changing it here did nothing
               on paper. One place decides, and it is the slot. */}
           <Note>
-            Paper size, A6 half, A5 half and A4 layout are set per print slot,
-            under Print Sales 1 / Print Sales 2 — the slot always decides what
-            comes out of the printer.
+            Paper size, A6 half, A5 half and A4 layout are set on the Print
+            Sales 1 / 2 button — that button always decides what comes out of
+            the printer.
           </Note>
           <div className="ph-fields">
             <Field label="Page copies (Print Bill)">
@@ -1268,9 +1267,9 @@ export function PharmacyPanel(props: Props) {
           <Help>
             <ul className="ph-help-list">
               <li>
-                Page copies: how many times each sheet is sent to the printer on
-                the direct <b>Print Bill</b> path. F7 / F8 / F9 use the copies
-                set on their own Print Sales slot instead.
+                Page copies: how many times each sheet is sent to the printer by
+                the <b>Print</b> button. F7 / F8 / F9 use the copies set on their
+                own Print Sales 1 / 2 button instead.
               </li>
               <li>
                 Medicines per bill page: max lines on one printed bill; extra
@@ -1817,7 +1816,7 @@ export function PharmacyPanel(props: Props) {
               ))}
             </select>
           </Field>
-          <Note>Leave slot printers blank to use the default printer.</Note>
+          <Note>Leave the printers for Print Sales 1/2 blank to use the default printer.</Note>
 
           <Field label="Printer type">
             <select
@@ -1880,7 +1879,7 @@ export function PharmacyPanel(props: Props) {
             className="ph-advanced"
             open={String(printer.printer_type || 'standard') === 'dot_matrix'}
           >
-            <summary>SumatraPDF, dot matrix print method, debug log</summary>
+            <summary>SumatraPDF, dot matrix print method, print log file</summary>
             <div className="ph-advanced-body">
               <Field label="SumatraPDF path">
                 <div className="ph-select-btn">
@@ -1910,8 +1909,7 @@ export function PharmacyPanel(props: Props) {
                 </div>
               </Field>
               <Note>
-                Auto-detects tools\SumatraPDF64.exe or SumatraPDF32.exe (dev and
-                EXE).
+                Auto-detects tools\SumatraPDF64.exe or SumatraPDF32.exe.
               </Note>
 
               <Field label="Dot matrix print method">
@@ -1948,7 +1946,7 @@ export function PharmacyPanel(props: Props) {
               </Help>
 
               <Note>
-                Print debug log: {printLogPath || 'config/print_log.txt'}
+                Print log file: {printLogPath || 'config/print_log.txt'}
               </Note>
             </div>
           </details>

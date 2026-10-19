@@ -251,8 +251,7 @@ async function getJson<T>(path: string): Promise<T> {
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
     const err = data as { error?: string; path?: string }
-    const msg = err.error || `HTTP ${res.status}`
-    throw new Error(err.path ? `${msg} (${err.path})` : msg)
+    throw new Error(err.error || "Could not reach the app's data. Try again.")
   }
   return data as T
 }
@@ -828,8 +827,7 @@ async function postJson<T>(
     if (passTypedErrors && err.ok === false && typeof err.code === 'string' && err.code) {
       return data as T
     }
-    const msg = err.error || `HTTP ${res.status}`
-    throw new Error(err.path ? `${msg} (${err.path})` : msg)
+    throw new Error(err.error || "Could not reach the app's data. Try again.")
   }
   return data as T
 }

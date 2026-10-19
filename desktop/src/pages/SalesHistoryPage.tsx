@@ -359,7 +359,7 @@ export function SalesHistoryPage({
       }
       setAlert({
         title: 'Print',
-        message: `Bill sent to printer (slot ${slot}).`,
+        message: `Bill sent to Print Sales ${slot}.`,
         kind: 'info',
       })
     } catch (e) {
@@ -424,7 +424,7 @@ export function SalesHistoryPage({
       }
       setAlert({
         title: 'Print',
-        message: `Bill sent to printer (slot ${slot}).`,
+        message: `Bill sent to Print Sales ${slot}.`,
         kind: 'info',
       })
     } catch (e) {

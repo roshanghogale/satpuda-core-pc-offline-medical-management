@@ -1936,7 +1936,7 @@ function clearedText(r: Record<string, unknown>) {
   if (ref) return `Refund of ${ref.return_no}${ref.bill_no ? ` (bill ${shortNo(ref.bill_no)})` : ''}`
   const cleared = Array.isArray(r.cleared) ? (r.cleared as PaymentCleared[]) : []
   const parts = cleared.map(
-    (c) => `${shortNo(c.bill_no) || `#${c.bill_id}`} ₹${money(c.amount)}${c.how === 'chosen' ? ' ✓' : ''}`,
+    (c) => `${shortNo(c.bill_no) || 'bill'} ₹${money(c.amount)}${c.how === 'chosen' ? ' ✓' : ''}`,
   )
   const left = Number(r.credit_left || 0)
   if (left > 0.009) parts.push(`₹${money(left)} left as credit`)
@@ -2114,7 +2114,7 @@ function PaymentDetailsDialog({
                   <tbody>
                     {d.cleared.map((c, i) => (
                       <tr key={`${c.bill_id}-${i}`}>
-                        <td>{shortNo(c.bill_no) || `#${c.bill_id}`}</td>
+                        <td>{shortNo(c.bill_no) || 'bill'}</td>
                         <td>{c.date}</td>
                         <td className="num">{money(c.bill_total)}</td>
                         <td className="num">{money(c.amount)}</td>
@@ -2607,7 +2607,7 @@ export function PaymentPanel({
       setRefundTicks({ [ref.return_id]: Math.abs(Number(r.amount || 0)).toFixed(2) })
       setEditingReturn(ref.return_id)
       setEditingId(id)
-      setEditHint(`Editing refund #${id} (${ref.return_no}). Save updates this row.`)
+      setEditHint(`Editing the refund of ${ref.return_no} — Save to update it.`)
       return
     }
     if (payKind === 'refund') {
@@ -2639,7 +2639,7 @@ export function PaymentPanel({
     setAmountTyped(true)
     if (id > 0) {
       setEditingId(id)
-      setEditHint(`Editing payment #${id}. Save updates this row.`)
+      setEditHint('Editing this payment — Save to update it.')
     } else {
       setEditingId(null)
       setEditHint('')
@@ -2658,10 +2658,10 @@ export function PaymentPanel({
           title={
             payKind === 'refund'
               ? editingId
-                ? `Edit refund #${editingId}`
+                ? 'Edit refund'
                 : 'Refund a return'
               : editingId
-                ? `Edit payment #${editingId}`
+                ? 'Edit payment'
                 : 'New payment'
           }
         >
@@ -2768,7 +2768,7 @@ export function PaymentPanel({
           </div>
           {payKind === 'refund' && party.trim() ? (
             !refundSupported ? (
-              <Note>Online, refund a return from the Returns page; refunds here work in Offline / offline-first.</Note>
+              <Note>Online, refund a return from the Returns page; refunds here work when this PC works offline.</Note>
             ) : (
               <>
                 {refundErr ? <p className="iset-callout warn">{refundErr}</p> : null}
@@ -2839,7 +2839,7 @@ export function PaymentPanel({
           ) : null}
           {payKind === 'payment' && billMode === 'choose' && party.trim() ? (
             !billsSupported ? (
-              <Note>Online, a payment clears the oldest bills first; bills can be chosen in Offline / offline-first.</Note>
+              <Note>Online, a payment clears the oldest bills first; bills can be chosen when this PC works offline.</Note>
             ) : (
               <>
                 {billsErr ? <p className="iset-callout warn">{billsErr}</p> : null}
@@ -2868,7 +2868,7 @@ export function PaymentPanel({
                                 onChange={(e) => tickBill(b, e.target.checked)}
                               />
                             </td>
-                            <td>{shortNo(b.bill_no) || `#${b.bill_id}`}</td>
+                            <td>{shortNo(b.bill_no) || 'bill'}</td>
                             <td>{b.date}</td>
                             <td className="num">{money(b.total)}</td>
                             <td className="num">{money(b.owes)}</td>
@@ -3592,7 +3592,7 @@ function ReorderBySupplierEditor({
       })
       const line = res.line as ReorderLine | undefined
       if (!line?.medicine_name) {
-        setErr('Could not build line.')
+        setErr('Could not add this medicine.')
         return
       }
       setLines((prev) => [...prev, line])
@@ -3698,7 +3698,7 @@ function ReorderBySupplierEditor({
     <Frame title="Load by Supplier">
       <Note>
         Select a supplier, add medicines with suggested qty/rate, then save as
-        draft or mark ordered (same as classic Reorder supplier tab).
+        draft or mark ordered.
       </Note>
       <Field label="Supplier">
         <select
@@ -3911,7 +3911,7 @@ export function ReorderPanel({
     try {
       const tabs = await fetchReorderBulkTabs()
       setMultiTabs(tabs)
-      setMsg(`Loaded ${tabs.length} supplier tab(s) from stock candidates.`)
+      setMsg(`Loaded ${tabs.length} supplier(s) to reorder from.`)
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
     } finally {
@@ -3983,7 +3983,7 @@ export function ReorderPanel({
   async function openPurchaseForGroup(group: Record<string, unknown>) {
     const firstId = Number(group.first_id || 0)
     if (firstId <= 0) {
-      setErr('No order id for this group.')
+      setErr('This order cannot be opened.')
       return
     }
     setBusy(true)
@@ -3995,7 +3995,7 @@ export function ReorderPanel({
       })
       const prefill = res.prefill as ReorderPrefill | undefined
       if (!prefill?.order_id) {
-        setErr('Could not build purchase prefill.')
+        setErr('Could not open this order in Purchase.')
         return
       }
       onOpenPurchase?.(prefill)
@@ -4161,7 +4161,7 @@ export function ReorderPanel({
           <Frame title="New Order">
             <Note>
               Create draft reorder groups grouped by preferred supplier, or use
-              multi-supplier tabs with bulk load (same as classic Reorder page).
+              multi-supplier tabs with bulk load.
             </Note>
             <div className="iset-row">
               <SaveBtn
@@ -4330,6 +4330,19 @@ export function ShelfPanel({
       return m.location === loc || m.location.startsWith(loc)
     })
   }, [shelf.assigned, selected])
+
+  /** "A / 2 / 3" for a stored key like rack1section2box3 (the key is never shown). */
+  const locWords = useMemo(() => {
+    const out = new Map<string, string>()
+    for (const r of shelf.racks) {
+      out.set(locKey(r.name), pathLabel(r.name))
+      for (const s of r.sections || []) {
+        out.set(locKey(r.name, s.name), pathLabel(r.name, s.name))
+        for (const b of s.boxes || []) out.set(locKey(r.name, s.name, b.name), pathLabel(r.name, s.name, b.name))
+      }
+    }
+    return out
+  }, [shelf.racks])
 
   // Tk uses a persistent split: tree | medicines. Sidebar section is navigational only.
   void sectionId
@@ -4630,7 +4643,14 @@ export function ShelfPanel({
                           <tr key={m.id}>
                             <td>{m.name}</td>
                             <td>{m.batch}</td>
-                            <td>{m.location}</td>
+                            <td>
+                              {locWords.get(m.location) ||
+                                (m.location.match(/^rack(\d+)(?:section(\d+))?(?:box(\d+))?$/) || [])
+                                  .slice(1)
+                                  .filter(Boolean)
+                                  .join(' / ') ||
+                                m.location}
+                            </td>
                             <td className="act">
                               <button
                                 type="button"

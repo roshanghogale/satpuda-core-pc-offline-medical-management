@@ -493,7 +493,7 @@ export function InventoryPage({
         if (!res.ok || !res.prefill) {
           setAlert({
             title: 'Reorder',
-            message: res.error || 'Could not build reorder line.',
+            message: res.error || 'Could not add this medicine to reorder.',
             kind: 'warning',
           })
           return

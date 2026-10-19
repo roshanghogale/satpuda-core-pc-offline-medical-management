@@ -6,7 +6,7 @@ type Props = {
 /** Full-screen loading overlay while the local engine and first paint finish. */
 export function StartupSplashOverlay({
   open,
-  status = 'Starting local engine…',
+  status = 'Starting Satpuda…',
 }: Props) {
   if (!open) return null
 

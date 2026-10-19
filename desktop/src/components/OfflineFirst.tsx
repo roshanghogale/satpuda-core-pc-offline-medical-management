@@ -64,7 +64,7 @@ export function OfflineFirstPill() {
   }, [])
 
   if (!st?.registered) {
-    return <span className="mainnav-sync mainnav-sync-offline">Offline-first</span>
+    return <span className="mainnav-sync mainnav-sync-offline">This PC only</span>
   }
   const waiting = (st.noted || 0) + (st.waiting || 0) + (st.stock_moves_waiting || 0)
   const errRecent =
@@ -86,14 +86,14 @@ export function OfflineFirstPill() {
         className={`mainnav-sync ${cls}`}
         style={{ cursor: 'pointer' }}
         // The pill may be cut short on a narrow window: the whole status is in the tooltip.
-        title={`${label}. Offline-first sync: this PC works on its own copy and keeps it in step with the server`}
+        title={`${label}. Sync: this PC works on its own copy and keeps it in step with the server`}
         onClick={() => setOpen((v) => !v)}
       >
         {label}
       </button>
       {open ? (
         <div className="offline-first-pop" role="dialog" aria-label="Sync details">
-          <div><b>This PC</b> · device {st.device_no ?? '—'}</div>
+          <div><b>This PC</b></div>
           <div>Last sent: {ago(st.last_push_at)} · last received: {ago(st.last_pull_at)}</div>
           <div>
             Waiting to send: {waiting} {waiting ? '(kept on this PC until the server has them)' : ''}
@@ -101,11 +101,6 @@ export function OfflineFirstPill() {
           {st.flagged ? (
             <div style={{ color: 'var(--danger, #c0392b)' }}>
               {st.flagged} record(s) need a look (kept on the server, nothing lost).
-            </div>
-          ) : null}
-          {st.numbers_left ? (
-            <div className="muted">
-              Bill numbers ready: {st.numbers_left.sales ?? 0} · purchase numbers: {st.numbers_left.purchases ?? 0}
             </div>
           ) : null}
           {errRecent ? <div className="muted">Last try: {st.last_error}</div> : null}
@@ -265,11 +260,6 @@ export function OfflineFirstAutoSwitch({ enabled }: { enabled: boolean }) {
               <p className="muted">Nothing was changed: the store stays Online. It will try again next time.</p>
             </>
           ) : null}
-          <ul className="muted" style={{ maxHeight: 180, overflow: 'auto', fontSize: 12 }}>
-            {steps.slice(-8).map((s, i) => (
-              <li key={i}>{s}</li>
-            ))}
-          </ul>
         </div>
         {state === 'error' ? (
           <div className="modal-foot">
