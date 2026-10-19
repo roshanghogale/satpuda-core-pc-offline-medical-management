@@ -63,6 +63,7 @@ import {
 import { CappedTableWrap } from '../pageChrome'
 import '../../styles/interactive-settings.css'
 import '../../styles/payments-ledger.css'
+import '../../styles/alerts.css'
 import {
   ReorderMultiTabEditor,
   fetchReorderBulkTabs,
@@ -1301,15 +1302,6 @@ function alertDisplayRow(sp: (typeof ALERT_SPECS)[string], r: unknown[], money: 
 }
 
 type ExportHow = AlertExportHow
-const EXPORT_HOW: { key: ExportHow; label: string }[] = [
-  { key: 'xlsx', label: 'Excel file' },
-  { key: 'pdf', label: 'PDF file' },
-  { key: 'csv', label: 'CSV file' },
-  { key: 'pdf_split', label: 'PDF — one file per supplier (Expired / Near Expiry)' },
-  { key: 'dm_a4', label: 'Print — dot matrix, A4' },
-  { key: 'dm_a5', label: 'Print — dot matrix, A5' },
-  { key: 'printer', label: 'Print — normal printer (laser / inkjet)' },
-]
 
 /** The sections of an export: the list on screen (with its search) or all five, as the
  *  screen filters them (Month / Year), Expired / Near Expiry by supplier when asked. */
@@ -1366,7 +1358,6 @@ function AlertsExportDialog({
   const canGroup = keys.some((k) => ALERT_SPECS[k]?.periodOf === 'expiry')
   const sections = alertSections(alerts, keys, current, period, search, bySupplier || how === 'pdf_split')
   const total = sections.reduce((n, s) => n + s.rows.length, 0)
-  const hows = EXPORT_HOW.filter((o) => o.key !== 'pdf_split' || canGroup)
 
   async function go() {
     setBusy(true)
@@ -1387,61 +1378,132 @@ function AlertsExportDialog({
     }
   }
 
+  const isPrint = how.startsWith('dm_') || how === 'printer'
+  const showPage = how !== 'csv' && how !== 'xlsx' && how !== 'dm_a5'
+  const grouped = canGroup && (bySupplier || how === 'pdf_split')
+  const suppliers = grouped
+    ? new Set(
+        sections
+          .filter((sec) => sec.group_by)
+          .flatMap((sec) => {
+            const at = sec.columns.indexOf('Supplier')
+            return at < 0 ? [] : sec.rows.map((r) => String(r[at] ?? '') || 'Unknown supplier')
+          }),
+      ).size
+    : 0
+  const formats: { key: ExportHow; label: string; sub: string }[] = [
+    { key: 'xlsx', label: 'Excel', sub: '.xlsx' },
+    { key: 'pdf', label: 'PDF', sub: grouped ? 'one file' : '.pdf' },
+    ...(grouped ? [{ key: 'pdf_split' as ExportHow, label: 'PDF per supplier', sub: `${suppliers} files` }] : []),
+    { key: 'csv', label: 'CSV', sub: '.csv' },
+    { key: 'printer', label: 'Print', sub: 'laser / inkjet' },
+    { key: 'dm_a4', label: 'Dot matrix', sub: 'A4' },
+    { key: 'dm_a5', label: 'Dot matrix', sub: 'A5' },
+  ]
+  const pickLayout = (bySup: boolean) => {
+    setBySupplier(bySup)
+    if (!bySup && how === 'pdf_split') setHow('pdf')
+  }
+
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
-      <div className="modal-card" role="dialog" aria-modal="true" aria-label="Export / Print"
+      <div className="alx-xp" role="dialog" aria-modal="true" aria-label="Export or print alerts"
         onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
-          <h2>Export / Print — Alert &amp; Monitoring</h2>
-          <button type="button" className="icon-btn" onClick={onClose}>
+        <div className="alx-xp-head">
+          <div>
+            <h2>Export / Print</h2>
+            <p>Alert &amp; Monitoring{period ? ` · ${periodLabel(period)}` : ''}</p>
+          </div>
+          <button type="button" className="alx-close" onClick={onClose} aria-label="Close">
             ✕
           </button>
         </div>
-        <div className="modal-body">
-          <Field label="What">
-            <select className="settings-input" value={which}
-              onChange={(e) => setWhich(e.target.value as 'current' | 'all')}>
-              <option value="current">This list ({ALERT_SPECS[current]?.title})</option>
-              <option value="all">All lists (Low, Out of Stock, Expired, Near Expiry, Dues)</option>
-            </select>
-          </Field>
-          <Field label="How">
-            <select className="settings-input" value={how} onChange={(e) => setHow(e.target.value as ExportHow)}>
-              {hows.map((o) => (
-                <option key={o.key} value={o.key}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </Field>
-          {canGroup && how !== 'pdf_split' ? (
-            <Check
-              label="Expired / Near Expiry supplier-wise (a block and a total per supplier)"
-              checked={bySupplier}
-              onChange={setBySupplier}
-            />
-          ) : null}
-          {how !== 'csv' && how !== 'xlsx' && how !== 'dm_a5' ? (
-            <Field label="Page">
-              <select className="settings-input" value={pageLayout}
-                onChange={(e) => setPageLayout(e.target.value as 'portrait' | 'landscape')}>
-                <option value="portrait">A4 vertical (portrait)</option>
-                <option value="landscape">A4 horizontal (landscape)</option>
-              </select>
-            </Field>
-          ) : null}
-          <Note>
-            {total} rows{period ? ` · ${periodLabel(period)}` : ''}
-            {which === 'all' ? ` · ${sections.map((s) => `${s.title}: ${s.rows.length}`).join(' · ')}` : ''}
-          </Note>
-          {error ? <p className="settings-error">{error}</p> : null}
-          <div className="iset-row">
-            <SaveBtn label={how.startsWith('dm_') || how === 'printer' ? 'Print' : 'Save file'}
-              saving={busy} onClick={() => void go()} />
-            <button type="button" className="settings-action-btn iset-secondary" onClick={onClose}>
-              Cancel
+        <div className="alx-xp-body">
+          <div className="alx-xp-label">Which list</div>
+          <div className="alx-xp-cards two">
+            <button type="button" className={`alx-xp-card${which === 'current' ? ' on' : ''}`}
+              onClick={() => setWhich('current')}>
+              <b>This list</b>
+              <span>{ALERT_SPECS[current]?.title}</span>
+            </button>
+            <button type="button" className={`alx-xp-card${which === 'all' ? ' on' : ''}`}
+              onClick={() => setWhich('all')}>
+              <b>All lists</b>
+              <span>Low, Out of Stock, Expired, Near Expiry, Dues</span>
             </button>
           </div>
+
+          {canGroup ? (
+            <>
+              <div className="alx-xp-label">How the medicines are listed</div>
+              <div className="alx-xp-cards two">
+                <button type="button" className={`alx-xp-card${!grouped ? ' on' : ''}`}
+                  onClick={() => pickLayout(false)}>
+                  <b>Export list</b>
+                  <span>One table of all medicines</span>
+                  <i className="alx-xp-mini">
+                    <em />
+                    <em />
+                    <em />
+                  </i>
+                </button>
+                <button type="button" className={`alx-xp-card${grouped ? ' on' : ''}`}
+                  onClick={() => pickLayout(true)}>
+                  <b>Export list by supplier</b>
+                  <span>Supplier name, then its medicines and a total</span>
+                  <i className="alx-xp-mini grouped">
+                    <strong />
+                    <em />
+                    <em />
+                    <strong />
+                    <em />
+                  </i>
+                </button>
+              </div>
+            </>
+          ) : null}
+
+          <div className="alx-xp-label">Format</div>
+          <div className="alx-xp-formats">
+            {formats.map((f) => (
+              <button key={f.key} type="button" className={`alx-xp-fmt${how === f.key ? ' on' : ''}`}
+                onClick={() => setHow(f.key)}>
+                <b>{f.label}</b>
+                <span>{f.sub}</span>
+              </button>
+            ))}
+          </div>
+
+          {showPage ? (
+            <>
+              <div className="alx-xp-label">Page</div>
+              <div className="alx-xp-seg">
+                <button type="button" className={pageLayout === 'portrait' ? 'on' : ''}
+                  onClick={() => setPageLayout('portrait')}>
+                  A4 vertical
+                </button>
+                <button type="button" className={pageLayout === 'landscape' ? 'on' : ''}
+                  onClick={() => setPageLayout('landscape')}>
+                  A4 horizontal
+                </button>
+              </div>
+            </>
+          ) : null}
+          {error ? <p className="settings-error">{error}</p> : null}
+        </div>
+        <div className="alx-xp-foot">
+          <span className="alx-xp-count">
+            {total} rows
+            {grouped ? ` · ${suppliers} supplier${suppliers === 1 ? '' : 's'}` : ''}
+            {which === 'all' ? ` · ${sections.length} lists` : ''}
+          </span>
+          <button type="button" className="btn btn-neutral" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="button" className="btn btn-primary" disabled={busy || total === 0}
+            onClick={() => void go()}>
+            {busy ? 'Working…' : isPrint ? 'Print' : how === 'pdf_split' ? `Save ${suppliers} PDFs` : 'Save file'}
+          </button>
         </div>
       </div>
     </div>

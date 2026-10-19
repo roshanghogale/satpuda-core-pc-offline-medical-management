@@ -694,3 +694,186 @@
   align-self: flex-end;
   height: var(--unit-h);
 }
+
+/* ── Export / Print box (Settings -> Alert & Monitoring), owner 19 Oct 2026: two clear
+   choices, "Export list" or "Export list by supplier", and nothing cut off. ─────────── */
+.alx-xp {
+  width: min(560px, calc(94vw / var(--ui-font-scale, 1)));
+  max-height: calc((100vh - 40px) / var(--ui-font-scale, 1));
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 18px 50px color-mix(in srgb, #000 35%, transparent);
+  overflow: hidden;
+}
+.alx-xp-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.alx-xp-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+.alx-xp-head p {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+.alx-xp-head .alx-close {
+  margin-left: auto;
+}
+.alx-xp-body {
+  padding: 4px 16px 14px;
+  overflow: auto;
+}
+.alx-xp-label {
+  margin: 12px 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.alx-xp-cards {
+  display: grid;
+  gap: 8px;
+}
+.alx-xp-cards.two {
+  grid-template-columns: 1fr 1fr;
+}
+.alx-xp-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px 12px;
+  text-align: left;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+.alx-xp-card b {
+  font-size: 13px;
+}
+.alx-xp-card span {
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  line-height: 1.3;
+}
+.alx-xp-card:hover {
+  border-color: var(--primary);
+}
+.alx-xp-card.on {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 9%, var(--surface));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 22%, transparent);
+}
+.alx-xp-mini {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  margin-top: 6px;
+}
+.alx-xp-mini em,
+.alx-xp-mini strong {
+  display: block;
+  height: 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--fg-muted) 30%, transparent);
+}
+.alx-xp-mini.grouped em {
+  margin-left: 10px;
+}
+.alx-xp-mini strong {
+  width: 55%;
+  background: color-mix(in srgb, var(--primary) 55%, transparent);
+}
+.alx-xp-formats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+.alx-xp-fmt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 7px 4px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+  min-width: 0;
+}
+.alx-xp-fmt b {
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.alx-xp-fmt span {
+  font-size: 10.5px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+.alx-xp-fmt:hover {
+  border-color: var(--primary);
+}
+.alx-xp-fmt.on {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 9%, var(--surface));
+}
+.alx-xp-seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.alx-xp-seg button {
+  padding: 6px 14px;
+  border: 0;
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.alx-xp-seg button + button {
+  border-left: 1px solid var(--border);
+}
+.alx-xp-seg button.on {
+  background: var(--primary);
+  color: #fff;
+}
+.alx-xp-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.alx-xp-count {
+  margin-right: auto;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+@media (max-width: 560px) {
+  .alx-xp-cards.two,
+  .alx-xp-formats {
+    grid-template-columns: 1fr 1fr;
+  }
+}
