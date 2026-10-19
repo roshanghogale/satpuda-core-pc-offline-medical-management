@@ -1468,6 +1468,16 @@ export function AlertsPanel({
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [msg, setMsg] = useState('')
+  // The title-row help opens as a little box over the list; a click anywhere else closes it.
+  const helpRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const close = (e: MouseEvent) => {
+      const box = helpRef.current?.querySelector('details')
+      if (box?.open && !helpRef.current?.contains(e.target as Node)) box.open = false
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [])
   // Month ("2026-10") or year ("2026"); empty = the alert rules as before.
   const [month, setMonth] = useState('')
   const [year, setYear] = useState('')
@@ -1713,26 +1723,18 @@ export function AlertsPanel({
 
   return (
     <>
-      <PanelTitle>
-        {spec.title} ({count}){period ? ` — ${periodLabel(period)}` : ''}
-      </PanelTitle>
-      <Note>
-        Central dashboard for stock, expiry, and customer due alerts. Select a
-        row for Reorder/Return actions. F5 refreshes.
-      </Note>
-      {spec.periodOf ? (
-        <Help title="What Month / Year shows">
-          {spec.periodOf === 'expiry'
-            ? 'Month / Year shows every batch whose expiry falls in it, batch-wise. Group by supplier puts each batch under the supplier it was bought from, so the expiry can go back to them.'
-            : 'Month / Year shows the medicines last bought in it. Supplier is the one the medicine was last bought from (its newest purchase bill, else the supplier written on the stock row); Group by supplier lists what to reorder from each.'}
-        </Help>
-      ) : (
-        <Help title="Village / area">
-          Area is the customer's village / address (Contacts, or the address typed on their bill). Group by area
-          lists each village with its customers and the total due.
-        </Help>
-      )}
-      <div className="alx-panel">
+      {/* Owner, 19 Oct 2026: the help and the counts sit on the title row (right side), so
+          the list below gets the room. */}
+      <div className="alx-head-row">
+        <div className="alx-head-text">
+          <PanelTitle>
+            {spec.title} ({count}){period ? ` — ${periodLabel(period)}` : ''}
+          </PanelTitle>
+          <Note>
+            Central dashboard for stock, expiry, and customer due alerts. Select a
+            row for Reorder/Return actions. F5 refreshes.
+          </Note>
+        </div>
         <div className="alx-summary">
           {stats.map((s) => (
             <div key={s.label} className={`alx-stat ${s.tone || ''}`}>
@@ -1741,6 +1743,22 @@ export function AlertsPanel({
             </div>
           ))}
         </div>
+        <div className="alx-head-help" ref={helpRef}>
+          {spec.periodOf ? (
+            <Help title="What Month / Year shows">
+              {spec.periodOf === 'expiry'
+                ? 'Month / Year shows every batch whose expiry falls in it, batch-wise. Group by supplier puts each batch under the supplier it was bought from, so the expiry can go back to them.'
+                : 'Month / Year shows the medicines last bought in it. Supplier is the one the medicine was last bought from (its newest purchase bill, else the supplier written on the stock row); Group by supplier lists what to reorder from each.'}
+            </Help>
+          ) : (
+            <Help title="Village / area">
+              Area is the customer's village / address (Contacts, or the address typed on their bill). Group by area
+              lists each village with its customers and the total due.
+            </Help>
+          )}
+        </div>
+      </div>
+      <div className="alx-panel">
         <div className="iset-bar">
           <BarField label="Search" className="grow">
             <input
