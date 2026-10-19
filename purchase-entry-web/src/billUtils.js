@@ -46,7 +46,42 @@ export function expiryProblem(text) {
     : 'Expiry must be MM/YY, e.g. 04/28'
 }
 
-export function buildJSON(bills) {
+/**
+ * Pieces in one strip: "10" / "10'S" -> 10, "1x10" -> 10 (the product of every number after
+ * the first). parseInt("1x10") read 1, so a strip of ten went out as a strip of one.
+ * Same rule as the loader app (LoaderRules.packSize).
+ */
+export function packSize(text) {
+  const digits = (String(text == null ? '' : text).match(/\d+/g) || []).map(n => parseInt(n, 10) || 0)
+  let size = 1
+  if (digits.length === 1) size = digits[0]
+  else if (digits.length > 1) size = digits.slice(1).reduce((acc, n) => acc * Math.max(n, 1), 1)
+  return size > 0 ? size : 1
+}
+
+/** Rate A / B / C a wholesale line would get from the store's margins (% over purchase rate). */
+export function suggestRates(rate, margins = { A: 8, B: 10, C: 12 }) {
+  const pr = parseFloat(rate) || 0
+  if (pr <= 0) return { rate_a: '', rate_b: '', rate_c: '' }
+  const at = (m) => String(round2(pr * (1 + (Number(m) || 0) / 100)))
+  return { rate_a: at(margins.A), rate_b: at(margins.B), rate_c: at(margins.C) }
+}
+
+/** Indexes of the lines (with a name and a quantity) that have no Rate A above zero. */
+export function rateAMissing(items) {
+  const out = []
+  ;(items || []).forEach((it, i) => {
+    if (itemHasData(it) && !((parseFloat(it.rate_a) || 0) > 0)) out.push(i)
+  })
+  return out
+}
+
+/**
+ * The bills as the PC reads them (Web Entry's /api/purchases/save and Mobile Import).
+ * Wholesale: every line also carries purchase_rate (= rate, per strip) and Rate A / B / C,
+ * which the PC writes onto the purchase line and the medicine batch.
+ */
+export function buildJSON(bills, { wholesale = false } = {}) {
   return {
     bills: bills.map(bill => {
       const items = (bill.items || []).filter(itemHasData)
@@ -76,7 +111,7 @@ export function buildJSON(bills) {
           batch_no:           it.batch_no           || '',
           expiry_date:        normalizeExpiry(it.expiry_date || ''),
           qty:                parseFloat(it.qty)            || 0,
-          tablets_per_stripe: ['tablet','bolus'].includes((it.type||'').toLowerCase()) ? (parseInt(it.quantity_value) || 1) : 1,
+          tablets_per_stripe: ['tablet','bolus','capsule'].includes((it.type||'').toLowerCase()) ? packSize(it.quantity_value) : 1,
           free_qty:           parseFloat(it.free_qty)        || 0,
           rate:               parseFloat(it.rate)            || 0,
           mrp:                parseFloat(it.mrp)             || 0,
@@ -89,6 +124,12 @@ export function buildJSON(bills) {
           item_discount:      parseFloat(it.item_discount)   || 0,
           quantity_value:     it.quantity_value     || '1',
           is_tax_inclusive:   gstMethod === 'discount_after_gst',
+          ...(wholesale ? {
+            purchase_rate:    parseFloat(it.rate)            || 0,
+            rate_a:           parseFloat(it.rate_a)          || 0,
+            rate_b:           parseFloat(it.rate_b)          || 0,
+            rate_c:           parseFloat(it.rate_c)          || 0,
+          } : {}),
         }))
       }
     })
@@ -113,6 +154,7 @@ export function emptyItem() {
     rate: '', mrp: '', gst_percent: '0', item_discount: '0',
     hsn_code: '', manufacturer: '', schedule: '',
     content_drug: '', quantity_value: '1',
+    rate_a: '', rate_b: '', rate_c: '',
   }
 }
 

@@ -1,9 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback, memo } from 'react'
 import { createPortal } from 'react-dom'
-import { buildJSON, emptyBill, emptyItem, calcAmount, calcPurchaseSummary, round2, typeExpiry, normalizeExpiry, expiryProblem } from '../billUtils.js'
+import {
+  buildJSON, emptyBill, emptyItem, calcAmount, calcPurchaseSummary, round2, typeExpiry, normalizeExpiry, expiryProblem,
+  suggestRates, rateAMissing,
+} from '../billUtils.js'
 import {
   getApiBase, getSuppliers, upsertSupplier, saveSupplierToServer, getFieldOrderForSupplier, ALL_MEDICINE_FIELDS,
   getMedicineTypes, getSchedules, loadRuntimeCatalog,
+  WHOLESALE_MEDICINE_FIELDS, WHOLESALE_FIELD_ORDER, sendToPc,
 } from '../store.js'
 import {
   searchBuiltInMedicines, isMedicineIndexReady, getMedicineIndexCount, loadBuiltInMedicines,
@@ -12,7 +16,11 @@ import {
 } from '../medicineIndex.js'
 import styles from './PurchasePage.module.css'
 
-function fieldMeta(key) { return ALL_MEDICINE_FIELDS.find(f => f.key === key) }
+function fieldMeta(key, wholesale = false) {
+  return (wholesale ? WHOLESALE_MEDICINE_FIELDS : ALL_MEDICINE_FIELDS).find(f => f.key === key)
+}
+
+const RATE_KEYS = ['rate_a', 'rate_b', 'rate_c']
 
 // ── Medicine: one input + dropdown (visible on focus); ↑↓ navigate, Enter select / next field ─
 const MedicineCombo = memo(function MedicineCombo({ value, onChange, onEnter, inputRef }) {
@@ -46,10 +54,13 @@ const MedicineCombo = memo(function MedicineCombo({ value, onChange, onEnter, in
     const el = inputElRef.current
     if (!el) return
     const r = el.getBoundingClientRect()
+    // Never wider than what is left of the screen: on a phone 300px from the box's left
+    // edge ran off the right side.
+    const room = Math.max(160, window.innerWidth - r.left - 8)
     setListPos({
       top: r.bottom + 2,
       left: r.left,
-      width: Math.max(r.width, 300),
+      width: Math.min(Math.max(r.width, 300), room),
     })
   }, [])
 
@@ -245,6 +256,13 @@ export default function PurchasePage({
   suppliers: suppliersFromApp,
   schedules: schedulesFromApp,
   medicineTypes: medicineTypesFromApp,
+  // Served by the PC's Mobile Import receiver to a phone: bills go to the PC with "Send to
+  // PC" (it shows them for Import there) instead of Web Entry's Save All.
+  phone = false,
+  // The PC's open store is wholesale: strips, purchase rate per strip, Rate A / B / C.
+  wholesale = false,
+  postTo = '/mobile-import',
+  margins = { A: 8, B: 10, C: 12 },
 }) {
   const [bills, setBills]           = useState([emptyBill()])
   const [activeBill, setActiveBill] = useState(0)
@@ -257,6 +275,8 @@ export default function PurchasePage({
   const [schedules, setSchedules]   = useState(getSchedules)
   const [medicineTypes, setMedicineTypes] = useState(getMedicineTypes)
   const [supplierLoad, setSupplierLoad] = useState('loading')
+  // Rows of the active bill a wholesale send/save refused for having no Rate A.
+  const [missingRows, setMissingRows] = useState([])
   const inputRefs = useRef({})
 
   const bill = bills[activeBill]
@@ -297,7 +317,7 @@ export default function PurchasePage({
   useEffect(() => {
     function onKey(e) {
       if (e.ctrlKey && e.key === 'n') { e.preventDefault(); addBill() }
-      if (e.ctrlKey && e.shiftKey && e.key === 'S') { e.preventDefault(); saveAll() }
+      if (e.ctrlKey && e.shiftKey && e.key === 'S') { e.preventDefault(); if (phone) sendAll(); else saveAll() }
       if (e.ctrlKey && !e.shiftKey && e.key === 's') { e.preventDefault(); copyJSON() }
     }
     window.addEventListener('keydown', onKey)
@@ -345,6 +365,7 @@ export default function PurchasePage({
   }
 
   function updateItem(rowIdx, field, value) {
+    if (field === 'rate_a') setMissingRows(m => m.filter(i => i !== rowIdx))
     setBills(b => b.map((bl, i) => {
       if (i !== activeBill) return bl
       const items = bl.items.map((it, j) => j === rowIdx ? { ...it, [field]: value } : it)
@@ -390,7 +411,7 @@ export default function PurchasePage({
     updateBillField('supplier_name', name)
   }
 
-  const fieldOrder = getFieldOrderForSupplier(bill.supplier_name)
+  const fieldOrder = wholesale ? WHOLESALE_FIELD_ORDER : getFieldOrderForSupplier(bill.supplier_name)
   const scheduleOptions = [...new Set(
     schedules.filter(s => s != null && String(s).trim() !== '' && String(s) !== 'Non-Scheduled')
   )]
@@ -431,13 +452,90 @@ export default function PurchasePage({
   }
 
   function copyJSON() {
-    const json = JSON.stringify(buildJSON(bills), null, 2)
+    const json = JSON.stringify(buildJSON(bills, { wholesale }), null, 2)
     navigator.clipboard.writeText(json).then(() => {
       setCopied(true); setTimeout(() => setCopied(false), 2000)
     })
   }
 
+  /** Wholesale: Rate A on every line, as the PC's own Purchase page asks. false when one is missing. */
+  function rateAReady() {
+    if (!wholesale) return true
+    for (let i = 0; i < bills.length; i++) {
+      const missing = rateAMissing(bills[i].items)
+      if (missing.length) {
+        setActiveBill(i)
+        setMissingRows(missing)
+        const names = missing.map(r => (bills[i].items[r].medicine_name || '').trim()).filter(Boolean)
+        setSaveMsg(
+          `Bill ${i + 1}: Rate A is required for ${names.slice(0, 3).join(', ')}`
+          + (names.length > 3 ? ` and ${names.length - 3} more` : '')
+          + '. Type it (per strip, GST extra) or press Fill Rate A/B/C.',
+        )
+        focusRef(`${i}-r${missing[0]}-rate_a`)
+        return false
+      }
+    }
+    setMissingRows([])
+    return true
+  }
+
+  /** Empty Rate A / B / C of the active bill, from the purchase rate + the store's margins. */
+  function fillRates() {
+    setBills(b => b.map((bl, i) => {
+      if (i !== activeBill) return bl
+      const items = bl.items.map(it => {
+        const s = suggestRates(it.rate, margins)
+        const next = { ...it }
+        for (const k of RATE_KEYS) {
+          if (!((parseFloat(next[k]) || 0) > 0) && s[k]) next[k] = s[k]
+        }
+        return next
+      })
+      return { ...bl, items }
+    }))
+    setMissingRows([])
+  }
+
+  /** Phone: the bills go to the PC that served this page, which shows them for Import. */
+  async function sendAll() {
+    const ready = bills.filter(bl => (bl.items || []).some(it => (it.medicine_name || '').trim()))
+    if (!ready.length) {
+      setSaveMsg('Type at least one medicine first.')
+      return
+    }
+    const noSupplier = bills.findIndex(bl =>
+      (bl.items || []).some(it => (it.medicine_name || '').trim()) && !(bl.supplier_name || '').trim())
+    if (noSupplier >= 0) {
+      setActiveBill(noSupplier)
+      setSaveMsg(`Bill ${noSupplier + 1}: choose or add the supplier first.`)
+      focusRef(`${noSupplier}-h-supplier_name`)
+      return
+    }
+    if (!rateAReady()) return
+    setSaving(true)
+    setSaveMsg('')
+    const payload = {
+      export_type: 'purchases',
+      device_name: 'Phone (Purchase Entry page)',
+      export_date: new Date().toISOString().slice(0, 10),
+      store_kind: wholesale ? 'wholesale' : 'retail',
+      ...buildJSON(bills, { wholesale }),
+    }
+    const res = await sendToPc(payload, postTo)
+    setSaving(false)
+    if (!res.ok) {
+      setSaveMsg(`Not sent: ${res.error}. Bills are still here; try again.`)
+      return
+    }
+    const n = payload.bills.length
+    setSaveMsg(`Sent ${n} bill(s) to the PC. On the PC: Settings → Import → Mobile Import → Import.`)
+    setBills([emptyBill()])
+    setActiveBill(0)
+  }
+
   async function saveAll() {
+    if (!rateAReady()) return
     const apiBase = getApiBase()
     if (!apiBase) {
       setSaveMsg('Open Web Purchase Entry from Settings while the desktop app is running.')
@@ -452,7 +550,7 @@ export default function PurchasePage({
       const res = await fetch(`${apiBase}/api/purchases/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildJSON(bills)),
+        body: JSON.stringify(buildJSON(bills, { wholesale })),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok && res.status !== 207) {
@@ -538,15 +636,27 @@ export default function PurchasePage({
           >
             {copied ? '✔ Copied!' : '📋 Copy JSON'}
           </button>
-          <button
-            type="button"
-            className={styles.saveAllBtn}
-            onClick={saveAll}
-            disabled={saving}
-            title="Save all bills to the desktop app database (Ctrl+Shift+S)"
-          >
-            {saving ? 'Saving…' : '💾 Save All'}
-          </button>
+          {phone ? (
+            <button
+              type="button"
+              className={styles.saveAllBtn}
+              onClick={sendAll}
+              disabled={saving}
+              title="Send all bills to the PC; import them there (Ctrl+Shift+S)"
+            >
+              {saving ? 'Sending…' : `📤 Send ${bills.length} bill(s) to PC`}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className={styles.saveAllBtn}
+              onClick={saveAll}
+              disabled={saving}
+              title="Save all bills to the desktop app database (Ctrl+Shift+S)"
+            >
+              {saving ? 'Saving…' : '💾 Save All'}
+            </button>
+          )}
           {saveMsg && <span className={styles.saveMsg}>{saveMsg}</span>}
         </div>
       </div>
@@ -660,7 +770,7 @@ export default function PurchasePage({
           <span className={styles.catalogMeta}>
             {medicineTypes.length} types · {schedules.length} schedules · {getMedicineIndexCount().toLocaleString()} medicines (built-in)
           </span>
-          {bill.supplier_name &&
+          {bill.supplier_name && !wholesale &&
             <span className={styles.fieldHint}> — layout for "{bill.supplier_name}"</span>}
         </div>
 
@@ -669,20 +779,26 @@ export default function PurchasePage({
             <thead>
               <tr>
                 <th>#</th>
-                {fieldOrder.map(k => <th key={k}>{fieldMeta(k)?.label}</th>)}
+                {fieldOrder.map(k => <th key={k}>{fieldMeta(k, wholesale)?.label}</th>)}
                 <th>Amount (excl. GST)</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
               {bill.items.map((item, rowIdx) => (
-                <tr key={rowIdx}>
-                  <td className={styles.rowNum}>{rowIdx + 1}</td>
+                <tr key={rowIdx} className={styles.itemRow}>
+                  <td className={styles.rowNum} data-label="#">{rowIdx + 1}</td>
                   {fieldOrder.map(fk => {
-                    const meta   = fieldMeta(fk)
+                    const meta   = fieldMeta(fk, wholesale)
                     const refKey = `${activeBill}-r${rowIdx}-${fk}`
+                    const missing = fk === 'rate_a' && missingRows.includes(rowIdx)
+                    const suggested = RATE_KEYS.includes(fk) ? suggestRates(item.rate, margins)[fk] : ''
                     return (
-                      <td key={fk}>
+                      <td
+                        key={fk}
+                        data-label={meta?.label}
+                        className={`${fk === 'medicine_name' ? styles.wideCell : ''} ${missing ? styles.missingCell : ''}`}
+                      >
                         {fk === 'medicine_name' ? (
                           <MedicineCombo
                             value={item[fk] || ''}
@@ -725,19 +841,20 @@ export default function PurchasePage({
                           <input
                             ref={r => inputRefs.current[refKey] = r}
                             type={meta?.type === 'number' ? 'number' : 'text'}
+                            inputMode={meta?.type === 'number' ? 'decimal' : undefined}
                             value={item[fk] || ''}
                             onChange={e => updateItem(rowIdx, fk, e.target.value)}
                             onKeyDown={e => e.key === 'Enter' && onItemEnter(rowIdx, fk)}
                             onFocus={e => e.target.select()}
                             className={styles.cellInput}
-                            placeholder={meta?.label}
+                            placeholder={suggested ? `${suggested} (margin)` : meta?.label}
                           />
                         )}
                       </td>
                     )
                   })}
-                  <td className={styles.amount}>₹{calcAmount(item).toFixed(2)}</td>
-                  <td>
+                  <td className={styles.amount} data-label="Amount (excl. GST)">₹{calcAmount(item).toFixed(2)}</td>
+                  <td className={styles.removeCell}>
                     <button className={styles.removeRow} onClick={() => removeItem(rowIdx)}>×</button>
                   </td>
                 </tr>
@@ -747,7 +864,18 @@ export default function PurchasePage({
         </div>
 
         <div className={styles.tableFooter}>
-          <button className={styles.addRowBtn} onClick={addItemRow}>+ Add Row</button>
+          <div className={styles.footerBtns}>
+            <button className={styles.addRowBtn} onClick={addItemRow}>+ Add Row</button>
+            {wholesale && (
+              <button
+                className={styles.addRowBtn}
+                onClick={fillRates}
+                title={`Empty Rate A / B / C = purchase rate + ${margins.A}% / ${margins.B}% / ${margins.C}%`}
+              >
+                Fill Rate A/B/C
+              </button>
+            )}
+          </div>
           <div className={styles.grandTotal}>
             Subtotal: ₹{grandSubtotal.toFixed(2)}
             &nbsp;−&nbsp;Disc: ₹{liveDiscRs.toFixed(2)} ({liveDiscPct}%)
@@ -762,7 +890,9 @@ export default function PurchasePage({
           onClose={() => setShowAddSupplier(false)}
           onSaved={async sup => {
             upsertSupplier(sup)
-            const res = await saveSupplierToServer(sup)
+            // Phone: the bill carries the supplier and the PC adds it when the bill is
+            // imported; the receiver has no supplier endpoint of its own.
+            const res = phone ? { ok: true } : await saveSupplierToServer(sup)
             if (!res?.ok) {
               alert(res?.error || 'Could not save supplier to database. Check that the desktop app is running.')
             }
