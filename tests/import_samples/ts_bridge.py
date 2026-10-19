@@ -36,7 +36,8 @@ def _compiled() -> str:
     if _JS:
         return _JS
     src = open(TSX, encoding="utf-8").read()
-    body = "\n".join(_cut(src, n) for n in ("isStripType", "lineFromPayload", "tabPayload"))
+    body = "\n".join(_cut(src, n) for n in ("wsRate", "isStripType", "tabReturnIds", "tabReturnsLeft",
+                                          "lineFromPayload", "tabPayload"))
     ts = (
         "type PurchaseRuntimePrefs = any; type PurchaseLinePayload = any;\n"
         "type LineItem = any; type PurchaseTab = any;\n"

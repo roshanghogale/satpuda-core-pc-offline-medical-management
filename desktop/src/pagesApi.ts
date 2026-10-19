@@ -1172,6 +1172,8 @@ export type PurchaseImportPreview = {
     rate: number
     valid: boolean
     issues?: string[]
+    /** Cells the bill reader could not prove. */
+    check_fields?: string[]
   }[]
 }
 
@@ -1316,6 +1318,9 @@ export type PurchaseLinePayload = {
   rate_a?: number | null
   rate_b?: number | null
   rate_c?: number | null
+  /** A bill import's cells the reader could not prove (core/bill_columns.py). */
+  check_fields?: string[]
+  check_note?: string
 }
 
 export type PurchaseCalcResult = {
