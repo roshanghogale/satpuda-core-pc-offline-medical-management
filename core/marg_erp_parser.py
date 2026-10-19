@@ -253,7 +253,7 @@ def parse_marg_parakh_item_lines(raw_text: str) -> List[Dict[str, Any]]:
             return val
 
         amount = pop_num()
-        pop_num()  # gst amount column
+        gst_pct = pop_num()  # the GST% column (0.00 / 5.00), not a tax amount
         dis_token = tokens[idx]
         idx -= 1
         rate = pop_num()
@@ -284,7 +284,7 @@ def parse_marg_parakh_item_lines(raw_text: str) -> List[Dict[str, Any]]:
             "free_qty": free_qty,
             "mrp": mrp,
             "rate": rate,
-            "gst_pct": 0.0,
+            "gst_pct": gst_pct,
             "amount": amount or round(qty * rate, 2),
         }
         if "%" in dis_token:

@@ -192,8 +192,20 @@ def resolve_line_pricing(
     if amount <= 0 and rate > 0 and qty > 0:
         amount = round(rate * qty, 2)
 
+    # A Disc% the line's own amount was worked out with: qty × rate × (1 − d%)
+    # = amount. The bill proves the percent, so it is kept -- a 5% line on a
+    # distributor CSV came in with no discount at all.
+    pct_on_amount = bool(
+        disc_type == DISC_PCT
+        and 0 < disc_raw < 100
+        and rate > 0 and qty > 0 and amount > 0
+        and abs(round(rate * qty * (1 - disc_raw / 100.0), 2) - amount)
+        <= max(0.05, amount * 0.001)
+        and abs(round(rate * qty, 2) - amount) > 0.05
+    )
+
     amount_validated = True
-    if rate > 0 and qty > 0 and amount > 0:
+    if rate > 0 and qty > 0 and amount > 0 and not pct_on_amount:
         expected = round(rate * qty, 2)
         if abs(expected - amount) > 0.02:
             amount_validated = False
@@ -202,7 +214,9 @@ def resolve_line_pricing(
 
     # PurchaseCalculator uses discount_pct on base = qty × rate
     discount_pct = 0.0
-    if disc_type == DISC_PCT and disc_raw > 0:
+    if pct_on_amount:
+        discount_pct = disc_raw
+    elif disc_type == DISC_PCT and disc_raw > 0:
         if mrp > 0 and rate > 0 and abs(rate - mrp * (1 - disc_raw / 100.0)) <= 0.10:
             discount_pct = disc_raw
         elif mrp <= 0:
@@ -1022,7 +1036,12 @@ def extract_invoice_totals(text: str) -> Dict[str, float]:
         expected = round(gross - disc + gst_total + round_off, 2)
         diff = round(net - expected, 2)
         if 0.01 <= abs(diff) <= max(500.0, gross * 0.15):
-            if diff > 0:
+            # Under a rupee is the round-off to a whole-rupee total (a Marg bill
+            # prints 1235.0 over 1234.70 with no round-off line), never a charge:
+            # as a charge it was added a second time to the supplier's due.
+            if abs(diff) < 1.0 and not round_off:
+                result["round_off"] = diff
+            elif diff > 0:
                 result["added_charges"] = diff
             elif not round_off:
                 result["round_off"] = diff

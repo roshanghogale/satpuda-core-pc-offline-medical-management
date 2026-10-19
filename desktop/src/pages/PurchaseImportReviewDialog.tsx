@@ -44,7 +44,11 @@ export function PurchaseImportReviewDialog({
     ln.batch,
     ln.qty,
     ln.rate,
-    ln.valid ? 'OK' : (ln.issues || []).join('; ') || 'Invalid',
+    ln.valid
+      ? ln.check_fields?.length
+        ? `Check: ${ln.check_fields.join(', ')}`
+        : 'OK'
+      : (ln.issues || []).join('; ') || 'Invalid',
   ])
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>

@@ -72,6 +72,14 @@ FIELD_ALIASES = {
     ],
 }
 
+# How a field is named when the Purchase page asks the shop to check it.
+_CHECK_FIELD_LABELS = {
+    "name": "Medicine", "batch": "Batch", "expiry": "Expiry", "qty": "Qty",
+    "free_qty": "Free", "rate": "Rate", "mrp": "MRP", "amount": "Amount",
+    "gst_pct": "GST%", "discount_pct": "Disc%", "hsn_code": "HSN",
+    "manufacturer": "Mfg", "pack": "Pack",
+}
+
 # Shown on Purchase page when the bill has no batch / expiry — update before saving.
 IMPORT_PLACEHOLDER_BATCH = "WITHOUT BATCH"
 IMPORT_PLACEHOLDER_EXPIRY = "WITHOUT EXP"
@@ -373,7 +381,14 @@ def parse_purchase_pdf(path: str) -> PurchaseInvoice:
 
     raw_text = "\n".join(part for part in raw_text_parts if part)
 
-    marg_invoice = _try_parse_marg_erp_invoice(raw_text, path, issues, parsers_used)
+    # The bill's own header words decide the columns, checked by value shapes
+    # (core/bill_columns). Supplier-format readers below still run; whichever
+    # reading holds up better line by line is the one used.
+    smart_label, smart_records = _smart_pdf_records(raw_text, table_rows)
+
+    marg_invoice = _try_parse_marg_erp_invoice(
+        raw_text, path, issues, parsers_used, smart_records=smart_records,
+    )
     if marg_invoice is not None:
         if parsers_used:
             marg_invoice.parser = "{}, {}".format(
@@ -389,6 +404,11 @@ def parse_purchase_pdf(path: str) -> PurchaseInvoice:
         return marg_invoice
 
     tuljai_invoice = _try_parse_tuljai_invoice(raw_text, table_rows, issues)
+    if tuljai_invoice is not None and smart_records:
+        from core.bill_columns import records_quality
+
+        if records_quality(smart_records) > records_quality(tuljai_invoice.items):
+            tuljai_invoice = None
     if tuljai_invoice is not None:
         if parsers_used:
             tuljai_invoice.parser = "{}, {}".format(
@@ -406,7 +426,15 @@ def parse_purchase_pdf(path: str) -> PurchaseInvoice:
     records = _records_from_table_rows(table_rows, issues)
     if not records and raw_text:
         records = _records_from_text(raw_text)
-    records = _merge_broken_records(records)
+    from core.bill_columns import better_reading
+
+    chosen_label, chosen = better_reading([
+        (smart_label, smart_records),
+        ("", records),
+    ])
+    if chosen_label and chosen is smart_records:
+        parsers_used.append(smart_label)
+    records = _merge_broken_records(list(chosen or records))
 
     items = _items_from_records(records, issues)
     items = merge_duplicate_items(items, issues)
@@ -472,6 +500,23 @@ def parse_purchase_excel(path: str) -> PurchaseInvoice:
         issues.append("No clear header row found; tried positional invoice parsing.")
         records = _records_from_table_rows(rows, issues)
 
+    # Columns by header words, checked (and swapped back) by what their cells
+    # hold; with no header at all, named from the cells alone.
+    from core.bill_columns import better_reading, records_from_rows
+
+    try:
+        smart_records, smart_info = records_from_rows(rows)
+    except Exception:
+        smart_records, smart_info = [], {}
+    for note in (smart_info or {}).get("notes") or []:
+        issues.append("Columns: {}".format(note))
+    smart_label = "columns-by-header" if (smart_info or {}).get("source") == "header" else "columns-by-shape"
+    chosen_label, chosen = better_reading([(smart_label, smart_records), ("", records)])
+    if chosen is smart_records and smart_records:
+        records = list(smart_records)
+    else:
+        smart_label = ""
+
     records = _merge_broken_records(records)
     items = _items_from_records(records, issues)
     items = merge_duplicate_items(items, issues)
@@ -490,7 +535,7 @@ def parse_purchase_excel(path: str) -> PurchaseInvoice:
         items,
         path,
         ext.lstrip("."),
-        "csv" if ext == ".csv" else "excel",
+        ("csv" if ext == ".csv" else "excel") + (", " + smart_label if smart_label else ""),
         _extract_total_amount(text, items),
         issues,
         text,
@@ -577,10 +622,133 @@ def _finalize_parsed_invoice(
     enrich_metadata: bool = True,
 ) -> None:
     """Totals/validation plus medicine type detection on all lines."""
+    check_invoice_items(invoice)
     enrich_purchase_invoice(invoice)
+    _complete_footer_slabs(invoice)
+    _fill_missing_round_off(invoice)
+    _add_check_review_flag(invoice)
     enrich_invoice_medicine_types(invoice, conn=conn)
     if enrich_metadata:
         enrich_invoice_item_metadata(invoice, conn=conn, use_gemini=False)
+
+
+_CHECK_TEXT_FIELDS = ("name", "batch", "expiry", "manufacturer", "pack", "hsn_code")
+_CHECK_NUM_FIELDS = ("qty", "free_qty", "rate", "mrp", "amount", "gst_pct", "discount_pct")
+
+
+def check_invoice_items(invoice: PurchaseInvoice) -> None:
+    """Every imported line, whatever read it (PDF text or table, CSV, Excel, EDI,
+    bill photo), is checked the same way: cells plainly in each other's place are
+    swapped back, and cells that cannot be proven are listed in
+    ``item.raw["check_fields"]`` for the Purchase page to mark."""
+    from core.bill_columns import check_records
+
+    items = list(getattr(invoice, "items", None) or [])
+    if not items:
+        return
+    parser = (getattr(invoice, "parser", "") or "").lower()
+    photo = parser.startswith(("gemini", "image")) or getattr(invoice, "source_type", "") == "image"
+    recs: List[Dict[str, Any]] = []
+    for it in items:
+        rec: Dict[str, Any] = {f: getattr(it, f, "") or "" for f in _CHECK_TEXT_FIELDS}
+        for f in _CHECK_NUM_FIELDS:
+            rec[f] = getattr(it, f, 0) or 0
+        dtype = str(getattr(it, "disc_column_type", "") or "")
+        dval = float(getattr(it, "disc_column_value", 0) or 0)
+        if not rec["discount_pct"] and dtype == "PERCENTAGE" and dval:
+            rec["discount_pct"] = dval
+        if dtype == "RUPEE_AMOUNT" and dval:
+            rec["disc_rupees"] = dval
+        raw = getattr(it, "raw", None) or {}
+        for k in ("cgst_pct", "sgst_pct"):
+            if _clean_cell(raw.get(k)):
+                rec[k] = raw.get(k)
+        rec["gst_pct"] = getattr(it, "gst_pct", 0) or 0
+        recs.append(rec)
+    try:
+        check_records(recs, strip_maker_from_name=photo)
+    except Exception:
+        return
+    for it, rec in zip(items, recs):
+        if rec.get("fixed_fields"):
+            for f in _CHECK_TEXT_FIELDS:
+                setattr(it, f, _clean_cell(rec.get(f)))
+            for f in _CHECK_NUM_FIELDS:
+                setattr(it, f, _to_float(rec.get(f)))
+            it.expiry = normalize_expiry(it.expiry) or it.expiry
+            it.raw = dict(it.raw or {})
+            it.raw["fixed_fields"] = list(rec["fixed_fields"])
+            it.validate()
+        if rec.get("check_fields"):
+            it.raw = dict(it.raw or {})
+            # Keep what the reader itself already marked (a photo row read twice).
+            fields = list(it.raw.get("check_fields") or [])
+            notes = dict(it.raw.get("check_notes") or {})
+            for f in rec["check_fields"]:
+                if f not in fields:
+                    fields.append(f)
+                notes.setdefault(f, (rec.get("check_notes") or {}).get(f, "check"))
+            it.raw["check_fields"] = fields
+            it.raw["check_notes"] = notes
+
+
+def _complete_footer_slabs(invoice: PurchaseInvoice) -> None:
+    """A footer GST table read only in part: the 5% row came through but the 0%
+    row did not (its line says SGST, not CGST), and the purchase saved only the 5%
+    goods as its sub total. When every slab that WAS read equals the
+    lines at that rate, the missing rates are filled in from the lines."""
+    slabs = list(getattr(invoice, "footer_gst_slabs", None) or [])
+    if not slabs or not invoice.items:
+        return
+    by_rate: Dict[float, float] = {}
+    for it in invoice.items:
+        key = round(float(it.gst_pct or 0), 2)
+        by_rate[key] = round(by_rate.get(key, 0.0) + float(it.amount or 0), 2)
+    have = {round(float(s.get("gst_pct") or 0), 2): s for s in slabs}
+    for rate, slab in have.items():
+        taxable = float(slab.get("taxable") or slab.get("gross") or 0)
+        if abs(taxable - by_rate.get(rate, -1e9)) > max(0.1, taxable * 0.001):
+            return  # the slab table disagrees with the lines: leave it as read
+    missing = [r for r in by_rate if r not in have and by_rate[r] > 0]
+    if not missing:
+        return
+    for rate in missing:
+        slabs.append({"gst_pct": rate, "taxable": by_rate[rate], "gross": by_rate[rate]})
+    invoice.footer_gst_slabs = sorted(slabs, key=lambda s: float(s.get("gst_pct") or 0))
+
+
+def _fill_missing_round_off(invoice: PurchaseInvoice) -> None:
+    """A bill that prints its grand total but no round-off line (Marg PDFs: sub
+    total + GST = 1234.70, grand total 1235.0). The 0.30 is the
+    round-off; without it the purchase saved 1235 while the supplier due said
+    1235.30."""
+    try:
+        if float(invoice.round_off or 0):
+            return
+        net = float(invoice.invoice_total or 0)
+        gst = float(invoice.total_cgst or 0) + float(invoice.total_sgst or 0)
+        if net <= 0 or gst <= 0:
+            return
+        goods = float(invoice.taxable_amount or 0) or float(invoice.line_gross or 0)
+        if goods <= 0:
+            return
+        line_sum = round(sum(float(it.amount or 0) for it in invoice.items), 2)
+        if abs(line_sum - goods) > 0.05:
+            return  # discounts / charges in between: not a plain round-off
+        diff = round(net - (goods - invoice_bill_discount(invoice) + gst), 2)
+        if 0 < abs(diff) < 1.0:
+            invoice.round_off = diff
+    except (TypeError, ValueError):
+        return
+
+
+def _add_check_review_flag(invoice: PurchaseInvoice) -> None:
+    flagged = sum(1 for it in invoice.items if (it.raw or {}).get("check_fields"))
+    if flagged:
+        invoice.review_flags = list(getattr(invoice, "review_flags", None) or [])
+        msg = "{} line(s) have values to check".format(flagged)
+        if msg not in invoice.review_flags:
+            invoice.review_flags.append(msg)
 
 
 def _type_from_record(
@@ -1058,9 +1226,31 @@ def _build_import_payload(
         qty_val = float(converted_item["qty"] or 0)
         if bill_amt > 0 and qty_val > 0:
             synced_rate = round(bill_amt / qty_val, 4)
-            converted_item["rate"] = synced_rate
+            # qty × the bill's rate less its Disc% IS the amount: keep the printed
+            # rate, or the page takes the discount off a second time.
+            disc_pct = float(converted_item["discount_pct"] or 0)
+            bill_rate = float(converted_item["rate"] or 0)
+            pct_makes_amount = (
+                disc_pct > 0
+                and bill_rate > 0
+                and abs(round(qty_val * bill_rate * (1 - disc_pct / 100.0), 2) - bill_amt)
+                <= max(0.05, bill_amt * 0.001)
+                and abs(round(qty_val * bill_rate, 2) - bill_amt) > 0.05
+            )
+            if not pct_makes_amount:
+                converted_item["rate"] = synced_rate
             converted_item["amount"] = bill_amt
             converted_item["item_amount"] = bill_amt
+        # Cells the reader could not prove (core/bill_columns.check_record): the
+        # Purchase page marks them so the shop looks there before saving.
+        check_fields = [str(f) for f in (raw.get("check_fields") or []) if f]
+        if check_fields:
+            converted_item["check_fields"] = check_fields
+            notes = raw.get("check_notes") or {}
+            converted_item["check_note"] = "; ".join(
+                "{}: {}".format(_CHECK_FIELD_LABELS.get(f, f), notes.get(f, "check"))
+                for f in check_fields
+            )
         _add_quantity_metadata(converted_item, item.pack)
         converted.append(converted_item)
 
@@ -1476,13 +1666,41 @@ def write_import_log(invoice: PurchaseInvoice, status: str, message: str = "") -
         pass
 
 
+def _smart_pdf_records(
+    raw_text: str, table_rows: Sequence[Sequence[Any]]
+) -> Tuple[str, List[Dict[str, Any]]]:
+    """Item records read by header words + value shapes, from the PDF's table
+    cells or its text lines -- whichever holds up better."""
+    from core.bill_columns import better_reading, records_from_rows, records_from_text
+
+    from_table: List[Dict[str, Any]] = []
+    from_text: List[Dict[str, Any]] = []
+    try:
+        if table_rows:
+            from_table, _info = records_from_rows(table_rows)
+    except Exception:
+        from_table = []
+    try:
+        if raw_text:
+            from_text = records_from_text(raw_text)
+    except Exception:
+        from_text = []
+    label, recs = better_reading([
+        ("columns-by-header (table)", from_table),
+        ("columns-by-header (text)", from_text),
+    ])
+    return label, list(recs or [])
+
+
 def _try_parse_marg_erp_invoice(
     raw_text: str,
     source_path: str,
     issues: List[str],
     parsers_used: Optional[List[str]] = None,
+    smart_records: Optional[List[Dict[str, Any]]] = None,
 ) -> Optional[PurchaseInvoice]:
     """Parse MARG ERP Nano chemist invoices (Sn./Mfg. or MRP/HSN line layouts)."""
+    from core.bill_columns import better_reading
     from core.marg_erp_parser import (
         enhance_marg_supplier_details,
         looks_like_marg_erp_invoice,
@@ -1493,6 +1711,16 @@ def _try_parse_marg_erp_invoice(
         return None
 
     records, parser_label = pick_marg_item_records(raw_text)
+    # The fixed Marg readers count tokens from the right; a blank pack or a pack
+    # jammed into the maker code shifted the batch into the maker column. The
+    # header-driven reading wins whenever its lines hold up at least as well.
+    if smart_records:
+        picked_label, picked = better_reading([
+            ("marg-erp, columns-by-header", smart_records),
+            (parser_label, records),
+        ])
+        if picked is smart_records:
+            records, parser_label = list(smart_records), picked_label
     if not records:
         return None
 
@@ -2237,6 +2465,9 @@ def _looks_like_non_item_name(value: Any) -> bool:
         return True
     if name in ("refill", "tab", "ml", "gm", "pow", "syp", "cap", "inj", "message"):
         return True
+    # The table's own TOTAL row (a distributor CSV ends with one) is no medicine.
+    if re.fullmatch(r"(sub\s*|net\s*|bill\s*)?totals?\s*:?", name):
+        return True
     blocked = (
         "message", "cgst", "sgst", "taxable", "gross", "declaration",
         "amount in words", "net amt", "bank name", "authorised",
@@ -2523,9 +2754,13 @@ JAI_GANESH_PHARMAVET_SUPPLIER = {
 #
 # MARG ERP EDI CSV (~51 T columns, <MARGERP FORMAT> in H row):
 #   H[2]=invoice no, H[3]=date, H[30]=customer, H[52]=format marker
-#   T[5]=name, T[6]=pack, T[8]=batch, T[9]=expiry, T[12]=qty, T[14]=rate
-#   T[20]=qty billed, T[23]=line discount ₹, T[25]=taxable amount, T[26]=GST ₹
-#   T[38]=HSN, T[41]=line total (with GST)
+#   T[1]=company code, T[2]=company (maker) name, T[3]=item code, T[5]=name,
+#   T[6]=pack, T[7]=item's own maker tag (often blank), T[8]=batch,
+#   T[9]=expiry DDMMYYYY, T[12]=GST %, T[14]=rate, T[16]=MRP,
+#   T[20]=qty billed, T[21]=free, T[23]=line discount ₹, T[25]=taxable amount,
+#   T[26]=GST ₹, T[38]=HSN, T[41]=rate again
+#   (matched value by value against the same bill printed as a Marg PDF, whose
+#   MFG column is the first letters of T[2])
 #   F[1]=net payable (rounded), F[2]=total item discount ₹ (already in T[25])
 #   F[9]=total GST
 
@@ -2597,6 +2832,15 @@ def _edi_htf_line_amounts(
             amount = round(max(0.0, rate * qty - disc), 2)
         gst_amt = _to_float(_cell_at(row, 26))
         gst_pct = round(gst_amt / amount * 100, 2) if amount > 0 and gst_amt else 0.0
+        # T[12] is the line's GST %: use it when it is a GST rate the tax amount
+        # agrees with (or the line has no tax amount at all).
+        from core.bill_columns import is_gst_rate
+
+        printed = _cell_at(row, 12)
+        if _clean_cell(printed) and is_gst_rate(printed):
+            g = _to_float(printed)
+            if not gst_amt or abs(round(amount * g / 100, 2) - gst_amt) <= max(0.05, gst_amt * 0.01):
+                gst_pct = g
         hsn_code = normalize_hsn_code(_cell_at(row, 38))
         return rate, mrp, qty, free_qty, amount, gst_pct, hsn_code
 
@@ -2917,7 +3161,12 @@ def _parse_h_t_f_invoice(path: str, rows: Sequence[Sequence[Any]], ext: str) -> 
         expiry = _normalize_compact_expiry(_cell_at(row, 9)) or normalize_expiry(_cell_at(row, 9))
         rate, mrp, qty, free_qty, amount, gst_pct, hsn_code = _edi_htf_line_amounts(row, edi_fmt)
         if edi_fmt == "marg":
-            manufacturer = _clean_cell(_cell_at(row, 7))
+            # T[2] is the company the bill's MFG column abbreviates; T[7] is a
+            # per-item tag that is blank on most lines (and names another
+            # company on some), so it is only the fallback.
+            manufacturer = _clean_cell(_cell_at(row, 2)) or _clean_cell(_cell_at(row, 7))
+            if manufacturer and not re.search(r"[A-Za-z]", manufacturer):
+                manufacturer = _clean_cell(_cell_at(row, 7))
         elif edi_fmt == "seema_legacy":
             manufacturer = _clean_cell(_cell_at(row, 7))
         else:

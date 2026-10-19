@@ -67,6 +67,7 @@ import { todayLocal } from '../localDate'
 import { fetchLastRates, suggestedRates, useBusinessMode } from '../wholesale/mode'
 import { fillRatesFromMargins, lineNeedsRateA, rateAMissing, rateAMissingText } from '../wholesale/rateA'
 import '../wholesale/wholesale.css'
+import './importCheck.css'
 
 type LineItem = {
   medicine: string
@@ -97,6 +98,9 @@ type LineItem = {
   rateA?: number
   rateB?: number
   rateC?: number
+  /** Imported line: fields the bill reader could not prove, marked until the line is edited. */
+  importCheck?: string[]
+  importCheckNote?: string
 }
 
 /** A rate box's text -> a number above zero, or undefined. */
@@ -301,6 +305,18 @@ function lineFromPayload(it: PurchaseLinePayload): LineItem {
     rateA: wsRate(it.rate_a),
     rateB: wsRate(it.rate_b),
     rateC: wsRate(it.rate_c),
+    importCheck:
+      Array.isArray(it.check_fields) && it.check_fields.length ? it.check_fields : undefined,
+    importCheckNote: it.check_note || undefined,
+  }
+}
+
+/** A cell an import could not prove: outlined, with the reason on hover. */
+function checkCell(it: LineItem, field: string, base: string) {
+  const marked = Boolean(it.importCheck?.includes(field))
+  return {
+    className: marked ? `${base} import-check`.trim() : base || undefined,
+    title: marked ? `Check this: ${it.importCheckNote || field}` : undefined,
   }
 }
 
@@ -3367,9 +3383,9 @@ export function PurchasePage({
                           null
                         ) : (
                           <>
-                            <span className="med-name">{it.medicine}</span>
+                            <span {...checkCell(it, 'name', 'med-name')}>{it.medicine}</span>
                             {it.manufacturer ? (
-                              <span className="med-sub">{it.manufacturer}</span>
+                              <span {...checkCell(it, 'manufacturer', 'med-sub')}>{it.manufacturer}</span>
                             ) : null}
                           </>
                         )}
@@ -3379,17 +3395,17 @@ export function PurchasePage({
                       <td>{it.type || '—'}</td>
                     ) : null}
                     {showCol.batch ? (
-                      <td className="mono">
+                      <td {...checkCell(it, 'batch', 'mono')}>
                         {it.batch || '—'}
                       </td>
                     ) : null}
                     {showCol.expiry ? (
-                      <td className="mono">
+                      <td {...checkCell(it, 'expiry', 'mono')}>
                         {it.expiry || '—'}
                       </td>
                     ) : null}
                     {showCol.qty ? (
-                      <td className="numsm mono">
+                      <td {...checkCell(it, 'qty', 'numsm mono')}>
                         {it.qty}
                         {tab.editingPurchaseId && Number(tab.returnedByMed?.[String(it.medicine_id)] || 0) > 0 ? (
                           <div className="note" data-returned="1">
@@ -3399,7 +3415,7 @@ export function PurchasePage({
                       </td>
                     ) : null}
                     {showCol.hsn ? (
-                      <td className="mono">{it.hsn || '—'}</td>
+                      <td {...checkCell(it, 'hsn_code', 'mono')}>{it.hsn || '—'}</td>
                     ) : null}
                     {showCol.schedule ? (
                       <td>
@@ -3407,17 +3423,17 @@ export function PurchasePage({
                       </td>
                     ) : null}
                     {showCol.free ? (
-                      <td className="numsm mono free-badge">
+                      <td {...checkCell(it, 'free_qty', 'numsm mono free-badge')}>
                         {it.free}
                       </td>
                     ) : null}
                     {showCol.mrp ? (
-                      <td className="numsm mono">
+                      <td {...checkCell(it, 'mrp', 'numsm mono')}>
                         {it.mrp.toFixed(2)}
                       </td>
                     ) : null}
                     {showCol.rate ? (
-                      <td className="numsm mono">
+                      <td {...checkCell(it, 'rate', 'numsm mono')}>
                         {it.rate.toFixed(2)}
                         {ws.isWholesale && lineNeedsRateA(it) ? (
                           <div className="ws-rate-needed" title="Open the line (Enter) and type Rate A">
@@ -3434,12 +3450,12 @@ export function PurchasePage({
                       </td>
                     ) : null}
                     {showCol.disc ? (
-                      <td className="numsm mono">
+                      <td {...checkCell(it, 'discount_pct', 'numsm mono')}>
                         {it.discPct}
                       </td>
                     ) : null}
                     {showCol.gstPct ? (
-                      <td className="numsm">
+                      <td {...checkCell(it, 'gst_pct', 'numsm')}>
                         {<span className="gst-badge">{it.gstPct}%</span>}
                       </td>
                     ) : null}
@@ -3450,7 +3466,7 @@ export function PurchasePage({
                       <td className="numsm mono">{gstAmt.toFixed(2)}</td>
                     ) : null}
                     {showCol.amount ? (
-                      <td className="num mono">
+                      <td {...checkCell(it, 'amount', 'num mono')}>
                         {amount.toFixed(2)}
                       </td>
                     ) : null}

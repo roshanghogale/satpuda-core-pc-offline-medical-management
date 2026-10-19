@@ -40,6 +40,8 @@ Study the bill image(s). Extract EVERY product row from all pages combined. Map 
 
 Return ONLY valid JSON (no markdown):
 {
+  "columns": ["the item table's column headings, exactly as printed, left to right"],
+  "column_values": {"MRP": [], "Batch": [], "Qty": [], "Rate": []},
   "supplier": {
     "name": "", "address": "", "phone": "", "gstin": "", "dl_numbers": "",
     "invoice_number": "", "invoice_date": "YYYY-MM-DD"
@@ -53,6 +55,7 @@ Return ONLY valid JSON (no markdown):
   "items": [{
     "line_no": 1,
     "page": 1,
+    "row_text": "this row's cells as printed, left to right in the order of columns, one space apart; an empty cell is -",
     "name": "product name only",
     "medicine_type": "",
     "schedule": "",
@@ -115,6 +118,25 @@ SHRIGURUDEO / SHRIGURUDEO PHARMACEUTICALS — carry-forward multi-page tax invoi
   - Read EVERY product row from ALL pages; item_count in totals = "No of items" on last page.
   - Footer Gross + Add GST = Net (e.g. Gross 12264.06 + GST 969.02 = Net 13233.00).
 
+Every bill (whatever the supplier) — read the table one printed row at a time:
+- First read the column headings into "columns". Then, for each row, copy the row
+  into "row_text" exactly as printed, cell by cell in the same column order.
+- Fill the item fields from THAT row only. Never take MRP, rate, batch or expiry
+  from the row above or below — handwritten ticks over the Qty column do not move
+  a row's other values.
+- name = the product-name column ONLY. The MFG / Mfr / Company code has its own
+  column: never put it at the start or end of name.
+- manufacturer = the MFG / Mfr / Co. cell of the same row (often 2-6 letters like
+  A.B., ALK, INT); batch = the Batch cell (letters+digits, e.g. K26K010300); never
+  swap the two.
+- pack = the Pack / Pkg cell as printed ("1 S", "10'S", "100ML", "1"); keep the
+  space in "1 S".
+- Check every row: qty × rate (less DIS%) must equal amount. If it does not, read
+  the row again before answering.
+- column_values: read the MRP, Batch, Qty and Rate columns AGAIN, each on its own,
+  straight down the column from the first product row to the last (all pages),
+  one value per product row. Do not copy them from items — read the column.
+
 General:
 - pack is NEVER 2.50, 9.00, 12.00 (those are GST half-rates)
 - hsn_code = exact digits from the HSN column (do not pad with zeros or shorten)
@@ -152,7 +174,16 @@ def parse_bill_images_with_gemini(
         _report(on_progress, "Reading {} bill pages…".format(len(clean)))
     else:
         _report(on_progress, "Reading the bill…")
-    raw_json = _call_gemini(clean, api_key, on_progress)
+    from core.bill_photo_orientation import remove_quietly, upright_copies
+
+    # A bill lying on its side in the photo is read across instead of down (one
+    # row's MRP landed on the next row on every try); turned upright first, the
+    # same photo read right (core/bill_photo_orientation).
+    send, temps = upright_copies(clean)
+    try:
+        raw_json = _call_gemini(send, api_key, on_progress)
+    finally:
+        remove_quietly(temps)
     _report(on_progress, "Matching medicines…")
     return _json_to_invoice(raw_json, clean[0])
 
@@ -344,6 +375,7 @@ def _json_to_invoice(data: Dict[str, Any], source_path: str) -> PurchaseInvoice:
     totals = data.get("totals") or {}
     raw_items = normalize_gemini_item_rows(data.get("items"))
     supplier_name = str(supplier.get("name") or "")
+    columns = data.get("columns") if isinstance(data.get("columns"), list) else []
 
     items: List[ImportedPurchaseItem] = []
     for idx, row in enumerate(raw_items, 1):
@@ -385,6 +417,27 @@ def _json_to_invoice(data: Dict[str, Any], source_path: str) -> PurchaseInvoice:
             continue
         if _looks_like_non_item_name(rec["name"]):
             continue
+        # The reader's own copy of the printed row, read under the printed
+        # headings: where the two disagree the bill's arithmetic decides, and
+        # what it cannot decide is marked for the shop (core/bill_columns).
+        row_text = str(row.get("row_text") or "").strip()
+        from core.bill_columns import (
+            column_values_for_row,
+            cross_check_row,
+            reconcile_readings,
+        )
+
+        try:
+            if row_text and columns:
+                cross_check_row(rec, row_text, columns)
+            # The same columns read straight down on their own.
+            by_column = column_values_for_row(
+                data.get("column_values"), idx - 1, len(raw_items),
+            )
+            if by_column:
+                reconcile_readings(rec, by_column, "column")
+        except Exception:
+            pass
         from core.bill_import_normalize import normalize_gemini_item_record
 
         normalize_gemini_item_record(rec, supplier_name)

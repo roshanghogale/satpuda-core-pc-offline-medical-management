@@ -100,8 +100,9 @@ def normalize_bill_pack(
             return "{}{}".format(num, "MD")
         return num
 
-    # 10's, 15's, 60's
-    m = re.match(r"^(\d+)['']S?$", compact.replace("'", ""))
+    # 10's, 15's, 60's, 10S, 1 S (the old pattern needed a quote it had just
+    # removed, so none of these ever matched)
+    m = re.match(r"^(\d+)['’`*]?S$", compact)
     if m:
         return m.group(1)
 

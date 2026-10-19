@@ -2217,6 +2217,7 @@ def get_purchase_import_preview(token: str) -> dict[str, Any]:
                 "mrp": float(getattr(it, "mrp", 0) or 0),
                 "valid": bool(getattr(it, "is_valid", False)),
                 "issues": list(getattr(it, "issues", None) or []),
+                "check_fields": list((getattr(it, "raw", None) or {}).get("check_fields") or []),
                 "source_row": getattr(it, "source_row", None),
             }
         )
@@ -2542,6 +2543,15 @@ def apply_purchase_import(conn, body: dict[str, Any]) -> dict[str, Any]:
         "edi_manual_supplier": bool(prepared.get("edi_manual_supplier")),
     }
 
+    # Cells the bill reader could not prove are outlined on the Purchase page.
+    check_lines = sum(1 for row in converted if (row or {}).get("check_fields"))
+    check_note = (
+        f"\n{check_lines} line(s) have a value outlined in amber: the bill reader could not "
+        "prove it (hover it to see why). Check those cells against the bill."
+        if check_lines
+        else ""
+    )
+
     ws_note = ""
     if wholesale:
         form["rate_a_needed"] = rate_a_needed
@@ -2554,7 +2564,7 @@ def apply_purchase_import(conn, body: dict[str, Any]) -> dict[str, Any]:
     message = (
         f"{len(converted)} item(s) loaded on the Purchase page.\n"
         "Line discounts are shown in the Disc column (₹ or % from the bill)."
-        f"{disc_note}{supplier_note}{ocr_note}{note}\n"
+        f"{disc_note}{supplier_note}{ocr_note}{note}{check_note}\n"
         "Check MRP, rate, quantity and schedule on every line (and batch / expiry) "
         "before you save the purchase."
         f"{ws_note}"
