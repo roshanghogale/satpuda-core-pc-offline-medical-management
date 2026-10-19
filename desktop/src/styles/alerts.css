@@ -642,9 +642,36 @@
   flex-direction: column;
   gap: 10px;
 }
+/* Owner, 19 Oct 2026: "i can't able to scroll the alert and monitoring lists". The list
+   used to be a 56vh box inside a page that scrolled too, so on a 768 px screen the wheel
+   moved the page or the list by turns and the buttons fell below the window. Now the tab
+   fills the window: title and filters stay put, the list takes all the room left and is
+   the one thing that scrolls, and the action bar is always in sight. */
+.settings-section-content-full:has(.alx-panel) {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 10px;
+}
+.settings-section-content-full:has(.alx-panel) > div {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.settings-section-content-full:has(.alx-panel) > div > .settings-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.settings-panel > .alx-panel {
+  flex: 1;
+  min-height: 0;
+}
 .alx-panel .alx-table-wrap {
-  max-height: min(56vh, 520px);
-  flex: none;
+  flex: 1 1 auto;
+  min-height: 180px;
+  max-height: none;
 }
 .alx-summary {
   display: flex;
