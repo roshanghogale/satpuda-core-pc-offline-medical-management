@@ -3,8 +3,10 @@
  *  while-running re-check and Home -> Alerts) and Settings -> Alert & Monitoring.
  *
  *  - AlertGrid: a table with a sticky header, number columns right-aligned, an action on
- *    every row, and (Expired / Near Expiry) rows grouped under the supplier the batch was
- *    bought from, each supplier with its count and value at purchase rate and MRP.
+ *    every row, and rows grouped: Expired / Near Expiry under the supplier the batch was
+ *    bought from (count, value at purchase rate and MRP), Low / Out of Stock under the
+ *    supplier the medicine was last bought from (count), Customer Dues under the
+ *    customer's village / area (customers, total due).
  *  - MenuButton: "Export ▾" / "Print ▾".
  *
  *  Every figure comes from the engine (core/alert_monitoring_service, startup_alerts_data);
@@ -15,9 +17,41 @@ import { useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from '
 import '../../styles/alerts.css'
 
 export const UNKNOWN_SUPPLIER = 'Unknown supplier'
+export const UNKNOWN_AREA = 'Unknown area'
 export const VALUE_RATE = 'Value (P.Rate)'
 export const VALUE_MRP = 'Value (MRP)'
-const SUPPLIER_COLUMNS = ['Supplier', 'Supplier Name']
+
+/** What a list can be grouped by (core/alert_supplier_groups: the same names). */
+export type GroupKind = 'supplier' | 'area'
+const GROUP_COLUMNS: Record<GroupKind, string[]> = {
+  supplier: ['Supplier', 'Supplier Name'],
+  area: ['Area', 'Village / Area', 'Village'],
+}
+const UNKNOWN: Record<GroupKind, string> = { supplier: UNKNOWN_SUPPLIER, area: UNKNOWN_AREA }
+const NAME_COLUMNS = ['Medicine', 'Medicine Name', 'Customer', 'Customer Name']
+const BILL_COLUMNS = ['Bill Number', 'Bill No']
+/** Expired / Near Expiry: their rows are batches (counted as batches). */
+const BATCH_LIST_COLUMNS = ['Days Expired', 'Days Left', 'Remaining Days', 'Quantity Expired']
+
+/** The engine's group_by ("Supplier" / "Area") as a kind; '' = the list is not grouped. */
+export function groupKindOf(groupBy: unknown): GroupKind | '' {
+  const g = String(groupBy ?? '').trim().toLowerCase()
+  if (g === 'supplier') return 'supplier'
+  if (g === 'area' || g === 'village' || g === 'village / area') return 'area'
+  return ''
+}
+
+/** "supplier" / "village / area" -- the words the screens use. */
+export function groupWord(kind: GroupKind, plural = false): string {
+  if (kind === 'area') return plural ? 'areas' : 'area'
+  return plural ? 'suppliers' : 'supplier'
+}
+
+export function isBatchList(columns: string[]): boolean {
+  return (
+    columns.includes(VALUE_RATE) || columns.includes(VALUE_MRP) || BATCH_LIST_COLUMNS.some((c) => columns.includes(c))
+  )
+}
 
 /** Money columns: two decimals, right-aligned. */
 const MONEY = /^(P\.Rate|MRP|Rate|Value|Due Amount|Total Amount|Paid Amount|Selling Rate|Purchase Rate)/
@@ -50,51 +84,121 @@ export function rupees(v: number): string {
   return `₹${money(v)}`
 }
 
-export function supplierIndex(columns: string[]): number {
-  for (const c of SUPPLIER_COLUMNS) {
+function firstIndex(columns: string[], names: string[]): number {
+  for (const c of names) {
     const i = columns.indexOf(c)
     if (i >= 0) return i
   }
   return -1
 }
 
-export function supplierLabel(v: unknown): string {
-  const s = String(v ?? '').trim()
-  return s || UNKNOWN_SUPPLIER
+export function groupIndex(columns: string[], kind: GroupKind = 'supplier'): number {
+  return firstIndex(columns, GROUP_COLUMNS[kind])
 }
 
-export type SupplierGroup = {
+export function supplierIndex(columns: string[]): number {
+  return groupIndex(columns, 'supplier')
+}
+
+/** A supplier / area as the groups name it: spaces tidied, blank = "Unknown ...". */
+export function groupLabel(v: unknown, kind: GroupKind = 'supplier'): string {
+  const s = String(v ?? '').trim().replace(/\s+/g, ' ')
+  return s || UNKNOWN[kind]
+}
+
+export function supplierLabel(v: unknown): string {
+  return groupLabel(v, 'supplier')
+}
+
+export function isUnknownGroup(name: string): boolean {
+  return name === UNKNOWN_SUPPLIER || name === UNKNOWN_AREA
+}
+
+export type RowGroup = {
+  /** the supplier's / area's name */
+  name: string
+  /** the same (older callers) */
   supplier: string
+  kind: GroupKind
   /** indexes into the rows given */
   idx: number[]
   count: number
+  /** distinct medicines / customers */
+  names: number
+  /** distinct bills */
+  bills: number
   valueRate: number
   valueMrp: number
+  due: number
 }
+export type SupplierGroup = RowGroup
 
-/** Rows cut by supplier, A-Z with "Unknown supplier" last (as the export cuts them). */
-export function groupBySupplier(columns: string[], rows: unknown[][]): SupplierGroup[] {
-  const at = supplierIndex(columns)
+/** Rows cut by supplier / area, A-Z with the unknown group last, names compared without
+ *  case or extra spaces (as core/alert_supplier_groups cuts the files). */
+export function groupRows(columns: string[], rows: unknown[][], kind: GroupKind = 'supplier'): RowGroup[] {
+  const at = groupIndex(columns, kind)
   const vr = columns.indexOf(VALUE_RATE)
   const vm = columns.indexOf(VALUE_MRP)
-  const map = new Map<string, SupplierGroup>()
+  const due = columns.indexOf('Due Amount')
+  const nameAt = firstIndex(columns, NAME_COLUMNS)
+  const billAt = firstIndex(columns, BILL_COLUMNS)
+  const map = new Map<string, RowGroup & { _n: Set<string>; _b: Set<string> }>()
   rows.forEach((r, i) => {
-    const name = supplierLabel(at >= 0 ? r[at] : '')
-    let g = map.get(name)
+    const name = groupLabel(at >= 0 ? r[at] : '', kind)
+    const key = name.toLowerCase()
+    let g = map.get(key)
     if (!g) {
-      g = { supplier: name, idx: [], count: 0, valueRate: 0, valueMrp: 0 }
-      map.set(name, g)
+      g = {
+        name,
+        supplier: name,
+        kind,
+        idx: [],
+        count: 0,
+        names: 0,
+        bills: 0,
+        valueRate: 0,
+        valueMrp: 0,
+        due: 0,
+        _n: new Set(),
+        _b: new Set(),
+      }
+      map.set(key, g)
     }
     g.idx.push(i)
     g.count += 1
+    const nm = nameAt >= 0 ? String(r[nameAt] ?? '').trim().toLowerCase() : ''
+    if (nm) g._n.add(nm)
+    const bill = billAt >= 0 ? String(r[billAt] ?? '').trim() : ''
+    if (bill) g._b.add(bill)
     if (vr >= 0) g.valueRate += Number(r[vr]) || 0
     if (vm >= 0) g.valueMrp += Number(r[vm]) || 0
+    if (due >= 0) g.due += Number(r[due]) || 0
   })
-  return [...map.values()].sort((a, b) => {
-    const ua = a.supplier === UNKNOWN_SUPPLIER ? 1 : 0
-    const ub = b.supplier === UNKNOWN_SUPPLIER ? 1 : 0
-    return ua - ub || a.supplier.localeCompare(b.supplier, 'en', { sensitivity: 'base' })
-  })
+  return [...map.values()]
+    .map(({ _n, _b, ...g }) => ({ ...g, names: _n.size, bills: _b.size }))
+    .sort((a, b) => {
+      const ua = isUnknownGroup(a.name) ? 1 : 0
+      const ub = isUnknownGroup(b.name) ? 1 : 0
+      return ua - ub || a.name.localeCompare(b.name, 'en', { sensitivity: 'base' })
+    })
+}
+
+/** Rows cut by supplier, A-Z with "Unknown supplier" last (as the export cuts them). */
+export function groupBySupplier(columns: string[], rows: unknown[][]): RowGroup[] {
+  return groupRows(columns, rows, 'supplier')
+}
+
+function plural(n: number, one: string, many = `${one}s`) {
+  return `${n} ${n === 1 ? one : many}`
+}
+
+/** "4 batches" / "6 medicines" / "3 customers · 5 bills" -- what a group heading counts. */
+export function groupCountText(columns: string[], g: RowGroup): string {
+  if (g.kind === 'area') {
+    return `${plural(g.names || g.count, 'customer')}${g.bills ? ` · ${plural(g.bills, 'bill')}` : ''}`
+  }
+  if (isBatchList(columns)) return plural(g.count, 'batch', 'batches')
+  return plural(g.names || g.count, 'medicine')
 }
 
 export function sumColumn(columns: string[], rows: unknown[][], name: string): number {
@@ -120,25 +224,28 @@ type GridProps = {
   /** columns not shown (still exported) */
   hidden?: Set<string>
   grouped?: boolean
+  /** what the rows are grouped by (default: supplier) */
+  groupKind?: GroupKind
   selected?: number | null
   onSelect?: (i: number) => void
   onActivate?: (i: number) => void
   /** label of the action button at the end of every row ("Return", "Reorder") */
   rowActionLabel?: string | null
   onRowAction?: (i: number) => void
-  /** extra buttons on a supplier's heading (e.g. that supplier's PDF) */
-  groupActions?: (g: SupplierGroup) => ReactNode
+  /** extra buttons on a group's heading (e.g. that supplier's PDF) */
+  groupActions?: (g: RowGroup) => ReactNode
   empty?: string
   /** rows drawn at most (the rest are in the export) */
   limit?: number
 }
 
-/** The alert table: sticky header, row actions, optional supplier groups. */
+/** The alert table: sticky header, row actions, optional supplier / area groups. */
 export function AlertGrid({
   columns,
   rows,
   hidden,
   grouped,
+  groupKind = 'supplier',
   selected,
   onSelect,
   onActivate,
@@ -148,7 +255,7 @@ export function AlertGrid({
   empty = 'Nothing here.',
   limit = 600,
 }: GridProps) {
-  const supAt = supplierIndex(columns)
+  const supAt = groupIndex(columns, groupKind)
   const groupOn = Boolean(grouped && supAt >= 0)
   const shown = useMemo(
     () =>
@@ -157,7 +264,10 @@ export function AlertGrid({
         .filter(({ c, i }) => !hidden?.has(c) && !(groupOn && i === supAt)),
     [columns, hidden, groupOn, supAt],
   )
-  const groups = useMemo(() => (groupOn ? groupBySupplier(columns, rows) : []), [groupOn, columns, rows])
+  const groups = useMemo(
+    () => (groupOn ? groupRows(columns, rows, groupKind) : []),
+    [groupOn, columns, rows, groupKind],
+  )
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const hasValue = columns.includes(VALUE_RATE) || columns.includes(VALUE_MRP)
   const actionCol = Boolean(rowActionLabel && onRowAction)
@@ -216,26 +326,29 @@ export function AlertGrid({
     )
   } else if (groupOn) {
     for (const g of groups) {
-      const shut = Boolean(collapsed[g.supplier])
+      const shut = Boolean(collapsed[g.name])
       body.push(
-        <tr key={`g:${g.supplier}`} className={`alx-group${g.supplier === UNKNOWN_SUPPLIER ? ' is-unknown' : ''}`}>
+        <tr key={`g:${g.name}`} className={`alx-group${isUnknownGroup(g.name) ? ' is-unknown' : ''}`}>
           <td colSpan={span}>
             <div className="alx-group-line">
               <button
                 type="button"
                 className="alx-group-toggle"
                 aria-expanded={!shut}
-                onClick={() => setCollapsed((p) => ({ ...p, [g.supplier]: !shut }))}
+                onClick={() => setCollapsed((p) => ({ ...p, [g.name]: !shut }))}
               >
                 <span className={`alx-caret${shut ? ' shut' : ''}`} aria-hidden>
                   ▾
                 </span>
-                <span className="alx-group-name">{g.supplier}</span>
+                <span className="alx-group-name">{g.name}</span>
               </button>
-              <span className="alx-group-count">
-                {g.count} batch{g.count === 1 ? '' : 'es'}
-              </span>
-              {hasValue ? (
+              <span className="alx-group-count">{groupCountText(columns, g)}</span>
+              {g.kind === 'area' ? (
+                <span className="alx-group-money">
+                  <span title="Total due">{rupees(g.due)}</span>
+                  <span className="alx-dim"> due</span>
+                </span>
+              ) : hasValue ? (
                 <span className="alx-group-money">
                   <span title="Value at purchase rate">{rupees(g.valueRate)}</span>
                   <span className="alx-dim"> P.Rate · </span>
@@ -367,15 +480,23 @@ export function MenuButton({
   )
 }
 
-/** "Group by supplier" switch. */
-export function GroupSwitch({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+/** "Group by supplier" / "Group by area" switch. */
+export function GroupSwitch({
+  on,
+  onChange,
+  label = 'Group by supplier',
+}: {
+  on: boolean
+  onChange: (on: boolean) => void
+  label?: string
+}) {
   return (
     <label className={`alx-switch${on ? ' on' : ''}`}>
       <input type="checkbox" checked={on} onChange={(e) => onChange(e.target.checked)} />
       <span className="alx-switch-track" aria-hidden>
         <span className="alx-switch-knob" />
       </span>
-      Group by supplier
+      {label}
     </label>
   )
 }

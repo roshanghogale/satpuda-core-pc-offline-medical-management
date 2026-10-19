@@ -134,6 +134,8 @@ def _purchase_trail(conn) -> Dict[str, Any]:
     by_batch: Dict[Tuple[int, str], Dict[str, Any]] = {}
     by_med: Dict[int, Dict[str, Any]] = {}
     by_name: Dict[str, Dict[str, Any]] = {}
+    sup_by_med: Dict[int, str] = {}
+    sup_by_name: Dict[str, str] = {}
     for med_id, batch, expiry, bill, pdate, supplier, name, prate in cur.fetchall():
         # rate: what the shop paid for one pack on that bill (an expiry return is valued at it)
         info = {"bill": str(bill or ""), "date": _iso_day(pdate), "supplier": str(supplier or ""),
@@ -143,15 +145,52 @@ def _purchase_trail(conn) -> Dict[str, Any]:
         by_med.setdefault(mid, info)
         if name:
             by_name.setdefault(str(name), info)
+        _note_supplier(sup_by_med, sup_by_name, mid, name, supplier)
     shelf: Dict[int, str] = {}
+    shelf_by_name: Dict[str, str] = {}
     try:
-        for mid, sup in cur.execute(
-                "SELECT id, COALESCE(supplier_name,'') FROM medicines").fetchall():
+        for mid, name, sup in cur.execute(
+                "SELECT id, COALESCE(name,''), COALESCE(supplier_name,'') FROM medicines "
+                "ORDER BY id DESC").fetchall():
             if sup and str(sup).strip():
                 shelf[int(mid)] = str(sup).strip()
+                if name:
+                    shelf_by_name.setdefault(str(name), str(sup).strip())
     except Exception:
         pass
-    return {"by_batch": by_batch, "by_med": by_med, "by_name": by_name, "shelf": shelf}
+    return {"by_batch": by_batch, "by_med": by_med, "by_name": by_name, "shelf": shelf,
+            "sup_by_med": sup_by_med, "sup_by_name": sup_by_name, "shelf_by_name": shelf_by_name}
+
+
+def _note_supplier(sup_by_med: Dict[int, str], sup_by_name: Dict[str, str], mid: int,
+                   name: Any, supplier: Any) -> None:
+    """Purchase lines arrive newest first: the first one naming a supplier is the last
+    supplier the medicine was bought from."""
+    sup = str(supplier or "").strip()
+    if not sup:
+        return
+    if mid:
+        sup_by_med.setdefault(mid, sup)
+    if name:
+        sup_by_name.setdefault(str(name), sup)
+
+
+def _last_bought_from(trail: Dict[str, Any], name: Any, med_id: Any) -> str:
+    """The supplier a medicine was LAST bought from (Low / Out of Stock, owner 19 Oct 2026:
+    "reorder per supplier"): the newest saved purchase line of that medicine -- any row of
+    that name, then the row itself -- that names a supplier; else the supplier written on
+    the shelf row (opening stock / import), else on any row of that name; else "" (the
+    export's "Unknown supplier")."""
+    try:
+        mid = int(med_id or 0)
+    except (TypeError, ValueError):
+        mid = 0
+    nm = str(name or "")
+    return (trail.get("sup_by_name", {}).get(nm)
+            or trail.get("sup_by_med", {}).get(mid)
+            or trail.get("shelf", {}).get(mid)
+            or trail.get("shelf_by_name", {}).get(nm)
+            or "")
 
 
 def _batch_source(trail: Dict[str, Any], med_id: Any, batch: Any) -> Dict[str, Any]:
@@ -324,7 +363,7 @@ def fetch_low_stock_alerts(conn, detail: bool = False) -> List[Tuple[Any, ...]]:
             continue
         mid = int(info["sample_id"]) if info.get("sample_id") else 0
         last = trail["by_name"].get(name) or trail["by_med"].get(mid) or {}
-        supplier = trail["shelf"].get(mid, "") or last.get("supplier", "")
+        supplier = _last_bought_from(trail, name, mid)
         row: Tuple[Any, ...] = (name, _num(qty), unit or "", supplier)
         if detail:
             row += (last.get("batch", ""), _fmt_expiry_display(last.get("expiry", "")),
@@ -358,7 +397,7 @@ def fetch_out_of_stock_medicines(conn, detail: bool = False) -> List[Tuple[Any, 
         seen.add(key)
         mid = int(med_id) if med_id else 0
         last = trail["by_med"].get(mid) or trail["by_name"].get(name) or {}
-        supplier = trail["shelf"].get(mid, "") or last.get("supplier", "")
+        supplier = _last_bought_from(trail, name, mid)
         row: Tuple[Any, ...] = (
             name,
             unit or "",
@@ -506,14 +545,49 @@ def remaining_bill_due(due_amount, total_due, account_cleared) -> float:
     return snapshot if snapshot > 0.01 else 0.0
 
 
+def _area_text(value: Any) -> str:
+    return " ".join(str(value or "").split())
+
+
+def _customer_areas(conn) -> Dict[int, str]:
+    """Customer id -> village / area (Customer Dues by area, owner 19 Oct 2026): the
+    customer's own address -- the field Contacts and Sales keep as the village -- else the
+    address typed on the customer's newest bill that has one."""
+    out: Dict[int, str] = {}
+    try:
+        for cid, addr in conn.execute("SELECT id, COALESCE(address,'') FROM customers").fetchall():
+            if _area_text(addr):
+                out[int(cid)] = _area_text(addr)
+    except Exception:
+        return out
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(sales)").fetchall()}
+        if "customer_address" in cols:
+            for cid, addr in conn.execute("""
+                SELECT customer_id, customer_address FROM sales
+                WHERE customer_id IS NOT NULL AND TRIM(COALESCE(customer_address,'')) <> ''
+                ORDER BY bill_date DESC, id DESC
+            """).fetchall():
+                try:
+                    out.setdefault(int(cid), _area_text(addr))
+                except (TypeError, ValueError):
+                    continue
+    except Exception:
+        pass
+    return out
+
+
 def fetch_customer_due_bills(conn) -> List[Tuple[Any, ...]]:
+    """Bills still owing (Alert & Monitoring). Row: customer, phone, bill no, bill date,
+    total, paid, due, due days, and -- appended last -- the customer's village / area."""
     cur = conn.cursor()
     today = date.today()
     due_settings = load_due_alert_settings(conn)
+    areas = _customer_areas(conn)
     cur.execute("""
         SELECT c.name, COALESCE(c.phone,''), s.bill_no, s.bill_date,
                COALESCE(s.total_amount,0), COALESCE(s.amount_paid,0),
-               remaining_due.due
+               remaining_due.due, c.id
         FROM sales s
         JOIN customers c ON c.id = s.customer_id
         JOIN (
@@ -529,7 +603,7 @@ def fetch_customer_due_bills(conn) -> List[Tuple[Any, ...]]:
         ORDER BY s.bill_date DESC, s.bill_no DESC
     """)
     rows: List[Tuple[Any, ...]] = []
-    for name, phone, bill_no, bill_date, total, paid, due in cur.fetchall():
+    for name, phone, bill_no, bill_date, total, paid, due, cid in cur.fetchall():
         due_days = bill_due_days(bill_date, today)
         if not passes_due_alert_filter(due, due_days, due_settings):
             continue
@@ -542,12 +616,14 @@ def fetch_customer_due_bills(conn) -> List[Tuple[Any, ...]]:
             round(float(paid or 0), 2),
             round(float(due or 0), 2),
             due_days,
+            areas.get(int(cid or 0), ""),
         ))
     return rows
 
 
-def fetch_customer_due_summary(conn) -> List[Tuple[Any, ...]]:
-    """Customer-level due rows for the startup alert popup."""
+def fetch_customer_due_summary(conn, area: bool = False) -> List[Tuple[Any, ...]]:
+    """Customer-level due rows for the startup alert popup: name, phone, due, and with
+    `area` the customer's village / area last."""
     cur = conn.cursor()
     due_settings = load_due_alert_settings(conn)
     min_amount = due_settings["min_amount"]
@@ -556,7 +632,7 @@ def fetch_customer_due_summary(conn) -> List[Tuple[Any, ...]]:
 
     if min_days > 0:
         cur.execute("""
-            SELECT DISTINCT c.name, COALESCE(c.phone,''), COALESCE(c.total_due,0)
+            SELECT DISTINCT c.name, COALESCE(c.phone,''), COALESCE(c.total_due,0), c.id
             FROM customers c
             JOIN sales s ON s.customer_id = c.id
             WHERE COALESCE(c.total_due,0) >= ?
@@ -575,7 +651,7 @@ def fetch_customer_due_summary(conn) -> List[Tuple[Any, ...]]:
         """, (min_amount, min_amount, str(today), min_days))
     else:
         cur.execute("""
-            SELECT name, COALESCE(phone,''), COALESCE(total_due,0)
+            SELECT name, COALESCE(phone,''), COALESCE(total_due,0), id
             FROM customers
             WHERE COALESCE(total_due,0) >= ?
               AND COALESCE(total_due,0) > 0.01
@@ -584,13 +660,14 @@ def fetch_customer_due_summary(conn) -> List[Tuple[Any, ...]]:
         # `>= 0` alone (the default minimum) listed every customer in the shop,
         # zero balances included. A due alert is for money still owed.
 
-    return [
-        (n, p, round(float(d or 0), 2))
-        for n, p, d in cur.fetchall()
-    ]
+    found = cur.fetchall()
+    if not area:
+        return [(n, p, round(float(d or 0), 2)) for n, p, d, _cid in found]
+    areas = _customer_areas(conn)
+    return [(n, p, round(float(d or 0), 2), areas.get(int(cid or 0), "")) for n, p, d, cid in found]
 
 
-def fetch_customer_due_summary_online(conn) -> List[Tuple[Any, ...]]:
+def fetch_customer_due_summary_online(conn, area: bool = False) -> List[Tuple[Any, ...]]:
     """fetch_customer_due_summary for Online, where `customers` is the store's.
 
     Same rule as the Offline SQL: a balance above zero and at least the shop's
@@ -636,9 +713,38 @@ def fetch_customer_due_summary_online(conn) -> List[Tuple[Any, ...]]:
             nm = str(c.get("name") or "").strip().upper()
             if cid not in eligible_ids and nm not in eligible_names:
                 continue
-        rows.append((c.get("name") or "", c.get("phone") or "", round(total, 2)))
+        row: Tuple[Any, ...] = (c.get("name") or "", c.get("phone") or "", round(total, 2))
+        if area:
+            # the store's customer row carries the village (Contacts keeps it as address)
+            row += (_area_text(c.get("address") or c.get("village")),)
+        rows.append(row)
     rows.sort(key=lambda r: (-r[2], str(r[0]).lower()))
     return rows
+
+
+def _online_customer_areas() -> Tuple[Dict[str, str], Dict[str, str]]:
+    """(customer id -> area, upper-case name -> area) from the store's customers."""
+    from core import online_catalog as oc
+
+    by_id: Dict[str, str] = {}
+    by_name: Dict[str, str] = {}
+    try:
+        custs = oc.customers() or []
+    except Exception:
+        return by_id, by_name
+    for c in custs:
+        if not isinstance(c, dict):
+            continue
+        a = _area_text(c.get("address") or c.get("village"))
+        if not a:
+            continue
+        for k in (c.get("id"), c.get("local_id")):
+            if k not in (None, ""):
+                by_id.setdefault(str(k), a)
+        nm = str(c.get("name") or "").strip().upper()
+        if nm:
+            by_name.setdefault(nm, a)
+    return by_id, by_name
 
 
 def fetch_all_monitoring_sections(conn, detail: bool = False) -> Dict[str, List[Tuple[Any, ...]]]:
@@ -694,6 +800,8 @@ def online_purchase_trail(meds: List[Dict[str, Any]]) -> Dict[str, Any]:
     by_batch: Dict[Tuple[int, str], Dict[str, str]] = {}
     by_med: Dict[int, Dict[str, str]] = {}
     by_name: Dict[str, Dict[str, str]] = {}
+    sup_by_med: Dict[int, str] = {}
+    sup_by_name: Dict[str, str] = {}
     for d in docs:
         if d.get("deleted") or d.get("is_autosave"):
             continue
@@ -721,7 +829,27 @@ def online_purchase_trail(meds: List[Dict[str, Any]]) -> Dict[str, Any]:
             name = names_by_id.get(mid) or str(it.get("medicine_name") or it.get("name") or "")
             if name:
                 by_name.setdefault(name, info)
-    return {"by_batch": by_batch, "by_med": by_med, "by_name": by_name, "shelf": shelf}
+            _note_supplier(sup_by_med, sup_by_name, mid, name, supplier)
+    return {"by_batch": by_batch, "by_med": by_med, "by_name": by_name, "shelf": shelf,
+            "sup_by_med": sup_by_med, "sup_by_name": sup_by_name,
+            "shelf_by_name": _online_shelf_by_name(meds)}
+
+
+def _online_shelf_by_name(meds: List[Dict[str, Any]]) -> Dict[str, str]:
+    """Medicine name -> the supplier written on its newest shelf row that names one."""
+    def _id(m: Dict[str, Any]) -> int:
+        try:
+            return int(m.get("id") or m.get("local_id") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    out: Dict[str, str] = {}
+    for m in sorted(meds, key=_id, reverse=True):
+        sup = str(m.get("supplier_name") or "").strip()
+        name = str(m.get("name") or "").strip()
+        if sup and name:
+            out.setdefault(name, sup)
+    return out
 
 
 def online_visible_medicines() -> List[Dict[str, Any]]:
@@ -761,15 +889,18 @@ def online_stock_sections(conn, meds=None, detail: bool = False) -> Dict[str, Li
         except (TypeError, ValueError):
             return 0
 
+    light = {"by_batch": {}, "by_med": {}, "by_name": {},
+             "shelf": {_mid(m): str(m.get("supplier_name") or "").strip() for m in meds
+                       if str(m.get("supplier_name") or "").strip()},
+             "shelf_by_name": _online_shelf_by_name(meds)}
     if detail:
         try:
             trail = online_purchase_trail(meds)
         except Exception:
-            trail = {"by_batch": {}, "by_med": {}, "by_name": {}, "shelf": {}}
+            trail = light
     else:
-        trail = {"by_batch": {}, "by_med": {}, "by_name": {},
-                 "shelf": {_mid(m): str(m.get("supplier_name") or "").strip() for m in meds
-                           if str(m.get("supplier_name") or "").strip()}}
+        # The startup popup stays light: no purchase pull, the shelf rows' own supplier.
+        trail = light
 
     by_name: Dict[str, Dict[str, Any]] = {}
     by_pack: Dict[Tuple[str, str], Dict[str, Any]] = {}
@@ -820,7 +951,7 @@ def online_stock_sections(conn, meds=None, detail: bool = False) -> Dict[str, Li
             name,
             int(qty) if qty == int(qty) else round(qty, 2),
             unit,
-            trail["shelf"].get(mid, "") or last.get("supplier", ""),
+            _last_bought_from(trail, name, mid),
         )
         if detail:
             row += (last.get("batch", ""), _fmt_expiry_display(last.get("expiry", "")),
@@ -839,7 +970,7 @@ def online_stock_sections(conn, meds=None, detail: bool = False) -> Dict[str, Li
             round(float(info.get("mrp") or 0), 2),
             round(float(info.get("rate") or 0), 2),
             info.get("type") or "",
-            trail["shelf"].get(mid, "") or last.get("supplier", ""),
+            _last_bought_from(trail, name, mid),
         )
         if detail:
             row += (last.get("batch", ""), last.get("bill", ""), _show_day(last.get("date", "")),
@@ -905,6 +1036,7 @@ def _fetch_all_monitoring_online(conn, detail: bool = False) -> Dict[str, List[T
         sales = (sq.list_sales(limit=5000) or {}).get("rows") or []
     except Exception:
         sales = []
+    area_by_id, area_by_name = _online_customer_areas() if sales else ({}, {})
     for r in sales:
         # The cascaded remainder, not the entry-time snapshot — see remaining_bill_due.
         due = remaining_bill_due(
@@ -927,6 +1059,9 @@ def _fetch_all_monitoring_online(conn, detail: bool = False) -> Dict[str, List[T
             round(float(r.get("amount_paid") or 0), 2),
             round(due, 2),
             due_days,
+            area_by_id.get(str(r.get("customer_id") or ""))
+            or area_by_name.get(str(r.get("customer_name") or "").strip().upper())
+            or _area_text(r.get("customer_address")),
         ))
 
     return {**stock, "customer_due": due_rows}

@@ -84,7 +84,7 @@ def _collect_alert_data(conn):
     today = date.today()
 
     low_stock = []
-    for name, qty, unit, _supplier in fetch_low_stock_alerts(conn):
+    for name, qty, unit, supplier in fetch_low_stock_alerts(conn):
         # The hidden filter fetch_low_stock_alerts applies: without it a batch
         # the shop removed from lists came back as a row here.
         cur.execute(
@@ -105,6 +105,7 @@ def _collect_alert_data(conn):
                     batch_no,
                     float(stock_qty or 0),
                     unit or "",
+                    supplier or "",
                 ))
         else:
             cur.execute(
@@ -113,7 +114,7 @@ def _collect_alert_data(conn):
             )
             row = cur.fetchone()
             med_type = row[0] if row else ""
-            low_stock.append((name, med_type, "", qty, unit or ""))
+            low_stock.append((name, med_type, "", qty, unit or "", supplier or ""))
 
     near_expiry = []
     for (name, batch, expiry_display, days_left, qty, supplier, bill,
@@ -158,7 +159,7 @@ def _collect_alert_data(conn):
             supplier or "",
         ))
 
-    customer_due = fetch_customer_due_summary(conn)
+    customer_due = fetch_customer_due_summary(conn, area=True)
     return _tabs(low_stock, out_of_stock, near_expiry, expired, customer_due)
 
 
@@ -191,7 +192,9 @@ def _collect_alert_data_online(conn):
         return str((first.get((name, batch or "")) or {}).get("type") or "")
 
     low_stock = []
-    for name, qty, unit, _supplier in sections["low_stock"]:
+    # Online the popup stays light (no purchase pull at startup): the supplier written on
+    # the shelf rows; Alert & Monitoring reads the purchases for the last one bought from.
+    for name, qty, unit, supplier in sections["low_stock"]:
         batches = sorted(
             (m for m in by_name.get(name, []) if float(m.get("stock_qty") or 0) > 0),
             key=lambda m: str(m.get("batch_no") or ""),
@@ -203,6 +206,7 @@ def _collect_alert_data_online(conn):
                 str(m.get("batch_no") or ""),
                 float(m.get("stock_qty") or 0),
                 unit or "",
+                supplier or "",
             ))
 
     def _money(name, batch, qty):
@@ -228,7 +232,7 @@ def _collect_alert_data_online(conn):
          med_type or "", supplier or "")
         for name, unit, mrp, rate, med_type, supplier in sections["out_of_stock"]
     ]
-    customer_due = fetch_customer_due_summary_online(conn)
+    customer_due = fetch_customer_due_summary_online(conn, area=True)
     return _tabs(low_stock, out_of_stock, near_expiry, expired, customer_due)
 
 
@@ -239,7 +243,7 @@ def _collect_alert_data_online(conn):
 _RETURN_COLUMNS = ["Qty", "Supplier", "Bill No", "P.Rate", "MRP", VALUE_RATE, VALUE_MRP]
 
 
-def _alert(title, columns, rows, group_by=None):
+def _alert(title, columns, rows, group_by=None, grouped=False):
     action_kind, action_label = _TAB_ACTIONS.get(title, (None, None))
     out = {
         "title": title,
@@ -249,30 +253,40 @@ def _alert(title, columns, rows, group_by=None):
         "action_label": action_label,
     }
     if group_by:
-        # The column the window groups by (on by default) and the export cuts by.
+        # The column the window can group by and the export cuts by (owner, 19 Oct 2026:
+        # every list by what suits it); `grouped`: the window opens it grouped.
         out["group_by"] = group_by
+        out["grouped"] = bool(grouped)
     return out
 
 
 def _tabs(low_stock, out_of_stock, near_expiry, expired, customer_due):
     return [
-        _alert("Low Stock Alerts", ["Medicine", "Type", "Batch", "Stock", "Unit"], low_stock),
+        # Supplier (low stock): the one the medicine was last bought from, appended after the
+        # columns the row actions and "already shown today" keys read by position.
+        _alert("Low Stock Alerts", ["Medicine", "Type", "Batch", "Stock", "Unit", "Supplier"], low_stock,
+               group_by="Supplier"),
         _alert(
             "Out of Stock",
             ["Medicine", "Pack", "MRP", "Rate", "Type", "Supplier"],
             out_of_stock,
+            group_by="Supplier",
         ),
         _alert(
             "Near Expiry Alerts",
             ["Medicine", "Type", "Batch", "Expiry", "Days Left", *_RETURN_COLUMNS],
             near_expiry,
             group_by="Supplier",
+            grouped=True,
         ),
         _alert(
             "Expired Medicines",
             ["Medicine", "Type", "Batch", "Expiry", "Days Expired", *_RETURN_COLUMNS],
             expired,
             group_by="Supplier",
+            grouped=True,
         ),
-        _alert("Customer Due Alerts", ["Customer", "Phone", "Due Amount"], customer_due),
+        # Area: the customer's village / area (customers.address), appended last.
+        _alert("Customer Due Alerts", ["Customer", "Phone", "Due Amount", "Area"], customer_due,
+               group_by="Area"),
     ]

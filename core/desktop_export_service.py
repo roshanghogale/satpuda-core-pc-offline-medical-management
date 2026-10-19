@@ -1965,7 +1965,7 @@ def _alert_cell(col: str, v: Any) -> str:
     return str(v)
 
 # The summary section a grouped list starts with ends in this (core/alert_supplier_groups).
-_BY_SUPPLIER = " — by supplier"
+_BY_GROUP = re.compile(r" — by (supplier|area)$")
 
 
 def _alert_sections(sections: Any) -> list[tuple[str, list[str], list[list[Any]]]]:
@@ -1979,32 +1979,44 @@ def _alert_sections(sections: Any) -> list[tuple[str, list[str], list[list[Any]]
     return out
 
 
-def _alert_sections_grouped(body: dict[str, Any]) -> tuple[list[tuple[str, list[str], list[list[Any]]]], list[str]]:
-    """The sections to write, and what each one is ("list", "summary" or "supplier"). A
-    section that asks for it (group_by "Supplier": the Expired / Near Expiry lists) becomes
-    a summary by supplier plus one block per supplier, each with its own total."""
-    from core.alert_supplier_groups import group_for, split_section, supplier_column
+def _alert_sections_grouped(body: dict[str, Any]) -> tuple[list[tuple[str, list[str], list[list[Any]]]], list[str], set[str]]:
+    """The sections to write, what each one is ("list", "summary" or "group"), and what the
+    lists were grouped by ({"supplier", "area"}). A section that asks for it (group_by
+    "Supplier": Expired / Near Expiry / Low / Out of Stock; "Area": Customer Dues) becomes a
+    summary by supplier / area plus one block per group, each with its own total."""
+    from core.alert_supplier_groups import group_column, group_for, split_section
 
     raw = [s for s in (body.get("sections") or []) if isinstance(s, dict)]
     out: list[tuple[str, list[str], list[list[Any]]]] = []
     kinds: list[str] = []
+    by: set[str] = set()
     for spec, (title, cols, rows) in zip(raw, _alert_sections(raw)):
         if not cols:
             continue
-        if group_for(spec, body.get("group_by")) and rows and supplier_column(cols) >= 0:
-            parts = split_section(title, cols, rows)
+        kind = group_for(spec, body.get("group_by"))
+        if kind and rows and group_column(cols, kind) >= 0:
+            parts = split_section(title, cols, rows, kind=kind)
             out.extend(parts)
-            kinds.extend(["summary"] + ["supplier"] * (len(parts) - 1))
+            kinds.extend(["summary"] + ["group"] * (len(parts) - 1))
+            by.add(kind)
         else:
             out.append((title, cols, rows))
             kinds.append("list")
-    return out, kinds
+    return out, kinds, by
+
+
+def _alert_totals(cols, rows) -> list[str]:
+    """The TOTAL line of an alert table (the report rule, core/dot_matrix_print), except the
+    stock on hand of Low Stock: 2 strips of one medicine and 4 of another add up to nothing
+    (each supplier's heading counts its medicines instead)."""
+    from core.dot_matrix_print import _report_totals_row
+
+    heads = ["" if str(c).strip().lower() in ("stock", "current stock") else c for c in cols]
+    return _report_totals_row(heads, list(rows))
 
 
 def _alerts_pdf(path: str, title: str, sections, landscape: bool = True, kinds=None) -> str:
     from datetime import datetime
-
-    from core.export_manager import _totals_html
 
     def esc(v: Any) -> str:
         return str(v).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -2016,11 +2028,13 @@ def _alerts_pdf(path: str, title: str, sections, landscape: bool = True, kinds=N
         trs = "".join("<tr>" + "".join(
             f"<td class={num[j] or 'l'}>{esc(_alert_cell(cols[j] if j < len(cols) else '', v))}</td>"
             for j, v in enumerate(r)) + "</tr>" for r in rows)
-        # a supplier's block names its own count in its heading
-        is_sup = bool(kinds) and i < len(kinds) and kinds[i] == "supplier"
-        head = esc(sec_title) if is_sup else f"{esc(sec_title)} ({len(rows)})"
-        body += (f"<h3{' class=sup' if is_sup else ''}>{head}</h3><table><thead><tr>{hdr}</tr></thead>"
-                 f"<tbody>{trs}</tbody>{_totals_html(cols, rows)}</table>")
+        # a supplier's / an area's block names its own count in its heading
+        is_grp = bool(kinds) and i < len(kinds) and kinds[i] == "group"
+        head = esc(sec_title) if is_grp else f"{esc(sec_title)} ({len(rows)})"
+        tot = _alert_totals(cols, rows)
+        foot = ("<tfoot><tr>" + "".join(f"<td>{esc(v)}</td>" for v in tot) + "</tr></tfoot>") if tot else ""
+        body += (f"<h3{' class=sup' if is_grp else ''}>{head}</h3><table><thead><tr>{hdr}</tr></thead>"
+                 f"<tbody>{trs}</tbody>{foot}</table>")
     html = (f"<!DOCTYPE html><html><head><meta charset=UTF-8><title>{esc(title)}</title>"
             f"<style>{_ALERT_PDF_CSS.replace('A4 landscape', 'A4 landscape' if landscape else 'A4 portrait')}</style>"
             f"</head><body><h2>{esc(title)}</h2>"
@@ -2050,35 +2064,47 @@ def _alerts_pdf_bytes(title: str, sections, landscape: bool, kinds=None) -> tupl
 
 
 def _export_alerts_per_supplier(body: dict[str, Any], landscape: bool) -> dict[str, Any]:
-    """PDF, one file per supplier, for every grouped list: saved straight into a dated folder
-    under Exports (core/saved_files), each file under its dated name."""
+    """PDF, one file per supplier (or, for Customer Dues, per village / area), for every
+    grouped list: saved straight into a dated folder under Exports (core/saved_files), each
+    file under its dated name."""
     import os
     from datetime import datetime
 
-    from core.alert_supplier_groups import group_for, supplier_files
+    from core.alert_supplier_groups import group_column, group_files, group_for, is_batch_list
     from core.saved_files import STAMP_FORMAT, describe, reports_dir, save_bytes
 
     raw = [s for s in (body.get("sections") or []) if isinstance(s, dict)]
     jobs = []
+    lists: set[str] = set()
     for spec, (sec_title, cols, rows) in zip(raw, _alert_sections(raw)):
-        if rows and group_for(spec, body.get("group_by") or "supplier"):
-            jobs.extend(supplier_files(sec_title, cols, rows))
+        kind = group_for(spec, body.get("group_by") or "supplier")
+        if rows and kind and group_column(cols, kind) >= 0:
+            jobs.extend(group_files(sec_title, cols, rows, kind))
+            lists.add("Dues by area" if kind == "area"
+                      else "Expiry by supplier" if is_batch_list(cols) else "Stock by supplier")
     if not jobs:
-        return {"ok": False, "error": "Supplier-wise file banvayla kahi nahi — yaadi rikami aahe."}
-    folder = os.path.join(reports_dir(), f"Expiry by supplier_{datetime.now().strftime(STAMP_FORMAT)}")
+        return {"ok": False, "error": "Supplier / area-wise file banvayla kahi nahi — yaadi rikami aahe."}
+    if len(lists) == 1:
+        name = lists.pop()
+    elif "Dues by area" in lists:
+        name = "Alerts by supplier and area"
+    else:
+        name = "Alerts by supplier"
+    folder = os.path.join(reports_dir(), f"{name}_{datetime.now().strftime(STAMP_FORMAT)}")
     saved: list[str] = []
     try:
         for stem, doc_title, heading, cols, rows in jobs:
-            payload, ext = _alerts_pdf_bytes(doc_title, [(heading, cols, rows)], landscape, ["supplier"])
+            payload, ext = _alerts_pdf_bytes(doc_title, [(heading, cols, rows)], landscape, ["group"])
             saved.append(save_bytes(f"{stem}.{ext}", payload, folder))
     except OSError as exc:
         return {"ok": False, "error": f"File save zali nahi: {exc}", "files": saved}
+    each = {"Dues by area": "ek area"}.get(name, "ek supplier" if "area" not in name else "ek gat")
     return {
         "ok": True,
         "files": [describe(p) for p in saved],
         "folder": folder,
         "path": saved[0],
-        "message": f"{len(saved)} PDF (ek supplier, ek file) save zalya:\n{folder}",
+        "message": f"{len(saved)} PDF ({each}, ek file) save zalya:\n{folder}",
         "row_count": sum(len(j[4]) for j in jobs),
     }
 
@@ -2089,12 +2115,13 @@ def export_alert_sections(body: dict[str, Any]) -> dict[str, Any]:
 
     body: {title, sections: [{title, columns, rows, group_by?}], format: csv|xlsx|pdf,
            print_to: ""|"dot_matrix"|"printer", paper: A4|A5, page_layout,
-           group_by?: "Supplier" (every section), per_supplier_files?: bool (PDF only),
-           file_name?: str}
+           group_by?: "Supplier" | "Area" (every section), per_supplier_files?: bool (PDF
+           only), file_name?: str}
 
-    A section grouped by supplier (Expired / Near Expiry, owner 19 Oct 2026) is written as a
-    summary by supplier and then one block per supplier with its own total; with
-    per_supplier_files one PDF is saved for each supplier instead."""
+    A section grouped by supplier (Expired / Near Expiry / Low / Out of Stock) or by village /
+    area (Customer Dues) -- owner, 19 Oct 2026 -- is written as a summary by supplier / area
+    and then one block per group with its own total; with per_supplier_files one PDF is saved
+    for each group instead."""
     import base64
     import csv
     import io
@@ -2103,8 +2130,8 @@ def export_alert_sections(body: dict[str, Any]) -> dict[str, Any]:
 
     from core.alert_supplier_groups import file_slug
 
-    sections, kinds = _alert_sections_grouped(body)
-    grouped = "supplier" in kinds
+    sections, kinds, grouped_by = _alert_sections_grouped(body)
+    grouped = "group" in kinds
     if not sections or not any(rows for _, _, rows in sections):
         return {"ok": False, "error": "Export karayla kahi nahi — yaadi rikami aahe."}
     title = str(body.get("title") or "Alert & Monitoring")
@@ -2113,11 +2140,18 @@ def export_alert_sections(body: dict[str, Any]) -> dict[str, Any]:
     if wanted:
         base = file_slug(wanted, "alerts")
     elif grouped:
-        base = f"{file_slug(title, 'alerts')}_by_supplier"
+        by = "supplier_and_area" if len(grouped_by) > 1 else next(iter(grouped_by))
+        base = f"{file_slug(title, 'alerts')}_by_{by}"
     else:
         base = f"alerts_{stamp}"
-    if grouped and "supplier" not in title.lower():
-        title = f"{title} — supplier-wise (for return)"
+    if grouped and not re.search(r"supplier|area", title, re.I):
+        if grouped_by == {"area"}:
+            title = f"{title} — village / area-wise"
+        elif grouped_by == {"supplier"}:
+            expiry = any(k == "summary" and "Batch Count" in c for (_, c, _), k in zip(sections, kinds))
+            title = f"{title} — supplier-wise ({'for return' if expiry else 'for reorder'})"
+        else:
+            title = f"{title} — by supplier / area"
     print_to = str(body.get("print_to") or "").strip().lower()
 
     landscape = str(body.get("page_layout") or "").lower().startswith("land")
@@ -2152,12 +2186,10 @@ def export_alert_sections(body: dict[str, Any]) -> dict[str, Any]:
         return _export_alerts_per_supplier(body, landscape)
 
     def totals(cols, rows):
-        # Grouped: each supplier's block ends with its own total (the PDF's tfoot does the same).
+        # Grouped: each supplier's / area's block ends with its own total (as the PDF's tfoot).
         if not grouped:
             return []
-        from core.dot_matrix_print import _report_totals_row
-
-        return _report_totals_row(list(cols), list(rows))
+        return _alert_totals(cols, rows)
 
     if fmt == "csv":
         buf = io.StringIO()
@@ -2200,11 +2232,11 @@ def export_alert_sections(body: dict[str, Any]) -> dict[str, Any]:
                 c.font = bold
 
         if grouped:
-            # One sheet per list; on it a block per supplier: heading, columns, rows, total.
+            # One sheet per list; on it a block per supplier / area: heading, columns, rows, total.
             ws = None
             for (t, cols, rows), kind in zip(sections, kinds):
-                if ws is None or kind != "supplier":
-                    ws = sheet(t[: -len(_BY_SUPPLIER)] if kind == "summary" else t)
+                if ws is None or kind != "group":
+                    ws = sheet(_BY_GROUP.sub("", t) if kind == "summary" else t)
                 else:
                     ws.append([])
                 ws.append([t])

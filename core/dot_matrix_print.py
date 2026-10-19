@@ -1869,13 +1869,16 @@ def _report_totals_row(headers: list, rows: list) -> list[str]:
 
     A printed report used to end with its last row: the counter added the money column
     by hand. Only columns whose name says money or a count are summed -- a batch number
-    or a phone number is never a total.
+    or a phone number is never a total, and neither is a number of days ("Due Days" says
+    "due", but 30 + 45 days is nobody's figure).
     """
     hdrs = [str(h or "").strip().lower() for h in headers]
     sums: dict[int, float] = {}
     decimals: dict[int, bool] = {}
     for i, h in enumerate(hdrs):
         if not (any(w in h for w in _MONEY_WORDS) or any(w in h for w in _COUNT_WORDS)):
+            continue
+        if "days" in h.split():
             continue
         total = 0.0
         seen = False

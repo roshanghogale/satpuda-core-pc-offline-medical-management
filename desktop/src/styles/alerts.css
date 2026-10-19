@@ -877,3 +877,29 @@
     grid-template-columns: 1fr 1fr;
   }
 }
+
+/* Export button + its quick menu (the button opens the Export / Print box). */
+.alx-split {
+  display: inline-flex;
+  align-items: stretch;
+}
+.alx-split > .btn {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.alx-split .alx-split-caret {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  margin-left: -1px;
+  padding-left: 7px;
+  padding-right: 7px;
+  min-width: 0;
+}
+.alx-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
