@@ -1714,7 +1714,8 @@ def _schedule_styled_pdf_bytes(
     ext = "pdf" if mime.endswith("pdf") else "html"
     return {
         "ok": True,
-        "filename": f"{base_name}.{ext}",
+        # the name it was saved under in Exports (it carries the save time)
+        "filename": os.path.basename(target),
         "mime": mime,
         "format": ext,
         "content_base64": base64.b64encode(payload).decode("ascii"),
@@ -1799,7 +1800,8 @@ def _schedule_standard_pdf_bytes(data: dict[str, Any], *, do_print: bool = False
     ext = "pdf" if mime.endswith("pdf") else "html"
     return {
         "ok": True,
-        "filename": f"{base_name}.{ext}",
+        # the name it was saved under in Exports (it carries the save time)
+        "filename": os.path.basename(target),
         "mime": mime,
         "format": ext,
         "content_base64": base64.b64encode(payload).decode("ascii"),
@@ -1918,18 +1920,11 @@ def export_to_file(
                                   orientation="portrait" if str(page_layout).startswith("port") else "landscape")
         with open(saved, "rb") as fh:
             payload = fh.read()
-        for p in (saved, path):
-            try:
-                if p and os.path.isfile(p):
-                    os.remove(p)
-            except OSError:
-                pass
-        html_path = saved.replace(".pdf", ".html") if saved else ""
-        if html_path and os.path.isfile(html_path):
-            try:
-                os.remove(html_path)
-            except OSError:
-                pass
+        from core.saved_files import remove_quietly
+
+        # The bytes go back to the app, which saves them in Exports: no temp file stays
+        # (the HTML too, when no PDF could be made).
+        remove_quietly(saved, path, path.rsplit(".", 1)[0] + ".html")
         ext = "pdf"
         mime = "application/pdf"
     else:
@@ -2028,6 +2023,10 @@ def export_alert_sections(body: dict[str, Any]) -> dict[str, Any]:
         problem = print_pdf_on_printer(saved, landscape=landscape)
         if problem:
             return {"ok": False, "error": problem, "path": saved}
+        # Printed: the temporary PDF goes once the spooler has read it (19 Oct 2026).
+        from core.saved_files import remove_later
+
+        remove_later(saved, path)
         return {"ok": True, "printed": True, "message": "Printer la pathavle.", "path": saved}
 
     fmt = str(body.get("format") or "csv").strip().lower()
@@ -2066,6 +2065,10 @@ def export_alert_sections(body: dict[str, Any]) -> dict[str, Any]:
         saved = _alerts_pdf(path, title, sections, landscape=landscape)
         with open(saved, "rb") as fh:
             payload = fh.read()
+        # The bytes go back to the app, which saves them in Exports: no temp file stays.
+        from core.saved_files import remove_quietly
+
+        remove_quietly(saved, path, path.rsplit(".", 1)[0] + ".html")
         mime = "application/pdf" if saved.lower().endswith(".pdf") else "text/html"
         fmt = "pdf" if mime.endswith("pdf") else "html"
     else:
@@ -2129,6 +2132,10 @@ def print_report(title: str, cols: list, rows: list, print_to: str, page_layout:
     if problem:
         return {"ok": False, "printed": False, "print_error": problem, "error": problem,
                 "path": saved, "pdf_path": saved}
+    # Printed: the temporary PDF goes once the spooler has read it (19 Oct 2026).
+    from core.saved_files import remove_later
+
+    remove_later(saved, path)
     return {"ok": True, "printed": True, "path": saved, "pdf_path": saved,
             "message": f"Printer la pathavle (A4 {'horizontal' if landscape else 'vertical'})."}
 

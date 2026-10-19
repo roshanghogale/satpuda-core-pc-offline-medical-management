@@ -1413,12 +1413,14 @@ def save_sale(conn, body: dict[str, Any]) -> dict[str, Any]:
         # to render from and quietly gives up. Naming a folder there sends the
         # counter to hunt for a bill that was never written -- worse than the
         # silence this replaces.
+        # The bill goes in its day's folder, <save folder>\Bills\<YYYY-MM-DD> by the
+        # bill date (core/bill_output._render_bill_files), so that is the folder named.
         pdf_dir = ""
         if int(sale_id) > 0 and str(bill_no).strip().upper() != "PENDING":
             try:
-                from core.bill_save_prefs import resolve_sales_bill_save_dir
+                from core.bill_save_prefs import resolve_bill_day_save_dir
 
-                pdf_dir = resolve_sales_bill_save_dir()
+                pdf_dir = resolve_bill_day_save_dir(bill_date)
             except Exception:
                 pdf_dir = ""
 

@@ -39,19 +39,20 @@ class TheFolderOnTheAnswerIsTheFolderUsed(unittest.TestCase):
         import core.desktop_sales_service as svc
 
         src = open(svc.__file__, encoding="utf-8").read()
-        self.assertIn("resolve_sales_bill_save_dir", src)
+        # the bill's own day folder inside the save folder (Bills\YYYY-MM-DD, 19 Oct 2026)
+        self.assertIn("resolve_bill_day_save_dir(bill_date)", src)
         self.assertNotIn(
             "pdf_dir = load_sales_bill_save_dir()", src,
             "the configured path can be rejected and fall back to Downloads",
         )
 
     def test_the_writer_resolves_the_same_way(self):
-        # bill_output writes to resolve_sales_bill_save_dir(); if the answer
+        # bill_output writes to resolve_bill_day_save_dir(); if the answer
         # came from anywhere else the dialog would point at the wrong folder.
         import core.bill_output as bo
 
         src = open(bo.__file__, encoding="utf-8").read()
-        self.assertIn("resolve_sales_bill_save_dir", src)
+        self.assertIn("resolve_bill_day_save_dir", src)
 
     def test_a_configured_folder_is_used_when_it_can_be_made(self):
         import tempfile

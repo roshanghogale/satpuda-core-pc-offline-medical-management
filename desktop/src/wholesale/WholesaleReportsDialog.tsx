@@ -188,7 +188,7 @@ export function WholesaleReportsDialog({ open, onClose, onBack, initial = 'regis
       )
       if (d.content_base64 && d.filename) {
         const saved = await saveFileAndShow(d.filename, d.mime || 'application/octet-stream', d.content_base64)
-        setMsg(saved ? `${d.filename} saved: ${saved.folder || ''}` : `${d.filename} saved (Downloads)`)
+        setMsg(saved ? `${saved.file_name || d.filename} saved: ${saved.folder || ''}` : `${d.filename} saved (Downloads)`)
       } else {
         setMsg(d.message || 'Sent to the printer.')
       }

@@ -309,7 +309,7 @@ class ExportAndMode(_Store):
         rows = list(csv.reader(io.StringIO(base64.b64decode(res["content_base64"]).decode("utf-8-sig"))))
         self.assertEqual(wr.REGISTER_COLUMNS, rows[0])
         self.assertEqual("TOTAL", rows[-1][0])
-        self.assertTrue(res["filename"].startswith("wholesale_sales_register_"))
+        self.assertTrue(res["filename"].startswith("wholesale_sales_register."))
 
     def test_outstanding_csv_has_both_tables(self):
         res = wr.export(self.conn, {"report": "outstanding", "as_of": "2026-10-18", "format": "csv"})

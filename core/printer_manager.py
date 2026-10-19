@@ -1673,18 +1673,20 @@ class PrinterManager:
 
         # Same Edge/Chrome HTML -> PDF step the bills use (the old built-in
         # HTML-to-PDF module has no source any more, so Test Print failed here).
+        # Both temporary files go afterwards -- a failed test page's too.
         from core.bill_output import _try_pdf_via_browser
-        if not _try_pdf_via_browser(html_path, pdf_path):
-            raise PrintFailedError(
-                'Could not create the test page PDF. Microsoft Edge or Google Chrome is needed.'
-            )
-        cls.print_pdf_silently(pdf_path, printer, copies=1)
-
-        for path in (html_path, pdf_path):
-            try:
-                os.remove(path)
-            except Exception:
-                pass
+        try:
+            if not _try_pdf_via_browser(html_path, pdf_path):
+                raise PrintFailedError(
+                    'Could not create the test page PDF. Microsoft Edge or Google Chrome is needed.'
+                )
+            cls.print_pdf_silently(pdf_path, printer, copies=1)
+        finally:
+            for path in (html_path, pdf_path):
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
 
 
 # Convenience module-level wrappers (match user API spec)

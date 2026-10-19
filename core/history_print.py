@@ -208,7 +208,8 @@ def save_bills_pdf(
     copy_label: str = "",
 ) -> tuple[str, list[str]]:
     """Print All's "Save PDF" (owner, 17 Oct 2026): the same pages Print would send,
-    as ONE PDF in the shop's reports folder instead of on paper. Returns (path, failures).
+    as ONE PDF in the shop's Exports folder instead of on paper, named with the save time
+    (Bills_A5_3_2026-10-19_14-32.pdf). Returns (path, failures). No HTML is left behind.
 
     A5 / A4 are the very sheets print_bills_batch builds; A6 is each bill's own PDF, the
     one its Print makes. A dot matrix shop gets the standard pages: a PDF of printer
@@ -221,8 +222,13 @@ def save_bills_pdf(
         get_print_slot_settings,
         load_bill_print_settings,
     )
-    from core.bill_output import _load_sale_data, _try_pdf_via_browser, save_bill_pdf_pages
-    from core.saved_files import reports_dir, remember, safe_filename
+    from core.bill_output import (
+        _load_sale_data,
+        _try_pdf_via_browser,
+        discard_html_after_pdf,
+        save_bill_pdf_pages,
+    )
+    from core.saved_files import dated_path, remember, reports_dir, safe_filename
 
     paper_u = (paper or "A6").upper()
     base = dict(load_bill_print_settings())
@@ -279,6 +285,7 @@ def save_bills_pdf(
                     fh.write(html)
                 if not _try_pdf_via_browser(html_path, pdf_path):
                     raise RuntimeError("PDF could not be created (install Edge or Chrome).")
+                discard_html_after_pdf(html_path, pdf_path)
                 parts.append(pdf_path)
             except Exception as exc:
                 label = ", ".join(str(x) for x in chunk[:4])
@@ -291,10 +298,7 @@ def save_bills_pdf(
                 pass
         return "", failures or ["No bill could be turned into a PDF."]
 
-    from datetime import datetime
-
-    name = safe_filename(f"Bills_{paper_u}_{len(sale_ids)}_{datetime.now():%Y%m%d_%H%M%S}.pdf")
-    out_path = os.path.join(reports_dir(), name)
+    out_path = dated_path(os.path.join(reports_dir(), safe_filename(f"Bills_{paper_u}_{len(sale_ids)}.pdf")))
     merged = pdfium.PdfDocument.new()
     try:
         for part in parts:
@@ -494,6 +498,7 @@ def print_bills_batch(
     from core.bill_output import (
         _load_sale_data,
         _try_pdf_via_browser,
+        discard_html_after_pdf,
         print_bill_with_slot,
     )
     from core.printer_manager import PrinterManager
@@ -553,6 +558,7 @@ def print_bills_batch(
             failures.append(f"Wholesale bills [{', '.join(str(x) for x in chunk[:4])}]: {exc}")
         _remove_later(files)
     for chunk in _chunk_sale_ids_for_print(sale_ids, paper_u):
+        tmp_files: list[str] = []
         try:
             contexts = []
             for sale_id in chunk:
@@ -564,14 +570,18 @@ def print_bills_batch(
             fd, html_path = tempfile.mkstemp(suffix=".html", prefix="batch_bills_")
             os.close(fd)
             pdf_path = html_path.replace(".html", ".pdf")
+            tmp_files = [html_path, pdf_path]
             with open(html_path, "w", encoding="utf-8") as fh:
                 fh.write(html)
             if not _try_pdf_via_browser(html_path, pdf_path):
                 raise RuntimeError("Could not create PDF for batch print.")
+            discard_html_after_pdf(html_path, pdf_path)
             PrinterManager.print_pdf_silently(pdf_path, printer, copies=1)
             pages += 1
         except Exception as exc:
             label = ", ".join(str(x) for x in chunk[:4])
             failures.append(f"Bills [{label}]: {exc}")
+        # Temporary files of this sheet: they used to stay in %TEMP% for ever.
+        _remove_later(tmp_files)
         time.sleep(0.35)
     return pages, failures
