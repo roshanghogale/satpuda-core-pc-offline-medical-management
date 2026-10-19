@@ -32,6 +32,8 @@ export type VoicePack = {
   need_gb: number
   /** A SatpudaVoicePack.zip already on this PC or a pendrive: installed from it, no download. */
   local: string
+  /** Bytes of a paused / broken download kept on this PC: "Resume" goes on from there. */
+  partial: number
 }
 
 export type PackAction = 'check' | 'install' | 'cancel' | 'remove' | 'start'
@@ -46,7 +48,7 @@ const BUSY = new Set<PackState>(['checking', 'downloading', 'verifying', 'extrac
 const POLL_MS = 1000
 const TIMEOUT_MS = 8000
 /** Shown until the manifest says otherwise. */
-export const PACK_SIZE_GUESS = '1.6 GB'
+export const PACK_SIZE_GUESS = '1.4 GB'
 
 export const packBusy = (p: VoicePack | null) => !!p && BUSY.has(p.state)
 
@@ -69,6 +71,7 @@ function parse(v: unknown): VoicePack {
     free_gb: o.free_gb == null || !Number.isFinite(Number(o.free_gb)) ? null : Number(o.free_gb),
     need_gb: num(o.need_gb),
     local: String(o.local ?? ''),
+    partial: num(o.partial),
   }
 }
 
@@ -128,6 +131,11 @@ function subscribe(l: () => void) {
 }
 const current = () => view
 
+/** Hear every change of the pack (voiceReady.ts). */
+export const subscribeVoicePack = subscribe
+/** Where the pack stands now. */
+export const voicePackView = current
+
 /** The pack, kept current while anyone shows it. */
 export function useVoicePack(): PackView {
   return useSyncExternalStore(subscribe, current, current)
@@ -146,8 +154,8 @@ export function sizeText(bytes: number): string {
 
 /** The install button: from a copy already here (a minute or two), else the download. */
 export function installLabel(p: VoicePack | null, update = false): string {
-  if (p?.local) return `${update ? 'Update' : 'Install'} kara — PC / pendrive var aahe, download nahi`
-  return `${update ? 'Update kara' : 'Download kara'} (${packSizeText(p)})`
+  if (p?.local) return `${update ? 'Update' : 'Install'} from the copy on this PC / pendrive (no download)`
+  return `${update ? 'Update' : 'Download'} (${packSizeText(p)})`
 }
 
 /** The download's size: the manifest's, else the usual one. */

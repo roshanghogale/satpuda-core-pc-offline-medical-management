@@ -10,6 +10,7 @@
  */
 import type { VoiceCommand } from './voiceClient'
 import { DAY_PRESETS } from '../components/DayPresets'
+import { isVoiceReady } from './voiceReady'
 
 export type VoiceResult = {
   /** One line, in the shop's words: "Dolo 650 × 2 patta jodla". */
@@ -23,7 +24,9 @@ export type VoiceHandler = (cmd: VoiceCommand) => Promise<VoiceResult | null>
 
 const handlers = new Map<string, () => VoiceHandler>()
 
-/** Register a page. Pass a GETTER so the page's newest closure is used. */
+/** Register a page. Pass a GETTER so the page's newest closure is used.
+ *  Kept even while voice is not ready (pages stay mounted), but sendToPage hands it
+ *  nothing until voice is ready -- so once the pack is in, the page answers at once. */
 export function registerVoicePage(page: string, get: () => VoiceHandler): () => void {
   handlers.set(page, get)
   return () => {
@@ -32,13 +35,15 @@ export function registerVoicePage(page: string, get: () => VoiceHandler): () => 
 }
 
 export async function sendToPage(page: string, cmd: VoiceCommand): Promise<VoiceResult | null> {
+  // Voice not ready (no voice pack / switch off): pages take no spoken commands.
+  if (!isVoiceReady()) return null
   const get = handlers.get(page)
   if (!get) return null
   return get()(cmd)
 }
 
 export function pageIsListening(page: string): boolean {
-  return handlers.has(page)
+  return isVoiceReady() && handlers.has(page)
 }
 
 /** Which page each intent belongs to. Global ones are handled by the bar. */

@@ -877,6 +877,12 @@
 .vb-setup { max-height: 45vh; overflow-y: auto; }
 /* With the level settings open the bar can outgrow a small screen: it scrolls instead of losing its head. */
 .vb-panel { max-height: calc(100vh - 28px); overflow-y: auto; }
+/* The button and the popup's header can be dragged (voiceDock.ts). */
+.vb-fab { touch-action: none; user-select: none; }
+.vb-fab.vb-dragging { cursor: grabbing; opacity: 0.85; }
+.vb-head { cursor: grab; touch-action: none; user-select: none; }
+.vb-head:active { cursor: grabbing; }
+.vb-head button, .vb-head select { cursor: pointer; }
 .vb-source { font-size: 11px; color: var(--text-muted); }
 /* "Satpuda" heard alone: the bar waits for the command. */
 .vb-panel.vb-wake-wait { border-color: #30a46c; box-shadow: 0 0 0 3px rgba(48, 164, 108, 0.3), 0 10px 30px rgba(0,0,0,.22); }

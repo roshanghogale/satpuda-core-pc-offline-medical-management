@@ -1,12 +1,12 @@
 """The voice pack: downloaded only by a store that wants voice, never part of the app.
 
 The app stays its normal size. The voice pack -- a portable Python, the voice service and the
-IndicConformer model, about 1.6 GB -- is published as one zip next to a small manifest:
+IndicConformer model, about 1.4 GB -- is published as one zip next to a small manifest:
 
     MANIFEST_URL -> {"version": "2026.09.27", "url": ".../SatpudaVoicePack.zip",
                      "sha256": "...", "size": 1634000000}
 
-From the voice bar the owner presses "Download voice"; this module then
+In Settings > Assistant (the only place that offers it) the owner presses "Download"; this module then
 
   1. reads the manifest,
   2. downloads the zip into PACK_HOME (resuming a broken download),
@@ -18,7 +18,10 @@ From the voice bar the owner presses "Download voice"; this module then
 The service is a child of this engine: it is told the engine's PID and quits by itself when the
 engine is gone, so closing the app never leaves 3 GB of RAM behind.
 
-HTTP (core.desktop_api): GET /api/voice/pack, POST /api/voice/pack/{install,cancel,remove,start,check}.
+Nothing voice starts until voice_ready(): the store allowed AND a whole pack installed.
+
+HTTP (core.desktop_api): GET /api/voice/pack, GET /api/voice/ready,
+POST /api/voice/pack/{install,cancel,remove,start,check}.
 """
 from __future__ import annotations
 
@@ -64,16 +67,70 @@ def _current() -> str:
     return os.path.join(pack_home(), "current")
 
 
+#: what a whole pack has; pack.json is written last, just before the pack is swapped in
+WHOLE = ("pack.json", os.path.join("python", "pythonw.exe"), os.path.join("voice", "voice_service.py"))
+#: the install is under way (a first install has no current pack until it has ended)
+BUSY = ("checking", "downloading", "verifying", "extracting", "preparing", "starting")
+
+
 def installed() -> Optional[dict]:
-    """{"version": ...} of the pack in use, or None."""
-    marker = os.path.join(_current(), "pack.json")
-    if not os.path.isfile(marker) or not os.path.isfile(os.path.join(_current(), "python", "pythonw.exe")):
+    """{"version": ...} of the WHOLE pack in use, or None (none, half copied, or broken)."""
+    cur = _current()
+    if not all(os.path.isfile(os.path.join(cur, rel)) for rel in WHOLE):
         return None
     try:
-        with open(marker, encoding="utf-8") as fh:
-            return json.load(fh)
+        with open(os.path.join(cur, "pack.json"), encoding="utf-8") as fh:
+            data = json.load(fh)
     except Exception:
-        return {"version": "?"}
+        return None                         # a damaged marker: not a pack to start
+    return data if isinstance(data, dict) else None
+
+
+def voice_ready(*, allowed: Optional[bool] = None) -> dict:
+    """The one "voice ready" answer -- GET /api/voice/ready.
+
+    Ready = the store is allowed voice (core.voice_switch, the admin panel's switch) AND
+    a whole pack is installed (installed()). Until then nothing voice starts: no voice
+    service, so no model is loaded and no command list is read. A pack being updated
+    stays ready while its old copy is whole; a first install is not ready until it ends.
+    `allowed` is for tests; otherwise the switch is asked.
+    """
+    if allowed is None:
+        try:
+            from core.voice_switch import voice_status
+
+            allowed = bool(voice_status().get("enabled"))
+        except Exception:
+            allowed = False
+    with _lock:
+        state = str(_state.get("state") or "idle")
+    whole = installed() is not None
+    if not allowed:
+        reason = "not_allowed"
+    elif whole:
+        reason = "ready"
+    elif state in BUSY:
+        reason = "installing"
+    elif os.path.isdir(_current()):
+        reason = "broken"
+    else:
+        reason = "not_installed"
+    return {"ready": bool(allowed) and whole, "allowed": bool(allowed), "installed": whole,
+            "state": state, "reason": reason}
+
+
+def partial_bytes() -> int:
+    """How much of a paused / broken download is kept (it resumes from there), else 0."""
+    zip_path = os.path.join(pack_home(), "SatpudaVoicePack.zip")
+    try:
+        with open(zip_path + ".parts", encoding="utf-8") as fh:
+            return max(0, sum(int(d) for d in json.load(fh)))
+    except (OSError, ValueError, TypeError):
+        pass
+    try:
+        return os.path.getsize(zip_path)
+    except OSError:
+        return 0
 
 
 def _set(**kw) -> None:
@@ -104,7 +161,7 @@ def status() -> dict:
         except Exception:
             local = ""
     s.update({"installed": bool(inst), "version": (inst or {}).get("version"), "running": service_running(),
-              "local": local,
+              "local": local, "partial": partial_bytes() if s.get("state") in ("idle", "error") else 0,
               "path": pack_home(), "free_gb": round(free, 1) if free is not None else None,
               "need_gb": NEED_FREE_GB})
     return s
@@ -424,9 +481,15 @@ def _install_worker() -> None:
 
 
 def install() -> dict:
+    """Download (or resume, or take a copy on this PC) and install -- Settings > Assistant only.
+
+    Refused while the store is not allowed voice: 1.4 GB it could not use."""
     global _worker
     with _lock:
         busy = _worker is not None and _worker.is_alive()
+    if not busy and not voice_ready()["allowed"]:
+        _set(state="idle", error="Voice ya store sathi band aahe (admin panel)")
+        return status()
     if not busy:
         _cancel.clear()
         _worker = threading.Thread(target=_install_worker, daemon=True, name="VoicePack")
@@ -450,6 +513,11 @@ def start_service() -> dict:
     services ran at 2.7 GB each (2 Oct 2026). The one this engine started is waited for.
     """
     global _service
+    gate = voice_ready()
+    if not gate["ready"]:
+        # not allowed for this store, or no whole pack: no service, no model in memory
+        _set(error="" if gate["reason"] == "not_allowed" else "Voice pack install nahi")
+        return status()
     with _start_lock:
         if _service is not None and _service.poll() is None:
             return status()
@@ -497,12 +565,12 @@ def remove() -> dict:
 
 
 def autostart() -> None:
-    """At engine start: if the pack is installed and the store has voice on, start the service."""
+    """At engine start: only when voice is ready (store allowed + whole pack), start the service."""
     def go() -> None:
         try:
-            from core.voice_switch import voice_status
-
-            if installed() and voice_status().get("enabled"):
+            if installed() is None:         # no pack: not even the switch is asked
+                return
+            if voice_ready()["ready"]:
                 start_service()
         except Exception:
             pass

@@ -4,7 +4,7 @@
  * "start", "stop" and "what does this text mean". Nothing here leaves the PC.
  */
 
-import { whenVoiceChecked } from './voiceEnabled'
+import { isVoiceReady, whenVoiceReady } from './voiceReady'
 
 export const VOICE_BASE = 'http://127.0.0.1:47811'
 
@@ -57,10 +57,10 @@ export type VoiceDevice = { index: number; name: string; default: boolean }
 /** A voice-opened dropdown: its name and the rows it shows now (pending "dropdown"). */
 export type FieldContext = { field?: string; options?: string[] }
 
-/** Thrown instead of calling the service while the store's voice switch is off. */
+/** Thrown instead of calling the service while voice is not ready (switch off, or no voice pack). */
 export class VoiceOffError extends Error {
   constructor() {
-    super('voice band aahe (admin panel)')
+    super('voice tayar nahi (admin panel / voice pack)')
     this.name = 'VoiceOffError'
   }
 }
@@ -73,8 +73,8 @@ type CallOpts = {
 }
 
 async function call<T>(path: string, body?: unknown, timeoutMs = 30000, opts: CallOpts = {}): Promise<T> {
-  // The store's switch comes first: with voice off nothing is sent to the service.
-  if (!opts.always && !(await whenVoiceChecked())) throw new VoiceOffError()
+  // Voice ready (store allowed + whole pack) comes first: until then nothing is sent to the service.
+  if (!opts.always && !(await whenVoiceReady())) throw new VoiceOffError()
   const ctrl = new AbortController()
   const timer = window.setTimeout(() => ctrl.abort(), timeoutMs)
   try {
@@ -350,6 +350,7 @@ export function shortcutKindWord(kind: unknown): string {
 
 /** "②" for 1..20, "#21" past that. */
 export function shortcutBadge(n: number | string): string {
+  if (!isVoiceReady()) return ''   // no voice pack / voice off: no voice badges anywhere
   const k = Number(n)
   return k >= 1 && k <= 20 ? String.fromCodePoint(0x2460 + k - 1) : `#${n}`
 }

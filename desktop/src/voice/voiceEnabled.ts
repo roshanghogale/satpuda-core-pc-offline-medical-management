@@ -1,9 +1,9 @@
 /** Is voice switched on for this store? (the admin panel's per-store switch)
  *
  * The engine answers GET /api/voice/enabled with {enabled, tier, source}. Until
- * it says `enabled: true` the voice bar and the Voice Commands panels are not
- * shown, F1 does nothing and nothing is sent to the voice service (voiceClient
- * waits for this answer before any call). An engine that does not know the
+ * it says `enabled: true` nothing voice is shown. It is half of "voice ready"
+ * (voiceReady.ts): the other half is the whole voice pack on this PC. The bar,
+ * F1 and every call to the voice service wait for BOTH. An engine that does not know the
  * endpoint, or does not answer, counts as "off".
  *
  * Re-checked every 5 minutes and when the window comes back into focus. A check
@@ -125,6 +125,9 @@ function subscribe(l: () => void) {
     listeners.delete(l)
   }
 }
+
+/** Hear every change of the switch (also starts the re-checks). */
+export const subscribeVoiceSwitch = subscribe
 
 /** The switch, kept current: re-renders when the engine's answer changes. */
 export function useVoiceEnabled(): VoiceSwitch {

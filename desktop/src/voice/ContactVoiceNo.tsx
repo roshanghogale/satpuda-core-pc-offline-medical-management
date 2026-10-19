@@ -14,7 +14,7 @@ import {
   type ShortcutKind,
   type ShortcutMap,
 } from './voiceClient'
-import { useVoiceEnabled } from './voiceEnabled'
+import { useVoiceReady } from './voiceReady'
 
 const FIRST = 10
 const norm = (s: string) => String(s ?? '').trim().replace(/\s+/g, ' ').toUpperCase()
@@ -37,8 +37,8 @@ export function useContactShortcuts(): ContactShortcuts {
   const [down, setDown] = useState(false)
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null)
-  // Voice switched off for this store (admin panel): no column, no "service band" note.
-  const voiceOn = useVoiceEnabled().enabled
+  // Voice not ready (switch off, or no voice pack): no column, no "service band" note.
+  const voiceOn = useVoiceReady().ready
 
   const reload = useCallback(() => {
     let alive = true

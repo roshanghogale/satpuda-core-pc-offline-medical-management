@@ -3,19 +3,37 @@
  * The list is the voice service's own (GET /guide.json), so what is shown here
  * is what the parser understands today -- never a copy that drifts. When the
  * service is not running the panel says so instead of showing an empty list.
+ *
+ * Until voice is READY (store allowed + whole voice pack) nothing is loaded: the panel
+ * only says the pack is needed and opens Settings > Assistant (My Assist), the one place
+ * that downloads it.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Frame, Note, PanelTitle } from '../pages/settings/SettingsChrome'
 import { VOICE_BASE } from './voiceClient'
 import { VoiceShortcutsPanel } from './VoiceShortcutsPanel'
 import { VoiceLevelPanel } from './VoiceLevelPanel'
-import { VoicePackPanel } from './VoicePackPanel'
+import { ASSISTANT_PLACE, VoiceNeedsPack } from './VoicePackPanel'
 import { useVoiceEnabled, voiceSourceNote } from './voiceEnabled'
+import { useVoiceReady } from './voiceReady'
 
 type GuideJob = { label: string; sentences: string[] }
 type GuideGroup = { group: string; jobs: GuideJob[] }
 
-export function VoiceCommandsPanel() {
+export function VoiceCommandsPanel({ onOpenAssistant }: { onOpenAssistant?: () => void }) {
+  const ready = useVoiceReady().ready
+  if (!ready) {
+    return (
+      <>
+        <PanelTitle>🎤 Voice Commands</PanelTitle>
+        <VoiceNeedsPack onOpenAssistant={onOpenAssistant} />
+      </>
+    )
+  }
+  return <VoiceCommandsReady onOpenAssistant={onOpenAssistant} />
+}
+
+function VoiceCommandsReady({ onOpenAssistant }: { onOpenAssistant?: () => void }) {
   const [groups, setGroups] = useState<GuideGroup[] | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -89,8 +107,17 @@ export function VoiceCommandsPanel() {
         saves or prints asks “Yes / No” first; a popup answers “yes”, “no” and
         “band kar”.
       </Note>
-      <p className="muted" style={{ margin: '0 0 8px', fontSize: 12 }}>Voice: {voiceSourceNote(sw)}</p>
-      <VoicePackPanel />
+      <p className="muted" style={{ margin: '0 0 8px', fontSize: 12 }}>
+        Voice: {voiceSourceNote(sw)} · Voice pack (update / remove): {ASSISTANT_PLACE}
+        {onOpenAssistant ? (
+          <>
+            {' '}
+            <button type="button" className="vb-small" style={{ marginTop: 0 }} onClick={onOpenAssistant}>
+              Open Assistant settings
+            </button>
+          </>
+        ) : null}
+      </p>
       <VoiceLevelPanel />
       <VoiceShortcutsPanel />
       <div className="settings-inline-actions" style={{ marginBottom: 8 }}>

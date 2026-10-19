@@ -783,6 +783,7 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                             "/api/reports/doctor-margin/export",
                             "/api/customers/gst",
                             "/api/voice/pack",
+                            "/api/voice/ready",
                             "/api/login/status",
                             "/api/login/verify",
                             "/api/sales/history/delete",
@@ -950,6 +951,12 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 if hit is not None:
                     _json_response(self, hit[0], hit[1])
                     return
+            if path == "/api/voice/ready":
+                # One answer: store allowed AND whole pack installed (core/voice_pack.voice_ready).
+                from core import voice_pack
+
+                _json_response(self, 200, voice_pack.voice_ready())
+                return
             if path == "/api/voice/pack":
                 # The downloadable voice pack (core/voice_pack.py): installed? downloading?
                 from core import voice_pack
