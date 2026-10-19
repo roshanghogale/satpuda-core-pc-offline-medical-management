@@ -9,6 +9,7 @@ import {
   type SettingsBundle,
 } from '../../settingsApi'
 import { getApiBase } from '../../api'
+import { useBusinessMode } from '../../wholesale/mode'
 import { IS_DEMO } from '../../demoMode'
 import {
   Check,
@@ -328,6 +329,9 @@ const SLIP_PRESETS: { cm: number; label: string }[] = [
 ]
 
 export function PharmacyPanel(props: Props) {
+  // Bank details print only on the wholesale invoice (owner, 19 Oct 2026), so a
+  // retail store never sees the frame.
+  const { isWholesale } = useBusinessMode()
   const {
     sectionId,
     opts,
@@ -689,6 +693,7 @@ export function PharmacyPanel(props: Props) {
           </div>
         </Frame>
 
+        {isWholesale ? (
         <Frame title="Bank Details">
           <div className="ph-grid-2">
             <ProfileField id="ph-bank-name" label="Bank Name">
@@ -741,6 +746,7 @@ export function PharmacyPanel(props: Props) {
             </span>
           </div>
         </Frame>
+        ) : null}
 
         <div className="ph-media-pair">
           <Frame title="Bill Logo">

@@ -86,6 +86,8 @@ export type SettingsBundle = {
     }[]
     villages: string[]
     default_village: string
+    /** Sales & Billing default doctor (Contacts > Doctors > Set default); "" = none. */
+    default_doctor?: string
   }
   thresholds?: {
     med_types: string[]

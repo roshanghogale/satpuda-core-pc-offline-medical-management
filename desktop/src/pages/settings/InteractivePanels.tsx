@@ -473,6 +473,9 @@ export function ContactsPanel({
     },
   })
 
+  const defaultDoctor = String(contacts.default_doctor || '').trim().toUpperCase()
+  const isDefaultDoctor = (name: string) =>
+    Boolean(defaultDoctor) && String(name || '').trim().toUpperCase() === defaultDoctor
   const doctors = useMemo(() => {
     const rows = contacts.doctors.filter((d) =>
       filterText(search, [d.name, d.reg_no, d.phone]),
@@ -577,7 +580,14 @@ export function ContactsPanel({
               {cancelBtn}
             </div>
           </div>
-          <div className="iset-bar">{searchBox}</div>
+          <div className="iset-bar">
+            {searchBox}
+            <div className="iset-bar-actions">
+              <span className="iset-hint">
+                Default doctor on new bills: <strong>{contacts.default_doctor || '(none)'}</strong>
+              </span>
+            </div>
+          </div>
           <VoiceNoBar sc={voiceNo} kind="doctor" only={voiceOnly} onOnly={setVoiceOnly} />
           <div ref={tableWrapRef}>
           <CappedTableWrap
@@ -605,10 +615,36 @@ export function ContactsPanel({
                         <VoiceNoSelect sc={voiceNo} kind="doctor" name={d.name} />
                       </td>
                     ) : null}
-                    <td>{d.name}</td>
+                    <td>
+                      {d.name}
+                      {isDefaultDoctor(d.name) ? (
+                        <span className="iset-badge">default</span>
+                      ) : null}
+                    </td>
                     <td>{d.reg_no}</td>
                     <td>{d.phone}</td>
                     <td className="act">
+                      <button
+                        type="button"
+                        className="iset-btn"
+                        title={
+                          isDefaultDoctor(d.name)
+                            ? 'New Sales bills start with this doctor. Click to stop.'
+                            : 'Every new Sales bill starts with this doctor'
+                        }
+                        onClick={() =>
+                          run(
+                            isDefaultDoctor(d.name)
+                              ? contactPayload('doctor', 'clear_default')
+                              : contactPayload('doctor', 'set_default', {
+                                  id: d.id,
+                                  fields: { name: d.name },
+                                }),
+                          )
+                        }
+                      >
+                        {isDefaultDoctor(d.name) ? 'Remove default' : 'Set default'}
+                      </button>
                       <button
                         type="button"
                         className="iset-btn"

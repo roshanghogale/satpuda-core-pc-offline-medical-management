@@ -1331,6 +1331,7 @@ def get_contacts(conn: sqlite3.Connection) -> dict[str, Any]:
             ],
             "villages": load_villages(conn),
             "default_village": get_default_village(conn),
+            "default_doctor": _default_doctor_name(),
         }
         _wholesale_contacts(conn, out["customers"], cust_rows)
         return out
@@ -1376,6 +1377,7 @@ def get_contacts(conn: sqlite3.Connection) -> dict[str, Any]:
         ],
         "villages": load_villages(conn),
         "default_village": get_default_village(conn),
+        "default_doctor": _default_doctor_name(),
     }
     _wholesale_contacts(conn, out["customers"], None)
     return out
@@ -1539,8 +1541,74 @@ def get_alerts(conn: sqlite3.Connection) -> dict[str, Any]:
     return out
 
 
+def _default_doctor_name() -> str:
+    try:
+        from core.billing_layout_prefs import load_default_doctor
+
+        return load_default_doctor()
+    except Exception:
+        return ""
+
+
+def _doctor_name_by_id(conn: sqlite3.Connection, doctor_id: Any) -> str:
+    try:
+        did = int(doctor_id)
+    except (TypeError, ValueError):
+        return ""
+    for d in get_contacts(conn).get("doctors") or []:
+        try:
+            if int(d.get("id") or 0) == did:
+                return str(d.get("name") or "").strip()
+        except (TypeError, ValueError):
+            continue
+    return ""
+
+
 def mutate_contact(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, Any]:
-    """CRUD for doctors / villages / suppliers / customers used by Settings → Contacts."""
+    """CRUD for doctors / villages / suppliers / customers used by Settings → Contacts.
+
+    Doctors also carry the default doctor (Contacts > Doctors > Set default): it is the
+    same setting as Sales & Billing > Default doctor, follows a rename, and clears when
+    that doctor is deleted.
+    """
+    from core.billing_layout_prefs import save_billing_layout_prefs
+
+    action = str(data.get("action") or "").strip().lower()
+    kind = str(data.get("kind") or "").strip().lower()
+    if kind != "doctor":
+        return _mutate_contact(conn, data)
+    if action in ("set_default", "clear_default"):
+        from core.online_guard import ensure_can_mutate
+
+        ensure_can_mutate()
+        name = ""
+        if action == "set_default":
+            name = " ".join(str(data.get("name") or "").split()) or _doctor_name_by_id(
+                conn, data.get("id")
+            )
+            if not name:
+                raise ValueError("Pick a doctor to make the default.")
+        save_billing_layout_prefs({"default_doctor": name})
+        return get_contacts(conn)
+    before = _default_doctor_name()
+    old_name = (
+        _doctor_name_by_id(conn, data.get("id"))
+        if before and action in ("update", "delete")
+        else ""
+    )
+    out = _mutate_contact(conn, data)
+    if before and old_name and old_name.upper() == before.upper():
+        new_name = (
+            " ".join(str(data.get("name") or "").split()).upper() if action == "update" else ""
+        )
+        if new_name != before:
+            save_billing_layout_prefs({"default_doctor": new_name})
+            out = dict(out)
+            out["default_doctor"] = new_name
+    return out
+
+
+def _mutate_contact(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, Any]:
     from core.online_guard import ensure_can_mutate
     from core.sync_prefs import is_online_mode
 

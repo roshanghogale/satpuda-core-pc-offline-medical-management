@@ -195,3 +195,57 @@ class NewBillsStartWithIt(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ContactsDoctorsSetsTheDefault(unittest.TestCase):
+    """Owner, 19 Oct 2026: "this option should be in the contacts to where we add the
+    doctors" -- Contacts > Doctors > Set default writes the same setting, follows a
+    rename and clears when that doctor is deleted."""
+
+    def setUp(self):
+        self.saved = {"default_doctor": ""}
+        self.doctors = [{"id": 1, "name": "DR A", "reg_no": "1", "phone": ""},
+                        {"id": 2, "name": "DR B", "reg_no": "2", "phone": ""}]
+        import core.desktop_settings_service as svc
+        self.svc = svc
+        self._p = [
+            mock.patch("core.billing_layout_prefs.save_billing_layout_prefs",
+                       lambda d: self.saved.update(d)),
+            mock.patch("core.billing_layout_prefs.load_default_doctor",
+                       lambda *a, **k: self.saved["default_doctor"]),
+            mock.patch.object(svc, "get_contacts",
+                              lambda conn: {"doctors": list(self.doctors),
+                                            "default_doctor": self.saved["default_doctor"]}),
+            mock.patch.object(svc, "_mutate_contact", self._fake_mutate),
+            mock.patch("core.online_guard.ensure_can_mutate", lambda *a, **k: None),
+        ]
+        for p in self._p:
+            p.start()
+
+    def tearDown(self):
+        for p in reversed(self._p):
+            p.stop()
+
+    def _fake_mutate(self, conn, data):
+        if data["action"] == "update":
+            for d in self.doctors:
+                if d["id"] == data["id"]:
+                    d["name"] = data["name"].upper()
+        elif data["action"] == "delete":
+            self.doctors = [d for d in self.doctors if d["id"] != data["id"]]
+        return {"doctors": list(self.doctors), "default_doctor": self.saved["default_doctor"]}
+
+    def test_set_rename_delete(self):
+        out = self.svc.mutate_contact(None, {"kind": "doctor", "action": "set_default", "id": 2})
+        self.assertEqual(out["default_doctor"], "DR B")
+        out = self.svc.mutate_contact(None, {"kind": "doctor", "action": "update", "id": 2,
+                                             "name": "dr b2", "reg_no": "2"})
+        self.assertEqual(self.saved["default_doctor"], "DR B2")
+        self.assertEqual(out["default_doctor"], "DR B2")
+        self.svc.mutate_contact(None, {"kind": "doctor", "action": "delete", "id": 1})
+        self.assertEqual(self.saved["default_doctor"], "DR B2")
+        out = self.svc.mutate_contact(None, {"kind": "doctor", "action": "delete", "id": 2})
+        self.assertEqual(out["default_doctor"], "")
+        self.svc.mutate_contact(None, {"kind": "doctor", "action": "set_default", "name": "DR A"})
+        out = self.svc.mutate_contact(None, {"kind": "doctor", "action": "clear_default"})
+        self.assertEqual(out["default_doctor"], "")
