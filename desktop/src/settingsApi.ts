@@ -105,6 +105,9 @@ export type SettingsBundle = {
     /** Every stocked batch with an expiry (past or future), for the Month / Year filter:
      *  name, batch, expiry, days left, qty, supplier, bill, purchase date, expiry ISO. */
     expiry_by_batch?: unknown[][]
+    /** What each batch with an expiry is worth (Expired / Near Expiry by supplier):
+     *  name, batch, purchase rate, MRP, value at purchase rate, value at MRP. */
+    batch_money?: unknown[][]
   }
   shelf?: {
     racks: {
@@ -582,11 +585,15 @@ export function applyAlertNavigation(
 /** Alert & Monitoring: a file (csv / xlsx / pdf) or paper (dot matrix / normal printer). */
 export function exportAlerts(body: {
   title: string
-  sections: { title: string; columns: string[]; rows: unknown[][] }[]
+  /** group_by "Supplier": a summary by supplier, then one block per supplier with its total */
+  sections: { title: string; columns: string[]; rows: unknown[][]; group_by?: string }[]
   format?: 'csv' | 'xlsx' | 'pdf'
   print_to?: '' | 'dot_matrix' | 'printer'
   paper?: 'A4' | 'A5'
   page_layout?: 'portrait' | 'landscape'
+  /** PDF only: one file per supplier, saved by the engine in a dated folder under Exports */
+  per_supplier_files?: boolean
+  file_name?: string
 }) {
   return jsonFetch<{
     ok: boolean
@@ -596,6 +603,10 @@ export function exportAlerts(body: {
     filename?: string
     mime?: string
     content_base64?: string
+    /** per_supplier_files: what was saved */
+    files?: { path: string; file_name?: string; folder?: string }[]
+    folder?: string
+    path?: string
   }>('/api/settings/alerts/export', { method: 'PUT', body: JSON.stringify(body) })
 }
 

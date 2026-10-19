@@ -10,6 +10,8 @@ from __future__ import annotations
 import sqlite3
 from datetime import date
 
+from core.alert_supplier_groups import VALUE_MRP, VALUE_RATE
+
 
 # Which page each alert offers to open. Data, not UI -- the desktop shell and
 # the classic window both act on it.
@@ -114,17 +116,20 @@ def _collect_alert_data(conn):
             low_stock.append((name, med_type, "", qty, unit or ""))
 
     near_expiry = []
-    for name, batch, expiry_display, days_left, qty, _supplier, _bill in fetch_near_expiry_medicines(conn):
+    for (name, batch, expiry_display, days_left, qty, supplier, bill,
+         *money) in fetch_near_expiry_medicines(conn, money=True):
         cur.execute(
             "SELECT COALESCE(type,'') FROM medicines WHERE name=? AND COALESCE(batch_no,'')=? LIMIT 1",
             (name, batch or ""),
         )
         row = cur.fetchone()
         med_type = row[0] if row else ""
-        near_expiry.append((name, med_type, batch, expiry_display, days_left))
+        near_expiry.append((name, med_type, batch, expiry_display, days_left, qty, supplier, bill,
+                            *money))
 
     expired = []
-    for name, batch, expiry_display, _qty, _supplier, _bill in fetch_expired_medicines(conn):
+    for (name, batch, expiry_display, qty, supplier, bill,
+         *money) in fetch_expired_medicines(conn, money=True):
         cur.execute(
             f"""
             SELECT COALESCE(type,''), COALESCE(expiry_date,'')
@@ -139,7 +144,8 @@ def _collect_alert_data(conn):
         expiry_raw = row[1] if row else expiry_display
         expiry_dt = alert_expiry_date(expiry_raw)
         days_expired = max(0, (today - expiry_dt).days) if expiry_dt else 0
-        expired.append((name, med_type, batch, expiry_display, days_expired))
+        expired.append((name, med_type, batch, expiry_display, days_expired, qty, supplier, bill,
+                        *money))
 
     out_of_stock = []
     for name, unit, mrp, rate, med_type, supplier in fetch_out_of_stock_medicines(conn):
@@ -163,6 +169,7 @@ def _collect_alert_data_online(conn):
     both modes (tests/test_startup_alerts_reach_the_shop.py holds them together).
     """
     from core.alert_monitoring_service import (
+        batch_money,
         fetch_customer_due_summary_online,
         online_stock_sections,
         online_visible_medicines,
@@ -198,16 +205,23 @@ def _collect_alert_data_online(conn):
                 unit or "",
             ))
 
+    def _money(name, batch, qty):
+        # Online the popup reads only the shelf (no purchase pull at startup): the rate is
+        # the shelf row's own purchase rate.
+        m = first.get((name, batch or "")) or {}
+        return batch_money(qty, m.get("rate"), m.get("mrp"), str(m.get("type") or ""), m.get("unit"))
+
     near_expiry = [
-        (name, _type(name, batch), batch, disp, days_left)
-        for name, batch, disp, days_left, _q, _s, _b in sections["near_expiry"]
+        (name, _type(name, batch), batch, disp, days_left, q, s, b, *_money(name, batch, q))
+        for name, batch, disp, days_left, q, s, b in sections["near_expiry"]
     ]
     expired = []
-    for name, batch, disp, _q, _s, _b in sections["expired"]:
+    for name, batch, disp, q, s, b in sections["expired"]:
         cut = alert_expiry_date((first.get((name, batch or "")) or {}).get("expiry_date"))
         expired.append((
             name, _type(name, batch), batch, disp,
             max(0, (today - cut).days) if cut else 0,
+            q, s, b, *_money(name, batch, q),
         ))
     out_of_stock = [
         (name, unit or "", round(float(mrp or 0), 2), round(float(rate or 0), 2),
@@ -218,15 +232,26 @@ def _collect_alert_data_online(conn):
     return _tabs(low_stock, out_of_stock, near_expiry, expired, customer_due)
 
 
-def _alert(title, columns, rows):
+# Expired / Near Expiry carry what the shop needs to send them back (owner, 19 Oct 2026):
+# quantity, the supplier of the batch's purchase, its bill, and the value at the purchase
+# rate and at MRP. Appended after the first five columns, which the row actions and the
+# "already shown today" keys read by position.
+_RETURN_COLUMNS = ["Qty", "Supplier", "Bill No", "P.Rate", "MRP", VALUE_RATE, VALUE_MRP]
+
+
+def _alert(title, columns, rows, group_by=None):
     action_kind, action_label = _TAB_ACTIONS.get(title, (None, None))
-    return {
+    out = {
         "title": title,
         "columns": columns,
         "rows": rows,
         "action_kind": action_kind,
         "action_label": action_label,
     }
+    if group_by:
+        # The column the window groups by (on by default) and the export cuts by.
+        out["group_by"] = group_by
+    return out
 
 
 def _tabs(low_stock, out_of_stock, near_expiry, expired, customer_due):
@@ -239,13 +264,15 @@ def _tabs(low_stock, out_of_stock, near_expiry, expired, customer_due):
         ),
         _alert(
             "Near Expiry Alerts",
-            ["Medicine", "Type", "Batch", "Expiry", "Days Left"],
+            ["Medicine", "Type", "Batch", "Expiry", "Days Left", *_RETURN_COLUMNS],
             near_expiry,
+            group_by="Supplier",
         ),
         _alert(
             "Expired Medicines",
-            ["Medicine", "Type", "Batch", "Expiry", "Days Expired"],
+            ["Medicine", "Type", "Batch", "Expiry", "Days Expired", *_RETURN_COLUMNS],
             expired,
+            group_by="Supplier",
         ),
         _alert("Customer Due Alerts", ["Customer", "Phone", "Due Amount"], customer_due),
     ]

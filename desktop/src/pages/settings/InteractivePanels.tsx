@@ -16,7 +16,6 @@ import {
   alertAction,
   applyAlertNavigation,
   deletePayment,
-  exportAlerts,
   exportPaymentReport,
   fetchLedger,
   fetchOpenBills,
@@ -71,6 +70,18 @@ import {
   type ReorderTabState,
 } from './ReorderMultiTabEditor'
 import { todayLocal } from '../../localDate'
+import {
+  AlertGrid,
+  GroupSwitch,
+  MenuButton,
+  VALUE_MRP,
+  VALUE_RATE,
+  groupBySupplier,
+  rupees,
+  sumColumn,
+  type MenuItem,
+} from '../alerts/AlertBoard'
+import { runAlertExport, type AlertExportHow, type AlertSection } from '../alerts/alertExport'
 
 type Contacts = NonNullable<SettingsBundle['contacts']>
 type Shelf = NonNullable<SettingsBundle['shelf']>
@@ -1265,37 +1276,75 @@ const ALERT_EMPTY: Record<string, string> = {
   dues: 'No customer owes more than the minimum due.',
 }
 
-/** Columns that hold numbers: right-aligned, tabular figures. */
-const ALERT_NUM_HEADERS = new Set([
-  'Current Stock',
-  'Selling Rate',
-  'Purchase Rate',
-  'Quantity Expired',
-  'Remaining Days',
-  'Available Qty',
-  'Total Amount',
-  'Paid Amount',
-  'Due Amount',
-  'Due Days',
-])
+/** Expired / Near Expiry also show what each batch is worth (engine: batch_money), and
+ *  group by the supplier it was bought from (owner, 19 Oct 2026). */
+const ALERT_MONEY_HEADERS = ['P.Rate', 'MRP', VALUE_RATE, VALUE_MRP]
 
-type ExportHow = 'csv' | 'xlsx' | 'pdf' | 'dm_a4' | 'dm_a5' | 'printer'
+function alertMoney(alerts: Alerts): Map<string, unknown[]> {
+  const out = new Map<string, unknown[]>()
+  for (const r of (alerts.batch_money as unknown[][]) || []) {
+    const key = `${String(r[0] ?? '')}|${String(r[1] ?? '')}`
+    if (!out.has(key)) out.set(key, r.slice(2, 6))
+  }
+  return out
+}
+
+/** The columns a list shows (and exports): its own, plus the money of Expired / Near Expiry. */
+function alertHeaders(sp: (typeof ALERT_SPECS)[string]): string[] {
+  return sp.periodOf === 'expiry' ? [...sp.headers, ...ALERT_MONEY_HEADERS] : sp.headers
+}
+
+function alertDisplayRow(sp: (typeof ALERT_SPECS)[string], r: unknown[], money: Map<string, unknown[]>): unknown[] {
+  const base = r.slice(0, sp.headers.length)
+  if (sp.periodOf !== 'expiry') return base
+  return [...base, ...(money.get(`${String(r[0] ?? '')}|${String(r[1] ?? '')}`) || ['', '', '', ''])]
+}
+
+type ExportHow = AlertExportHow
 const EXPORT_HOW: { key: ExportHow; label: string }[] = [
   { key: 'xlsx', label: 'Excel file' },
   { key: 'pdf', label: 'PDF file' },
   { key: 'csv', label: 'CSV file' },
+  { key: 'pdf_split', label: 'PDF — one file per supplier (Expired / Near Expiry)' },
   { key: 'dm_a4', label: 'Print — dot matrix, A4' },
   { key: 'dm_a5', label: 'Print — dot matrix, A5' },
   { key: 'printer', label: 'Print — normal printer (laser / inkjet)' },
 ]
 
-/** Export or print the list on screen, or all five lists at once, as the screen filters them
- *  (search and Month / Year). */
+/** The sections of an export: the list on screen (with its search) or all five, as the
+ *  screen filters them (Month / Year), Expired / Near Expiry by supplier when asked. */
+function alertSections(
+  alerts: Alerts,
+  keys: string[],
+  current: string,
+  period: string,
+  search: string,
+  bySupplier: boolean,
+): AlertSection[] {
+  const money = alertMoney(alerts)
+  return keys.map((k) => {
+    const sp = ALERT_SPECS[k]
+    const rows = alertRows(alerts, sp.key as string, sp.periodOf, sp.periodOf ? period : '')
+      .filter((r) => filterText(k === current ? search : '', r.slice(0, sp.headers.length)))
+      .map((r) => alertDisplayRow(sp, r, money))
+    const t = sp.periodOf && period ? `${sp.title} — ${periodLabel(period)}` : sp.title
+    return {
+      title: t,
+      columns: alertHeaders(sp),
+      rows,
+      group_by: bySupplier && sp.periodOf === 'expiry' ? 'Supplier' : '',
+    }
+  })
+}
+
+/** Export or print the list on screen, or all five lists at once (more choices than the
+ *  Export / Print menus: which lists, page, supplier-wise). */
 function AlertsExportDialog({
   alerts,
   current,
   period,
   search,
+  bySupplier: bySupplierStart,
   onClose,
   onDone,
 }: {
@@ -1303,48 +1352,33 @@ function AlertsExportDialog({
   current: string
   period: string
   search: string
+  bySupplier: boolean
   onClose: () => void
   onDone: (msg: string) => void
 }) {
   const [which, setWhich] = useState<'current' | 'all'>('current')
   const [how, setHow] = useState<ExportHow>('xlsx')
-  const [pageLayout, setPageLayout] = useState<'portrait' | 'landscape'>('portrait')
+  const [pageLayout, setPageLayout] = useState<'portrait' | 'landscape'>('landscape')
+  const [bySupplier, setBySupplier] = useState(bySupplierStart)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const keys = which === 'all' ? Object.keys(ALERT_SPECS) : [current]
-  const sections = keys.map((k) => {
-    const sp = ALERT_SPECS[k]
-    const rows = alertRows(alerts, sp.key as string, sp.periodOf, sp.periodOf ? period : '')
-      .filter((r) => filterText(k === current ? search : '', r.slice(0, sp.headers.length)))
-      .map((r) => r.slice(0, sp.headers.length))
-    const t = sp.periodOf && period ? `${sp.title} — ${periodLabel(period)}` : sp.title
-    return { title: t, columns: sp.headers, rows }
-  })
+  const canGroup = keys.some((k) => ALERT_SPECS[k]?.periodOf === 'expiry')
+  const sections = alertSections(alerts, keys, current, period, search, bySupplier || how === 'pdf_split')
   const total = sections.reduce((n, s) => n + s.rows.length, 0)
+  const hows = EXPORT_HOW.filter((o) => o.key !== 'pdf_split' || canGroup)
 
   async function go() {
     setBusy(true)
     setError('')
     try {
-      const printTo = how === 'printer' ? 'printer' : how.startsWith('dm_') ? 'dot_matrix' : ''
-      const res = await exportAlerts({
+      const note = await runAlertExport({
         title: which === 'all' ? 'Alert & Monitoring' : sections[0]?.title || 'Alerts',
-        sections,
-        format: printTo ? undefined : (how as 'csv' | 'xlsx' | 'pdf'),
-        print_to: printTo as '' | 'dot_matrix' | 'printer',
-        paper: how === 'dm_a5' ? 'A5' : 'A4',
-        page_layout: pageLayout,
+        sections: how === 'pdf_split' ? sections.filter((s) => s.group_by) : sections,
+        how,
+        pageLayout,
       })
-      if (!res.ok) {
-        setError(res.error || 'Export zala nahi.')
-        return
-      }
-      if (res.content_base64 && res.filename) {
-        const saved = await saveFileAndShow(res.filename, res.mime || 'application/octet-stream', res.content_base64)
-        onDone(`Saved ${saved?.file_name || res.filename}`)
-      } else {
-        onDone(res.message || 'Printed.')
-      }
+      onDone(note)
       onClose()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -1373,13 +1407,20 @@ function AlertsExportDialog({
           </Field>
           <Field label="How">
             <select className="settings-input" value={how} onChange={(e) => setHow(e.target.value as ExportHow)}>
-              {EXPORT_HOW.map((o) => (
+              {hows.map((o) => (
                 <option key={o.key} value={o.key}>
                   {o.label}
                 </option>
               ))}
             </select>
           </Field>
+          {canGroup && how !== 'pdf_split' ? (
+            <Check
+              label="Expired / Near Expiry supplier-wise (a block and a total per supplier)"
+              checked={bySupplier}
+              onChange={setBySupplier}
+            />
+          ) : null}
           {how !== 'csv' && how !== 'xlsx' && how !== 'dm_a5' ? (
             <Field label="Page">
               <select className="settings-input" value={pageLayout}
@@ -1492,6 +1533,8 @@ export function AlertsPanel({
   const [month, setMonth] = useState('')
   const [year, setYear] = useState('')
   const [exportOpen, setExportOpen] = useState(false)
+  // Expired / Near Expiry: grouped by supplier unless the shop turns it off.
+  const [bySupplier, setBySupplier] = useState(true)
   const spec = ALERT_SPECS[nestedId] || ALERT_SPECS.low
   const period = month || year
   const rows = alertRows(alerts, spec.key as string, spec.periodOf, period).filter((r) =>
@@ -1500,6 +1543,12 @@ export function AlertsPanel({
   const count = period ? rows.length : (alerts.counts?.[spec.key as string] ?? rows.length)
   const years = alertYears(alerts)
   const selectedRow = selectedIdx != null ? rows[selectedIdx] : null
+  const money = useMemo(() => alertMoney(alerts), [alerts])
+  const headers = alertHeaders(spec)
+  const display = rows.map((r) => alertDisplayRow(spec, r, money))
+  const canGroup = spec.periodOf === 'expiry'
+  const grouped = canGroup && bySupplier
+  const groups = canGroup ? groupBySupplier(headers, display) : []
 
   usePageHotkeys({ onSave: () => onRefresh() })
 
@@ -1511,6 +1560,28 @@ export function AlertsPanel({
       spec.headers,
       rows.map((r) => r.slice(0, spec.headers.length)),
     )
+  }
+
+  async function quickExport(how: AlertExportHow, which: 'current' | 'all' = 'current') {
+    setBusy(true)
+    setErr('')
+    setMsg('')
+    try {
+      const keys = which === 'all' ? Object.keys(ALERT_SPECS) : [nestedId in ALERT_SPECS ? nestedId : 'low']
+      const sections = alertSections(alerts, keys, nestedId, period, search, grouped || how === 'pdf_split')
+      setMsg(
+        await runAlertExport({
+          title: which === 'all' ? 'Alert & Monitoring' : sections[0]?.title || 'Alerts',
+          sections: how === 'pdf_split' ? sections.filter((s) => s.group_by) : sections,
+          how,
+          pageLayout: 'landscape',
+        }),
+      )
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function runAction(action: string, extra?: Record<string, unknown>) {
@@ -1594,14 +1665,6 @@ export function AlertsPanel({
     setSelectedIdx(null)
   }
 
-  async function bulkReorder() {
-    await runAction('bulk_reorder')
-  }
-
-  async function bulkReturn() {
-    await runAction('bulk_return')
-  }
-
   useEffect(() => {
     setSearch('')
     setSelectedIdx(null)
@@ -1609,7 +1672,7 @@ export function AlertsPanel({
     setMsg('')
   }, [nestedId])
 
-  useEffect(() => setSelectedIdx(null), [month, year])
+  useEffect(() => setSelectedIdx(null), [month, year, search, bySupplier])
 
   // ── Voice: "ya mahinyache", "march 2027", "2027 che", "filter kadh", "refresh", "export" ──
   const voiceHandlerRef = useRef<VoiceHandler>(async () => null)
@@ -1660,8 +1723,52 @@ export function AlertsPanel({
           period ? ` in ${periodLabel(period)}` : ''
         }.`
       : ALERT_EMPTY[nestedId] || 'Nothing to show.'
-  const hasRowActions = Boolean(spec.actionLabel || spec.dismissRow)
   const hasBulkRemove = Boolean(spec.dismissAllExpired || spec.dismissAllOos)
+
+  const stats: { label: string; value: string; tone?: string }[] = [
+    { label: spec.periodOf === 'expiry' ? 'Batches' : spec.key === 'customer_due' ? 'Bills' : 'Rows', value: String(display.length) },
+  ]
+  if (canGroup) {
+    stats.push(
+      { label: 'Suppliers', value: String(groups.length) },
+      { label: 'At purchase rate', value: rupees(sumColumn(headers, display, VALUE_RATE)), tone: nestedId === 'expired' ? 'bad' : 'warn' },
+      { label: 'At MRP', value: rupees(sumColumn(headers, display, VALUE_MRP)) },
+    )
+  }
+  if (spec.key === 'customer_due') {
+    stats.push({ label: 'Due', value: rupees(sumColumn(headers, display, 'Due Amount')), tone: 'bad' })
+  }
+
+  const scope = `${spec.title}${period ? ` — ${periodLabel(period)}` : ''} (${display.length})`
+  const exportItems: MenuItem[] = [
+    { key: 'h1', heading: `This list — ${scope}` },
+    { key: 'pdf', label: 'PDF', hint: grouped ? 'by supplier' : '', disabled: !display.length, onPick: () => void quickExport('pdf') },
+    { key: 'xlsx', label: 'Excel', hint: grouped ? 'by supplier' : '', disabled: !display.length, onPick: () => void quickExport('xlsx') },
+    { key: 'csv', label: 'CSV', hint: grouped ? 'by supplier' : '', disabled: !display.length, onPick: () => void quickExport('csv') },
+  ]
+  if (canGroup) {
+    exportItems.push({
+      key: 'split',
+      label: 'PDF — one file per supplier',
+      hint: `${groups.length} file${groups.length === 1 ? '' : 's'}`,
+      disabled: !display.length,
+      onPick: () => void quickExport('pdf_split'),
+    })
+  }
+  exportItems.push(
+    { key: 's', separator: true },
+    { key: 'h2', heading: 'All five lists' },
+    { key: 'all_pdf', label: 'All lists — PDF', onPick: () => void quickExport('pdf', 'all') },
+    { key: 'all_xlsx', label: 'All lists — Excel', onPick: () => void quickExport('xlsx', 'all') },
+    { key: 's2', separator: true },
+    { key: 'more', label: 'More options…', hint: 'page, lists', onPick: () => setExportOpen(true) },
+  )
+  const printItems: MenuItem[] = [
+    { key: 'h', heading: `Print ${spec.title}${grouped ? ' by supplier' : ''}` },
+    { key: 'printer', label: 'Normal printer', hint: 'A4 landscape', onPick: () => void quickExport('printer') },
+    { key: 'dm_a4', label: 'Dot matrix', hint: 'A4', onPick: () => void quickExport('dm_a4') },
+    { key: 'dm_a5', label: 'Dot matrix', hint: 'A5', onPick: () => void quickExport('dm_a5') },
+  ]
 
   return (
     <>
@@ -1675,194 +1782,162 @@ export function AlertsPanel({
       {spec.periodOf ? (
         <Help title="What Month / Year shows">
           {spec.periodOf === 'expiry'
-            ? 'Month / Year shows every batch whose expiry falls in it, batch-wise.'
+            ? 'Month / Year shows every batch whose expiry falls in it, batch-wise. Group by supplier puts each batch under the supplier it was bought from, so the expiry can go back to them.'
             : 'Month / Year shows the medicines last bought in it.'}
         </Help>
       ) : null}
-      <div className="iset-bar">
-        <BarField label="Search" className="grow">
-          <input
-            className="settings-input"
-            value={search}
-            placeholder="Filter table…"
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </BarField>
-        {spec.periodOf ? (
-          <>
-            <BarField label="Month" className="mid">
-              <input
-                type="month"
-                className="settings-input"
-                value={month}
-                onChange={(e) => {
-                  setMonth(e.target.value)
-                  if (e.target.value) setYear('')
-                }}
-              />
-            </BarField>
-            <BarField label="Year" className="short">
-              <select
-                className="settings-input"
-                value={year}
-                onChange={(e) => {
-                  setYear(e.target.value)
-                  if (e.target.value) setMonth('')
-                }}
-              >
-                <option value="">All</option>
-                {years.map((y) => (
-                  <option key={y} value={y}>
-                    {y}
-                  </option>
-                ))}
-              </select>
-            </BarField>
-            {period ? (
-              <button
-                type="button"
-                className="settings-action-btn iset-secondary"
-                onClick={() => {
-                  setMonth('')
-                  setYear('')
-                }}
-              >
-                Clear Month / Year
-              </button>
-            ) : null}
-          </>
-        ) : null}
-        <div className="iset-bar-actions">
-          <SaveBtn label="Refresh (F5)" onClick={() => onRefresh()} />
-          <button
-            type="button"
-            className="settings-action-btn iset-secondary"
-            onClick={() => setExportOpen(true)}
-          >
-            Export / Print
-          </button>
-          <button
-            type="button"
-            className="settings-action-btn iset-secondary"
-            disabled={busy}
-            onClick={() => void bulkReorder()}
-          >
-            Reorder by Supplier
-          </button>
-          <button
-            type="button"
-            className="settings-action-btn iset-secondary"
-            disabled={busy}
-            onClick={() => void bulkReturn()}
-          >
-            Return by Purchase
-          </button>
+      <div className="alx-panel">
+        <div className="alx-summary">
+          {stats.map((s) => (
+            <div key={s.label} className={`alx-stat ${s.tone || ''}`}>
+              <b>{s.value}</b>
+              <span>{s.label}</span>
+            </div>
+          ))}
         </div>
-      </div>
-      {hasRowActions || hasBulkRemove ? (
-        <div className="iset-alert-actions">
-          {hasRowActions ? (
-            <span className="iset-row-label">
-              {selectedRow ? `Selected: ${String(selectedRow[0] ?? '')}` : 'Select a row:'}
-            </span>
-          ) : null}
-          {spec.actionLabel ? (
-            <SaveBtn
-              label={spec.actionLabel}
-              saving={busy}
-              onClick={() => void rowAction()}
+        <div className="iset-bar">
+          <BarField label="Search" className="grow">
+            <input
+              className="settings-input"
+              value={search}
+              placeholder="Medicine, batch, supplier…"
+              onChange={(e) => setSearch(e.target.value)}
             />
+          </BarField>
+          {spec.periodOf ? (
+            <>
+              <BarField label="Month" className="mid">
+                <input
+                  type="month"
+                  className="settings-input"
+                  value={month}
+                  onChange={(e) => {
+                    setMonth(e.target.value)
+                    if (e.target.value) setYear('')
+                  }}
+                />
+              </BarField>
+              <BarField label="Year" className="short">
+                <select
+                  className="settings-input"
+                  value={year}
+                  onChange={(e) => {
+                    setYear(e.target.value)
+                    if (e.target.value) setMonth('')
+                  }}
+                >
+                  <option value="">All</option>
+                  {years.map((y) => (
+                    <option key={y} value={y}>
+                      {y}
+                    </option>
+                  ))}
+                </select>
+              </BarField>
+              {period ? (
+                <button
+                  type="button"
+                  className="settings-action-btn iset-secondary"
+                  onClick={() => {
+                    setMonth('')
+                    setYear('')
+                  }}
+                >
+                  Clear Month / Year
+                </button>
+              ) : null}
+            </>
+          ) : null}
+          {canGroup ? <GroupSwitch on={bySupplier} onChange={setBySupplier} /> : null}
+          <div className="iset-bar-actions">
+            <SaveBtn label="Refresh (F5)" onClick={() => onRefresh()} />
+          </div>
+        </div>
+        {err ? <p className="iset-callout warn">{err}</p> : null}
+        {msg ? <p className="iset-callout">{msg}</p> : null}
+        <AlertGrid
+          columns={headers}
+          rows={display}
+          grouped={grouped}
+          selected={selectedIdx}
+          onSelect={setSelectedIdx}
+          onActivate={(i) => {
+            setSelectedIdx(i)
+            void rowAction(rows[i])
+          }}
+          rowActionLabel={spec.actionLabel || null}
+          onRowAction={(i) => {
+            setSelectedIdx(i)
+            void rowAction(rows[i])
+          }}
+          empty={emptyText}
+          limit={ALERT_ROWS_SHOWN}
+        />
+        <div className="alx-panel-bar">
+          <span className="alx-foot-msg">
+            {busy ? 'Working…' : selectedRow ? `Selected: ${String(selectedRow[0] ?? '')}` : 'Select a row for its actions.'}
+          </span>
+          {spec.actionLabel ? (
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={busy || !selectedRow}
+              onClick={() => void rowAction()}
+            >
+              {spec.actionLabel}
+            </button>
           ) : null}
           {spec.dismissRow ? (
             <button
               type="button"
-              className="settings-action-btn iset-secondary"
-              disabled={busy}
+              className="btn btn-neutral"
+              disabled={busy || !selectedRow}
               onClick={() => void dismissRow()}
             >
               Remove from List
             </button>
           ) : null}
-          {hasBulkRemove ? (
-            <span className="iset-push">
-              {spec.dismissAllExpired ? (
-                <button
-                  type="button"
-                  className="settings-action-btn iset-danger"
-                  disabled={busy}
-                  onClick={() => void dismissAllExpired()}
-                >
-                  Remove All Expired
-                </button>
-              ) : null}
-              {spec.dismissAllOos ? (
-                <button
-                  type="button"
-                  className="settings-action-btn iset-danger"
-                  disabled={busy}
-                  onClick={() => void dismissAllOos()}
-                >
-                  Remove All Out of Stock
-                </button>
-              ) : null}
-            </span>
+          <span className="alx-foot-sep" />
+          <MenuButton label="Export" items={exportItems} disabled={busy} />
+          <MenuButton label="Print" items={printItems} disabled={busy || !display.length} />
+          {spec.bulkReorder ? (
+            <button type="button" className="btn btn-neutral" disabled={busy}
+              onClick={() => void runAction('bulk_reorder')}>
+              Reorder by Supplier
+            </button>
+          ) : null}
+          {spec.bulkReturn ? (
+            <button type="button" className="btn btn-neutral" disabled={busy}
+              onClick={() => void runAction('bulk_return')}>
+              Return by Purchase
+            </button>
+          ) : null}
+          {hasBulkRemove ? <span className="alx-foot-sep" /> : null}
+          {spec.dismissAllExpired ? (
+            <button type="button" className="btn alx-danger" disabled={busy}
+              onClick={() => void dismissAllExpired()}>
+              Remove All Expired
+            </button>
+          ) : null}
+          {spec.dismissAllOos ? (
+            <button type="button" className="btn alx-danger" disabled={busy}
+              onClick={() => void dismissAllOos()}>
+              Remove All Out of Stock
+            </button>
           ) : null}
         </div>
-      ) : null}
-      {err ? <p className="iset-callout warn">{err}</p> : null}
-      {msg ? <p className="iset-callout">{msg}</p> : null}
+      </div>
       {exportOpen ? (
         <AlertsExportDialog
           alerts={alerts}
           current={nestedId}
           period={period}
           search={search}
+          bySupplier={grouped}
           onClose={() => setExportOpen(false)}
           onDone={(m) => setMsg(m)}
         />
       ) : null}
-      <div className="iset-table-wrap capped">
-        <table className="settings-table">
-          <thead>
-            <tr>
-              {spec.headers.map((h) => (
-                <th key={h} className={ALERT_NUM_HEADERS.has(h) ? 'num' : undefined}>
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.slice(0, ALERT_ROWS_SHOWN).map((r, i) => (
-              <tr
-                key={i}
-                className={`iset-clickable${selectedIdx === i ? ' row-selected' : ''}`}
-                onClick={() => setSelectedIdx(i)}
-                onDoubleClick={() => {
-                  setSelectedIdx(i)
-                  void rowAction(r)
-                }}
-              >
-                {spec.headers.map((h, j) => (
-                  <td key={j} className={ALERT_NUM_HEADERS.has(h) ? 'num' : undefined}>
-                    {String(r[j] ?? '')}
-                  </td>
-                ))}
-              </tr>
-            ))}
-            {!rows.length ? (
-              <EmptyRow cols={spec.headers.length}>{emptyText}</EmptyRow>
-            ) : null}
-            {rows.length > ALERT_ROWS_SHOWN ? (
-              <tr>
-                <td className="iset-more" colSpan={spec.headers.length}>
-                  First {ALERT_ROWS_SHOWN} of {rows.length} shown — Export CSV has every row.
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
     </>
   )
 }

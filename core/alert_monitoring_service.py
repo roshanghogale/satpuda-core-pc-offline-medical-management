@@ -123,7 +123,7 @@ def _purchase_trail(conn) -> Dict[str, Any]:
     cur.execute(f"""
         SELECT pi.medicine_id, COALESCE(pi.batch_no,''), COALESCE(pi.expiry_date,''),
                COALESCE(p.bill_number,''), COALESCE(p.purchase_date,''), COALESCE(s.name,''),
-               COALESCE(m.name,'')
+               COALESCE(m.name,''), COALESCE(pi.rate,0)
         FROM purchase_items pi
         JOIN purchases p ON p.id = pi.purchase_id
         LEFT JOIN suppliers s ON s.id = p.supplier_id
@@ -131,12 +131,13 @@ def _purchase_trail(conn) -> Dict[str, Any]:
         WHERE {_real_purchases_sql(conn)}
         ORDER BY p.purchase_date DESC, p.id DESC
     """)
-    by_batch: Dict[Tuple[int, str], Dict[str, str]] = {}
-    by_med: Dict[int, Dict[str, str]] = {}
-    by_name: Dict[str, Dict[str, str]] = {}
-    for med_id, batch, expiry, bill, pdate, supplier, name in cur.fetchall():
+    by_batch: Dict[Tuple[int, str], Dict[str, Any]] = {}
+    by_med: Dict[int, Dict[str, Any]] = {}
+    by_name: Dict[str, Dict[str, Any]] = {}
+    for med_id, batch, expiry, bill, pdate, supplier, name, prate in cur.fetchall():
+        # rate: what the shop paid for one pack on that bill (an expiry return is valued at it)
         info = {"bill": str(bill or ""), "date": _iso_day(pdate), "supplier": str(supplier or ""),
-                "batch": str(batch or ""), "expiry": str(expiry or "")}
+                "batch": str(batch or ""), "expiry": str(expiry or ""), "rate": float(prate or 0)}
         mid = int(med_id)
         by_batch.setdefault((mid, _norm_batch(batch)), info)
         by_med.setdefault(mid, info)
@@ -153,16 +154,45 @@ def _purchase_trail(conn) -> Dict[str, Any]:
     return {"by_batch": by_batch, "by_med": by_med, "by_name": by_name, "shelf": shelf}
 
 
-def _batch_source(trail: Dict[str, Any], med_id: Any, batch: Any) -> Dict[str, str]:
-    """Supplier, bill number and purchase date of one shelf batch."""
+def _batch_source(trail: Dict[str, Any], med_id: Any, batch: Any) -> Dict[str, Any]:
+    """Supplier, bill number, purchase date and (when the batch's own bill is known) the
+    rate paid on it, of one shelf batch. The supplier is the one on the bill that brought
+    the batch, else the one written on the shelf row (opening stock / import), else the
+    row's newest bill."""
     try:
         mid = int(med_id)
     except (TypeError, ValueError):
-        return {"bill": "", "date": "", "supplier": ""}
+        return {"bill": "", "date": "", "supplier": "", "rate": 0.0}
     hit = trail["by_batch"].get((mid, _norm_batch(batch))) or {}
     latest = trail["by_med"].get(mid) or {}
     supplier = hit.get("supplier") or trail["shelf"].get(mid, "") or latest.get("supplier", "")
-    return {"bill": hit.get("bill", ""), "date": hit.get("date", ""), "supplier": supplier}
+    return {"bill": hit.get("bill", ""), "date": hit.get("date", ""), "supplier": supplier,
+            "rate": float(hit.get("rate") or 0)}
+
+
+def batch_money(qty: Any, purchase_rate: Any, mrp: Any, med_type: str,
+                unit: Any) -> Tuple[float, float, float, float]:
+    """(purchase rate, MRP, value at the purchase rate, value at MRP) of a batch on the shelf.
+
+    Rates are per pack (a strip); the stock of a strip-counted type is kept in tablets, so
+    the rate is divided down to one tablet first -- the rule the inventory value uses
+    (core/stock_utils.stock_value_at_mrp)."""
+    from core.stock_utils import per_unit_mrp
+
+    q = float(qty or 0)
+    rate = round(float(purchase_rate or 0), 2)
+    m = round(float(mrp or 0), 2)
+    if q <= 0:
+        return rate, m, 0.0, 0.0
+    return (rate, m, round(q * per_unit_mrp(rate, med_type or "", unit), 2),
+            round(q * per_unit_mrp(m, med_type or "", unit), 2))
+
+
+def _row_money(src: Dict[str, Any], qty: Any, row_rate: Any, mrp: Any, med_type: str,
+               unit: Any) -> Tuple[float, float, float, float]:
+    """batch_money at the rate on the batch's own bill, else the shelf row's purchase rate."""
+    rate = float(src.get("rate") or 0) or float(row_rate or 0)
+    return batch_money(qty, rate, mrp, med_type, unit)
 
 
 def _latest_supplier_by_medicine_id(conn) -> Dict[int, str]:
@@ -345,10 +375,13 @@ def fetch_out_of_stock_medicines(conn, detail: bool = False) -> List[Tuple[Any, 
 
 
 def _stocked_batches(conn) -> List[Tuple[Any, ...]]:
+    """id, name, type, batch, expiry, stock, purchase rate, MRP, pack of every visible batch
+    in stock."""
     cur = conn.cursor()
     cur.execute(f"""
         SELECT id, name, COALESCE(type,''), COALESCE(batch_no,''),
-               COALESCE(expiry_date,''), COALESCE(stock_qty,0)
+               COALESCE(expiry_date,''), COALESCE(stock_qty,0),
+               COALESCE(rate,0), COALESCE(mrp,0), COALESCE(unit,'')
         FROM medicines
         WHERE {HIDDEN_FILTER_SQL} AND COALESCE(stock_qty,0) > 0
         ORDER BY name COLLATE NOCASE, batch_no
@@ -356,13 +389,14 @@ def _stocked_batches(conn) -> List[Tuple[Any, ...]]:
     return cur.fetchall()
 
 
-def fetch_expired_medicines(conn, detail: bool = False) -> List[Tuple[Any, ...]]:
+def fetch_expired_medicines(conn, detail: bool = False, money: bool = False) -> List[Tuple[Any, ...]]:
     """Expired batches still on the shelf. With `detail`: purchase date, and (hidden, last)
-    the expiry as YYYY-MM-DD for the month / year filter."""
+    the expiry as YYYY-MM-DD for the month / year filter. With `money` (the startup popup):
+    purchase rate, MRP, value at the purchase rate and at MRP last (batch_money)."""
     trail = _purchase_trail(conn)
     today = date.today()
     rows: List[Tuple[Any, ...]] = []
-    for med_id, name, _type, batch, expiry_raw, qty in _stocked_batches(conn):
+    for med_id, name, med_type, batch, expiry_raw, qty, rate, mrp, unit in _stocked_batches(conn):
         expiry_dt = alert_expiry_date(expiry_raw)
         if not expiry_dt or expiry_dt >= today:
             continue
@@ -372,18 +406,20 @@ def fetch_expired_medicines(conn, detail: bool = False) -> List[Tuple[Any, ...]]
         )
         if detail:
             row += (_show_day(src["date"]), expiry_dt.isoformat())
+        if money:
+            row += _row_money(src, qty, rate, mrp, med_type, unit)
         rows.append(row)
     return rows
 
 
-def fetch_near_expiry_medicines(conn, detail: bool = False) -> List[Tuple[Any, ...]]:
+def fetch_near_expiry_medicines(conn, detail: bool = False, money: bool = False) -> List[Tuple[Any, ...]]:
     """Batches whose expiry falls inside the near-expiry threshold. With `detail`: purchase
-    date, and (hidden, last) the expiry as YYYY-MM-DD."""
+    date, and (hidden, last) the expiry as YYYY-MM-DD. With `money`: as fetch_expired_medicines."""
     _, near_thr = load_thresholds(conn)
     trail = _purchase_trail(conn)
     today = date.today()
     rows: List[Tuple[Any, ...]] = []
-    for med_id, name, med_type, batch, expiry_raw, qty in _stocked_batches(conn):
+    for med_id, name, med_type, batch, expiry_raw, qty, rate, mrp, unit in _stocked_batches(conn):
         expiry_dt = alert_expiry_date(expiry_raw)
         if not expiry_dt:
             continue
@@ -396,6 +432,8 @@ def fetch_near_expiry_medicines(conn, detail: bool = False) -> List[Tuple[Any, .
         )
         if detail:
             row += (_show_day(src["date"]), expiry_dt.isoformat())
+        if money:
+            row += _row_money(src, qty, rate, mrp, med_type, unit)
         rows.append(row)
     return rows
 
@@ -408,13 +446,27 @@ def fetch_expiry_by_batch(conn) -> List[Tuple[Any, ...]]:
     trail = _purchase_trail(conn)
     today = date.today()
     rows: List[Tuple[Any, ...]] = []
-    for med_id, name, _type, batch, expiry_raw, qty in _stocked_batches(conn):
+    for med_id, name, _type, batch, expiry_raw, qty, *_ in _stocked_batches(conn):
         expiry_dt = alert_expiry_date(expiry_raw)
         if not expiry_dt:
             continue
         src = _batch_source(trail, med_id, batch)
         rows.append((name, batch, _fmt_expiry_display(expiry_raw), (expiry_dt - today).days, _num(qty),
                      src["supplier"], src["bill"], _show_day(src["date"]), expiry_dt.isoformat()))
+    return rows
+
+
+def fetch_batch_money(conn) -> List[Tuple[Any, ...]]:
+    """What each batch with an expiry is worth, for Expired / Near Expiry grouped by supplier
+    (Alert & Monitoring). Row: name, batch, purchase rate, MRP, value at the purchase rate,
+    value at MRP -- matched to the list rows by name and batch."""
+    trail = _purchase_trail(conn)
+    rows: List[Tuple[Any, ...]] = []
+    for med_id, name, med_type, batch, expiry_raw, qty, rate, mrp, unit in _stocked_batches(conn):
+        if not alert_expiry_date(expiry_raw):
+            continue
+        src = _batch_source(trail, med_id, batch)
+        rows.append((name, batch) + _row_money(src, qty, rate, mrp, med_type, unit))
     return rows
 
 
@@ -611,6 +663,7 @@ def fetch_all_monitoring_sections(conn, detail: bool = False) -> Dict[str, List[
     }
     if detail:
         out["expiry_by_batch"] = fetch_expiry_by_batch(conn)
+        out["batch_money"] = fetch_batch_money(conn)
     return out
 
 
@@ -624,6 +677,12 @@ def online_purchase_trail(meds: List[Dict[str, Any]]) -> Dict[str, Any]:
             return int(v or 0)
         except (TypeError, ValueError):
             return 0
+
+    def _float(v: Any) -> float:
+        try:
+            return float(v or 0)
+        except (TypeError, ValueError):
+            return 0.0
 
     names_by_id = {_int(m.get("id") or m.get("local_id")): str(m.get("name") or "") for m in meds}
     shelf = {_int(m.get("id") or m.get("local_id")): str(m.get("supplier_name") or "").strip()
@@ -656,7 +715,7 @@ def online_purchase_trail(meds: List[Dict[str, Any]]) -> Dict[str, Any]:
                 continue
             info = {"bill": str(d.get("bill_number") or ""), "date": _iso_day(d.get("purchase_date")),
                     "supplier": supplier, "batch": str(it.get("batch_no") or ""),
-                    "expiry": str(it.get("expiry_date") or "")}
+                    "expiry": str(it.get("expiry_date") or ""), "rate": _float(it.get("rate"))}
             by_batch.setdefault((mid, _norm_batch(it.get("batch_no"))), info)
             by_med.setdefault(mid, info)
             name = names_by_id.get(mid) or str(it.get("medicine_name") or it.get("name") or "")
@@ -790,6 +849,7 @@ def online_stock_sections(conn, meds=None, detail: bool = False) -> Dict[str, Li
     expired_rows: List[Tuple[Any, ...]] = []
     near_rows: List[Tuple[Any, ...]] = []
     all_rows: List[Tuple[Any, ...]] = []
+    money_rows: List[Tuple[Any, ...]] = []
     for m in meds:
         qty = float(m.get("stock_qty") or 0)
         if qty <= 0:
@@ -807,6 +867,8 @@ def online_stock_sections(conn, meds=None, detail: bool = False) -> Dict[str, Li
         if detail:
             all_rows.append((name, batch, _fmt_expiry_display(str(expiry_raw)), days_left, qty_disp,
                              src["supplier"], src["bill"], _show_day(src["date"]), expiry_dt.isoformat()))
+            money_rows.append((name, batch) + _row_money(src, qty, m.get("rate"), m.get("mrp"),
+                                                         str(med_type), m.get("unit")))
         extra: Tuple[Any, ...] = (_show_day(src["date"]), expiry_dt.isoformat()) if detail else ()
         if expiry_dt < today:
             expired_rows.append((
@@ -827,6 +889,7 @@ def online_stock_sections(conn, meds=None, detail: bool = False) -> Dict[str, Li
     }
     if detail:
         out["expiry_by_batch"] = all_rows
+        out["batch_money"] = money_rows
     return out
 
 

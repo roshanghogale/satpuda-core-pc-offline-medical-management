@@ -1945,8 +1945,27 @@ _ALERT_PDF_CSS = (
     "@page{size:A4 landscape;margin:10mm}body{font-family:Segoe UI,Arial;font-size:9pt}"
     "h2{margin:0 0 4px}h3{margin:14px 0 4px}table{width:100%;border-collapse:collapse;margin-bottom:8px}"
     "th{background:#2c3e50;color:#fff;padding:4px;text-align:left}td{border:1px solid #ccc;padding:3px}"
-    "tr:nth-child(even){background:#f7f7f7}"
+    "tr:nth-child(even){background:#f7f7f7}tfoot td{font-weight:700;background:#eef1f4}"
+    "h3.sup{margin-top:18px;padding:4px 6px;background:#e8eef6;border-left:4px solid #2c3e50}"
+    # backgrounds print (the dark column heads were white text on white paper), a heading
+    # stays with its table, a row is never cut in two
+    "*{-webkit-print-color-adjust:exact;print-color-adjust:exact}h3{break-after:avoid;page-break-after:avoid}"
+    "tr{break-inside:avoid;page-break-inside:avoid}td.n,th.n,tfoot td{text-align:right}"
+    "tfoot td:first-child{text-align:left}"
 )
+
+# Alert columns written as money (two decimals) and right-aligned in the PDF.
+_ALERT_MONEY_COL = re.compile(r"^(P\.Rate|MRP|Rate|Value|Due Amount|Total Amount|Paid Amount|Selling Rate|Purchase Rate)")
+_ALERT_NUM_COL = re.compile(r"^(Qty|Stock|Current Stock|Quantity|Available Qty|Days|Remaining Days|Due Days|Batch Count)")
+
+
+def _alert_cell(col: str, v: Any) -> str:
+    if _ALERT_MONEY_COL.match(col) and isinstance(v, (int, float)) and not isinstance(v, bool):
+        return f"{v:,.2f}"
+    return str(v)
+
+# The summary section a grouped list starts with ends in this (core/alert_supplier_groups).
+_BY_SUPPLIER = " — by supplier"
 
 
 def _alert_sections(sections: Any) -> list[tuple[str, list[str], list[list[Any]]]]:
@@ -1960,7 +1979,29 @@ def _alert_sections(sections: Any) -> list[tuple[str, list[str], list[list[Any]]
     return out
 
 
-def _alerts_pdf(path: str, title: str, sections, landscape: bool = True) -> str:
+def _alert_sections_grouped(body: dict[str, Any]) -> tuple[list[tuple[str, list[str], list[list[Any]]]], list[str]]:
+    """The sections to write, and what each one is ("list", "summary" or "supplier"). A
+    section that asks for it (group_by "Supplier": the Expired / Near Expiry lists) becomes
+    a summary by supplier plus one block per supplier, each with its own total."""
+    from core.alert_supplier_groups import group_for, split_section, supplier_column
+
+    raw = [s for s in (body.get("sections") or []) if isinstance(s, dict)]
+    out: list[tuple[str, list[str], list[list[Any]]]] = []
+    kinds: list[str] = []
+    for spec, (title, cols, rows) in zip(raw, _alert_sections(raw)):
+        if not cols:
+            continue
+        if group_for(spec, body.get("group_by")) and rows and supplier_column(cols) >= 0:
+            parts = split_section(title, cols, rows)
+            out.extend(parts)
+            kinds.extend(["summary"] + ["supplier"] * (len(parts) - 1))
+        else:
+            out.append((title, cols, rows))
+            kinds.append("list")
+    return out, kinds
+
+
+def _alerts_pdf(path: str, title: str, sections, landscape: bool = True, kinds=None) -> str:
     from datetime import datetime
 
     from core.export_manager import _totals_html
@@ -1969,10 +2010,16 @@ def _alerts_pdf(path: str, title: str, sections, landscape: bool = True) -> str:
         return str(v).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
     body = ""
-    for sec_title, cols, rows in sections:
-        hdr = "".join(f"<th>{esc(h)}</th>" for h in cols)
-        trs = "".join("<tr>" + "".join(f"<td>{esc(v)}</td>" for v in r) + "</tr>" for r in rows)
-        body += (f"<h3>{esc(sec_title)} ({len(rows)})</h3><table><thead><tr>{hdr}</tr></thead>"
+    for i, (sec_title, cols, rows) in enumerate(sections):
+        num = ["n" if (_ALERT_MONEY_COL.match(h) or _ALERT_NUM_COL.match(h)) else "" for h in cols]
+        hdr = "".join(f"<th class={num[j] or 'l'}>{esc(h)}</th>" for j, h in enumerate(cols))
+        trs = "".join("<tr>" + "".join(
+            f"<td class={num[j] or 'l'}>{esc(_alert_cell(cols[j] if j < len(cols) else '', v))}</td>"
+            for j, v in enumerate(r)) + "</tr>" for r in rows)
+        # a supplier's block names its own count in its heading
+        is_sup = bool(kinds) and i < len(kinds) and kinds[i] == "supplier"
+        head = esc(sec_title) if is_sup else f"{esc(sec_title)} ({len(rows)})"
+        body += (f"<h3{' class=sup' if is_sup else ''}>{head}</h3><table><thead><tr>{hdr}</tr></thead>"
                  f"<tbody>{trs}</tbody>{_totals_html(cols, rows)}</table>")
     html = (f"<!DOCTYPE html><html><head><meta charset=UTF-8><title>{esc(title)}</title>"
             f"<style>{_ALERT_PDF_CSS.replace('A4 landscape', 'A4 landscape' if landscape else 'A4 portrait')}</style>"
@@ -1984,24 +2031,93 @@ def _alerts_pdf(path: str, title: str, sections, landscape: bool = True) -> str:
     return pdf_path or html_path
 
 
-def export_alert_sections(body: dict[str, Any]) -> dict[str, Any]:
-    """Alert & Monitoring -> a file (CSV / Excel / PDF) or paper (dot matrix A4 / A5, or the
-    normal Windows printer), for the list on screen or all five at once.
+def _alerts_pdf_bytes(title: str, sections, landscape: bool, kinds=None) -> tuple[bytes, str]:
+    """(file bytes, "pdf" | "html"); no temporary file stays behind."""
+    import os
+    import tempfile
 
-    body: {title, sections: [{title, columns, rows}], format: csv|xlsx|pdf,
-           print_to: ""|"dot_matrix"|"printer", paper: A4|A5}"""
+    from core.saved_files import remove_quietly
+
+    fd, path = tempfile.mkstemp(suffix=".pdf", prefix="alerts_")
+    os.close(fd)
+    saved = _alerts_pdf(path, title, sections, landscape=landscape, kinds=kinds)
+    try:
+        with open(saved, "rb") as fh:
+            payload = fh.read()
+    finally:
+        remove_quietly(saved, path, path.rsplit(".", 1)[0] + ".html")
+    return payload, ("pdf" if saved.lower().endswith(".pdf") else "html")
+
+
+def _export_alerts_per_supplier(body: dict[str, Any], landscape: bool) -> dict[str, Any]:
+    """PDF, one file per supplier, for every grouped list: saved straight into a dated folder
+    under Exports (core/saved_files), each file under its dated name."""
+    import os
+    from datetime import datetime
+
+    from core.alert_supplier_groups import group_for, supplier_files
+    from core.saved_files import STAMP_FORMAT, describe, reports_dir, save_bytes
+
+    raw = [s for s in (body.get("sections") or []) if isinstance(s, dict)]
+    jobs = []
+    for spec, (sec_title, cols, rows) in zip(raw, _alert_sections(raw)):
+        if rows and group_for(spec, body.get("group_by") or "supplier"):
+            jobs.extend(supplier_files(sec_title, cols, rows))
+    if not jobs:
+        return {"ok": False, "error": "Supplier-wise file banvayla kahi nahi — yaadi rikami aahe."}
+    folder = os.path.join(reports_dir(), f"Expiry by supplier_{datetime.now().strftime(STAMP_FORMAT)}")
+    saved: list[str] = []
+    try:
+        for stem, doc_title, heading, cols, rows in jobs:
+            payload, ext = _alerts_pdf_bytes(doc_title, [(heading, cols, rows)], landscape, ["supplier"])
+            saved.append(save_bytes(f"{stem}.{ext}", payload, folder))
+    except OSError as exc:
+        return {"ok": False, "error": f"File save zali nahi: {exc}", "files": saved}
+    return {
+        "ok": True,
+        "files": [describe(p) for p in saved],
+        "folder": folder,
+        "path": saved[0],
+        "message": f"{len(saved)} PDF (ek supplier, ek file) save zalya:\n{folder}",
+        "row_count": sum(len(j[4]) for j in jobs),
+    }
+
+
+def export_alert_sections(body: dict[str, Any]) -> dict[str, Any]:
+    """Alert & Monitoring and the alerts window -> a file (CSV / Excel / PDF) or paper (dot
+    matrix A4 / A5, or the normal Windows printer), for the list on screen or all at once.
+
+    body: {title, sections: [{title, columns, rows, group_by?}], format: csv|xlsx|pdf,
+           print_to: ""|"dot_matrix"|"printer", paper: A4|A5, page_layout,
+           group_by?: "Supplier" (every section), per_supplier_files?: bool (PDF only),
+           file_name?: str}
+
+    A section grouped by supplier (Expired / Near Expiry, owner 19 Oct 2026) is written as a
+    summary by supplier and then one block per supplier with its own total; with
+    per_supplier_files one PDF is saved for each supplier instead."""
     import base64
     import csv
     import io
     import os
     import tempfile
 
-    sections = [s for s in _alert_sections(body.get("sections")) if s[1]]
+    from core.alert_supplier_groups import file_slug
+
+    sections, kinds = _alert_sections_grouped(body)
+    grouped = "supplier" in kinds
     if not sections or not any(rows for _, _, rows in sections):
         return {"ok": False, "error": "Export karayla kahi nahi — yaadi rikami aahe."}
     title = str(body.get("title") or "Alert & Monitoring")
     stamp = date.today().isoformat()
-    base = f"alerts_{stamp}"
+    wanted = str(body.get("file_name") or "").strip()
+    if wanted:
+        base = file_slug(wanted, "alerts")
+    elif grouped:
+        base = f"{file_slug(title, 'alerts')}_by_supplier"
+    else:
+        base = f"alerts_{stamp}"
+    if grouped and "supplier" not in title.lower():
+        title = f"{title} — supplier-wise (for return)"
     print_to = str(body.get("print_to") or "").strip().lower()
 
     landscape = str(body.get("page_layout") or "").lower().startswith("land")
@@ -2019,7 +2135,7 @@ def export_alert_sections(body: dict[str, Any]) -> dict[str, Any]:
     if print_to == "printer":
         fd, path = tempfile.mkstemp(suffix=".pdf", prefix="alerts_print_")
         os.close(fd)
-        saved = _alerts_pdf(path, title, sections, landscape=landscape)
+        saved = _alerts_pdf(path, title, sections, landscape=landscape, kinds=kinds)
         problem = print_pdf_on_printer(saved, landscape=landscape)
         if problem:
             return {"ok": False, "error": problem, "path": saved}
@@ -2032,6 +2148,17 @@ def export_alert_sections(body: dict[str, Any]) -> dict[str, Any]:
     fmt = str(body.get("format") or "csv").strip().lower()
     if fmt == "excel":
         fmt = "xlsx"
+    if fmt == "pdf" and body.get("per_supplier_files"):
+        return _export_alerts_per_supplier(body, landscape)
+
+    def totals(cols, rows):
+        # Grouped: each supplier's block ends with its own total (the PDF's tfoot does the same).
+        if not grouped:
+            return []
+        from core.dot_matrix_print import _report_totals_row
+
+        return _report_totals_row(list(cols), list(rows))
+
     if fmt == "csv":
         buf = io.StringIO()
         w = csv.writer(buf)
@@ -2042,35 +2169,67 @@ def export_alert_sections(body: dict[str, Any]) -> dict[str, Any]:
                 w.writerow([t])
             w.writerow(cols)
             w.writerows(rows)
+            tot = totals(cols, rows)
+            if tot:
+                w.writerow(tot)
         payload, mime = buf.getvalue().encode("utf-8-sig"), "text/csv;charset=utf-8"
     elif fmt == "xlsx":
         try:
             import openpyxl
+            from openpyxl.styles import Font
         except ImportError:
             return {"ok": False, "error": "openpyxl not installed for Excel export."}
         wb = openpyxl.Workbook()
         wb.remove(wb.active)
-        for t, cols, rows in sections:
-            # Excel refuses these in a sheet name
-            ws = wb.create_sheet(title="".join(" " if c in "[]:*?/\\" else c for c in t)[:31] or "Alerts")
-            ws.append(cols)
-            for r in rows:
-                ws.append(list(r))
+        bold = Font(bold=True)
+        used: set[str] = set()
+
+        def sheet(name: str):
+            # Excel refuses these in a sheet name, and two sheets may not share one.
+            clean = "".join(" " if c in "[]:*?/\\" else c for c in name)[:31].strip() or "Alerts"
+            n, cand = 2, clean
+            while cand.lower() in used:
+                suffix = f" ({n})"
+                cand = clean[: 31 - len(suffix)] + suffix
+                n += 1
+            used.add(cand.lower())
+            return wb.create_sheet(title=cand)
+
+        def bold_last(ws) -> None:
+            for c in ws[ws.max_row]:
+                c.font = bold
+
+        if grouped:
+            # One sheet per list; on it a block per supplier: heading, columns, rows, total.
+            ws = None
+            for (t, cols, rows), kind in zip(sections, kinds):
+                if ws is None or kind != "supplier":
+                    ws = sheet(t[: -len(_BY_SUPPLIER)] if kind == "summary" else t)
+                else:
+                    ws.append([])
+                ws.append([t])
+                bold_last(ws)
+                ws.append(cols)
+                bold_last(ws)
+                for r in rows:
+                    ws.append(list(r))
+                tot = totals(cols, rows)
+                if tot:
+                    ws.append(tot)
+                    bold_last(ws)
+        else:
+            for t, cols, rows in sections:
+                ws = sheet(t)
+                ws.append(cols)
+                for r in rows:
+                    ws.append(list(r))
         bio = io.BytesIO()
         wb.save(bio)
         payload, mime = bio.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     elif fmt == "pdf":
-        fd, path = tempfile.mkstemp(suffix=".pdf", prefix="alerts_")
-        os.close(fd)
-        saved = _alerts_pdf(path, title, sections, landscape=landscape)
-        with open(saved, "rb") as fh:
-            payload = fh.read()
         # The bytes go back to the app, which saves them in Exports: no temp file stays.
-        from core.saved_files import remove_quietly
-
-        remove_quietly(saved, path, path.rsplit(".", 1)[0] + ".html")
-        mime = "application/pdf" if saved.lower().endswith(".pdf") else "text/html"
-        fmt = "pdf" if mime.endswith("pdf") else "html"
+        payload, fmt = _alerts_pdf_bytes(title, sections, landscape, kinds)
+        mime = "application/pdf" if fmt == "pdf" else "text/html"
     else:
         return {"ok": False, "error": f"Unknown export format: {fmt}"}
     return {
@@ -2079,7 +2238,7 @@ def export_alert_sections(body: dict[str, Any]) -> dict[str, Any]:
         "mime": mime,
         "format": fmt,
         "content_base64": base64.b64encode(payload).decode("ascii"),
-        "row_count": sum(len(r) for _, _, r in sections),
+        "row_count": sum(len(r) for (_, _, r), kind in zip(sections, kinds) if kind != "summary"),
     }
 
 

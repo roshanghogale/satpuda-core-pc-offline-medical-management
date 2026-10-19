@@ -165,6 +165,11 @@ class ThePages(unittest.TestCase):
                   os.path.join("settings", "InteractivePanels.tsx")):
             text = src("desktop", "src", "pages", f)
             self.assertNotIn("a.download = filename", text, f)
+            if f == "StartupAlertsDialog.tsx":
+                # The alerts window saves through the shared alert export (19 Oct 2026).
+                self.assertIn("alerts/alertExport'", text, f)
+                text = src("desktop", "src", "pages", "alerts", "alertExport.ts")
+                self.assertNotIn("a.download = filename", text, f)
             self.assertIn("savedFiles'", text, f)
 
     def test_the_saved_dialog_is_mounted_once(self):

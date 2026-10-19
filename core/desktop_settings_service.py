@@ -1531,7 +1531,7 @@ def get_alerts(conn: sqlite3.Connection) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for key, rows in raw.items():
         out[key] = [list(r) for r in rows]
-    out["counts"] = {k: len(v) for k, v in out.items() if k not in ("counts", "expiry_by_batch")}
+    out["counts"] = {k: len(v) for k, v in out.items() if k not in ("counts", "expiry_by_batch", "batch_money")}
     return out
 
 
