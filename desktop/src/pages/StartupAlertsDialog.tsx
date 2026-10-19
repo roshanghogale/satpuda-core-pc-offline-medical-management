@@ -6,7 +6,10 @@
  *  badges, a search / filter row, one table with a sticky header and an action on every
  *  row, and one bar at the bottom (Export ▾, Print ▾, Reorder / Return, Skip Today, Close).
  *  Expired and Near Expiry are grouped by the supplier each batch was bought from (on by
- *  default) with every supplier's count and value, and export supplier-wise.
+ *  default) with every supplier's count and value, and export supplier-wise. Low / Out of
+ *  Stock group by the supplier last bought from, Customer Due by village / area (off by
+ *  default). Export opens the same box as Settings -> Alert & Monitoring
+ *  (alerts/AlertExportBox), worded for the list on screen.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AppNavigate } from '../App'
@@ -20,15 +23,17 @@ import {
   MenuButton,
   VALUE_MRP,
   VALUE_RATE,
-  groupBySupplier,
+  groupIndex,
+  groupKindOf,
+  groupLabel,
+  groupRows,
   matchRows,
   rupees,
   sumColumn,
-  supplierIndex,
-  supplierLabel,
   type MenuItem,
 } from './alerts/AlertBoard'
 import { runAlertExport, type AlertExportHow, type AlertSection } from './alerts/alertExport'
+import { AlertExportBox } from './alerts/AlertExportBox'
 
 type Props = {
   open: boolean
@@ -41,8 +46,9 @@ type Props = {
   error?: string
 }
 
-/** The engine names the column to group by (Expired / Near Expiry: "Supplier"). */
-type Tab = StartupAlertTab & { group_by?: string }
+/** The engine names the column to group by ("Supplier" / "Area") and whether the list opens
+ *  grouped (Expired / Near Expiry). */
+type Tab = StartupAlertTab & { group_by?: string; grouped?: boolean }
 
 /** Expired / Near Expiry: columns left off the window to fit 1280 px (still exported). */
 const EXPIRY_HIDDEN = new Set(['Type'])
@@ -80,9 +86,11 @@ function BellIcon() {
 export function StartupAlertsDialog({ open, tabs, onClose, onNavigate, title, error }: Props) {
   const [tabIdx, setTabIdx] = useState(0)
   const [search, setSearch] = useState('')
+  /** the supplier / area picked in the filter ('' = all) */
   const [supplier, setSupplier] = useState('')
-  /** grouping per tab; a tab the engine marks group_by starts grouped */
-  const [groupOff, setGroupOff] = useState<Record<string, boolean>>({})
+  /** grouping the shop picked per tab; else the engine's `grouped` */
+  const [groupPick, setGroupPick] = useState<Record<string, boolean>>({})
+  const [exportOpen, setExportOpen] = useState(false)
   const [selected, setSelected] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -94,7 +102,8 @@ export function StartupAlertsDialog({ open, tabs, onClose, onNavigate, title, er
   useEffect(() => {
     if (open) {
       setTabIdx(0)
-      setGroupOff({})
+      setGroupPick({})
+      setExportOpen(false)
     }
   }, [open, tabs])
 
@@ -109,23 +118,27 @@ export function StartupAlertsDialog({ open, tabs, onClose, onNavigate, title, er
   useEffect(() => setSelected(null), [search, supplier])
 
   const columns = useMemo(() => active?.columns || [], [active])
-  const supAt = supplierIndex(columns)
-  const canGroup = Boolean(active?.group_by) && supAt >= 0
-  const grouped = canGroup && !groupOff[active?.title || '']
+  const kind = groupKindOf(active?.group_by) || 'supplier'
+  const supAt = groupIndex(columns, kind)
+  const canGroup = Boolean(groupKindOf(active?.group_by)) && supAt >= 0
+  // A tab from an engine before 19 Oct 2026 has no `grouped`: it only grouped Expired / Near Expiry.
+  const startsGrouped = active?.grouped ?? RETURN_TABS.has(active?.title || '')
+  const grouped = canGroup && (groupPick[active?.title || ''] ?? startsGrouped)
+  const word = kind === 'area' ? 'area' : 'supplier'
 
   const view = useMemo(() => {
     const rows = (active?.rows || []) as unknown[][]
     const idx = matchRows(rows, search).filter(
-      (i) => !supplier || supplierLabel(rows[i]?.[supAt]) === supplier,
+      (i) => !supplier || groupLabel(rows[i]?.[supAt], kind).toLowerCase() === supplier.toLowerCase(),
     )
     return idx.map((i) => rows[i])
-  }, [active, search, supplier, supAt])
+  }, [active, search, supplier, supAt, kind])
 
   const suppliers = useMemo(
-    () => (canGroup ? groupBySupplier(columns, (active?.rows || []) as unknown[][]) : []),
-    [canGroup, columns, active],
+    () => (canGroup ? groupRows(columns, (active?.rows || []) as unknown[][], kind) : []),
+    [canGroup, columns, active, kind],
   )
-  const viewGroups = useMemo(() => (canGroup ? groupBySupplier(columns, view) : []), [canGroup, columns, view])
+  const viewGroups = useMemo(() => (canGroup ? groupRows(columns, view, kind) : []), [canGroup, columns, view, kind])
 
   const stats = useMemo(() => {
     const out: { label: string; value: string; tone: string }[] = []
@@ -227,12 +240,16 @@ export function StartupAlertsDialog({ open, tabs, onClose, onNavigate, title, er
     await runAction('row_action', { values })
   }
 
+  function tabGrouped(t: Tab): boolean {
+    return Boolean(groupKindOf(t.group_by)) && (groupPick[t.title] ?? t.grouped ?? RETURN_TABS.has(t.title))
+  }
+
   function sectionOf(t: Tab, rows: unknown[][]): AlertSection {
     return {
       title: meta(t.title).short,
       columns: t.columns || [],
       rows,
-      group_by: t.group_by && !groupOff[t.title] ? t.group_by : '',
+      group_by: tabGrouped(t) ? t.group_by : '',
     }
   }
 
@@ -265,7 +282,7 @@ export function StartupAlertsDialog({ open, tabs, onClose, onNavigate, title, er
     )
   }
 
-  /** One supplier's batches as a PDF (the button on its heading). */
+  /** One supplier's / area's rows as a PDF (the button on its heading). */
   function exportSupplier(name: string, rowsIdx: number[]) {
     const keep = columns.map((_, i) => i).filter((i) => i !== supAt)
     void exporting(() =>
@@ -294,7 +311,9 @@ export function StartupAlertsDialog({ open, tabs, onClose, onNavigate, title, er
     onClose()
   }
 
-  const groupedHint = grouped ? 'by supplier' : ''
+  const filterText = [search.trim() ? `“${search.trim()}”` : '', supplier].filter(Boolean).join(', ')
+  const groupedHint = grouped ? `by ${word}` : ''
+  // Quick items beside the Export button (the box is the main way out).
   const exportItems: MenuItem[] = [
     { key: 'h1', heading: `This list — ${m.short} (${view.length})` },
     { key: 'pdf', label: 'PDF', hint: groupedHint, disabled: !view.length, onPick: () => doExport('pdf') },
@@ -304,7 +323,7 @@ export function StartupAlertsDialog({ open, tabs, onClose, onNavigate, title, er
   if (grouped) {
     exportItems.push({
       key: 'split',
-      label: 'PDF — one file per supplier',
+      label: `PDF — one file per ${word}`,
       hint: `${viewGroups.length} file${viewGroups.length === 1 ? '' : 's'}`,
       disabled: !view.length,
       onPick: () => doExport('pdf_split'),
@@ -317,7 +336,7 @@ export function StartupAlertsDialog({ open, tabs, onClose, onNavigate, title, er
     { key: 'all_xlsx', label: 'All lists — Excel', onPick: () => doExport('xlsx', 'all') },
   )
   const printItems: MenuItem[] = [
-    { key: 'h', heading: `Print ${m.short}${grouped ? ' by supplier' : ''}` },
+    { key: 'h', heading: `Print ${m.short}${grouped ? ` by ${word}` : ''}` },
     { key: 'printer', label: 'Normal printer', hint: 'A4 landscape', onPick: () => doExport('printer') },
     { key: 'dm_a4', label: 'Dot matrix', hint: 'A4', onPick: () => doExport('dm_a4') },
     { key: 'dm_a5', label: 'Dot matrix', hint: 'A5', onPick: () => doExport('dm_a5') },
@@ -416,28 +435,36 @@ export function StartupAlertsDialog({ open, tabs, onClose, onNavigate, title, er
               <h3>{m.short}</h3>
               <span className="alx-dim">
                 {view.length} row{view.length === 1 ? '' : 's'}
-                {canGroup ? ` · ${viewGroups.length} supplier${viewGroups.length === 1 ? '' : 's'}` : ''}
+                {canGroup ? ` · ${viewGroups.length} ${word}${viewGroups.length === 1 ? '' : 's'}` : ''}
                 {hasValue ? ` · ${rupees(valueRate)} at purchase rate · ${rupees(valueMrp)} at MRP` : ''}
               </span>
             </div>
             <div className="alx-tools">
-              <AlertSearch value={search} onChange={setSearch} inputRef={searchRef} />
+              <AlertSearch
+                value={search}
+                onChange={setSearch}
+                inputRef={searchRef}
+                placeholder={kind === 'area' && canGroup ? 'Search customer, phone, area…' : undefined}
+              />
               {canGroup ? (
                 <>
                   <GroupSwitch
                     on={grouped}
-                    onChange={(on) => setGroupOff((p) => ({ ...p, [tab.title]: !on }))}
+                    label={`Group by ${word}`}
+                    onChange={(on) => setGroupPick((p) => ({ ...p, [tab.title]: on }))}
                   />
                   <select
                     className="alx-select"
                     value={supplier}
-                    aria-label="Supplier"
+                    aria-label={kind === 'area' ? 'Area' : 'Supplier'}
                     onChange={(e) => setSupplier(e.target.value)}
                   >
-                    <option value="">All suppliers ({suppliers.length})</option>
+                    <option value="">
+                      All {word}s ({suppliers.length})
+                    </option>
                     {suppliers.map((g) => (
-                      <option key={g.supplier} value={g.supplier}>
-                        {g.supplier} ({g.count})
+                      <option key={g.name} value={g.name}>
+                        {g.name} ({g.count})
                       </option>
                     ))}
                   </select>
@@ -452,8 +479,9 @@ export function StartupAlertsDialog({ open, tabs, onClose, onNavigate, title, er
             <AlertGrid
               columns={columns}
               rows={view}
-              hidden={canGroup ? EXPIRY_HIDDEN : undefined}
+              hidden={RETURN_TABS.has(tab.title) ? EXPIRY_HIDDEN : undefined}
               grouped={grouped}
+              groupKind={kind}
               selected={selected}
               onSelect={setSelected}
               onActivate={(i) => {
@@ -470,8 +498,8 @@ export function StartupAlertsDialog({ open, tabs, onClose, onNavigate, title, er
                   type="button"
                   className="alx-group-btn"
                   disabled={busy}
-                  title={`PDF of ${g.supplier} only`}
-                  onClick={() => exportSupplier(g.supplier, g.idx)}
+                  title={`PDF of ${g.name} only`}
+                  onClick={() => exportSupplier(g.name, g.idx)}
                 >
                   PDF
                 </button>
@@ -493,7 +521,17 @@ export function StartupAlertsDialog({ open, tabs, onClose, onNavigate, title, er
                     }`
                   : '↑ ↓ select · Enter acts · Ctrl+F search · Esc closes')}
           </span>
-          <MenuButton label="Export" items={exportItems} disabled={busy} />
+          <div className="alx-split">
+            <button type="button" className="btn btn-neutral" disabled={busy} onClick={() => setExportOpen(true)}>
+              Export…
+            </button>
+            <MenuButton
+              label={<span className="alx-sr">Quick export</span>}
+              className="btn btn-neutral alx-split-caret"
+              items={exportItems}
+              disabled={busy}
+            />
+          </div>
           <MenuButton label="Print" items={printItems} disabled={busy || !view.length} />
           {showBulkReorder || showBulkReturn ? <span className="alx-foot-sep" /> : null}
           {showBulkReorder ? (
@@ -531,6 +569,29 @@ export function StartupAlertsDialog({ open, tabs, onClose, onNavigate, title, er
           </button>
         </footer>
       </div>
+      {exportOpen ? (
+        <AlertExportBox
+          lists={all.map((t) => ({
+            key: t.title,
+            title: meta(t.title).short,
+            section: {
+              ...sectionOf(t, (t === tab ? view : t.rows || []) as unknown[][]),
+              title: t === tab && filterText ? `${meta(t.title).short} — ${filterText}` : meta(t.title).short,
+            },
+            groupBy: t.group_by || '',
+          }))}
+          current={tab.title}
+          subtitle={`${title || 'Alerts'} · ${todayText()}${filterText ? ` · ${filterText}` : ''}`}
+          allTitle={title || 'Alerts'}
+          allFileName="Alerts"
+          startGrouped={grouped}
+          onClose={() => setExportOpen(false)}
+          onDone={(note) => {
+            setErr('')
+            setMsg(note)
+          }}
+        />
+      ) : null}
     </div>
   )
 }

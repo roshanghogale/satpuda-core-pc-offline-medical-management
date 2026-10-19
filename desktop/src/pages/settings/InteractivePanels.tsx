@@ -77,12 +77,14 @@ import {
   MenuButton,
   VALUE_MRP,
   VALUE_RATE,
-  groupBySupplier,
+  groupKindOf,
+  groupRows,
   rupees,
   sumColumn,
   type MenuItem,
 } from '../alerts/AlertBoard'
 import { runAlertExport, type AlertExportHow, type AlertSection } from '../alerts/alertExport'
+import { AlertExportBox, type ExportList } from '../alerts/AlertExportBox'
 
 type Contacts = NonNullable<SettingsBundle['contacts']>
 type Shelf = NonNullable<SettingsBundle['shelf']>
@@ -1178,6 +1180,9 @@ const ALERT_SPECS: Record<
     dismissAllOos?: boolean
     /** What the Month / Year filter looks at; the date is the row's last (hidden) cell. */
     periodOf?: 'purchase' | 'expiry'
+    /** What the list groups and exports by (owner, 19 Oct 2026): the supplier (expiry: the
+     *  batch's; stock: the one last bought from) or the customer's village / area. */
+    groupBy: 'Supplier' | 'Area'
   }
 > = {
   low: {
@@ -1185,6 +1190,7 @@ const ALERT_SPECS: Record<
     title: 'Low Stock',
     headers: ['Medicine Name', 'Current Stock', 'Unit', 'Supplier', 'Last Batch', 'Expiry', 'Last Bill No', 'Last Purchase'],
     periodOf: 'purchase',
+    groupBy: 'Supplier',
     file: 'alerts-low',
     actionLabel: 'Reorder',
     bulkReorder: true,
@@ -1205,6 +1211,7 @@ const ALERT_SPECS: Record<
       'Last Purchase',
     ],
     periodOf: 'purchase',
+    groupBy: 'Supplier',
     file: 'alerts-out',
     actionLabel: 'Reorder',
     bulkReorder: true,
@@ -1224,6 +1231,7 @@ const ALERT_SPECS: Record<
       'Purchase Date',
     ],
     periodOf: 'expiry',
+    groupBy: 'Supplier',
     file: 'alerts-expired',
     actionLabel: 'Return',
     bulkReturn: true,
@@ -1244,6 +1252,7 @@ const ALERT_SPECS: Record<
       'Purchase Date',
     ],
     periodOf: 'expiry',
+    groupBy: 'Supplier',
     file: 'alerts-near',
     actionLabel: 'Return',
     bulkReturn: true,
@@ -1261,7 +1270,10 @@ const ALERT_SPECS: Record<
       'Paid Amount',
       'Due Amount',
       'Due Days',
+      // the customer's village / area (engine: appended after the old columns)
+      'Area',
     ],
+    groupBy: 'Area',
     file: 'alerts-dues',
   },
 }
@@ -1301,17 +1313,15 @@ function alertDisplayRow(sp: (typeof ALERT_SPECS)[string], r: unknown[], money: 
   return [...base, ...(money.get(`${String(r[0] ?? '')}|${String(r[1] ?? '')}`) || ['', '', '', ''])]
 }
 
-type ExportHow = AlertExportHow
-
 /** The sections of an export: the list on screen (with its search) or all five, as the
- *  screen filters them (Month / Year), Expired / Near Expiry by supplier when asked. */
+ *  screen filters them (Month / Year), each by its own supplier / area when `grouped`. */
 function alertSections(
   alerts: Alerts,
   keys: string[],
   current: string,
   period: string,
   search: string,
-  bySupplier: boolean,
+  grouped: boolean,
 ): AlertSection[] {
   const money = alertMoney(alerts)
   return keys.map((k) => {
@@ -1324,190 +1334,21 @@ function alertSections(
       title: t,
       columns: alertHeaders(sp),
       rows,
-      group_by: bySupplier && sp.periodOf === 'expiry' ? 'Supplier' : '',
+      group_by: grouped ? sp.groupBy : '',
     }
   })
 }
 
-/** Export or print the list on screen, or all five lists at once (more choices than the
- *  Export / Print menus: which lists, page, supplier-wise). */
-function AlertsExportDialog({
-  alerts,
-  current,
-  period,
-  search,
-  bySupplier: bySupplierStart,
-  onClose,
-  onDone,
-}: {
-  alerts: Alerts
-  current: string
-  period: string
-  search: string
-  bySupplier: boolean
-  onClose: () => void
-  onDone: (msg: string) => void
-}) {
-  const [which, setWhich] = useState<'current' | 'all'>('current')
-  const [how, setHow] = useState<ExportHow>('xlsx')
-  const [pageLayout, setPageLayout] = useState<'portrait' | 'landscape'>('landscape')
-  const [bySupplier, setBySupplier] = useState(bySupplierStart)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-  const keys = which === 'all' ? Object.keys(ALERT_SPECS) : [current]
-  const canGroup = keys.some((k) => ALERT_SPECS[k]?.periodOf === 'expiry')
-  const sections = alertSections(alerts, keys, current, period, search, bySupplier || how === 'pdf_split')
-  const total = sections.reduce((n, s) => n + s.rows.length, 0)
-
-  async function go() {
-    setBusy(true)
-    setError('')
-    try {
-      const note = await runAlertExport({
-        title: which === 'all' ? 'Alert & Monitoring' : sections[0]?.title || 'Alerts',
-        sections: how === 'pdf_split' ? sections.filter((s) => s.group_by) : sections,
-        how,
-        pageLayout,
-      })
-      onDone(note)
-      onClose()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const isPrint = how.startsWith('dm_') || how === 'printer'
-  const showPage = how !== 'csv' && how !== 'xlsx' && how !== 'dm_a5'
-  const grouped = canGroup && (bySupplier || how === 'pdf_split')
-  const suppliers = grouped
-    ? new Set(
-        sections
-          .filter((sec) => sec.group_by)
-          .flatMap((sec) => {
-            const at = sec.columns.indexOf('Supplier')
-            return at < 0 ? [] : sec.rows.map((r) => String(r[at] ?? '') || 'Unknown supplier')
-          }),
-      ).size
-    : 0
-  const formats: { key: ExportHow; label: string; sub: string }[] = [
-    { key: 'xlsx', label: 'Excel', sub: '.xlsx' },
-    { key: 'pdf', label: 'PDF', sub: grouped ? 'one file' : '.pdf' },
-    ...(grouped ? [{ key: 'pdf_split' as ExportHow, label: 'PDF per supplier', sub: `${suppliers} files` }] : []),
-    { key: 'csv', label: 'CSV', sub: '.csv' },
-    { key: 'printer', label: 'Print', sub: 'laser / inkjet' },
-    { key: 'dm_a4', label: 'Dot matrix', sub: 'A4' },
-    { key: 'dm_a5', label: 'Dot matrix', sub: 'A5' },
-  ]
-  const pickLayout = (bySup: boolean) => {
-    setBySupplier(bySup)
-    if (!bySup && how === 'pdf_split') setHow('pdf')
-  }
-
-  return (
-    <div className="modal-backdrop" role="presentation" onClick={onClose}>
-      <div className="alx-xp" role="dialog" aria-modal="true" aria-label="Export or print alerts"
-        onClick={(e) => e.stopPropagation()}>
-        <div className="alx-xp-head">
-          <div>
-            <h2>Export / Print</h2>
-            <p>Alert &amp; Monitoring{period ? ` · ${periodLabel(period)}` : ''}</p>
-          </div>
-          <button type="button" className="alx-close" onClick={onClose} aria-label="Close">
-            ✕
-          </button>
-        </div>
-        <div className="alx-xp-body">
-          <div className="alx-xp-label">Which list</div>
-          <div className="alx-xp-cards two">
-            <button type="button" className={`alx-xp-card${which === 'current' ? ' on' : ''}`}
-              onClick={() => setWhich('current')}>
-              <b>This list</b>
-              <span>{ALERT_SPECS[current]?.title}</span>
-            </button>
-            <button type="button" className={`alx-xp-card${which === 'all' ? ' on' : ''}`}
-              onClick={() => setWhich('all')}>
-              <b>All lists</b>
-              <span>Low, Out of Stock, Expired, Near Expiry, Dues</span>
-            </button>
-          </div>
-
-          {canGroup ? (
-            <>
-              <div className="alx-xp-label">How the medicines are listed</div>
-              <div className="alx-xp-cards two">
-                <button type="button" className={`alx-xp-card${!grouped ? ' on' : ''}`}
-                  onClick={() => pickLayout(false)}>
-                  <b>Export list</b>
-                  <span>One table of all medicines</span>
-                  <i className="alx-xp-mini">
-                    <em />
-                    <em />
-                    <em />
-                  </i>
-                </button>
-                <button type="button" className={`alx-xp-card${grouped ? ' on' : ''}`}
-                  onClick={() => pickLayout(true)}>
-                  <b>Export list by supplier</b>
-                  <span>Supplier name, then its medicines and a total</span>
-                  <i className="alx-xp-mini grouped">
-                    <strong />
-                    <em />
-                    <em />
-                    <strong />
-                    <em />
-                  </i>
-                </button>
-              </div>
-            </>
-          ) : null}
-
-          <div className="alx-xp-label">Format</div>
-          <div className="alx-xp-formats">
-            {formats.map((f) => (
-              <button key={f.key} type="button" className={`alx-xp-fmt${how === f.key ? ' on' : ''}`}
-                onClick={() => setHow(f.key)}>
-                <b>{f.label}</b>
-                <span>{f.sub}</span>
-              </button>
-            ))}
-          </div>
-
-          {showPage ? (
-            <>
-              <div className="alx-xp-label">Page</div>
-              <div className="alx-xp-seg">
-                <button type="button" className={pageLayout === 'portrait' ? 'on' : ''}
-                  onClick={() => setPageLayout('portrait')}>
-                  A4 vertical
-                </button>
-                <button type="button" className={pageLayout === 'landscape' ? 'on' : ''}
-                  onClick={() => setPageLayout('landscape')}>
-                  A4 horizontal
-                </button>
-              </div>
-            </>
-          ) : null}
-          {error ? <p className="settings-error">{error}</p> : null}
-        </div>
-        <div className="alx-xp-foot">
-          <span className="alx-xp-count">
-            {total} rows
-            {grouped ? ` · ${suppliers} supplier${suppliers === 1 ? '' : 's'}` : ''}
-            {which === 'all' ? ` · ${sections.length} lists` : ''}
-          </span>
-          <button type="button" className="btn btn-neutral" onClick={onClose}>
-            Cancel
-          </button>
-          <button type="button" className="btn btn-primary" disabled={busy || total === 0}
-            onClick={() => void go()}>
-            {busy ? 'Working…' : isPrint ? 'Print' : how === 'pdf_split' ? `Save ${suppliers} PDFs` : 'Save file'}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
+/** Every list as the Export box offers it (ungrouped; the box picks the grouping). */
+function alertExportLists(alerts: Alerts, current: string, period: string, search: string): ExportList[] {
+  const keys = Object.keys(ALERT_SPECS)
+  const sections = alertSections(alerts, keys, current, period, search, false)
+  return keys.map((k, i) => ({
+    key: k,
+    title: ALERT_SPECS[k].title,
+    section: sections[i],
+    groupBy: ALERT_SPECS[k].groupBy,
+  }))
 }
 
 /** A spoken month / year ("this", "last", "next", "2027-03", "03", "2027") -> "2027-03" / "2027". */
@@ -1595,8 +1436,8 @@ export function AlertsPanel({
   const [month, setMonth] = useState('')
   const [year, setYear] = useState('')
   const [exportOpen, setExportOpen] = useState(false)
-  // Expired / Near Expiry: grouped by supplier unless the shop turns it off.
-  const [bySupplier, setBySupplier] = useState(true)
+  // Grouping per list: Expired / Near Expiry start grouped by supplier, the others plain.
+  const [groupPick, setGroupPick] = useState<Record<string, boolean>>({})
   const spec = ALERT_SPECS[nestedId] || ALERT_SPECS.low
   const period = month || year
   const rows = alertRows(alerts, spec.key as string, spec.periodOf, period).filter((r) =>
@@ -1608,9 +1449,11 @@ export function AlertsPanel({
   const money = useMemo(() => alertMoney(alerts), [alerts])
   const headers = alertHeaders(spec)
   const display = rows.map((r) => alertDisplayRow(spec, r, money))
-  const canGroup = spec.periodOf === 'expiry'
-  const grouped = canGroup && bySupplier
-  const groups = canGroup ? groupBySupplier(headers, display) : []
+  const groupKind = groupKindOf(spec.groupBy) || 'supplier'
+  const canGroup = Boolean(spec.groupBy)
+  const grouped = canGroup && (groupPick[nestedId] ?? spec.periodOf === 'expiry')
+  const groups = canGroup ? groupRows(headers, display, groupKind) : []
+  const groupNoun = groupKind === 'area' ? 'area' : 'supplier'
 
   usePageHotkeys({ onSave: () => onRefresh() })
 
@@ -1734,7 +1577,7 @@ export function AlertsPanel({
     setMsg('')
   }, [nestedId])
 
-  useEffect(() => setSelectedIdx(null), [month, year, search, bySupplier])
+  useEffect(() => setSelectedIdx(null), [month, year, search, grouped])
 
   // ── Voice: "ya mahinyache", "march 2027", "2027 che", "filter kadh", "refresh", "export" ──
   const voiceHandlerRef = useRef<VoiceHandler>(async () => null)
@@ -1790,9 +1633,9 @@ export function AlertsPanel({
   const stats: { label: string; value: string; tone?: string }[] = [
     { label: spec.periodOf === 'expiry' ? 'Batches' : spec.key === 'customer_due' ? 'Bills' : 'Rows', value: String(display.length) },
   ]
-  if (canGroup) {
+  if (canGroup) stats.push({ label: groupKind === 'area' ? 'Areas' : 'Suppliers', value: String(groups.length) })
+  if (spec.periodOf === 'expiry') {
     stats.push(
-      { label: 'Suppliers', value: String(groups.length) },
       { label: 'At purchase rate', value: rupees(sumColumn(headers, display, VALUE_RATE)), tone: nestedId === 'expired' ? 'bad' : 'warn' },
       { label: 'At MRP', value: rupees(sumColumn(headers, display, VALUE_MRP)) },
     )
@@ -1802,16 +1645,18 @@ export function AlertsPanel({
   }
 
   const scope = `${spec.title}${period ? ` — ${periodLabel(period)}` : ''} (${display.length})`
+  const byHint = grouped ? `by ${groupNoun}` : ''
+  // Quick items beside the Export button (the box is the main way out).
   const exportItems: MenuItem[] = [
     { key: 'h1', heading: `This list — ${scope}` },
-    { key: 'pdf', label: 'PDF', hint: grouped ? 'by supplier' : '', disabled: !display.length, onPick: () => void quickExport('pdf') },
-    { key: 'xlsx', label: 'Excel', hint: grouped ? 'by supplier' : '', disabled: !display.length, onPick: () => void quickExport('xlsx') },
-    { key: 'csv', label: 'CSV', hint: grouped ? 'by supplier' : '', disabled: !display.length, onPick: () => void quickExport('csv') },
+    { key: 'pdf', label: 'PDF', hint: byHint, disabled: !display.length, onPick: () => void quickExport('pdf') },
+    { key: 'xlsx', label: 'Excel', hint: byHint, disabled: !display.length, onPick: () => void quickExport('xlsx') },
+    { key: 'csv', label: 'CSV', hint: byHint, disabled: !display.length, onPick: () => void quickExport('csv') },
   ]
   if (canGroup) {
     exportItems.push({
       key: 'split',
-      label: 'PDF — one file per supplier',
+      label: `PDF — one file per ${groupNoun}`,
       hint: `${groups.length} file${groups.length === 1 ? '' : 's'}`,
       disabled: !display.length,
       onPick: () => void quickExport('pdf_split'),
@@ -1822,11 +1667,9 @@ export function AlertsPanel({
     { key: 'h2', heading: 'All five lists' },
     { key: 'all_pdf', label: 'All lists — PDF', onPick: () => void quickExport('pdf', 'all') },
     { key: 'all_xlsx', label: 'All lists — Excel', onPick: () => void quickExport('xlsx', 'all') },
-    { key: 's2', separator: true },
-    { key: 'more', label: 'More options…', hint: 'page, lists', onPick: () => setExportOpen(true) },
   )
   const printItems: MenuItem[] = [
-    { key: 'h', heading: `Print ${spec.title}${grouped ? ' by supplier' : ''}` },
+    { key: 'h', heading: `Print ${spec.title}${grouped ? ` by ${groupNoun}` : ''}` },
     { key: 'printer', label: 'Normal printer', hint: 'A4 landscape', onPick: () => void quickExport('printer') },
     { key: 'dm_a4', label: 'Dot matrix', hint: 'A4', onPick: () => void quickExport('dm_a4') },
     { key: 'dm_a5', label: 'Dot matrix', hint: 'A5', onPick: () => void quickExport('dm_a5') },
@@ -1845,9 +1688,14 @@ export function AlertsPanel({
         <Help title="What Month / Year shows">
           {spec.periodOf === 'expiry'
             ? 'Month / Year shows every batch whose expiry falls in it, batch-wise. Group by supplier puts each batch under the supplier it was bought from, so the expiry can go back to them.'
-            : 'Month / Year shows the medicines last bought in it.'}
+            : 'Month / Year shows the medicines last bought in it. Supplier is the one the medicine was last bought from (its newest purchase bill, else the supplier written on the stock row); Group by supplier lists what to reorder from each.'}
         </Help>
-      ) : null}
+      ) : (
+        <Help title="Village / area">
+          Area is the customer's village / address (Contacts, or the address typed on their bill). Group by area
+          lists each village with its customers and the total due.
+        </Help>
+      )}
       <div className="alx-panel">
         <div className="alx-summary">
           {stats.map((s) => (
@@ -1910,7 +1758,13 @@ export function AlertsPanel({
               ) : null}
             </>
           ) : null}
-          {canGroup ? <GroupSwitch on={bySupplier} onChange={setBySupplier} /> : null}
+          {canGroup ? (
+            <GroupSwitch
+              on={grouped}
+              label={groupKind === 'area' ? 'Group by area' : 'Group by supplier'}
+              onChange={(on) => setGroupPick((p) => ({ ...p, [nestedId]: on }))}
+            />
+          ) : null}
           <div className="iset-bar-actions">
             <SaveBtn label="Refresh (F5)" onClick={() => onRefresh()} />
           </div>
@@ -1921,6 +1775,7 @@ export function AlertsPanel({
           columns={headers}
           rows={display}
           grouped={grouped}
+          groupKind={groupKind}
           selected={selectedIdx}
           onSelect={setSelectedIdx}
           onActivate={(i) => {
@@ -1960,7 +1815,17 @@ export function AlertsPanel({
             </button>
           ) : null}
           <span className="alx-foot-sep" />
-          <MenuButton label="Export" items={exportItems} disabled={busy} />
+          <div className="alx-split">
+            <button type="button" className="btn btn-primary" disabled={busy} onClick={() => setExportOpen(true)}>
+              Export…
+            </button>
+            <MenuButton
+              label={<span className="alx-sr">Quick export</span>}
+              className="btn btn-neutral alx-split-caret"
+              items={exportItems}
+              disabled={busy}
+            />
+          </div>
           <MenuButton label="Print" items={printItems} disabled={busy || !display.length} />
           {spec.bulkReorder ? (
             <button type="button" className="btn btn-neutral" disabled={busy}
@@ -1990,12 +1855,11 @@ export function AlertsPanel({
         </div>
       </div>
       {exportOpen ? (
-        <AlertsExportDialog
-          alerts={alerts}
-          current={nestedId}
-          period={period}
-          search={search}
-          bySupplier={grouped}
+        <AlertExportBox
+          lists={alertExportLists(alerts, nestedId in ALERT_SPECS ? nestedId : 'low', period, search)}
+          current={nestedId in ALERT_SPECS ? nestedId : 'low'}
+          subtitle={`Alert & Monitoring${period ? ` · ${periodLabel(period)}` : ''}`}
+          startGrouped={grouped}
           onClose={() => setExportOpen(false)}
           onDone={(m) => setMsg(m)}
         />
