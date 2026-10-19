@@ -16,6 +16,7 @@ import { GstReportsDialog } from './GstReportsDialog'
 import { useBusinessMode } from '../wholesale/mode'
 import { WholesaleReportsDialog } from '../wholesale/WholesaleReportsDialog'
 import { Panel } from './pageChrome'
+import { fetchStartupAlerts } from '../pagesApi'
 import {
   BANNER_PREVIEW_EVENT,
   bannerCssWidth,
@@ -68,6 +69,22 @@ function qaStyle(style: string): QaStyle {
   return allowed.includes(style as QaStyle) ? (style as QaStyle) : 'primary'
 }
 
+/** Home -> Alerts opens the alerts window with everything due now (19 Oct 2026); it has
+ *  "Open Alert & Monitoring" for the full screen. Nothing to show (or no answer): the
+ *  Alert & Monitoring screen, as before. */
+function openAlertsWindow(onNavigate: AppNavigate) {
+  const toSettings = () => onNavigate('settings', { settingsTab: 'alerts', settingsToggle: 'low' })
+  void fetchStartupAlerts({ force: true })
+    .then((res) => {
+      if (res.ok && res.tabs?.length) {
+        window.dispatchEvent(
+          new CustomEvent('satpuda:show-startup-alerts', { detail: { tabs: res.tabs, title: 'Alerts' } }),
+        )
+      } else toSettings()
+    })
+    .catch(toSettings)
+}
+
 function handleQuickAction(key: string, onNavigate: AppNavigate) {
   switch (key) {
     case 'new_bill':
@@ -102,10 +119,7 @@ function handleQuickAction(key: string, onNavigate: AppNavigate) {
       })
       break
     case 'alerts':
-      onNavigate('settings', {
-        settingsTab: 'alerts',
-        settingsToggle: 'low',
-      })
+      openAlertsWindow(onNavigate)
       break
     case 'export_all':
       onNavigate('settings', {

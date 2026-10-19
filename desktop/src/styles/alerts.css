@@ -1,0 +1,696 @@
+/* Alerts window + Alert & Monitoring (owner, 19 Oct 2026: "make them like the Export UI").
+   Colours come from the theme tokens (themes.generated.css), so every light and dark
+   theme reads the same. Fits 1280x720. */
+
+/* ── Window ─────────────────────────────────────────────────────────────── */
+.alx-card {
+  /* The window is zoomed by the UI scale (satpuda.css .window): divide the viewport by it
+     so the card still fits 1280x720 at 110 %. */
+  width: min(1240px, calc(97vw / var(--ui-font-scale, 1)));
+  height: min(680px, calc((100vh - 48px) / var(--ui-font-scale, 1)));
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 18px 50px color-mix(in srgb, #000 35%, transparent);
+  overflow: hidden;
+}
+.alx-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--warning) 10%, var(--surface-2)),
+    var(--surface-2)
+  );
+}
+.alx-head-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--warning) 22%, var(--surface));
+  color: var(--warning);
+  flex: 0 0 auto;
+}
+.alx-head-text {
+  min-width: 0;
+}
+.alx-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--fg);
+  letter-spacing: 0.1px;
+}
+.alx-sub {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+.alx-stats {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.alx-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  padding: 4px 10px;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  min-width: 92px;
+}
+.alx-stat b {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.alx-stat span {
+  font-size: 10px;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.alx-stat.bad b {
+  color: var(--danger);
+}
+.alx-stat.warn b {
+  color: var(--warning);
+}
+.alx-close {
+  margin-left: 4px;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 14px;
+  cursor: pointer;
+}
+.alx-close:hover {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--fg);
+}
+
+.alx-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+/* ── Left list of alert kinds ───────────────────────────────────────────── */
+.alx-side {
+  flex: 0 0 188px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 8px;
+  border-right: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-2) 55%, var(--surface));
+  overflow-y: auto;
+}
+.alx-side-head {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 8px 6px;
+}
+.alx-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--fg);
+  font: 600 12px var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+}
+.alx-tab:hover {
+  background: var(--surface);
+  border-color: var(--border);
+}
+.alx-tab.active {
+  background: var(--surface);
+  border-color: var(--accent-soft-border);
+  box-shadow: inset 3px 0 0 var(--primary);
+  color: var(--accent-dark);
+}
+.alx-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--fg-muted);
+}
+.alx-dot.bad {
+  background: var(--danger);
+}
+.alx-dot.warn {
+  background: var(--warning);
+}
+.alx-dot.info {
+  background: var(--info);
+}
+.alx-dot.due {
+  background: var(--primary);
+}
+.alx-tab-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.alx-badge {
+  min-width: 22px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  background: var(--surface-2);
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+}
+.alx-tab.active .alx-badge {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+.alx-side-foot {
+  margin-top: auto;
+  padding: 8px 4px 2px;
+}
+.alx-link {
+  width: 100%;
+  border: 1px dashed var(--border-strong);
+  background: transparent;
+  color: var(--accent-dark);
+  border-radius: var(--radius-md);
+  padding: 7px 8px;
+  font: 600 11px var(--font-sans);
+  cursor: pointer;
+  text-align: left;
+}
+.alx-link:hover {
+  background: var(--accent-soft);
+}
+
+/* ── Right: tools row + table ───────────────────────────────────────────── */
+.alx-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 14px 0;
+  gap: 8px;
+}
+.alx-pane-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.alx-pane-head h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--fg);
+}
+.alx-pane-head .alx-dim {
+  font-size: 11.5px;
+}
+.alx-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.alx-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 240px;
+  max-width: 380px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--inputbg, var(--surface));
+  color: var(--fg-muted);
+}
+.alx-search:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 25%, transparent);
+}
+.alx-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--inputfg, var(--fg));
+  font: 12px var(--font-sans);
+}
+.alx-search-clear {
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 11px;
+}
+.alx-select {
+  height: 30px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--inputbg, var(--surface));
+  color: var(--inputfg, var(--fg));
+  font: 12px var(--font-sans);
+  padding: 0 6px;
+  max-width: 230px;
+}
+.alx-dim {
+  color: var(--fg-muted);
+}
+.alx-grow {
+  flex: 1;
+}
+.alx-count-note {
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  margin-left: auto;
+}
+
+/* switch */
+.alx-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.alx-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+.alx-switch-track {
+  width: 30px;
+  height: 17px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  position: relative;
+  transition: background 0.15s;
+}
+.alx-switch-knob {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--fg-muted);
+  transition: transform 0.15s, background 0.15s;
+}
+.alx-switch.on .alx-switch-track {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+.alx-switch.on .alx-switch-knob {
+  transform: translateX(13px);
+  background: #fff;
+}
+.alx-switch input:focus-visible + .alx-switch-track {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 40%, transparent);
+}
+
+/* table */
+.alx-table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.alx-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+}
+.alx-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface-2);
+  color: var(--fg-muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.35px;
+  text-align: left;
+  padding: 7px 7px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.alx-table td {
+  padding: 6px 7px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  white-space: nowrap;
+  color: var(--fg);
+}
+.alx-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.alx-table td.alx-name {
+  font-weight: 600;
+  max-width: 230px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.alx-row {
+  cursor: default;
+}
+.alx-row:hover > td {
+  background: color-mix(in srgb, var(--primary) 6%, var(--surface));
+}
+.alx-row.is-selected > td {
+  background: color-mix(in srgb, var(--primary) 24%, var(--surface));
+}
+.alx-row.is-selected > td:first-child {
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+.alx-act {
+  width: 1%;
+  text-align: right;
+}
+.alx-row-btn {
+  height: 22px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--accent-soft-border);
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  font: 600 10.5px var(--font-sans);
+  cursor: pointer;
+  opacity: 0.55;
+}
+.alx-row:hover .alx-row-btn,
+.alx-row.is-selected .alx-row-btn,
+.alx-row-btn:focus-visible {
+  opacity: 1;
+}
+.alx-row-btn:hover {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+.alx-empty {
+  text-align: center;
+  padding: 36px 12px !important;
+  color: var(--fg-muted);
+  font-size: 12.5px;
+}
+.alx-more {
+  padding: 7px 10px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+  position: sticky;
+  bottom: 0;
+}
+.alx-pill {
+  display: inline-block;
+  min-width: 30px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-align: center;
+}
+.alx-pill.ok {
+  background: color-mix(in srgb, var(--success) 16%, var(--surface));
+  color: var(--success);
+}
+.alx-pill.warn {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+.alx-pill.bad {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+/* supplier group heading */
+.alx-group > td {
+  position: sticky;
+  top: 29px;
+  z-index: 1;
+  padding: 0 !important;
+  background: color-mix(in srgb, var(--primary) 9%, var(--surface-2));
+  border-bottom: 1px solid var(--border);
+}
+.alx-group.is-unknown > td {
+  background: color-mix(in srgb, var(--warning) 10%, var(--surface-2));
+}
+.alx-group-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 9px;
+  font-size: 12px;
+}
+.alx-group-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font: 700 12px var(--font-sans);
+  cursor: pointer;
+  padding: 0;
+}
+.alx-caret {
+  display: inline-block;
+  transition: transform 0.12s;
+  color: var(--fg-muted);
+}
+.alx-caret.shut {
+  transform: rotate(-90deg);
+}
+.alx-group-count {
+  font-size: 11px;
+  color: var(--fg-muted);
+  font-weight: 600;
+}
+.alx-group-money {
+  font-size: 11.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.alx-group-btn {
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 5px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--fg);
+  font: 600 10.5px var(--font-sans);
+  cursor: pointer;
+}
+.alx-group-btn:hover {
+  border-color: var(--primary);
+  color: var(--accent-dark);
+}
+
+/* ── Bottom action bar ──────────────────────────────────────────────────── */
+.alx-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+  flex-wrap: wrap;
+}
+.alx-foot .btn {
+  height: 30px;
+}
+.alx-foot-msg {
+  flex: 1;
+  min-width: 160px;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.alx-foot-msg.err {
+  color: var(--danger);
+  white-space: normal;
+}
+.alx-foot-msg.ok {
+  color: var(--success);
+}
+.alx-foot-sep {
+  width: 1px;
+  height: 22px;
+  background: var(--border-strong);
+  margin: 0 2px;
+}
+
+/* menus */
+.alx-menu-anchor {
+  position: relative;
+  display: inline-flex;
+}
+.alx-menu-caret {
+  font-size: 9px;
+  opacity: 0.8;
+}
+.alx-menu {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  z-index: 30;
+  min-width: 270px;
+  padding: 5px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  box-shadow: 0 10px 30px color-mix(in srgb, #000 30%, transparent);
+  display: flex;
+  flex-direction: column;
+}
+.alx-menu.up {
+  top: auto;
+  bottom: calc(100% + 4px);
+}
+.alx-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font: 600 12px var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+}
+.alx-menu-item:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+.alx-menu-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.alx-menu-hint {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+.alx-menu-sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--border);
+}
+.alx-menu-head {
+  padding: 5px 9px 3px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--fg-muted);
+}
+
+/* ── Alert & Monitoring (Settings) uses the same table and bar ─────────── */
+.alx-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.alx-panel .alx-table-wrap {
+  max-height: min(56vh, 520px);
+  flex: none;
+}
+.alx-summary {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.alx-summary .alx-stat {
+  align-items: flex-start;
+}
+.alx-panel-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+.alx-panel-bar .btn {
+  height: 28px;
+}
+
+@media (max-width: 900px) {
+  .alx-side {
+    flex-basis: 150px;
+  }
+  .alx-stats {
+    display: none;
+  }
+}
+
+.btn.alx-danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+}
+.btn.alx-danger:hover:not(:disabled) {
+  background: var(--danger);
+  color: #fff;
+}
+.alx-panel .iset-bar {
+  margin: 0;
+  align-items: center;
+}
+.alx-panel .iset-bar .alx-switch {
+  align-self: flex-end;
+  height: var(--unit-h);
+}
