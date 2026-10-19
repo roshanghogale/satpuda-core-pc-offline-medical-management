@@ -23,6 +23,8 @@ import {
   type FileImportBill,
 } from '../FileImportReviewDialog'
 import { IS_DEMO } from '../../demoMode'
+import { beginStoreSwitch } from '../../components/StoreSwitchDialog'
+import { fetchBusinessMode } from '../../wholesale/mode'
 import '../../styles/interactive-settings.css'
 
 /** A box with its label above it (rows of boxes, tool bars). */
@@ -1358,6 +1360,36 @@ export function DataSystemPanel({
     stores.find((s) => String(s.store_key || '') === activeKey)?.display_name || '',
   )
 
+  /** Switch: through the store switch box, the same box as the Retail | Wholesale switch
+   *  (components/StoreSwitchDialog.tsx). It shows "Opening <store>", then restarts the app;
+   *  a refusal (PIN, satellite PC) is shown in it with Retry / Stay. */
+  function switchTo(storeKey: string, name = '') {
+    const target =
+      name ||
+      String(stores.find((s) => String(s.store_key || '') === storeKey)?.display_name || '') ||
+      storeKey
+    beginStoreSwitch({
+      target,
+      current: activeStoreName,
+      start: async () => {
+        const res = (await run('switch_store', { store_key: storeKey })) as
+          | Record<string, unknown>
+          | null
+          | undefined
+        if (!res || res.ok === false) {
+          throw new Error(String(res?.error || 'The store was not switched.'))
+        }
+        // The engine has the new store open: its kind for the box's badge.
+        const st = await fetchBusinessMode(true).catch(() => null)
+        return {
+          restart: true,
+          kind: st?.checked ? st.mode : null,
+          storeName: st?.storeName || undefined,
+        }
+      },
+    })
+  }
+
   // Nothing ever asked the engine for the admin state, so "Switching stores
   // also needs the PIN" always rendered OFF even when it was on, and "Remove
   // PIN" -- which only shows once a PIN exists -- never appeared at all.
@@ -1893,7 +1925,7 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
                         type="button"
                         className="iset-btn primary"
                         disabled={busy || isActive || !key}
-                        onClick={() => run('switch_store', { store_key: key })}
+                        onClick={() => switchTo(key, name)}
                       >
                         Switch
                       </button>
@@ -1959,7 +1991,7 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
                     `Store "${name}" created. It is not active yet.\n\n` +
                       'Switch to it now? (restarts the app)',
                   )
-                  if (ok) void run('switch_store', { store_key: key })
+                  if (ok) switchTo(key, name)
                 }
                 let res = await run('create_store', { name })
                 // Online, a name another shop already holds is refused: taking
@@ -2094,7 +2126,7 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
                                   type="button"
                                   className="iset-btn"
                                   disabled={busy}
-                                  onClick={() => void run('switch_store', { store_key: taken })}
+                                  onClick={() => switchTo(taken)}
                                 >
                                   Switch to it
                                 </button>
@@ -2169,7 +2201,7 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
                                 '\n\nSwitch to it now?',
                             )
                           ) {
-                            void run('switch_store', { store_key: newKey })
+                            switchTo(newKey, String(r?.created_store_name || ''))
                           }
                         }}
                       >

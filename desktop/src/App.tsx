@@ -62,12 +62,13 @@ import {
   themeVariantLabel,
   type ThemePack,
 } from './theme'
-import { restartDesktopApp } from './restartApp'
 import { DesktopUiPrefsProvider } from './desktopUiPrefsContext'
 import { VoiceBar } from './voice/VoiceBar'
 import { useVoiceEnabled } from './voice/voiceEnabled'
 import { OfflineFirstAutoSwitch, OfflineFirstPill } from './components/OfflineFirst'
 import { WholesaleSwitch } from './wholesale/WholesaleSwitch'
+import { StoreSwitchHost } from './components/StoreSwitchDialog'
+import { useStoreWindowTitle } from './storeWindowTitle'
 
 const NAV_LABELS: Record<PageId, string> = {
   home: 'Home',
@@ -133,6 +134,8 @@ export default function App() {
   const [theme, setTheme] = useState(() => loadStoredTheme() || 'navy-light')
   const [themePack, setThemePack] = useState<ThemePack>(loadStoredThemePack)
   const [meta, setMeta] = useState<MetaResponse | null>(null)
+  // The open store's name is the window title, on every page (it left the top bar).
+  useStoreWindowTitle(IS_DEMO ? '' : meta?.store_name || '')
 
   // Repaint the Online/Offline chip and the store name whenever the mode is
   // saved, without waiting for a restart.
@@ -562,11 +565,9 @@ export default function App() {
             </span>
           ) : null}
           {!IS_DEMO ? <WholesaleSwitch /> : null}
-          {meta?.store_name ? (
-            <span className="mainnav-store" title={meta.store_name}>
-              {meta.store_name}
-            </span>
-          ) : null}
+          {/* The store name is NOT in this row any more: with the status, the switch and the
+              badge there was no room for it (owner, 19 Oct 2026). It is the window title
+              (every page) and the head of the Home page. */}
           {IS_DEMO ? (
             <span
               className="mainnav-demo"
@@ -577,12 +578,14 @@ export default function App() {
           ) : null}
           <button
             type="button"
-            className="btn btn-neutral btn-sm"
+            className="btn btn-neutral btn-sm mainnav-theme"
             data-nav-order={200}
             onClick={() => void toggleThemeVariant()}
-            title={`Switch to ${themeVariantLabel(theme).toLowerCase()} variant (${theme})`}
+            title={`${theme.endsWith('-light') ? 'Use Dark' : 'Use Light'}: switch to the ${themeVariantLabel(theme).toLowerCase()} variant (${theme})`}
+            aria-label={theme.endsWith('-light') ? 'Use Dark' : 'Use Light'}
           >
-            {theme.endsWith('-light') ? 'Use Dark' : 'Use Light'}
+            {theme.endsWith('-light') ? <MoonIcon /> : <SunIcon />}
+            <span className="mainnav-theme-text">{theme.endsWith('-light') ? 'Dark' : 'Light'}</span>
           </button>
         </div>
       </nav>
@@ -661,6 +664,7 @@ export default function App() {
             }}
           >
             <HomePage
+              storeName={IS_DEMO ? '' : meta?.store_name || ''}
               onNavigate={navigate}
               syncRefreshNonce={syncRefreshNonce}
               active={page === 'home'}
@@ -852,7 +856,8 @@ export default function App() {
                   /* meta refresh best-effort */
                 }
                 // Match Classic: full process restart so every page/cache reloads clean.
-                await restartDesktopApp()
+                // The store switch box (StoreSwitchHost below) shows "Restarting…" and
+                // restarts the app once this returns.
               }}
             />
           </div>
@@ -876,8 +881,26 @@ export default function App() {
       {/* Voice test build: hold F1 to speak, Ctrl+K to type a command. Only when the
           store's voice switch (admin panel) is on: off, there is no bar and F1 does nothing. */}
       <SavedFileHost />
+      <StoreSwitchHost currentStoreName={meta?.store_name || ''} />
       {voiceSwitch.enabled ? <VoiceBar page={page} navigate={navigate} /> : null}
     </div>
     </DesktopUiPrefsProvider>
+  )
+}
+
+function MoonIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+    </svg>
+  )
+}
+
+function SunIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+    </svg>
   )
 }
