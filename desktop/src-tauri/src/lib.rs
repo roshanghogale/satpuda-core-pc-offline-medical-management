@@ -481,6 +481,8 @@ static QUITTING: AtomicBool = AtomicBool::new(false);
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Settings folder boxes open the native folder picker through this.
+        .plugin(tauri_plugin_dialog::init())
         .manage(ApiState {
             child: Mutex::new(None),
             boot: Mutex::new(()),

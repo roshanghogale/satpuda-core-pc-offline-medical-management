@@ -10,6 +10,7 @@
     "core:window:allow-set-title",
     "allow-ensure-desktop-api",
     "allow-desktop-api-status",
-    "allow-restart-app"
+    "allow-restart-app",
+    "dialog:allow-open"
   ]
 }

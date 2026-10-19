@@ -172,6 +172,8 @@ export type SalesFormDefaults = {
   doctor_phones?: Record<string, string>
   villages: string[]
   default_village?: string
+  /** Settings > Sales & Billing > Default doctor; "" = none. A new bill starts with it. */
+  default_doctor?: string
   medicines?: MedicineSuggestion[]
   payment_modes: string[]
   form: {
