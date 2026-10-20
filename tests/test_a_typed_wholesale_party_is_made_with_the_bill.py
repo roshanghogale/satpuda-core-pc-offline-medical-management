@@ -245,6 +245,22 @@ class TheSalesPage(unittest.TestCase):
         self.assertNotIn("Pick the party first.", self.src)
         self.assertIn("Type the party name.", self.src)
 
+    def test_an_exact_saved_name_is_picked_on_enter_blur_and_a_pause(self):
+        """A typed name that is exactly one saved party is picked through the list's own path
+        (pickParty), so its tier, due, GSTIN / DL and returns load before medicines go on."""
+        src = self.src
+        i = src.index("const pickTypedParty")
+        body = src[i:src.index("\n  }\n", i)]
+        # the engine's rule (UPPER(TRIM)), one match only, through pickParty
+        self.assertIn(".trim().toUpperCase() === want", body)
+        self.assertIn("same.length !== 1", body)
+        self.assertIn("pickParty(same[0], opts)", body)
+        # a pause in typing (0.7 s, as the phone), leaving the box, and Enter
+        self.assertRegex(src, r"pickTypedParty\(\{ stayPut: true \}\), 700\)")
+        self.assertIn("onBlur={() => void pickTypedParty({ stayPut: true })}", src)
+        self.assertRegex(
+            src, r"void pickTypedParty\(\)\.then\(\(done\) => \{\s*if \(!done\) focusNav\(NO\.phone\)")
+
 
 if __name__ == "__main__":
     unittest.main()

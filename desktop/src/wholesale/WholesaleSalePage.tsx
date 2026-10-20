@@ -504,11 +504,49 @@ export function WholesaleSalePage({
     return () => window.clearTimeout(t)
   }, [active, focusNonce, activeTab])
 
-  const pickParty = (row: PartyRow) => {
+  const pickParty = (row: PartyRow, opts?: { stayPut?: boolean }) => {
     patch({ partyText: row.name, partyId: row.id })
     setSuggestOpen(false)
-    window.setTimeout(() => medRef.current?.focus(), 0)
+    if (!opts?.stayPut) window.setTimeout(() => medRef.current?.focus(), 0)
   }
+
+  /** A typed name that is exactly one saved party (UPPER(TRIM), the engine's rule) is that
+   *  party: picked as if chosen from the list, so its rate tier, due, GSTIN / DL and returns
+   *  load before medicines go on. Resolves true when it picked. No match or two = left typed
+   *  (a new party, made with the bill). */
+  const partyNameSeq = useRef(0)
+  const pickTypedParty = async (opts?: { stayPut?: boolean }): Promise<boolean> => {
+    const idx = activeRef.current
+    const f = tabsRef.current[idx]
+    const typed = (f?.partyText || '').trim()
+    if (!f || f.partyId || !typed) return false
+    const want = typed.replace(/\s+/g, ' ').toUpperCase()
+    const seq = ++partyNameSeq.current
+    let rows: PartyRow[]
+    try {
+      rows = (await searchParties(typed)).parties || []
+    } catch {
+      return false
+    }
+    if (seq !== partyNameSeq.current) return false
+    const now = tabsRef.current[activeRef.current]
+    // The counter moved on meanwhile (another bill, more typing, a pick).
+    if (activeRef.current !== idx || !now || now.partyId || now.partyText.trim() !== typed) return false
+    const same = rows.filter((p) => p.name.trim().toUpperCase() === want)
+    if (same.length !== 1) return false
+    pickParty(same[0], opts)
+    return true
+  }
+
+  // Typing stopped for a moment on a name that is a saved party: pick it, as the phone does.
+  const typedPartyText = form.partyText
+  const typedPartyId = form.partyId
+  useEffect(() => {
+    if (typedPartyId || !typedPartyText.trim()) return
+    const t = window.setTimeout(() => void pickTypedParty({ stayPut: true }), 700)
+    return () => window.clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [typedPartyText, typedPartyId, activeTab])
 
   /** Units already on this bill by medicine id, so the picker shows what is left. */
   const reserved = useMemo(() => {
@@ -1064,7 +1102,19 @@ export function WholesaleSalePage({
                 const row = suggest.find((p) => String(p.id) === item.id)
                 if (row) pickParty(row)
               }}
-              onEnter={(picked) => focusNav(picked ? NO.medicine : NO.phone)}
+              // A row picked goes on to the medicine; a typed name that is a saved party is
+              // picked first (then the medicine too), a new name goes on to Phone as before.
+              onEnter={(picked) => {
+                // (or the pause already picked it)
+                if (picked || tabsRef.current[activeRef.current]?.partyId) {
+                  focusNav(NO.medicine)
+                  return
+                }
+                void pickTypedParty().then((done) => {
+                  if (!done) focusNav(NO.phone)
+                })
+              }}
+              onBlur={() => void pickTypedParty({ stayPut: true })}
             />
           </Field>
           <Field label="Phone">
