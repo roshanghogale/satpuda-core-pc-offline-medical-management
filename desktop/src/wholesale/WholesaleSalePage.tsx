@@ -1,8 +1,10 @@
 /** The Sales screen of a store in wholesale mode: a B2B tax invoice to another medical.
  *
- *  Party must be a customer (its GSTIN, DL numbers, state, rate tier and credit terms are
- *  shown); lines are whole packs + free packs at Rate A / B / C (GST excluded, added on
- *  top), with Disc % and Scheme %. The engine does every sum (core/wholesale_sale.py):
+ *  Party is a customer (its GSTIN, DL numbers, state, rate tier and credit terms are shown
+ *  once picked); a name typed and not picked is saved with the bill like a retail customer --
+ *  the party of that name, or a new one made from the Party / Phone / Address / GSTIN / DL boxes
+ *  at Rate A (core/wholesale_sale.party_for_typed_name). Lines are whole packs + free packs
+ *  at Rate A / B / C (GST excluded, added on top), with Disc % and Scheme %. The engine does every sum (core/wholesale_sale.py):
  *  this page only sends what is typed and shows what comes back. Retail billing is the
  *  untouched SalesPage.
  *
@@ -668,8 +670,10 @@ export function WholesaleSalePage({
     if (busy) return
     setError('')
     setNotice('')
-    if (!form.partyId) {
-      setError('Pick the party first.')
+    // A typed name is enough, as on the retail bill: the engine uses the party saved under
+    // it, or makes a new one from the boxes on this page (core/wholesale_sale.py).
+    if (!form.partyId && !form.partyText.trim()) {
+      setError('Type the party name.')
       partyRef.current?.focus()
       return
     }
@@ -683,6 +687,8 @@ export function WholesaleSalePage({
       const body = {
         ...calcBody,
         invoice_mode: 'wholesale',
+        // Not picked from the list: the engine finds or makes the party by this name.
+        customer_name: form.partyText.trim(),
         customer_phone: form.phone.trim(),
         customer_address: form.address.trim(),
         // the ticked returns, settled in this bill (core/return_credit.py)
@@ -1338,7 +1344,9 @@ export function WholesaleSalePage({
               {form.items.length === 0 ? (
                 <tr>
                   <td colSpan={15} className="muted">
-                    {form.partyId ? 'No medicines added' : 'Pick the party, then add medicines.'}
+                    {form.partyId || form.partyText.trim()
+                      ? 'No medicines added'
+                      : 'Type or pick the party, then add medicines.'}
                   </td>
                 </tr>
               ) : (
