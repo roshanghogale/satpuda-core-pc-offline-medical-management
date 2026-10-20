@@ -73,6 +73,9 @@ type Form = {
   partyId: number | null
   /** The party whose saved phone / address / GSTIN / DL are in the boxes below. */
   filledFor: number | null
+  /** What that fill put in the boxes, so a name changed after the pick takes back exactly
+   *  those (never what the counter typed) -- a new party must not inherit another's GSTIN. */
+  filledWith?: { phone: string; address: string; gstin: string; dl: string } | null
   phone: string
   address: string
   gstin: string
@@ -151,6 +154,43 @@ function blankForm(title?: string): Form {
     editingSaleId: null,
     editingBillNo: '',
     editingOldDue: 0,
+  }
+}
+
+/** The Party name changed after a pick: the pick is gone, and so is what it brought -- each
+ *  of Phone / Address / GSTIN / DL that still holds exactly what the pick filled in (a box the
+ *  counter typed or changed stays), and the party's open returns. Previous Due, the tier and
+ *  credit hints follow partyId by themselves. A bill saved now is a new party of its own, never
+ *  one carrying another party's GSTIN or DL on a tax invoice. */
+function unpickParty<F extends {
+  partyText: string
+  partyId: number | null
+  filledFor: number | null
+  filledWith?: { phone: string; address: string; gstin: string; dl: string } | null
+  phone: string
+  address: string
+  gstin: string
+  dl: string
+  openReturns?: unknown[]
+  useReturns?: number[]
+  returnsFor?: number | null
+}>(f: F, text: string): F {
+  if (!f.partyId && !f.filledWith) return { ...f, partyText: text }
+  const w = f.filledWith
+  const keep = (k: 'phone' | 'address' | 'gstin' | 'dl') => (w && f[k] === w[k] ? '' : f[k])
+  return {
+    ...f,
+    partyText: text,
+    partyId: null,
+    filledFor: null,
+    filledWith: null,
+    phone: keep('phone'),
+    address: keep('address'),
+    gstin: keep('gstin'),
+    dl: keep('dl'),
+    openReturns: [],
+    useReturns: [],
+    returnsFor: null,
   }
 }
 
@@ -346,14 +386,15 @@ export function WholesaleSalePage({
         setTabs((all) =>
           all.map((f) =>
             f.partyId === id && f.filledFor !== id
-              ? {
-                  ...f,
-                  filledFor: id,
-                  phone: r.party.phone || '',
-                  address: r.party.address || '',
-                  gstin: r.party.gstin || '',
-                  dl: r.party.dl_numbers || '',
-                }
+              ? (() => {
+                  const filledWith = {
+                    phone: r.party.phone || '',
+                    address: r.party.address || '',
+                    gstin: r.party.gstin || '',
+                    dl: r.party.dl_numbers || '',
+                  }
+                  return { ...f, filledFor: id, filledWith, ...filledWith }
+                })()
               : f,
           ),
         )
@@ -473,6 +514,8 @@ export function WholesaleSalePage({
           editingOldDue: Number(r.due_amount) || 0,
           billReturns: r.returns_in_bill || [],
         }
+        // The party's boxes as the bill came: renaming the party takes these back too.
+        loaded.filledWith = { phone: loaded.phone, address: loaded.address, gstin: loaded.gstin, dl: loaded.dl }
         const all = tabsRef.current
         const cur = all[activeRef.current]
         clearEntry()
@@ -1095,7 +1138,8 @@ export function WholesaleSalePage({
               }))}
               onFocus={() => setSuggestOpen(true)}
               onChange={(v) => {
-                patch({ partyText: v, partyId: null })
+                // A changed name drops the pick and what the pick filled in (unpickParty).
+                setForm((f) => unpickParty(f, v))
                 setSuggestOpen(true)
               }}
               onPick={(item) => {

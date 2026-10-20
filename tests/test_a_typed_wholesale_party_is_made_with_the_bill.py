@@ -261,6 +261,29 @@ class TheSalesPage(unittest.TestCase):
         self.assertRegex(
             src, r"void pickTypedParty\(\)\.then\(\(done\) => \{\s*if \(!done\) focusNav\(NO\.phone\)")
 
+    def test_a_changed_name_takes_back_what_the_pick_filled_in(self):
+        """Editing the name after a pick (from the list or by itself) clears the pick and each
+        box that still holds exactly the picked party's value -- a new party must never be
+        saved with another party's GSTIN / DL on a tax invoice. Boxes the counter typed stay."""
+        src = self.src
+        # what the fill put in is remembered, for a pick and for a bill opened for edit
+        self.assertIn("return { ...f, filledFor: id, filledWith, ...filledWith }", src)
+        self.assertIn("loaded.filledWith = { phone: loaded.phone, address: loaded.address, "
+                      "gstin: loaded.gstin, dl: loaded.dl }", src)
+        i = src.index("function unpickParty")
+        body = src[i:src.index("\n}\n", i)]
+        self.assertIn("w && f[k] === w[k] ? '' : f[k]", body)
+        for box in ("phone", "address", "gstin", "dl"):
+            self.assertIn(f"{box}: keep('{box}')", body)
+        for cleared in ("partyId: null", "filledFor: null", "filledWith: null",
+                        "openReturns: []", "useReturns: []", "returnsFor: null"):
+            self.assertIn(cleared, body)
+        # the Party box's onChange goes through it
+        self.assertIn("setForm((f) => unpickParty(f, v))", src)
+        self.assertNotIn("patch({ partyText: v, partyId: null })", src)
+        # Previous Due and the tier / credit hints follow the picked party's details only
+        self.assertIn("if (!form.partyId) {\n      setInfo(null)", src)
+
 
 if __name__ == "__main__":
     unittest.main()
