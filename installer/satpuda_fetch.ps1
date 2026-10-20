@@ -90,10 +90,43 @@ if ($CheckOnly) {
             try { $tag = ($sr.ReadToEnd() | ConvertFrom-Json).tag_name } finally { $sr.Dispose() }
         } finally { $resp.Close() }
     } catch { $tag = '' }
+
+    # The newest PRE-RELEASE, for the administrator's "install the test
+    # version" choice. releases/latest never returns one, so this is a second
+    # call, to the list (newest first). Same 4-second ceiling, same silence on
+    # failure. A draft is never chosen, and neither is a pre-release that does
+    # not carry the asset the installer downloads. The tag goes onto a command
+    # line and into a URL, so anything that is not a plain v1.2.3[-beta.4] tag
+    # is dropped here as well as in the .iss (IsSafeTag).
+    $pre = ''
+    try {
+        $r = [System.Net.HttpWebRequest]::Create("https://api.github.com/repos/$Repo/releases?per_page=20")
+        $r.UserAgent        = 'SatpudaCoreInstaller'
+        $r.Accept           = 'application/vnd.github+json'
+        $r.Timeout          = 4000
+        $r.ReadWriteTimeout = 4000
+        $resp = $r.GetResponse()
+        try {
+            $sr = New-Object System.IO.StreamReader($resp.GetResponseStream())
+            try { $list = $sr.ReadToEnd() | ConvertFrom-Json } finally { $sr.Dispose() }
+        } finally { $resp.Close() }
+        foreach ($rel in @($list)) {
+            if ($rel.draft -ne $false)     { continue }
+            if ($rel.prerelease -ne $true) { continue }
+            $hasAsset = $false
+            foreach ($a in @($rel.assets)) { if ($a.name -eq $AssetName) { $hasAsset = $true; break } }
+            if (-not $hasAsset) { continue }
+            $t = [string]$rel.tag_name
+            if (($t.Length -le 40) -and ($t -cmatch '^v[0-9]+(\.[0-9]+)*(-[A-Za-z0-9]+(\.[A-Za-z0-9]+)*)?$')) { $pre = $t }
+            break
+        }
+    } catch { $pre = '' }
+
     if ($OutFile) {
-        try { [System.IO.File]::WriteAllText($OutFile, ("LATEST|" + $tag)) } catch { }
+        try { [System.IO.File]::WriteAllText($OutFile, ("LATEST|" + $tag + "`r`nPRE|" + $pre)) } catch { }
     }
     [Console]::Out.WriteLine("LATEST|" + $tag)
+    [Console]::Out.WriteLine("PRE|" + $pre)
     exit 0
 }
 

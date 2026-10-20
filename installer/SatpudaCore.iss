@@ -33,7 +33,7 @@
 ; ============================================================================
 
 #define MyAppName        "Satpuda Core"
-#define MyAppVersion     "1.0.6"
+#define MyAppVersion     "1.0.10"
 #define MyAppPublisher   "Satpuda"
 #define MyAppExeName     "SatpudaCore_Desktop.exe"
 #define MyEngineExeName  "SatpudaEngine.exe"
@@ -216,6 +216,17 @@ const
   ADMIN_ROUNDS = 20000;
   ADMIN_HASH   = 'ee34ab1ab48f7fe463a09e9d4d9e509684a718cb70d352df92fccb0fcc233b2d';
 
+  { Said under the test-version choice, on both pages. The owner's words: the
+    pre-release is for chosen shops, it installs exactly like an update (the
+    program folder only - the shop's data in %LOCALAPPDATA%\VeterinaryApp is
+    never touched, and no new-shop handoff is written over an existing shop),
+    and the beta itself moves an Online shop to offline-first on its first
+    start by copying the store's data down from the server. The installer has
+    no conversion of its own to do. }
+  TEST_VERSION_NOTE = 'Test version for chosen shops. The shop''s data stays; an Online shop ' +
+                      'changes to offline-first on first start (its data is copied from the ' +
+                      'server). Keep the internet on for the first start.';
+
   { ---- The saved server address ----------------------------------------
     All four names come from core\server_api.py and are repeated here rather
     than guessed at:
@@ -298,6 +309,25 @@ var
   GOnlineNote     : TNewStaticText;
   GOfflineRadio   : TNewRadioButton;
   GOfflineNote    : TNewStaticText;
+
+  { The test version (newest GitHub PRE-RELEASE). Offered only after the
+    Administrator unlock - on the shop page as a tick box, on the maintenance
+    page as a fourth choice - or by /PreRelease WITH the credentials. }
+  GPreTag         : String;    { newest pre-release tag, '' when none / not checked }
+  GNormalTag      : String;    { what this run installs when the test version is NOT chosen }
+  GWantPre        : Boolean;   { /PreRelease arrived with valid credentials }
+  GUseTest        : Boolean;   { the administrator's current choice }
+  GPrePage        : TWizardPage;   { after the shop page; see CreateTestVersionPage }
+  GPreCheck       : TNewCheckBox;
+  GPreNote        : TNewStaticText;
+  GMaintTest      : TNewRadioButton;
+  GMaintTestNote  : TNewStaticText;
+  GMaintAdminBtn  : TNewButton;
+  GMaintSep       : TBevel;
+  GDlgForm        : TSetupForm;
+  GDlgUser        : TNewEdit;
+  GDlgPass        : TPasswordEdit;
+  GDlgStatus      : TNewStaticText;
 
   { What is already on this computer, and what to do about it. }
   GHaveInstall    : Boolean;
@@ -510,6 +540,17 @@ begin
     Result := '{#MyReleaseTag}';
 end;
 
+{ The release this run installs when the test version is NOT chosen. The same
+  as TargetTag on every normal run; it differs only when an administrator has
+  picked the pre-release, and the maintenance page talks about this one. }
+function NormalTag: String;
+begin
+  if GNormalTag <> '' then
+    Result := GNormalTag
+  else
+    Result := TargetTag;
+end;
+
 function TargetDirectUrl: String;
 begin
   Result := 'https://github.com/{#MyRepo}/releases/download/' + TargetTag + '/{#MyAssetName}';
@@ -529,6 +570,135 @@ begin
       Result := False;
       Exit;
     end;
+end;
+
+{ ---- Pre-release tags ("v1.1.0-beta.9") --------------------------------
+  IsPlainTag above rejects them on purpose and keeps doing so: the NORMAL path
+  (ResolveTargetTag) must never pick a pre-release. The administrator's test
+  version goes through IsSafeTag instead, which allows exactly one "-" followed
+  by letters, digits and dots - the same pattern satpuda_fetch.ps1 checks - so
+  the tag is still safe on a command line and in a URL. }
+function IsSafeTag(const S: String): Boolean;
+var
+  I: Integer;
+  C: Char;
+  Dash: Boolean;
+begin
+  Result := False;
+  if (Length(S) < 2) or (Length(S) > 40) or (S[1] <> 'v') then Exit;
+  if not ((S[2] >= '0') and (S[2] <= '9')) then Exit;
+  Dash := False;
+  for I := 2 to Length(S) do
+  begin
+    C := S[I];
+    if (C = '-') and (not Dash) and (I < Length(S)) then
+      Dash := True
+    else if not (((C >= '0') and (C <= '9')) or (C = '.') or
+                 (Dash and (((C >= 'a') and (C <= 'z')) or ((C >= 'A') and (C <= 'Z'))))) then
+      Exit;
+  end;
+  Result := True;
+end;
+
+function IsPreReleaseTag(const S: String): Boolean;
+begin
+  Result := Pos('-', Trim(S)) > 0;
+end;
+
+{ 'v1.1.0-beta.9' -> 'beta.9'; '' when there is no pre-release part. }
+function TagSuffix(const S: String): String;
+var
+  P: Integer;
+begin
+  Result := '';
+  P := Pos('-', S);
+  if P = 0 then Exit;
+  Result := Copy(S, P + 1, Length(S));
+  P := Pos('+', Result);
+  if P > 0 then
+    Result := Copy(Result, 1, P - 1);
+  Result := LowerCase(Trim(Result));
+end;
+
+function IsAllDigits(const S: String): Boolean;
+var
+  I: Integer;
+begin
+  Result := (S <> '');
+  for I := 1 to Length(S) do
+    if not ((S[I] >= '0') and (S[I] <= '9')) then
+    begin
+      Result := False;
+      Exit;
+    end;
+end;
+
+function NextIdent(var S: String): String;
+var
+  P: Integer;
+begin
+  P := Pos('.', S);
+  if P = 0 then
+  begin
+    Result := S;
+    S := '';
+  end
+  else
+  begin
+    Result := Copy(S, 1, P - 1);
+    S := Copy(S, P + 1, Length(S));
+  end;
+end;
+
+{ The semantic-versioning rule for the part after "-": a release is newer
+  than any pre-release of the same number (v1.1.0 > v1.1.0-beta.9), numbers
+  compare as numbers (beta.10 > beta.9), and a longer list wins a tie. }
+function CompareSuffix(A, B: String): Integer;
+var
+  X, Y: String;
+  NX, NY: Boolean;
+  IX, IY: Integer;
+begin
+  Result := 0;
+  if A = B then Exit;
+  if A = '' then begin Result :=  1; Exit; end;
+  if B = '' then begin Result := -1; Exit; end;
+  while (A <> '') or (B <> '') do
+  begin
+    if A = '' then begin Result := -1; Exit; end;
+    if B = '' then begin Result :=  1; Exit; end;
+    X := NextIdent(A);
+    Y := NextIdent(B);
+    NX := IsAllDigits(X);
+    NY := IsAllDigits(Y);
+    if NX and NY then
+    begin
+      IX := StrToIntDef(X, 0);
+      IY := StrToIntDef(Y, 0);
+      if IX > IY then begin Result :=  1; Exit; end;
+      if IX < IY then begin Result := -1; Exit; end;
+    end
+    else if NX then begin Result := -1; Exit; end
+    else if NY then begin Result :=  1; Exit; end
+    else
+    begin
+      Result := CompareText(X, Y);
+      if Result > 0 then begin Result :=  1; Exit; end;
+      if Result < 0 then begin Result := -1; Exit; end;
+    end;
+  end;
+end;
+
+{ CompareTags, plus the pre-release part. CompareTags alone reads
+  v1.1.0-beta.9 and v1.1.0 as EQUAL (it cuts at the "-"), which would tell a PC
+  on the test version that the real v1.1.0 is "the newest version" already.
+  For two plain tags this answers exactly what CompareTags answers. }
+function ComparePreTags(const A, B: String): Integer;
+begin
+  Result := CompareTags(A, B);
+  if Result <> 0 then Exit;
+  if (Trim(A) = '') or (Trim(B) = '') then Exit;
+  Result := CompareSuffix(TagSuffix(Trim(A)), TagSuffix(Trim(B)));
 end;
 
 { Where an earlier install put itself. }
@@ -1614,6 +1784,44 @@ begin
   UpdateAdminArea;
 end;
 
+{ ------------------------------------------------------------------------ }
+{  The test version, for a NEW install                                      }
+{                                                                           }
+{  Its own page, straight after the shop page, because the shop page has no }
+{  room left: unlocked, its last line already ends a few pixels above the   }
+{  bottom of the surface (measured, 100% DPI: 298 of 309), and a tick box   }
+{  plus its note would hang ~47 pixels off the edge.                        }
+{                                                                           }
+{  Shown only when the shop page was unlocked (or /PreRelease came with the }
+{  credentials) AND GitHub has a pre-release - see ShouldSkipPage. A shop   }
+{  never sees it. When the shop page itself is skipped (the program or a    }
+{  shop is already on this PC) the maintenance page offers the choice       }
+{  instead, behind its own Administrator button.                            }
+{ ------------------------------------------------------------------------ }
+procedure CreateTestVersionPage;
+var
+  Y: Integer;
+begin
+  GPrePage := CreateCustomPage(GSetupPage.ID,
+    'Test version',
+    'For Satpuda staff. A shop should install the normal version.');
+
+  Y := 0;
+  GPreCheck := TNewCheckBox.Create(GPrePage);
+  GPreCheck.Parent  := GPrePage.Surface;
+  GPreCheck.Left    := 0;
+  GPreCheck.Top     := Y;
+  GPreCheck.Width   := GPrePage.SurfaceWidth;
+  GPreCheck.Height  := ScaleY(17);
+  { The tag goes into the caption in CurPageChanged, once GitHub has been
+    asked. Unticked unless /PreRelease came WITH the credentials. }
+  GPreCheck.Caption := 'Install the test version (pre-release)';
+  GPreCheck.Checked := GUseTest;
+  Y := Y + GPreCheck.Height + ScaleY(4);
+
+  Y := LayoutLabel(GPrePage, GPreNote, TEST_VERSION_NOTE, Y, 16, 0, False);
+end;
+
 { ======================================================================== }
 {  NO STORE LIST, EVER                                                      }
 {                                                                           }
@@ -2370,8 +2578,29 @@ end;
 { Is the release this run will install newer than what is on the disk? }
 function UpdateIsAvailable: Boolean;
 begin
+  { NormalTag, not TargetTag: "Update" is always the normal release; the test
+    version is its own choice. ComparePreTags answers exactly as CompareTags
+    for two plain tags, and also sees v1.1.0 as newer than v1.1.0-beta.9. }
   Result := GHaveInstall and (GInstalledTag <> '') and
-            (CompareTags(TargetTag, GInstalledTag) > 0);
+            (ComparePreTags(NormalTag, GInstalledTag) > 0);
+end;
+
+{ The text after "Key" up to the end of its line, trimmed. }
+function LineValue(const S, Key: String): String;
+var
+  P, I: Integer;
+begin
+  Result := '';
+  P := Pos(Key, S);
+  if P = 0 then Exit;
+  Result := Copy(S, P + Length(Key), Length(S));
+  for I := 1 to Length(Result) do
+    if (Result[I] = #13) or (Result[I] = #10) then
+    begin
+      Result := Copy(Result, 1, I - 1);
+      Break;
+    end;
+  Result := Trim(Result);
 end;
 
 { Ask GitHub for the newest tag. One API call with a short timeout, run only
@@ -2383,7 +2612,6 @@ var
   Params, OutFile: String;
   Raw: AnsiString;
   S: String;
-  P: Integer;
 begin
   if GCheckedOnline then Exit;
   GCheckedOnline := True;
@@ -2418,10 +2646,17 @@ begin
   if not LoadStringFromFile(OutFile, Raw) then Exit;
   S := Raw;              { widened by assignment; see ProcessIsRunning }
   S := Trim(S);
-  P := Pos('LATEST|', S);
-  if P > 0 then
-    GLatestTag := Trim(Copy(S, P + 7, Length(S)));
+  { Two lines now: LATEST|<tag> and PRE|<tag>. Each is cut at its own line
+    end, so the second can never leak into the first. }
+  GLatestTag := LineValue(S, 'LATEST|');
   Log('latest tag on GitHub: "' + GLatestTag + '"');
+  GPreTag := LineValue(S, 'PRE|');
+  if (GPreTag <> '') and not IsSafeTag(GPreTag) then
+  begin
+    Log('pre-release tag on GitHub not usable: "' + GPreTag + '"');
+    GPreTag := '';
+  end;
+  Log('newest pre-release on GitHub: "' + GPreTag + '"');
 end;
 
 { Put the version that is really going to be installed at the top of the
@@ -2440,6 +2675,33 @@ end;
 { Decide once which release this run installs: GitHub's newest when it is newer
   than the version this installer was built as, else the built-in version (also
   the answer when the shop is offline or GitHub cannot be reached). }
+{ The administrator's choice between the normal release and the test version.
+  Want is only ever honoured with the page unlocked (or /PreRelease accepted)
+  AND a usable pre-release tag; anything else installs the normal release. }
+procedure ApplyTestChoice(Want: Boolean; const Where: String);
+var
+  WasTest: Boolean;
+begin
+  WasTest  := GUseTest;
+  GUseTest := Want and GAdminUnlocked and (GPreTag <> '');
+  if Want and not GUseTest then
+    Log('the test version was asked for (' + Where + ') but there is none to install; ' +
+        'the normal version is used');
+  if GNormalTag = '' then Exit;   { ResolveTargetTag applies GUseTest when it runs }
+  if GUseTest then
+  begin
+    GTargetTag := GPreTag;
+    Log('installing the TEST version ' + GPreTag + ' (pre-release, chosen ' + Where +
+        ') instead of the normal ' + GNormalTag);
+  end
+  else
+  begin
+    if WasTest then
+      Log('the normal version ' + GNormalTag + ' was chosen (' + Where + ') instead of the test version');
+    GTargetTag := GNormalTag;
+  end;
+end;
+
 procedure ResolveTargetTag;
 begin
   if GTargetTag <> '' then Exit;
@@ -2449,6 +2711,230 @@ begin
   else
     GTargetTag := '{#MyReleaseTag}';
   Log('installing release ' + GTargetTag + ' (built as {#MyReleaseTag}, GitHub latest "' + GLatestTag + '")');
+  GNormalTag := GTargetTag;
+  { Before any page has been answered the only way GUseTest can be set is
+    /PreRelease with the credentials; a silent install decides here. }
+  if GUseTest then
+    ApplyTestChoice(True, 'on the command line with /PreRelease');
+end;
+
+procedure LayoutMaintPage;
+var
+  H, Y, Rad: Integer;
+begin
+  H   := GMaintPage.SurfaceHeight;
+  Rad := ScaleY(17);
+
+  Y := H - Rad;
+  GMaintRemove.Top := Y;
+
+  Y := Y - ScaleY(8) - GMaintRepairNote.Height;
+  GMaintRepairNote.Top := Y;
+
+  Y := Y - ScaleY(2) - Rad;
+  GMaintRepair.Top := Y;
+
+  { The test version, between Update and Repair - and only when it is on
+    screen, so a page that has not been unlocked is laid out exactly as it
+    always was. }
+  if GMaintTest.Visible then
+  begin
+    Y := Y - ScaleY(8) - GMaintTestNote.Height;
+    GMaintTestNote.Top := Y;
+    Y := Y - ScaleY(2) - Rad;
+    GMaintTest.Top := Y;
+  end;
+
+  Y := Y - ScaleY(4) - Rad;
+  GMaintUpdate.Top := Y;
+
+  Y := Y - ScaleY(10) - GMaintPrompt.Height;
+  GMaintPrompt.Top := Y;
+  { On the prompt's line, at the right-hand edge. }
+  GMaintAdminBtn.Top := Y + (GMaintPrompt.Height - GMaintAdminBtn.Height) div 2;
+
+  Y := Y - ScaleY(10) - ScaleY(2);
+  GMaintSep.Top := Y;
+
+  { Whatever is left, and never a negative height: a machine that somehow left
+    no room would otherwise raise rather than simply show less. }
+  Y := Y - ScaleY(10);
+  if Y < ScaleY(20) then
+    Y := ScaleY(20);
+  GMaintNote.Height := Y;
+end;
+
+{ The Administrator half of the maintenance page: a button until the
+  credentials are accepted, then the test version as a fourth choice.
+
+  Offered only where the test version can ONLY be chosen here: a PC that already
+  has the program, or one whose shop page is going to be skipped (it already has
+  a shop). Everywhere else the shop page has its own Administrator area. And
+  only when GitHub has a pre-release at all - there is nothing else on this page
+  to unlock. }
+procedure RefreshMaintAdmin;
+var
+  Offer: Boolean;
+  Rel: String;
+  Cmp: Integer;
+begin
+  Offer := (GPreTag <> '') and (GHaveInstall or ForbidStoreChoice);
+
+  GMaintAdminBtn.Visible := Offer and not GAdminUnlocked;
+  GMaintTest.Visible     := Offer and GAdminUnlocked;
+  GMaintTestNote.Visible := GMaintTest.Visible;
+
+  if GMaintTest.Visible then
+  begin
+    GMaintTest.Caption := 'Install the test version ' + GPreTag + ' (pre-release)';
+    Rel := '';
+    if GHaveInstall and (GInstalledTag <> '') then
+    begin
+      Cmp := ComparePreTags(GPreTag, GInstalledTag);
+      if Cmp = 0 then
+        Rel := 'This is the version installed now. '
+      else if Cmp < 0 then
+        Rel := 'OLDER than the version installed now. ';
+    end;
+    GMaintTestNote.Caption := Rel + TEST_VERSION_NOTE;
+    GMaintTestNote.AdjustHeight;
+
+    if not GHaveInstall then
+    begin
+      { Nothing installed and no shop page to come: the choice is made here,
+        between the normal release and the test version. }
+      GMaintPrompt.Visible := True;
+      GMaintUpdate.Caption := 'Install the normal version ' + NormalTag;
+      GMaintUpdate.Visible := True;
+      GMaintUpdate.Enabled := True;
+      if not GMaintTest.Checked then
+        GMaintUpdate.Checked := True;
+    end;
+
+    if GUseTest then
+      GMaintTest.Checked := True;
+  end;
+
+  LayoutMaintPage;
+end;
+
+{ The maintenance page's Administrator button: a small dialog with the same
+  AdminCredentialsOK as the shop page, the same rule for the log (the count,
+  never the values), and both boxes emptied whatever the answer. Pascal Script
+  does not let a click handler set a form's ModalResult, so a wrong answer
+  shows the dialog again instead of keeping it open. }
+function ShowAdminDialog: Boolean;
+var
+  Lbl: TNewStaticText;
+  OkBtn, CancelBtn: TNewButton;
+  LabelW, BtnW: Integer;
+begin
+  Result := False;
+  GDlgForm := CreateCustomForm(ScaleX(330), ScaleY(150), False, True);
+  try
+    GDlgForm.Caption := 'Administrator';
+    LabelW := ScaleX(80);
+
+    Lbl := TNewStaticText.Create(GDlgForm);
+    Lbl.Parent  := GDlgForm;
+    Lbl.Left    := ScaleX(12);
+    Lbl.Top     := ScaleY(16);
+    Lbl.Caption := 'User name';
+
+    GDlgUser := TNewEdit.Create(GDlgForm);
+    GDlgUser.Parent := GDlgForm;
+    GDlgUser.Left   := ScaleX(12) + LabelW;
+    GDlgUser.Top    := ScaleY(12);
+    GDlgUser.Width  := GDlgForm.ClientWidth - LabelW - ScaleX(24);
+    GDlgUser.Height := ScaleY(23);
+
+    Lbl := TNewStaticText.Create(GDlgForm);
+    Lbl.Parent  := GDlgForm;
+    Lbl.Left    := ScaleX(12);
+    Lbl.Top     := ScaleY(47);
+    Lbl.Caption := 'Password';
+
+    GDlgPass := TPasswordEdit.Create(GDlgForm);
+    GDlgPass.Parent   := GDlgForm;
+    GDlgPass.Left     := ScaleX(12) + LabelW;
+    GDlgPass.Top      := ScaleY(43);
+    GDlgPass.Width    := GDlgForm.ClientWidth - LabelW - ScaleX(24);
+    GDlgPass.Height   := ScaleY(23);
+    GDlgPass.Password := True;
+
+    GDlgStatus := TNewStaticText.Create(GDlgForm);
+    GDlgStatus.Parent   := GDlgForm;
+    GDlgStatus.Left     := ScaleX(12);
+    GDlgStatus.Top      := ScaleY(76);
+    GDlgStatus.Width    := GDlgForm.ClientWidth - ScaleX(24);
+    GDlgStatus.AutoSize := False;
+    GDlgStatus.WordWrap := True;
+    GDlgStatus.Height   := ScaleY(30);
+    GDlgStatus.Caption  := '';
+
+    BtnW := GDlgForm.CalculateButtonWidth(['Unlock', 'Cancel']);
+
+    OkBtn := TNewButton.Create(GDlgForm);
+    OkBtn.Parent      := GDlgForm;
+    OkBtn.Caption     := 'Unlock';
+    OkBtn.Width       := BtnW;
+    OkBtn.Height      := ScaleY(23);
+    OkBtn.Left        := GDlgForm.ClientWidth - ScaleX(12) - BtnW - ScaleX(6) - BtnW;
+    OkBtn.Top         := GDlgForm.ClientHeight - ScaleY(23 + 10);
+    OkBtn.ModalResult := mrOk;
+    OkBtn.Default     := True;
+
+    CancelBtn := TNewButton.Create(GDlgForm);
+    CancelBtn.Parent      := GDlgForm;
+    CancelBtn.Caption     := 'Cancel';
+    CancelBtn.Width       := BtnW;
+    CancelBtn.Height      := ScaleY(23);
+    CancelBtn.Left        := GDlgForm.ClientWidth - ScaleX(12) - BtnW;
+    CancelBtn.Top         := GDlgForm.ClientHeight - ScaleY(23 + 10);
+    CancelBtn.ModalResult := mrCancel;
+    CancelBtn.Cancel      := True;
+
+    GDlgForm.ActiveControl := GDlgUser;
+    GDlgForm.FlipAndCenterIfNeeded(True, WizardForm, False);
+
+    while GDlgForm.ShowModal = mrOk do
+    begin
+      if AdminCredentialsOK(GDlgUser.Text, GDlgPass.Text) then
+      begin
+        Result := True;
+        Break;
+      end;
+      GAdminTries := GAdminTries + 1;
+      Log('administrator unlock refused (attempt ' + IntToStr(GAdminTries) + ')');
+      GDlgPass.Text := '';
+      GDlgStatus.Caption := 'That user name and password were not accepted.';
+      GDlgForm.ActiveControl := GDlgPass;
+    end;
+  finally
+    { Nothing is kept, whichever way the dialog closed. }
+    if GDlgUser <> nil then GDlgUser.Text := '';
+    if GDlgPass <> nil then GDlgPass.Text := '';
+    GDlgForm.Free;
+    GDlgForm   := nil;
+    GDlgUser   := nil;
+    GDlgPass   := nil;
+    GDlgStatus := nil;
+  end;
+end;
+
+procedure MaintAdminClick(Sender: TObject);
+begin
+  if not ShowAdminDialog then
+    Exit;
+  Log('administrator unlock accepted on the maintenance page; the test version can now be chosen');
+  GAdminUnlocked := True;
+  { Keep the shop page's own Administrator area in step, in case it is shown. }
+  GOnlineRadio.Checked  := (GSyncMode <> 'offline');
+  GOfflineRadio.Checked := (GSyncMode = 'offline');
+  UpdateAdminArea;
+  RefreshMaintAdmin;
+  if GMaintTest.Visible then
+    WizardForm.ActiveControl := GMaintTest;
 end;
 
 { Laid out from the BOTTOM of the page surface upwards, and the description
@@ -2463,24 +2949,23 @@ end;
   tall whatever the DPI is, so at 150% its caption was being drawn into a box
   two thirds the size it needed. They are ScaleY(17) now, and the wrapped note
   measures itself with AdjustHeight, which is where the old ScaleY(28) guess
-  came from. The separator matches the one on the shop page. }
+  came from. The separator matches the one on the shop page.
+
+  The controls are made here and placed by LayoutMaintPage, so the climb is
+  written down once and can be redone when the test version appears. }
 procedure CreateMaintenancePage;
 var
-  Sep: TBevel;
-  H, Y, Rad: Integer;
+  Rad, BtnW: Integer;
 begin
   GMaintPage := CreateCustomPage(wpWelcome,
     'Satpuda Core on this computer',
     'What is installed now, and what you would like to do about it.');
 
-  H   := GMaintPage.SurfaceHeight;
   Rad := ScaleY(17);
 
-  Y := H - Rad;
   GMaintRemove := TNewRadioButton.Create(GMaintPage);
   GMaintRemove.Parent  := GMaintPage.Surface;
   GMaintRemove.Left    := 0;
-  GMaintRemove.Top     := Y;
   GMaintRemove.Width   := GMaintPage.SurfaceWidth;
   GMaintRemove.Height  := Rad;
   GMaintRemove.Caption := 'Remove Satpuda Core from this computer';
@@ -2495,52 +2980,65 @@ begin
   GMaintRepairNote.Caption  := 'Downloads a fresh copy of the program and puts it back over the ' +
                                'damaged one. Your bills, stock and settings are NOT touched.';
   GMaintRepairNote.AdjustHeight;
-  Y := Y - ScaleY(8) - GMaintRepairNote.Height;
-  GMaintRepairNote.Top := Y;
 
-  Y := Y - ScaleY(2) - Rad;
   GMaintRepair := TNewRadioButton.Create(GMaintPage);
   GMaintRepair.Parent  := GMaintPage.Surface;
   GMaintRepair.Left    := 0;
-  GMaintRepair.Top     := Y;
   GMaintRepair.Width   := GMaintPage.SurfaceWidth;
   GMaintRepair.Height  := Rad;
   GMaintRepair.Caption := 'Repair / Reinstall';
 
-  Y := Y - ScaleY(4) - Rad;
+  { The test version: hidden until the Administrator unlock. }
+  GMaintTestNote := TNewStaticText.Create(GMaintPage);
+  GMaintTestNote.Parent   := GMaintPage.Surface;
+  GMaintTestNote.Left     := ScaleX(16);
+  GMaintTestNote.Width    := GMaintPage.SurfaceWidth - ScaleX(16);
+  GMaintTestNote.AutoSize := False;
+  GMaintTestNote.WordWrap := True;
+  GMaintTestNote.Caption  := TEST_VERSION_NOTE;
+  GMaintTestNote.AdjustHeight;
+  GMaintTestNote.Visible  := False;
+
+  GMaintTest := TNewRadioButton.Create(GMaintPage);
+  GMaintTest.Parent  := GMaintPage.Surface;
+  GMaintTest.Left    := 0;
+  GMaintTest.Width   := GMaintPage.SurfaceWidth;
+  GMaintTest.Height  := Rad;
+  GMaintTest.Caption := 'Install the test version (pre-release)';
+  GMaintTest.Visible := False;
+
   GMaintUpdate := TNewRadioButton.Create(GMaintPage);
   GMaintUpdate.Parent  := GMaintPage.Surface;
   GMaintUpdate.Left    := 0;
-  GMaintUpdate.Top     := Y;
   GMaintUpdate.Width   := GMaintPage.SurfaceWidth;
   GMaintUpdate.Height  := Rad;
   GMaintUpdate.Caption := 'Update to {#MyReleaseTag}';
 
+  GMaintAdminBtn := TNewButton.Create(GMaintPage);
+  GMaintAdminBtn.Parent  := GMaintPage.Surface;
+  GMaintAdminBtn.Caption := 'Administrator';
+  GMaintAdminBtn.Width   := WizardForm.CalculateButtonWidth([GMaintAdminBtn.Caption]);
+  GMaintAdminBtn.Height  := ScaleY(23);
+  GMaintAdminBtn.Left    := GMaintPage.SurfaceWidth - GMaintAdminBtn.Width;
+  GMaintAdminBtn.OnClick := @MaintAdminClick;
+  GMaintAdminBtn.Visible := False;
+  BtnW := GMaintAdminBtn.Width;
+
   GMaintPrompt := TNewStaticText.Create(GMaintPage);
   GMaintPrompt.Parent     := GMaintPage.Surface;
   GMaintPrompt.Left       := 0;
-  GMaintPrompt.Width      := GMaintPage.SurfaceWidth;
+  GMaintPrompt.Width      := GMaintPage.SurfaceWidth - BtnW - ScaleX(8);
   GMaintPrompt.AutoSize   := False;
   GMaintPrompt.WordWrap   := True;
   GMaintPrompt.Font.Style := [fsBold];
   GMaintPrompt.Caption    := 'What would you like to do?';
   GMaintPrompt.AdjustHeight;
-  Y := Y - ScaleY(10) - GMaintPrompt.Height;
-  GMaintPrompt.Top := Y;
 
-  Y := Y - ScaleY(10) - ScaleY(2);
-  Sep := TBevel.Create(GMaintPage);
-  Sep.Parent := GMaintPage.Surface;
-  Sep.Left   := 0;
-  Sep.Top    := Y;
-  Sep.Width  := GMaintPage.SurfaceWidth;
-  Sep.Height := ScaleY(2);
-
-  { Whatever is left, and never a negative height: a machine that somehow left
-    no room would otherwise raise rather than simply show less. }
-  Y := Y - ScaleY(10);
-  if Y < ScaleY(20) then
-    Y := ScaleY(20);
+  GMaintSep := TBevel.Create(GMaintPage);
+  GMaintSep.Parent := GMaintPage.Surface;
+  GMaintSep.Left   := 0;
+  GMaintSep.Width  := GMaintPage.SurfaceWidth;
+  GMaintSep.Height := ScaleY(2);
 
   GMaintNote := TNewStaticText.Create(GMaintPage);
   GMaintNote.Parent   := GMaintPage.Surface;
@@ -2549,8 +3047,9 @@ begin
   GMaintNote.Width    := GMaintPage.SurfaceWidth;
   GMaintNote.AutoSize := False;
   GMaintNote.WordWrap := True;
-  GMaintNote.Height   := Y;
   GMaintNote.Caption  := '';
+
+  LayoutMaintPage;
 end;
 
 { Fill the page in. Done from CurPageChanged rather than at creation time, so
@@ -2566,10 +3065,12 @@ begin
     version, where the page would otherwise say "nothing to do" while the PC is
     still calling a box that is about to go dark. Repair does the whole job. }
   { Which release to offer comes from GitHub (one call, four-second ceiling),
-    so ask before the page is filled in. Offline it falls back to this build. }
+    so ask before the page is filled in. Offline it falls back to this build.
+    Everything this page SAYS is about the normal release (NormalTag); the test
+    version, when it is offered, is its own line. }
   ResolveTargetTag;
   ShowResolvedVersionInTitle;
-  GMaintUpdate.Caption := 'Update to ' + TargetTag;
+  GMaintUpdate.Caption := 'Update to ' + NormalTag;
 
   Addr := '';
   if MigrateApiBaseHere(True, Info) = API_MIG_DONE then
@@ -2586,7 +3087,7 @@ begin
       which is indistinguishable from a version it failed to read. }
     GMaintNote.Caption :=
       'Satpuda Core is not installed on this computer yet.' + #13#10#13#10 +
-      'This installer will download and install version ' + Copy(TargetTag, 2, Length(TargetTag)) + '. ' +
+      'This installer will download and install version ' + Copy(NormalTag, 2, Length(NormalTag)) + '. ' +
       'It is about 122 MB and comes down over sixteen connections at once, so ' +
       'on a normal shop line it takes a minute or two.' + Addr;
     GMaintPrompt.Visible     := False;
@@ -2594,24 +3095,31 @@ begin
     GMaintRepair.Visible     := False;
     GMaintRepairNote.Visible := False;
     GMaintRemove.Visible     := False;
+    RefreshMaintAdmin;
     Exit;
   end;
 
   S := 'Satpuda Core is already installed on this computer.' + #13#10#13#10 +
        '      Version:  ' + InstalledVersionText;
+  if IsPreReleaseTag(GInstalledTag) then
+    S := S + '  (test version)';
   if GInstalledWhen <> '' then
     S := S + '        (installed ' + GInstalledWhen + ')';
   S := S + #13#10 + '      Folder:   ' + GInstalledPath + #13#10#13#10;
 
   if UpdateIsAvailable then
-    S := S + 'A newer version is available: ' + TargetTag + '.'
-  else if (GInstalledTag <> '') and (CompareTags(TargetTag, GInstalledTag) = 0) then
+    S := S + 'A newer version is available: ' + NormalTag + '.'
+  else if (GInstalledTag <> '') and (ComparePreTags(NormalTag, GInstalledTag) = 0) then
     S := S + 'This is the newest version.'
   else if GInstalledTag = '' then
     S := S + 'The version could not be read, so it cannot be compared. Repair / ' +
-             'Reinstall will put ' + TargetTag + ' in place.'
+             'Reinstall will put ' + NormalTag + ' in place.'
+  else if IsPreReleaseTag(GInstalledTag) then
+    { Only an administrator can have put a pre-release here. }
+    S := S + 'This is a test version, newer than the normal release ' + NormalTag + '. ' +
+             'Repair / Reinstall puts the normal version back.'
   else
-    S := S + 'What is installed is newer than the newest release found (' + TargetTag + ').';
+    S := S + 'What is installed is newer than the newest release found (' + NormalTag + ').';
 
   GMaintNote.Caption       := S + Addr;
   GMaintPrompt.Visible     := True;
@@ -2626,6 +3134,7 @@ begin
   else
     GMaintRepair.Checked := True;
 
+  RefreshMaintAdmin;
 end;
 
 { ======================================================================== }
@@ -2815,6 +3324,24 @@ begin
   DetectExistingInstall;
 end;
 
+{ /PreRelease on the command line, as a bare switch or as /PreRelease=yes.
+  Whether it is HONOURED is decided by the credentials, in InitializeWizard. }
+function PreReleaseSwitchGiven: Boolean;
+var
+  I: Integer;
+  V: String;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+    if CompareText(ParamStr(I), '/PreRelease') = 0 then
+    begin
+      Result := True;
+      Exit;
+    end;
+  V := LowerCase(Trim(ExpandConstant('{param:PreRelease|}')));
+  Result := (V = '1') or (V = 'yes') or (V = 'true');
+end;
+
 procedure InitializeWizard;
 var
   Lbl: TNewStaticText;
@@ -2855,6 +3382,28 @@ begin
           'this install will be Online');
   end;
 
+  { /PreRelease - the test version (newest GitHub pre-release) - on exactly the
+    same terms as /Mode=offline: honoured only with /AdminUser and /AdminPass
+    that pass the same check, ignored (and the normal release installed)
+    otherwise.
+
+      /VERYSILENT /PreRelease /AdminUser=... /AdminPass="..." }
+  GWantPre := False;
+  if PreReleaseSwitchGiven then
+  begin
+    if AdminCredentialsOK(ExpandConstant('{param:AdminUser|}'),
+                          ExpandConstant('{param:AdminPass|}')) then
+    begin
+      GAdminUnlocked := True;
+      GWantPre       := True;
+      Log('/PreRelease accepted: administrator credentials were supplied');
+    end
+    else
+      Log('/PreRelease IGNORED: it needs /AdminUser and /AdminPass; ' +
+          'this install uses the normal version');
+  end;
+  GUseTest := GWantPre;
+
   if GHaveInstall then
     GMaintAction := 'repair'
   else
@@ -2862,6 +3411,7 @@ begin
 
   CreateMaintenancePage;
   CreateSetupQuestionsPage;
+  CreateTestVersionPage;
 
   { Created here rather than inside PrepareToInstall: Inno's own documentation
     asks for wizard pages to be made in InitializeWizard, and it lets the Stop
@@ -2912,6 +3462,12 @@ begin
   if (GSetupPage <> nil) and (PageID = GSetupPage.ID) then
     Result := ForbidStoreChoice or GHaveInstall;
 
+  { The test version page: only behind the Administrator unlock, only when
+    GitHub has a pre-release, and only where the shop page itself was shown -
+    otherwise the maintenance page made the choice. }
+  if (GPrePage <> nil) and (PageID = GPrePage.ID) then
+    Result := (not GAdminUnlocked) or (GPreTag = '') or ForbidStoreChoice or GHaveInstall;
+
   { Update and repair go back into the folder the program is already in.
     Offering to move it there would only create a second copy. }
   if PageID = wpSelectDir then
@@ -2930,6 +3486,13 @@ begin
     if not GHaveInstall then
     begin
       GMaintAction := 'fresh';
+      { Only on a PC whose shop page will be skipped; otherwise the shop page
+        decides. See RefreshMaintAdmin. }
+      if GMaintTest.Visible then
+      begin
+        ApplyTestChoice(GMaintTest.Checked, 'on the maintenance page');
+        ShowResolvedVersionInTitle;
+      end;
       Exit;
     end;
 
@@ -2965,10 +3528,32 @@ begin
       Exit;
     end;
 
-    if GMaintUpdate.Visible and GMaintUpdate.Checked then
-      GMaintAction := 'update'
+    { The test version runs the update path with the pre-release tag. The radio
+      exists only after the Administrator unlock, and ApplyTestChoice checks
+      the unlock again rather than trusting that. }
+    if GMaintTest.Visible and GMaintTest.Checked then
+    begin
+      GMaintAction := 'update';
+      ApplyTestChoice(True, 'on the maintenance page');
+    end
     else
-      GMaintAction := 'repair';
+    begin
+      if GMaintUpdate.Visible and GMaintUpdate.Checked then
+        GMaintAction := 'update'
+      else
+        GMaintAction := 'repair';
+      ApplyTestChoice(False, 'on the maintenance page');
+    end;
+    ShowResolvedVersionInTitle;
+    Exit;
+  end;
+
+  { The test version page. ApplyTestChoice checks the unlock again rather
+    than trusting that the page could only be reached with it. }
+  if (GPrePage <> nil) and (CurPageID = GPrePage.ID) then
+  begin
+    ApplyTestChoice(GPreCheck.Checked, 'on the test version page');
+    ShowResolvedVersionInTitle;
     Exit;
   end;
 
@@ -3158,6 +3743,13 @@ begin
   { The shop name is the first thing to type on that page, so put the cursor
     in it rather than on the Next button - unless the Administrator row is
     already open, in which case that is what the person came back for. }
+  { The tag is only known once the maintenance page has asked GitHub. }
+  if (GPrePage <> nil) and (CurPageID = GPrePage.ID) then
+  begin
+    GPreCheck.Caption := 'Install the test version ' + GPreTag + ' (pre-release)';
+    WizardForm.ActiveControl := GPreCheck;
+  end;
+
   if (GSetupPage <> nil) and (CurPageID = GSetupPage.ID) then
   begin
     if GAdminOpen and not GAdminUnlocked then
@@ -3175,6 +3767,9 @@ begin
       WizardForm.FinishedLabel.Caption :=
         WizardForm.FinishedLabel.Caption + #13#10#13#10 +
         'Installed version: ' + GPayloadTag;
+    if IsPreReleaseTag(GPayloadTag) then
+      WizardForm.FinishedLabel.Caption :=
+        WizardForm.FinishedLabel.Caption + '  (test version, pre-release)';
     if GDesktopProblem <> '' then
     begin
       WizardForm.FinishedLabel.Caption :=
