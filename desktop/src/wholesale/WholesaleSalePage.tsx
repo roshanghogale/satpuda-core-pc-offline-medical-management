@@ -1,8 +1,10 @@
 /** The Sales screen of a store in wholesale mode: a B2B tax invoice to another medical.
  *
- *  Party must be a customer (its GSTIN, DL numbers, state, rate tier and credit terms are
- *  shown); lines are whole packs + free packs at Rate A / B / C (GST excluded, added on
- *  top), with Disc % and Scheme %. The engine does every sum (core/wholesale_sale.py):
+ *  Party is a customer (its GSTIN, DL numbers, state, rate tier and credit terms are shown
+ *  once picked); a name typed and not picked is saved with the bill like a retail customer --
+ *  the party of that name, or a new one made from the Party / Phone / Address / GSTIN / DL boxes
+ *  at Rate A (core/wholesale_sale.party_for_typed_name). Lines are whole packs + free packs
+ *  at Rate A / B / C (GST excluded, added on top), with Disc % and Scheme %. The engine does every sum (core/wholesale_sale.py):
  *  this page only sends what is typed and shows what comes back. Retail billing is the
  *  untouched SalesPage.
  *
@@ -71,6 +73,9 @@ type Form = {
   partyId: number | null
   /** The party whose saved phone / address / GSTIN / DL are in the boxes below. */
   filledFor: number | null
+  /** What that fill put in the boxes, so a name changed after the pick takes back exactly
+   *  those (never what the counter typed) -- a new party must not inherit another's GSTIN. */
+  filledWith?: { phone: string; address: string; gstin: string; dl: string } | null
   phone: string
   address: string
   gstin: string
@@ -149,6 +154,43 @@ function blankForm(title?: string): Form {
     editingSaleId: null,
     editingBillNo: '',
     editingOldDue: 0,
+  }
+}
+
+/** The Party name changed after a pick: the pick is gone, and so is what it brought -- each
+ *  of Phone / Address / GSTIN / DL that still holds exactly what the pick filled in (a box the
+ *  counter typed or changed stays), and the party's open returns. Previous Due, the tier and
+ *  credit hints follow partyId by themselves. A bill saved now is a new party of its own, never
+ *  one carrying another party's GSTIN or DL on a tax invoice. */
+function unpickParty<F extends {
+  partyText: string
+  partyId: number | null
+  filledFor: number | null
+  filledWith?: { phone: string; address: string; gstin: string; dl: string } | null
+  phone: string
+  address: string
+  gstin: string
+  dl: string
+  openReturns?: unknown[]
+  useReturns?: number[]
+  returnsFor?: number | null
+}>(f: F, text: string): F {
+  if (!f.partyId && !f.filledWith) return { ...f, partyText: text }
+  const w = f.filledWith
+  const keep = (k: 'phone' | 'address' | 'gstin' | 'dl') => (w && f[k] === w[k] ? '' : f[k])
+  return {
+    ...f,
+    partyText: text,
+    partyId: null,
+    filledFor: null,
+    filledWith: null,
+    phone: keep('phone'),
+    address: keep('address'),
+    gstin: keep('gstin'),
+    dl: keep('dl'),
+    openReturns: [],
+    useReturns: [],
+    returnsFor: null,
   }
 }
 
@@ -344,14 +386,15 @@ export function WholesaleSalePage({
         setTabs((all) =>
           all.map((f) =>
             f.partyId === id && f.filledFor !== id
-              ? {
-                  ...f,
-                  filledFor: id,
-                  phone: r.party.phone || '',
-                  address: r.party.address || '',
-                  gstin: r.party.gstin || '',
-                  dl: r.party.dl_numbers || '',
-                }
+              ? (() => {
+                  const filledWith = {
+                    phone: r.party.phone || '',
+                    address: r.party.address || '',
+                    gstin: r.party.gstin || '',
+                    dl: r.party.dl_numbers || '',
+                  }
+                  return { ...f, filledFor: id, filledWith, ...filledWith }
+                })()
               : f,
           ),
         )
@@ -471,6 +514,8 @@ export function WholesaleSalePage({
           editingOldDue: Number(r.due_amount) || 0,
           billReturns: r.returns_in_bill || [],
         }
+        // The party's boxes as the bill came: renaming the party takes these back too.
+        loaded.filledWith = { phone: loaded.phone, address: loaded.address, gstin: loaded.gstin, dl: loaded.dl }
         const all = tabsRef.current
         const cur = all[activeRef.current]
         clearEntry()
@@ -502,11 +547,49 @@ export function WholesaleSalePage({
     return () => window.clearTimeout(t)
   }, [active, focusNonce, activeTab])
 
-  const pickParty = (row: PartyRow) => {
+  const pickParty = (row: PartyRow, opts?: { stayPut?: boolean }) => {
     patch({ partyText: row.name, partyId: row.id })
     setSuggestOpen(false)
-    window.setTimeout(() => medRef.current?.focus(), 0)
+    if (!opts?.stayPut) window.setTimeout(() => medRef.current?.focus(), 0)
   }
+
+  /** A typed name that is exactly one saved party (UPPER(TRIM), the engine's rule) is that
+   *  party: picked as if chosen from the list, so its rate tier, due, GSTIN / DL and returns
+   *  load before medicines go on. Resolves true when it picked. No match or two = left typed
+   *  (a new party, made with the bill). */
+  const partyNameSeq = useRef(0)
+  const pickTypedParty = async (opts?: { stayPut?: boolean }): Promise<boolean> => {
+    const idx = activeRef.current
+    const f = tabsRef.current[idx]
+    const typed = (f?.partyText || '').trim()
+    if (!f || f.partyId || !typed) return false
+    const want = typed.replace(/\s+/g, ' ').toUpperCase()
+    const seq = ++partyNameSeq.current
+    let rows: PartyRow[]
+    try {
+      rows = (await searchParties(typed)).parties || []
+    } catch {
+      return false
+    }
+    if (seq !== partyNameSeq.current) return false
+    const now = tabsRef.current[activeRef.current]
+    // The counter moved on meanwhile (another bill, more typing, a pick).
+    if (activeRef.current !== idx || !now || now.partyId || now.partyText.trim() !== typed) return false
+    const same = rows.filter((p) => p.name.trim().toUpperCase() === want)
+    if (same.length !== 1) return false
+    pickParty(same[0], opts)
+    return true
+  }
+
+  // Typing stopped for a moment on a name that is a saved party: pick it, as the phone does.
+  const typedPartyText = form.partyText
+  const typedPartyId = form.partyId
+  useEffect(() => {
+    if (typedPartyId || !typedPartyText.trim()) return
+    const t = window.setTimeout(() => void pickTypedParty({ stayPut: true }), 700)
+    return () => window.clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [typedPartyText, typedPartyId, activeTab])
 
   /** Units already on this bill by medicine id, so the picker shows what is left. */
   const reserved = useMemo(() => {
@@ -668,8 +751,10 @@ export function WholesaleSalePage({
     if (busy) return
     setError('')
     setNotice('')
-    if (!form.partyId) {
-      setError('Pick the party first.')
+    // A typed name is enough, as on the retail bill: the engine uses the party saved under
+    // it, or makes a new one from the boxes on this page (core/wholesale_sale.py).
+    if (!form.partyId && !form.partyText.trim()) {
+      setError('Type the party name.')
       partyRef.current?.focus()
       return
     }
@@ -683,6 +768,8 @@ export function WholesaleSalePage({
       const body = {
         ...calcBody,
         invoice_mode: 'wholesale',
+        // Not picked from the list: the engine finds or makes the party by this name.
+        customer_name: form.partyText.trim(),
         customer_phone: form.phone.trim(),
         customer_address: form.address.trim(),
         // the ticked returns, settled in this bill (core/return_credit.py)
@@ -1051,14 +1138,27 @@ export function WholesaleSalePage({
               }))}
               onFocus={() => setSuggestOpen(true)}
               onChange={(v) => {
-                patch({ partyText: v, partyId: null })
+                // A changed name drops the pick and what the pick filled in (unpickParty).
+                setForm((f) => unpickParty(f, v))
                 setSuggestOpen(true)
               }}
               onPick={(item) => {
                 const row = suggest.find((p) => String(p.id) === item.id)
                 if (row) pickParty(row)
               }}
-              onEnter={(picked) => focusNav(picked ? NO.medicine : NO.phone)}
+              // A row picked goes on to the medicine; a typed name that is a saved party is
+              // picked first (then the medicine too), a new name goes on to Phone as before.
+              onEnter={(picked) => {
+                // (or the pause already picked it)
+                if (picked || tabsRef.current[activeRef.current]?.partyId) {
+                  focusNav(NO.medicine)
+                  return
+                }
+                void pickTypedParty().then((done) => {
+                  if (!done) focusNav(NO.phone)
+                })
+              }}
+              onBlur={() => void pickTypedParty({ stayPut: true })}
             />
           </Field>
           <Field label="Phone">
@@ -1338,7 +1438,9 @@ export function WholesaleSalePage({
               {form.items.length === 0 ? (
                 <tr>
                   <td colSpan={15} className="muted">
-                    {form.partyId ? 'No medicines added' : 'Pick the party, then add medicines.'}
+                    {form.partyId || form.partyText.trim()
+                      ? 'No medicines added'
+                      : 'Type or pick the party, then add medicines.'}
                   </td>
                 </tr>
               ) : (

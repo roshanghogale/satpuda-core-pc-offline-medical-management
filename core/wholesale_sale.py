@@ -761,6 +761,110 @@ def open_returns_for_party(conn, customer_id: Any) -> dict[str, Any]:
     return res
 
 
+def party_by_name(conn, name: Any) -> Optional[dict[str, Any]]:
+    """The party already saved under this name (any case), or None."""
+    want = " ".join(str(name or "").split()).upper()
+    if not want:
+        return None
+    alive = " AND COALESCE(deleted,0)=0" if "deleted" in _cols(conn, "customers") else ""
+    row = conn.execute(
+        f"SELECT id FROM customers WHERE UPPER(TRIM(COALESCE(name,'')))=?{alive} "
+        "ORDER BY id LIMIT 1", (want,)).fetchone()
+    return party(conn, row[0]) if row else None
+
+
+def party_for_typed_name(conn, body: dict) -> tuple[Optional[dict[str, Any]], Optional[dict]]:
+    """The party of a bill whose Party box was typed, not picked (owner, 20 Oct 2026: "the
+    party can be created same as the retail saves the customer").
+
+    (party, None) when the name is a party already saved -- never a second one of the same
+    name; (draft, None) for a new name: the party the bill's own boxes describe (phone,
+    address, GSTIN, DL numbers; a medical at Rate A, no credit terms, the state from the GSTIN
+    or none -- the bill then falls back to the shop's state; the phone app and the web make
+    the same party from the same boxes), marked ``_new`` and written by ``create_party``
+    only once the bill is good to save; (None, refusal) when there is no name or the GSTIN is wrong."""
+    from core.customer_service import is_counter_sale_name
+    from core.wholesale_party import clean_party
+
+    name = " ".join(str(body.get("customer_name") or "").split()).upper()
+    if not name:
+        return None, {"ok": False, "code": "party_required", "error": "Type the party name."}
+    if is_counter_sale_name(name):
+        return None, {"ok": False, "code": "party_required",
+                      "error": "A wholesale bill needs a party: type the party's name."}
+    found = party_by_name(conn, name)
+    if found:
+        return found, None
+    try:
+        fields = clean_party({
+            "gstin": body.get("buyer_gstin") or "",
+            "dl_numbers": body.get("buyer_dl") or "",
+            "party_type": "medical",
+            "rate_tier": "A",
+            "credit_limit": 0,
+            "credit_days": 0,
+        })
+    except ValueError as exc:
+        return None, {"ok": False, "code": "bad_party", "error": str(exc)}
+    state = str(fields.get("state_code") or "")
+    return {
+        "id": 0,
+        "name": name,
+        "phone": str(body.get("customer_phone") or "").strip(),
+        "address": str(body.get("customer_address") or "").strip(),
+        "party_type": "medical",
+        "gstin": str(fields.get("gstin") or ""),
+        "legal_name": "",
+        "dl_numbers": str(fields.get("dl_numbers") or ""),
+        "state_code": state,
+        "state_name": state_name(state),
+        "rate_tier": "A",
+        "credit_limit": 0.0,
+        "credit_days": 0,
+        "total_due": 0.0,
+        "total_credit": 0.0,
+        "_new": fields,
+    }, None
+
+
+def create_party(conn, draft: dict[str, Any], since: Any = "") -> dict[str, Any]:
+    """Write a drafted party (``party_for_typed_name``) the way Settings -> Contacts adds a
+    customer offline (core/desktop_settings_service._mutate_contact): the row and its party
+    fields, the GSTIN where the PC keeps it (core/customer_gst ``customer_gst:<id>``, no legal
+    name, in force from ``since`` -- the bill's date, so that bill is already B2B), then the
+    sync stamp; and read it back as ``party`` shows it."""
+    from core import customer_gst
+    from core.customer_service import _remember_customer_village
+    from core.online_guard import ensure_can_mutate
+    from core.wholesale_party import save_party_local
+
+    ensure_can_mutate()
+    fields = dict(draft.get("_new") or {})
+    gstin = str(fields.pop("gstin", "") or "")
+    cur = conn.execute(
+        "INSERT INTO customers (name, phone, address) VALUES (?, ?, ?)",
+        (draft["name"], draft.get("phone") or "", draft.get("address") or ""))
+    cid = int(cur.lastrowid)
+    save_party_local(conn, cid, fields)
+    conn.commit()
+    if gstin:
+        customer_gst.save_customer_gst(conn, cid, gstin, "", since=str(since or "")[:10])
+    try:
+        from core.sync_coordinator import after_customer_saved
+
+        after_customer_saved(conn, cid)
+    except Exception as exc:  # the row is saved; the next sync carries it
+        log.warning("wholesale party %s: sync stamp failed: %s", cid, exc)
+    try:
+        _remember_customer_village(conn, draft.get("address") or "")
+    except Exception:
+        pass
+    made = party(conn, cid)
+    if not made:
+        raise RuntimeError("the new party was not found after saving")
+    return made
+
+
 def save_sale(conn, body: dict) -> dict[str, Any]:
     """Save (or, with editing_sale_id, re-save) a wholesale tax invoice."""
     from core import desktop_sales_service as dss
@@ -777,7 +881,13 @@ def save_sale(conn, body: dict) -> dict[str, Any]:
         return {"ok": False, "code": "profile_required",
                 "error": "Please set up pharmacy profile in Settings first."}
     p = party(conn, body.get("customer_id"))
-    if not p or p["name"].strip().upper() == COUNTER_SALE:
+    if not p:
+        # Not picked from the list: the name typed in the Party box, as retail takes a new
+        # customer -- the party saved before, or a new one made with the bill.
+        p, why = party_for_typed_name(conn, body)
+        if why:
+            return why
+    if p["name"].strip().upper() == COUNTER_SALE:
         return {"ok": False, "code": "party_required",
                 "error": "Pick the party (a customer) for a wholesale bill."}
 
@@ -924,6 +1034,18 @@ def save_sale(conn, body: dict) -> dict[str, Any]:
         r = conn.execute("SELECT COALESCE(due_amount,0) FROM sales WHERE id=?",
                          (editing_id,)).fetchone()
         this_due = _f(r[0]) if r else 0.0
+    if p.get("_new") is not None:
+        # Everything on the bill checked out: only now is the new party written, so a bill
+        # refused above leaves no stray customer behind.
+        try:
+            p = create_party(conn, p, since=bill_date)
+        except Exception as exc:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            return {"ok": False, "code": "party_not_saved",
+                    "error": f"The party {p['name']} could not be saved: {exc}"}
     returns_plan: list = []
     returns_done: dict = {"list": [], "total": 0.0}
     try:
