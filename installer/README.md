@@ -267,8 +267,8 @@ the update check starts comparing against `1.0.3`.
 **The two edits go together, in this order: release first, installer second.**
 The version is what the download URL is built from, so an installer bumped ahead
 of its release does not degrade — it 404s on every single install. The file
-currently says `1.0.2`; `v1.0.2` must therefore already be published, with the
-zip attached, before that installer is given to anyone.
+currently says `1.0.10`; `v1.0.10` is published (the current Latest) with
+`SatpudaCore_Desktop_Win10.zip` attached, so the fallback URL resolves.
 
 **2. On GitHub, create release `v1.0.3`** in `roshanghogale/exes-for-satpuda-core`
 and attach:
@@ -631,6 +631,65 @@ carries no credential. Nothing was weakened to add this button.
 
 The setup log records only that an unlock was refused and how many times. It
 never records either value.
+
+### Administrator: install the test version
+
+The same credentials also open the **test version**: the newest GitHub
+**pre-release** of `roshanghogale/exes-for-satpuda-core` (for example
+`v1.1.0-beta.9`), for the chosen shops that should move to offline-first.
+
+**How it is found.** `satpuda_fetch.ps1 -CheckOnly` makes a second call, to
+`releases?per_page=20` (newest first), and takes the first release that is
+`prerelease: true`, `draft: false` and carries `SatpudaCore_Desktop_Win10.zip`.
+It prints `PRE|<tag>` after the usual `LATEST|<tag>` (both lines also go to the
+`-OutFile`). Same 4-second timeout, silent on failure (empty tag), ASCII only.
+A draft is never chosen, and a tag that is not `v1.2.3` or `v1.2.3-label.N` is
+dropped, both in the script and again in the wizard (`IsSafeTag`). The normal
+path is unchanged: it still only ever takes `releases/latest`, and `IsPlainTag`
+still rejects anything with a `-`.
+
+**Where it is offered** — only after the Administrator unlock, and only when a
+pre-release was found:
+
+- **New install:** unlock on the shop-name page as usual; a **Test version**
+  page then follows the shop page, with an unticked box *Install the test
+  version v1.1.0-beta.9 (pre-release)*. (It is its own page because the
+  unlocked shop page has no room left — measured, the last line ends at 298 of
+  309 pixels.)
+- **Program already installed:** the maintenance page has an **Administrator**
+  button at the right of *What would you like to do?*. It opens a small user
+  name / password dialog (same check, same log rule). After the unlock a fourth
+  choice appears: *Install the test version …*. It runs the normal **Update**
+  path with the pre-release tag. The same button and choice appear on a PC that
+  has no program but already has a shop (where the shop page is skipped).
+
+Under the choice, in the owner's words: *Test version for chosen shops. The
+shop's data stays; an Online shop changes to offline-first on first start (its
+data is copied from the server). Keep the internet on for the first start.*
+The installer does no conversion of its own. It replaces the program folder
+exactly as an update does, never touches `%LOCALAPPDATA%\VeterinaryApp`, and
+never writes a new-shop handoff over an existing shop (`ForbidStoreChoice`).
+The beta app makes the change itself on its first start.
+
+Without the unlock nothing changes: no button when there is no pre-release, no
+fourth choice, no test page. The setup log says which version was installed
+and why (`installing the TEST version v1.1.0-beta.9 (pre-release, chosen on the
+maintenance page) instead of the normal v1.0.10`), and the Finished page adds
+*(test version, pre-release)*.
+
+**Command line**, on the same terms as `/Mode=offline`. Without valid
+credentials it is ignored and logged as ignored:
+
+```
+SatpudaCoreInstaller.exe /VERYSILENT /PreRelease /AdminUser=... /AdminPass="..."
+```
+
+**Versions.** `ComparePreTags` adds the pre-release rule to `CompareTags`.
+`v1.1.0` is newer than `v1.1.0-beta.9`, `beta.10` is newer than `beta.9`, and
+two plain tags compare exactly as before. So a PC on a beta is offered the real
+`v1.1.0` as an update once it ships. Its maintenance page says *(test
+version)* beside the version, and *Repair / Reinstall* puts the normal version
+back.
 
 ---
 
