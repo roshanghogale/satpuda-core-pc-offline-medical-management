@@ -93,14 +93,21 @@ if ($CheckOnly) {
 
     # The newest PRE-RELEASE, for the administrator's "install the test
     # version" choice. releases/latest never returns one, so this is a second
-    # call, to the list (newest first). Same 4-second ceiling, same silence on
+    # call, to the release list. Same 4-second ceiling, same silence on
     # failure. A draft is never chosen, and neither is a pre-release that does
     # not carry the asset the installer downloads. The tag goes onto a command
     # line and into a URL, so anything that is not a plain v1.2.3[-beta.4] tag
     # is dropped here as well as in the .iss (IsSafeTag).
+    #
+    # The list is NOT newest first in practice: GitHub orders it by the tag's
+    # commit date, and every beta tag here points at the same commit, so a just
+    # published beta.10 sat below beta.6 (20 Oct 2026). So every qualifying
+    # pre-release is read and the HIGHEST version wins: v1.1.0-beta.10 over
+    # v1.1.0-beta.9, and a final v1.1.0 over any v1.1.0-beta.N.
     $pre = ''
+    $preKey = $null
     try {
-        $r = [System.Net.HttpWebRequest]::Create("https://api.github.com/repos/$Repo/releases?per_page=20")
+        $r = [System.Net.HttpWebRequest]::Create("https://api.github.com/repos/$Repo/releases?per_page=100")
         $r.UserAgent        = 'SatpudaCoreInstaller'
         $r.Accept           = 'application/vnd.github+json'
         $r.Timeout          = 4000
@@ -117,8 +124,21 @@ if ($CheckOnly) {
             foreach ($a in @($rel.assets)) { if ($a.name -eq $AssetName) { $hasAsset = $true; break } }
             if (-not $hasAsset) { continue }
             $t = [string]$rel.tag_name
-            if (($t.Length -le 40) -and ($t -cmatch '^v[0-9]+(\.[0-9]+)*(-[A-Za-z0-9]+(\.[A-Za-z0-9]+)*)?$')) { $pre = $t }
-            break
+            if (($t.Length -gt 40) -or ($t -cnotmatch '^v[0-9]+(\.[0-9]+)*(-[A-Za-z0-9]+(\.[A-Za-z0-9]+)*)?$')) { continue }
+            if ($t -notmatch '^v([0-9]+)\.([0-9]+)\.([0-9]+)(?:-[A-Za-z]+\.?([0-9]+))?') { continue }
+            # major, minor, patch, then a final release above all its betas, then the beta number
+            $isFinal = if ($Matches[4]) { 0 } else { 1 }
+            $betaNo  = if ($Matches[4]) { [int]$Matches[4] } else { 0 }
+            $key = @([int]$Matches[1], [int]$Matches[2], [int]$Matches[3], $isFinal, $betaNo)
+            $better = $false
+            if ($null -eq $preKey) { $better = $true }
+            else {
+                for ($i = 0; $i -lt 5; $i++) {
+                    if ($key[$i] -gt $preKey[$i]) { $better = $true; break }
+                    if ($key[$i] -lt $preKey[$i]) { break }
+                }
+            }
+            if ($better) { $pre = $t; $preKey = $key }
         }
     } catch { $pre = '' }
 
