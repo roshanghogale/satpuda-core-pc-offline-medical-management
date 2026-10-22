@@ -12,8 +12,9 @@ import { getApiBase, savePrefs } from '../api'
 import { todayLocal } from '../localDate'
 import { saveFileAndShow, showSavedFile } from '../savedFiles'
 import '../styles/doctor-margin.css'
+import { DoctorMarginRulesReport } from './DoctorMarginRulesReport'
 
-type Mode = 'regular' | 'injection'
+type Mode = 'rules' | 'regular' | 'injection'
 type Style = 'detailed' | 'summary'
 type Flag = 'estimated' | 'unavailable' | 'loss'
 
@@ -144,14 +145,17 @@ function FlagChips({ flags }: { flags: Flag[] }) {
 }
 
 /** Searchable multi-select with tick boxes, Select all / Clear all, chips. */
-function TypePicker({
+export function TypePicker({
   types,
   picked,
   onChange,
+  noun = 'type',
 }: {
   types: string[]
   picked: string[]
   onChange: (next: string[]) => void
+  /** What one entry is called in the summary ("type", "doctor"). */
+  noun?: string
 }) {
   const [open, setOpen] = useState(false)
   const [find, setFind] = useState('')
@@ -170,11 +174,11 @@ function TypePicker({
 
   const all = types.length > 0 && picked.length === types.length
   const summary = !picked.length
-    ? 'No type ticked'
+    ? `No ${noun} ticked`
     : all
-      ? `All ${types.length} types`
+      ? `All ${types.length} ${noun}s`
       : picked.length > 3
-        ? `${picked.length} types`
+        ? `${picked.length} ${noun}s`
         : ''
 
   return (
@@ -219,7 +223,7 @@ function TypePicker({
         >
           <input
             className="settings-input"
-            placeholder="Find a type…"
+            placeholder={`Find a ${noun}…`}
             value={find}
             autoFocus
             onChange={(e) => setFind(e.target.value)}
@@ -247,7 +251,7 @@ function TypePicker({
                 </label>
               ))
             ) : (
-              <p className="muted dm-empty-small">No type matches.</p>
+              <p className="muted dm-empty-small">No {noun} matches.</p>
             )}
           </div>
         </div>
@@ -261,7 +265,8 @@ export function DoctorMarginDialog({ open, onClose, onBack, from = '', to = '' }
   const [dFrom, setDFrom] = useState(from || today)
   const [dTo, setDTo] = useState(to || today)
   const [doctor, setDoctor] = useState('')
-  const [mode, setMode] = useState<Mode>('regular')
+  // By margin rules (owner, 22 Oct 2026) first; the two older reports stay one click away.
+  const [mode, setMode] = useState<Mode>('rules')
   const [pctText, setPctText] = useState('10')
   const [style, setStyle] = useState<Style>('detailed')
   const [opts, setOpts] = useState<Options | null>(null)
@@ -311,6 +316,7 @@ export function DoctorMarginDialog({ open, onClose, onBack, from = '', to = '' }
   const problem = useMemo(() => {
     if (!dFrom || !dTo) return 'Choose the From and To dates.'
     if (dFrom > dTo) return 'From date is after To date.'
+    if (mode === 'rules') return ''
     if (mode === 'regular' && (pctText.trim() === '' || !Number.isFinite(pct) || pct < 0 || pct > 100)) {
       return 'Doctor Commission (%) must be 0 to 100.'
     }
@@ -334,7 +340,7 @@ export function DoctorMarginDialog({ open, onClose, onBack, from = '', to = '' }
   const dataKey = JSON.stringify({ ...filters, style: undefined })
 
   useEffect(() => {
-    if (!open || !opts || opts.online) return
+    if (!open || !opts || opts.online || mode === 'rules') return
     if (problem) {
       seq.current += 1 // an answer still on its way is for filters no longer on screen
       setReport(null)
@@ -415,6 +421,39 @@ export function DoctorMarginDialog({ open, onClose, onBack, from = '', to = '' }
   }
 
   const inj = mode === 'injection'
+  const modeSwitch = (
+    <div className="dm-field dm-field-wide">
+      <span className="dm-label">Report mode</span>
+      <div className="dm-seg" role="radiogroup" aria-label="Report mode">
+        <button type="button" role="radio" aria-checked={mode === 'rules'} className={mode === 'rules' ? 'on' : ''} onClick={() => setMode('rules')}>
+          By margin rules
+        </button>
+        <button type="button" role="radio" aria-checked={mode === 'regular'} className={mode === 'regular' ? 'on' : ''} onClick={() => setMode('regular')}>
+          Regular medicine %
+        </button>
+        <button type="button" role="radio" aria-checked={inj} className={inj ? 'on' : ''} onClick={() => setMode('injection')}>
+          Injection profit
+        </button>
+      </div>
+    </div>
+  )
+  if (mode === 'rules') {
+    return (
+      <DoctorMarginRulesReport
+        modeSwitch={modeSwitch}
+        doctors={(opts?.doctors || []).filter((d) => d !== NO_DOCTOR)}
+        online={Boolean(opts?.online)}
+        from={dFrom}
+        to={dTo}
+        onDates={(f, t) => {
+          setDFrom(f)
+          setDTo(t)
+        }}
+        onClose={onClose}
+        onBack={onBack}
+      />
+    )
+  }
   const marginWord = inj ? 'Doctor margin' : 'Commission'
   const lines = report ? (style === 'detailed' ? report.rows : report.summary) : []
   const shown = lines.slice(0, PREVIEW_ROWS)
@@ -486,17 +525,7 @@ export function DoctorMarginDialog({ open, onClose, onBack, from = '', to = '' }
               </select>
             </div>
 
-            <div className="dm-field">
-              <span className="dm-label">Report mode</span>
-              <div className="dm-seg" role="radiogroup" aria-label="Report mode">
-                <button type="button" role="radio" aria-checked={!inj} className={!inj ? 'on' : ''} onClick={() => setMode('regular')}>
-                  Regular medicine report
-                </button>
-                <button type="button" role="radio" aria-checked={inj} className={inj ? 'on' : ''} onClick={() => setMode('injection')}>
-                  Injection report
-                </button>
-              </div>
-            </div>
+            {modeSwitch}
             <div className="dm-field dm-field-wide">
               <span className="dm-label">Medicine types</span>
               {modeTypes.length ? (

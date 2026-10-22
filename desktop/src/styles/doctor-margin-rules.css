@@ -1,0 +1,413 @@
+/* Doctor margin by rules (22 Oct 2026): the report's rules mode, the rules editor and the
+ * product pick list. Theme variables only; reuses .modal-*, .settings-input, .btn, .sat-table
+ * and the .dm-* pieces of doctor-margin.css. */
+
+.dmr-actions .dm-quick .btn-sm {
+  height: 28px;
+}
+.dmr-confirm {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border: 1px solid var(--warning, #c98a00);
+  border-radius: var(--radius-md);
+  background: var(--surface-alt);
+  font-size: 12px;
+}
+.dmr-confirm span {
+  flex: 1 1 320px;
+}
+.dmr-hint {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+/* Report: one block per doctor (the owner's Excel). */
+.dmr-doctors {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.dmr-doctor {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.dmr-doctor-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 7px 10px;
+  background: var(--surface-alt);
+  border-bottom: 1px solid var(--border);
+}
+.dmr-doctor-head b {
+  font-size: 13px;
+}
+.dmr-doctor-total {
+  margin-left: auto;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.dmr-table td.dmr-rule {
+  font-size: 11px;
+  color: var(--text-secondary);
+  max-width: 220px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dmr-table tr.dmr-product td {
+  font-weight: 700;
+  padding-top: 8px;
+  background: var(--surface-alt);
+}
+.dmr-table tr.dmr-sub td {
+  font-weight: 700;
+  border-top: 1px solid var(--border-strong);
+}
+.dmr-grand {
+  display: flex;
+  justify-content: flex-end;
+  gap: 16px;
+  padding: 8px 12px;
+  border-top: 2px solid var(--border-strong);
+  font-size: 13px;
+}
+.dmr-grand b {
+  font-variant-numeric: tabular-nums;
+}
+.dm-flag.dmr-flag-estimated,
+.dm-flag.dmr-flag-no_rate,
+.dm-flag.dmr-flag-rate_over_mrp {
+  margin-left: 4px;
+  font-size: 9.5px;
+}
+.dm-flag.dmr-flag-estimated {
+  background: var(--accent-soft);
+}
+.dm-flag.dmr-flag-no_rate,
+.dm-flag.dmr-flag-rate_over_mrp {
+  background: var(--danger-soft, #fde2e2);
+  color: var(--danger, #b42318);
+}
+
+/* Rules editor: rule sets | types | groups of the chosen type. */
+.modal-backdrop.dmr-editor-backdrop {
+  z-index: 60;
+}
+.modal-card.dmr-editor {
+  width: min(1320px, 98vw);
+  height: min(94vh, 900px);
+  display: flex;
+  flex-direction: column;
+}
+.dmr-editor-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 190px minmax(540px, 1.4fr) minmax(340px, 1fr);
+  gap: 12px;
+  overflow: hidden;
+}
+.dmr-sets,
+.dmr-types,
+.dmr-groups {
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dmr-set {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.dmr-set .muted {
+  font-size: 10.5px;
+}
+.dmr-set.on {
+  border-color: var(--primary);
+  background: var(--accent-soft);
+}
+.dmr-add-doctor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+.dmr-add-doctor .settings-input {
+  height: 28px;
+}
+.dmr-set-head {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.dmr-set-head h3 {
+  margin: 0 auto 4px 0;
+  font-size: 14px;
+}
+.dmr-basis {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.dmr-basis .settings-input {
+  height: 28px;
+}
+.dmr-set-actions {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+}
+.dmr-types-table .settings-input {
+  height: 26px;
+  font-size: 12px;
+}
+.dmr-types-table td:nth-child(2) .settings-input {
+  width: 150px;
+}
+.dmr-types-table td:nth-child(3) .dmr-margin .settings-input:not(.dm-num) {
+  width: 108px;
+}
+.dmr-types-table td:first-child {
+  white-space: normal;
+}
+.dmr-types-table tr {
+  cursor: pointer;
+}
+.dmr-types-table tr.dmr-on td:first-child {
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+tr.dmr-focus td {
+  background: var(--accent-soft) !important;
+}
+.dmr-margin {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+.dmr-margin .settings-input {
+  height: 26px;
+}
+.dmr-margin .settings-input.dm-num {
+  width: 76px;
+  max-width: 76px;
+}
+.dmr-groups {
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+}
+.dmr-groups-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.dmr-groups-head h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.dmr-groups-empty {
+  margin: 24px 8px;
+  line-height: 1.5;
+}
+.dmr-group-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dmr-group {
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-alt);
+}
+.dmr-group-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.dmr-group-row .settings-input {
+  height: 26px;
+}
+.settings-input.dmr-group-name {
+  width: 130px;
+  font-weight: 700;
+}
+.dmr-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+  font-size: 11.5px;
+}
+.dmr-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 4px 1px 8px;
+  border-radius: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.dmr-item em {
+  font-style: normal;
+  color: var(--text-secondary);
+}
+.dmr-item button {
+  border: 0;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 3px;
+}
+.dmr-rest {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+}
+
+/* Product pick list (owner's image 13). */
+.modal-backdrop.dmr-picker-backdrop {
+  z-index: 70;
+}
+.modal-card.dmr-picker {
+  width: min(1180px, 96vw);
+  height: min(88vh, 760px);
+  display: flex;
+  flex-direction: column;
+}
+.dmr-picker-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 290px;
+  gap: 12px;
+  overflow: hidden;
+}
+.dmr-picker-left {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+.dmr-picker-left > .settings-input {
+  height: 30px;
+}
+.dmr-picker-table {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.dmr-picker-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.dmr-picker-table tbody tr {
+  cursor: pointer;
+}
+.dmr-picker-table tr.dmr-ticked td {
+  font-weight: 600;
+}
+.dmr-tick {
+  width: 46px;
+}
+.dmr-tick label {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+.dmr-contents {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.dmr-tag {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 10px;
+  font-size: 9.5px;
+  font-weight: 600;
+  background: var(--accent-soft);
+  color: var(--text-secondary);
+}
+.dmr-tag-batch {
+  background: var(--primary);
+  color: #fff;
+}
+.dmr-picker-side {
+  overflow-y: auto;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-alt);
+  font-size: 12px;
+}
+.dmr-picker-side h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+.dmr-picker-side h4 {
+  margin: 10px 0 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.dmr-picker-side dl {
+  display: grid;
+  grid-template-columns: 70px 1fr;
+  gap: 2px 8px;
+  margin: 0;
+}
+.dmr-picker-side dt {
+  color: var(--text-secondary);
+}
+.dmr-picker-side dd {
+  margin: 0;
+}
+.dmr-batches {
+  margin-left: 18px;
+}
+.dmr-batch-name {
+  font-weight: 700;
+  min-width: 64px;
+}
+
+@media (max-width: 1100px) {
+  .dmr-editor-body {
+    grid-template-columns: 180px 1fr;
+    overflow-y: auto;
+  }
+  .dmr-groups {
+    grid-column: 1 / -1;
+    padding-left: 0;
+    border-left: 0;
+  }
+  .dmr-picker-body {
+    grid-template-columns: 1fr;
+  }
+}
