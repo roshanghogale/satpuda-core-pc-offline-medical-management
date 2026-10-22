@@ -5349,7 +5349,13 @@ def system_action(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, A
         from core.heavy_job import get_status
 
         st = get_status()
-        return {"ok": True, **st}
+        out = {"ok": True, **st}
+        if str(st.get("action") or "") in ("download_offline", "prepare_offline"):
+            # The store copy's real figures (core/copy_progress.py) for the bar.
+            from core.copy_progress import current
+
+            out["copy"] = current()
+        return out
     if action == "admin_status":
         from core.admin_gate import status as _admin_status
 

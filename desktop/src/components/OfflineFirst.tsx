@@ -2,6 +2,7 @@
  *  switch-over an Online PC makes by itself on its first start of this version. */
 import { useEffect, useRef, useState } from 'react'
 import { getApiBase } from '../api'
+import { copyFigures, timeLeftText, type CopyFigures } from '../wholesale/mode'
 
 type OfStatus = {
   ok?: boolean
@@ -122,12 +123,38 @@ export function OfflineFirstPill() {
   )
 }
 
-type Progress = { running?: boolean; steps?: string[]; result?: unknown; error?: string | null }
+type Progress = { running?: boolean; steps?: string[]; result?: unknown; error?: string | null; copy?: unknown }
+
+/** The bar for a store copy: the engine's real figures (records copied of the server's
+ *  total, time left), on the offline-first switch and Settings > Online -> Offline. */
+export function CopyProgressBar({ pct, label, etaS, secs }: { pct: number; label: string; etaS?: number | null; secs?: number }) {
+  const left = timeLeftText(etaS)
+  return (
+    <div className="of-progress" aria-label="Progress">
+      <div className="of-progress-bar" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+        <div className="of-progress-fill" style={{ width: `${pct}%` }} />
+      </div>
+      <div className="of-progress-text">
+        <b>{pct}%</b>
+        <span>{label || 'Starting…'}</span>
+        <span className="muted">
+          {left ? `${left} · ` : ''}
+          {secs != null ? `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}` : ''}
+        </span>
+      </div>
+    </div>
+  )
+}
 
 /** How far the switch-over is, from the step lines the engine reports (owner, 18 Oct 2026:
  *  "no progress bar"). The download of the store's lists is most of the time: "Downloading
  *  sales (3/13)…" says where in it we are. Never goes back. */
-export function switchProgress(steps: string[]): { pct: number; label: string } {
+export function switchProgress(
+  steps: string[],
+  copy?: CopyFigures | null,
+): { pct: number; label: string; etaS: number | null } {
+  // The engine counts the records it copies against the server's totals: use that.
+  if (copy) return { pct: Math.round(copy.pct), label: copy.label, etaS: copy.eta_s ?? null }
   let pct = 0
   let label = ''
   const fixed: [RegExp, number][] = [
@@ -161,7 +188,7 @@ export function switchProgress(steps: string[]): { pct: number; label: string } 
     }
     if (p > pct) pct = p
   }
-  return { pct: Math.min(100, Math.round(pct)), label }
+  return { pct: Math.min(100, Math.round(pct)), label, etaS: null }
 }
 
 /** First start of this version on an Online PC: copy the store and switch to offline-first.
@@ -170,6 +197,7 @@ export function switchProgress(steps: string[]): { pct: number; label: string } 
 export function OfflineFirstAutoSwitch({ enabled }: { enabled: boolean }) {
   const [state, setState] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
   const [steps, setSteps] = useState<string[]>([])
+  const [copy, setCopy] = useState<CopyFigures | null>(null)
   const [error, setError] = useState('')
   const [startedAt, setStartedAt] = useState(0)
   const [now, setNow] = useState(Date.now())
@@ -200,6 +228,7 @@ export function OfflineFirstAutoSwitch({ enabled }: { enabled: boolean }) {
           const p = await getJ<Progress>('/api/offline-first/activate/progress')
           if (!alive) return
           setSteps(p.steps || [])
+          setCopy(copyFigures(p.copy))
           if (!p.running) {
             if (p.error) {
               setError(p.error)
@@ -238,20 +267,9 @@ export function OfflineFirstAutoSwitch({ enabled }: { enabled: boolean }) {
             </p>
           ) : null}
           {state !== 'error' ? (() => {
-            const pr = state === 'done' ? { pct: 100, label: 'Done' } : switchProgress(steps)
+            const pr = state === 'done' ? { pct: 100, label: 'Done', etaS: null } : switchProgress(steps, copy)
             const secs = startedAt ? Math.max(0, Math.round((now - startedAt) / 1000)) : 0
-            return (
-              <div className="of-progress" aria-label="Progress">
-                <div className="of-progress-bar" role="progressbar" aria-valuenow={pr.pct} aria-valuemin={0} aria-valuemax={100}>
-                  <div className="of-progress-fill" style={{ width: `${pr.pct}%` }} />
-                </div>
-                <div className="of-progress-text">
-                  <b>{pr.pct}%</b>
-                  <span>{pr.label || 'Starting…'}</span>
-                  <span className="muted">{Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}</span>
-                </div>
-              </div>
-            )
+            return <CopyProgressBar pct={pr.pct} label={pr.label} etaS={pr.etaS} secs={secs} />
           })() : null}
           {state === 'done' ? <p>Done. Opening the store…</p> : null}
           {state === 'error' ? (

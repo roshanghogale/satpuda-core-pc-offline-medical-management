@@ -187,7 +187,44 @@ export async function switchStore(mode: BusinessMode): Promise<StoreSwitchAnswer
   }
 }
 
-export type SwitchProgress = { running: boolean; steps: string[]; error: string | null }
+/** The store copy's real figures from the engine (core/copy_progress.py). */
+export type CopyFigures = {
+  pct: number
+  label: string
+  collection?: string
+  done?: number
+  total?: number
+  /** Seconds left, once there is enough to estimate it. */
+  eta_s?: number | null
+  elapsed_s?: number
+}
+
+export type SwitchProgress = { running: boolean; steps: string[]; error: string | null; copy: CopyFigures | null }
+
+export function copyFigures(raw: unknown): CopyFigures | null {
+  if (!raw || typeof raw !== 'object') return null
+  const d = raw as Record<string, unknown>
+  const pct = Number(d.pct)
+  if (!Number.isFinite(pct)) return null
+  const eta = d.eta_s == null ? null : Number(d.eta_s)
+  return {
+    pct: Math.max(0, Math.min(100, pct)),
+    label: String(d.label || ''),
+    collection: d.collection ? String(d.collection) : undefined,
+    done: Number(d.done) || 0,
+    total: Number(d.total) || 0,
+    eta_s: eta != null && Number.isFinite(eta) ? eta : null,
+    elapsed_s: Number(d.elapsed_s) || 0,
+  }
+}
+
+/** "about 3 min left" / "less than a minute left" ('' when not known yet). */
+export function timeLeftText(etaS: number | null | undefined): string {
+  if (etaS == null || !Number.isFinite(etaS)) return ''
+  if (etaS < 45) return 'less than a minute left'
+  const m = Math.round(etaS / 60)
+  return m <= 1 ? 'about 1 min left' : `about ${m} min left`
+}
 
 /** The copy job's progress (GET /api/offline-first/activate/progress). */
 export async function fetchSwitchProgress(path = '/api/offline-first/activate/progress'): Promise<SwitchProgress> {
@@ -197,6 +234,7 @@ export async function fetchSwitchProgress(path = '/api/offline-first/activate/pr
     running: d.running === true,
     steps: Array.isArray(d.steps) ? d.steps.map((s: unknown) => String(s)) : [],
     error: d.error ? String(d.error) : null,
+    copy: copyFigures(d.copy),
   }
 }
 

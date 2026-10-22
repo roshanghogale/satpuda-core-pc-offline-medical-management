@@ -169,12 +169,16 @@ def pull_master_incremental() -> Tuple[bool, str, int]:
                 break
             total += apply_remote_docs(docs, replace=False)
             last = docs[-1]
+            before = (since, after_id)
             after_id = int(last.get("id") or last.get("local_id") or 0)
             ts = str(last.get("updated_at") or "")
             if ts:
                 since = ts
             if len(docs) < 500:
                 break
+            if (since, after_id) == before:
+                # The same page again: asking once more would never end.
+                raise RuntimeError("the master list stopped moving forward")
         if since:
             _save_watermark(since)
         return True, f"Pulled {total} master row updates.", total

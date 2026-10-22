@@ -88,8 +88,13 @@ def handle_get(path: str, conn) -> Optional[tuple[int, dict]]:
         out["last_cycle"] = w.last if w else None
         return 200, out
     if path == "/api/offline-first/activate/progress":
+        from core.copy_progress import current
+
         with _job_lock:
-            return 200, {"ok": True, **{k: v for k, v in _job.items()}}
+            out = {"ok": True, **{k: v for k, v in _job.items()}}
+        # The copy's real figures: percent, "x of y", time left (core/copy_progress.py).
+        out["copy"] = current() if out.get("running") or out.get("result") else None
+        return 200, out
     return None
 
 

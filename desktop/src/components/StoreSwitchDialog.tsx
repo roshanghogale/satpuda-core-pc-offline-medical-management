@@ -159,6 +159,7 @@ function StoreSwitchRunner({ job, fallbackCurrent }: { job: StoreSwitchJob; fall
   const [phase, setPhase] = useState<Phase>(job.confirm ? 'confirm' : 'working')
   const [copying, setCopying] = useState(false)
   const [steps, setSteps] = useState<string[]>([])
+  const [copyPct, setCopyPct] = useState<number | null>(null)
   const [error, setError] = useState('')
   const [target, setTarget] = useState(job.target)
   const [kind, setKind] = useState<StoreKind | null>(job.kind ?? null)
@@ -207,7 +208,8 @@ function StoreSwitchRunner({ job, fallbackCurrent }: { job: StoreSwitchJob; fall
     if (!copying) {
       next = creep(6, 92, secs, 2.5)
     } else if (stage === 'copy') {
-      const f = copyFraction(steps)
+      // The engine's own count of records copied, when it sends one; else the list lines.
+      const f = copyPct != null ? copyPct / 100 : copyFraction(steps)
       next = Math.max(creep(4, 68, secs, 45), f == null ? 0 : 4 + 64 * f)
     } else if (stage === 'register') {
       next = creep(70, 88, secs, 6)
@@ -215,7 +217,7 @@ function StoreSwitchRunner({ job, fallbackCurrent }: { job: StoreSwitchJob; fall
       next = creep(90, 97, secs, 2)
     }
     setPct((p) => Math.max(p, next))
-  }, [now, phase, copying, stage, steps, stepStartedAt])
+  }, [now, phase, copying, stage, steps, stepStartedAt, copyPct])
 
   const go = useCallback(async () => {
     const mine = ++run.current
@@ -223,6 +225,7 @@ function StoreSwitchRunner({ job, fallbackCurrent }: { job: StoreSwitchJob; fall
     setPhase('working')
     setError('')
     setSteps([])
+    setCopyPct(null)
     setCopying(false)
     setPct(0)
     setStartedAt(t0)
@@ -247,6 +250,7 @@ function StoreSwitchRunner({ job, fallbackCurrent }: { job: StoreSwitchJob; fall
           }
           if (!stillMine()) return
           setSteps(p.steps)
+          setCopyPct(p.copy ? p.copy.pct : null)
           if (!p.running) {
             if (p.error) throw new Error(p.error)
             break

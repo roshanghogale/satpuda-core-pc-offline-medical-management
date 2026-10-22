@@ -693,47 +693,18 @@ def _rows_from_store(kind: str, *, limit: int = 10000) -> list[dict]:
 
 
 def _pull_sync_pages(collection: str, *, limit: int = 8000) -> list[dict]:
-    """Fallback: full store sync pull with keyset pagination."""
-    from core import server_api as api
+    """Fallback: full store sync pull with keyset pagination.
+
+    Paged with server_live._iter_collection_pages (updated_at + id). This loop used to
+    send after_id alone, which the server answers with the first page again (22 Oct 2026)."""
+    from core.server_live import _iter_collection_pages
 
     token = _token()
     all_docs: list[dict] = []
-    after_id = None
-    seen: set[str] = set()
-    page_size = 5000
-    while len(all_docs) < limit:
-        docs, _ = api.pull_collection(
-            token,
-            collection,
-            after_id=after_id,
-            include_deleted=False,
-            limit=page_size,
-            timeout=90.0,
-        )
-        if not docs:
+    for docs in _iter_collection_pages(token, collection, since=None, include_deleted=False):
+        all_docs.extend(d for d in docs if not d.get("deleted"))
+        if len(all_docs) >= limit:
             break
-        new_count = 0
-        last_id = after_id
-        for d in docs:
-            if not isinstance(d, dict) or d.get("deleted"):
-                continue
-            raw = d.get("id") if d.get("id") is not None else d.get("local_id")
-            key = str(raw) if raw is not None else ""
-            if key and key in seen:
-                continue
-            if key:
-                seen.add(key)
-            all_docs.append(d)
-            new_count += 1
-            try:
-                last_id = int(raw)
-            except (TypeError, ValueError):
-                pass
-        if len(docs) < page_size or new_count == 0:
-            break
-        if last_id is None or last_id == after_id:
-            break
-        after_id = last_id
     return all_docs
 
 
