@@ -40,6 +40,7 @@ import { DataSystemPanel, ImportPanel } from './settings/ImportDataPanels'
 import { AlertPrefsPanel } from './settings/AlertPrefsPanel'
 import { VoiceCommandsPanel } from '../voice/VoiceCommandsPanel'
 import { useVoiceEnabled } from '../voice/voiceEnabled'
+import { GstReportsPage } from './GstReportsPage'
 import { registerVoicePage, sendToPage, setVoicePlace, type VoiceHandler } from '../voice/voiceBus'
 import {
   RestartAppDialog,
@@ -140,6 +141,16 @@ export function SettingsPage({
   useEffect(() => {
     if (initialTab) setTabId(initialTab)
   }, [initialTab])
+
+  // A button inside a panel (Pharmacy Profile -> "GST Reports") opens another tab.
+  useEffect(() => {
+    const onTab = (e: Event) => {
+      const t = (e as CustomEvent).detail?.tab
+      if (t === 'gst_reports') setTabId('gst_reports')
+    }
+    window.addEventListener('satpuda:settings-tab', onTab)
+    return () => window.removeEventListener('satpuda:settings-tab', onTab)
+  }, [])
 
   useEffect(() => {
     if (initialToggle) setToggleId(initialToggle)
@@ -961,6 +972,10 @@ export function SettingsPage({
           }
         />
       )
+    }
+
+    if (tabId === 'gst_reports') {
+      return <GstReportsPage active={active && tabId === 'gst_reports'} />
     }
 
     if (tabId === 'ledger') {

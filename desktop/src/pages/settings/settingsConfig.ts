@@ -13,6 +13,7 @@ export type SettingsTabId =
   | 'payment'
   | 'ledger'
   | 'reorder'
+  | 'gst_reports'
   | 'shortcuts'
 
 export type SectionDef = {
@@ -191,6 +192,14 @@ export const SETTINGS_TABS: TabDef[] = [
       { id: 'by_supplier', label: 'Load by Supplier' },
       { id: 'defaults', label: 'Reorder Defaults…' },
     ],
+  },
+  {
+    // Owner, 22 Oct 2026: GST reports live in Settings, a short list in plain words
+    // (pages/GstReportsPage.tsx); the screen gets the full width.
+    id: 'gst_reports',
+    label: 'GST Reports',
+    ctrlDigit: null,
+    layout: 'scroll',
   },
   {
     id: 'shortcuts',

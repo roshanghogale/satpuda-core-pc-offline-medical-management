@@ -178,7 +178,7 @@ export function HomePage({ onNavigate, syncRefreshNonce = 0, active, storeName =
       else if (k === 'p') onNavigate('purchase')
       else if (k === 'i') onNavigate('inventory')
       else if (k === 'e') setExportOpen(true)
-      else if (k === 'g') onNavigate('gst_reports')
+      else if (k === 'g') onNavigate('settings', { settingsTab: 'gst_reports' })
     },
   })
 
@@ -331,7 +331,7 @@ export function HomePage({ onNavigate, syncRefreshNonce = 0, active, storeName =
                   type="button"
                   className={`qa-btn qa-${qaStyle(a.style)}`}
                   data-nav-order={i + 1}
-                  onClick={() => (a.key === 'gst_reports' ? onNavigate('gst_reports') : handleQuickAction(a.key, onNavigate))}
+                  onClick={() => (a.key === 'gst_reports' ? onNavigate('settings', { settingsTab: 'gst_reports' }) : handleQuickAction(a.key, onNavigate))}
                 >
                   <QuickActionIcon actionKey={a.key} size={16} />
                   <span className="qa-label">{a.label}</span>
