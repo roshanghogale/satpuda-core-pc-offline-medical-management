@@ -13,6 +13,7 @@ Nothing here writes to the store.
 """
 from __future__ import annotations
 
+import threading
 import time
 from collections import defaultdict
 from decimal import ROUND_HALF_UP, Decimal
@@ -66,11 +67,20 @@ def section(title: str, columns: list, rows: list, sums=(), nums=(), header=None
 
 _CACHE: dict = {}
 _CACHE_SECONDS = 45
+# The screen asks for its list and its report at once, and the engine answers each on its own
+# thread over the one SQLite connection: two reads at once on it failed ("bad parameter or other
+# API misuse") or came back short. One GST read at a time.
+_LOCK = threading.RLock()
 
 
 def period(conn, start: str, end: str) -> gr.Period:
     """The period's bills, notes and supplier bills. Switching reports on the screen reads
     the store once: the same dates within a few seconds and no write since reuse it."""
+    with _LOCK:
+        return _period(conn, start, end)
+
+
+def _period(conn, start: str, end: str) -> gr.Period:
     key = (id(conn), gr._iso(start), gr._iso(end))
     try:
         changes = conn.total_changes
@@ -1145,11 +1155,75 @@ SCREEN = [
 GSTR1_KEYS = {k for k, _, g, _, _ in SCREEN if g == "GSTR-1"}
 
 
-def catalogue(conn=None) -> list:
+# Owner, 22 Oct 2026: "sort them properly so they don't overwhelm the user, and hide what
+# retail / wholesale do not need". Three sections: what is filed every month, the registers a
+# CA asks for, and the rest folded away. A table that would be empty this month (b2b in a
+# retail shop with no registered buyer ...) leaves "Monthly filing" for "More reports".
+MONTHLY, REGISTERS, MORE = "Monthly filing", "Registers for your CA", "More reports"
+REGISTER_KEYS = ["sale", "sale_return", "purchase", "purchase_return"]
+LAYOUT = {
+    # store: (monthly [(key, needs)], more) -- needs: the count that must be > 0, or ""
+    "retail": ([("gstr3b", ""), ("b2cs", ""), ("hsn_sale_net", ""), ("b2b", "registered_bills"),
+                ("cdnr", "registered_returns")],
+               ["hsn_sale", "hsn_sale_return", "purchase_b2b", "hsn_purchase", "dbnr", "hsn_purchase_return",
+                "hsn_purchase_net", "purchase_party", "gstr1_club", "gstr2_club", "gstr9"]),
+    "wholesale": ([("gstr3b", ""), ("b2b", ""), ("cdnr", ""), ("hsn_sale_net", ""), ("b2cs", "unregistered_bills")],
+                  ["purchase_b2b", "purchase_party", "dbnr", "hsn_sale", "hsn_sale_return", "hsn_purchase",
+                   "hsn_purchase_return", "hsn_purchase_net", "gstr1_club", "gstr2_club", "gstr9"]),
+    "composition": ([("composition_sale", ""), ("composition_purchase", "")], ["gstr4"]),
+}
+
+
+def period_counts(p: gr.Period) -> dict:
+    """What decides the conditional items, and the small counts beside the list."""
+    reg = [b for b in p.bills if b.gstin]
+    return {"bills": len(p.bills), "registered_bills": len(reg),
+            "unregistered_bills": sum(1 for b in p.bills if not b.gstin and b.lines),
+            "returns": len(p.notes),
+            "registered_returns": sum(1 for n in p.notes if n.bill is not None and n.bill.gstin),
+            "purchases": len(p.purchases), "purchase_returns": len(p.purchase_returns),
+            "registered_purchase_returns": sum(1 for r in p.purchase_returns if r.purchase and r.purchase.gstin)}
+
+
+ITEM_COUNT = {"sale": "bills", "sale_return": "returns", "purchase": "purchases",
+              "purchase_return": "purchase_returns", "b2b": "registered_bills", "cdnr": "registered_returns",
+              "b2cs": "unregistered_bills", "dbnr": "registered_purchase_returns"}
+
+
+def catalogue(conn=None, start: str = "", end: str = "", wholesale: Optional[bool] = None) -> dict:
+    """The screen's list for this store and period: {kind, counts, reports: [{key, title,
+    section, json, count}]} -- section Monthly filing / Registers for your CA / More reports."""
+    with _LOCK:
+        return _catalogue(conn, start, end, wholesale)
+
+
+def _catalogue(conn, start: str, end: str, wholesale: Optional[bool]) -> dict:
     comp = is_composition(conn) if conn is not None else False
-    want = {"both", "composition" if comp else "regular"}
-    return [{"key": k, "title": t, "group": g, "json": k in GSTR1_KEYS and not comp}
-            for k, t, g, who, _ in SCREEN if who in want]
+    if wholesale is None:
+        try:
+            from core.wholesale_mode import is_wholesale
+
+            wholesale = bool(is_wholesale(conn))
+        except Exception:
+            wholesale = False
+    kind = "composition" if comp else ("wholesale" if wholesale else "retail")
+    counts: dict = {}
+    if conn is not None and start and end:
+        counts = period_counts(period(conn, start, end))
+    titles = {k: t for k, t, _, _, _ in SCREEN}
+    monthly, more = LAYOUT[kind]
+    shown, folded = [], []
+    for key, needs in monthly:
+        # Unknown counts (no period asked) keep the item where it belongs.
+        (shown if not needs or not counts or counts.get(needs, 0) > 0 else folded).append(key)
+    rows = ([(k, MONTHLY) for k in shown] + [(k, REGISTERS) for k in REGISTER_KEYS]
+            + [(k, MORE) for k in folded + more])
+
+    def item(key: str, sec: str) -> dict:
+        return {"key": key, "title": titles[key], "section": sec, "json": key in GSTR1_KEYS and not comp,
+                "count": int(counts.get(ITEM_COUNT.get(key, ""), 0) or 0)}
+
+    return {"kind": kind, "composition": comp, "counts": counts, "reports": [item(k, s) for k, s in rows]}
 
 
 def _find(key: str):
@@ -1162,6 +1236,11 @@ def _find(key: str):
 
 def build(conn, key: str, start: str, end: str, comp_rate: float = 1.0) -> dict:
     """One report of the screen for one period (a SIMPLE key, or any of Marg's list)."""
+    with _LOCK:
+        return _build(conn, key, start, end, comp_rate)
+
+
+def _build(conn, key: str, start: str, end: str, comp_rate: float = 1.0) -> dict:
     screen = {k: (t, g, quiet) for k, t, g, _, quiet in SCREEN}
     simple = {k: (t, h, b) for k, t, h, b, _ in SIMPLE}
     simple.update(HIDDEN)
@@ -1313,7 +1392,8 @@ def export(conn, body: dict) -> dict:
 
     fmt = str(body.get("format") or "").lower()
     if fmt == "json":
-        return gr.export(conn, {"from": body.get("from"), "to": body.get("to"), "format": "json"})
+        with _LOCK:
+            return gr.export(conn, {"from": body.get("from"), "to": body.get("to"), "format": "json"})
     rep = build(conn, str(body.get("report") or ""), str(body.get("from") or ""), str(body.get("to") or ""),
                 float(body.get("comp_rate") or 1))
     stem = file_stem(rep)

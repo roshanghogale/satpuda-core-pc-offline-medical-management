@@ -350,7 +350,7 @@ class CompositionAndAnnual(_Store):
 
 class EveryReport(_Store):
     def test_every_report_builds_and_its_totals_are_its_rows(self):
-        for item in gs.full_catalogue() + gs.catalogue() + [{"key": "check_bills"}]:
+        for item in gs.full_catalogue() + gs.catalogue()["reports"] + [{"key": "check_bills"}]:
             rep = self.rep(item["key"])
             self.assertTrue(rep["sections"], item["key"])
             for sec in rep["sections"]:
@@ -362,7 +362,7 @@ class EveryReport(_Store):
                                                msg=(item["key"], sec["title"], sec["columns"][j]))
 
     def test_every_report_goes_to_csv_excel_and_pdf(self):
-        for item in gs.full_catalogue() + gs.catalogue():
+        for item in gs.full_catalogue() + gs.catalogue()["reports"]:
             for fmt in ("csv", "xlsx"):
                 res = gs.export(self.conn, {"report": item["key"], "from": self.FROM, "to": self.TO, "format": fmt})
                 self.assertTrue(res["ok"] and res["content_base64"], (item["key"], fmt))
@@ -385,7 +385,7 @@ class EveryReport(_Store):
 
     def test_nothing_is_written(self):
         before = self.conn.total_changes
-        for item in gs.full_catalogue() + gs.catalogue(self.conn):
+        for item in gs.full_catalogue() + gs.catalogue(self.conn)["reports"]:
             self.rep(item["key"])
         self.assertEqual(before, self.conn.total_changes)
 
@@ -395,37 +395,74 @@ if __name__ == "__main__":
 
 
 class TheScreenList(_Store):
-    """Owner, 22 Oct 2026: "use the marg's names" -- Marg's GST menu, named as Marg names it."""
+    """Owner, 22 Oct 2026: Marg's names, sorted so they do not overwhelm -- Monthly filing,
+    Registers for your CA, More reports -- and retail / wholesale / composition each their own."""
 
-    def test_a_regular_shop_sees_margs_list_in_margs_words(self):
-        titles = [i["title"] for i in gs.catalogue(self.conn)]
-        self.assertEqual([
-            "GSTR-3b", "Sale (GSTR-1) (Detail)", "Sale Return (GSTR-1) (Detail)", "Sale (GSTR-1) (b2b)",
-            "Sale (GSTR-1) (b2cs)", "HSN Sale (GSTR-1) (hsn)", "Sale Return (GSTR-1) (cdnr)",
-            "HSN Sale Return (GSTR-1) (hsn)", "HSN Sale - Sale Return (GSTR-1) (hsn)", "Sale GSTR-1 (club)",
-            "Purchase (GSTR-2) (Detail)", "Purchase Return (GSTR-2) (Detail)", "Purchase (GSTR-2) (b2b)",
-            "HSN Purchase (GSTR-2) (hsn)", "Purchase Return (GSTR-2) (dbnr)", "HSN Purchase Rtn (GSTR-2) (hsn)",
-            "HSN Purchase - Purchase Return (GSTR-2) (hsn)", "Purchase (GSTR-2) (Party Wise)",
-            "Purchase GSTR-2 (club)", "Annual GSTR"], titles)
-        by = {i["key"]: i for i in gs.catalogue(self.conn)}
-        self.assertTrue(by["sale"]["json"] and by["b2cs"]["json"])
-        self.assertFalse(by["purchase"]["json"] or by["gstr3b"]["json"])
-        self.assertEqual("Sale (GSTR-1) (Detail)", self.rep("sale")["title"])
-        self.assertEqual(self.rep("C")["sections"], self.rep("sale")["sections"])
+    REGISTERS = ["Sale (GSTR-1) (Detail)", "Sale Return (GSTR-1) (Detail)", "Purchase (GSTR-2) (Detail)",
+                 "Purchase Return (GSTR-2) (Detail)"]
 
-    def test_a_composition_shop_sees_composition_and_no_gstr3b_or_json(self):
+    def lists(self, start=None, end=None, wholesale=False):
+        cat = gs.catalogue(self.conn, start or self.FROM, end or self.TO, wholesale)
+        by = {}
+        for i in cat["reports"]:
+            by.setdefault(i["section"], []).append(i["title"])
+        return cat, by
+
+    def test_a_retail_month_with_registered_buyers(self):
+        cat, by = self.lists()
+        self.assertEqual("retail", cat["kind"])
+        self.assertEqual(["GSTR-3b", "Sale (GSTR-1) (b2cs)", "HSN Sale - Sale Return (GSTR-1) (hsn)",
+                          "Sale (GSTR-1) (b2b)", "Sale Return (GSTR-1) (cdnr)"], by["Monthly filing"])
+        self.assertEqual(self.REGISTERS, by["Registers for your CA"])
+        self.assertEqual(["HSN Sale (GSTR-1) (hsn)", "HSN Sale Return (GSTR-1) (hsn)", "Purchase (GSTR-2) (b2b)",
+                          "HSN Purchase (GSTR-2) (hsn)", "Purchase Return (GSTR-2) (dbnr)",
+                          "HSN Purchase Rtn (GSTR-2) (hsn)", "HSN Purchase - Purchase Return (GSTR-2) (hsn)",
+                          "Purchase (GSTR-2) (Party Wise)", "Sale GSTR-1 (club)", "Purchase GSTR-2 (club)",
+                          "Annual GSTR"], by["More reports"])
+        items = {i["key"]: i for i in cat["reports"]}
+        self.assertEqual((5, 2, 3, 1), (items["sale"]["count"], items["sale_return"]["count"],
+                                        items["b2b"]["count"], items["cdnr"]["count"]))
+        self.assertTrue(items["b2cs"]["json"] and items["sale"]["json"])
+        self.assertFalse(items["purchase"]["json"] or items["gstr3b"]["json"])
+
+    def test_a_retail_month_without_registered_buyers_folds_b2b_and_cdnr(self):
+        cat, by = self.lists("2026-08-01", "2026-08-31")
+        self.assertEqual(["GSTR-3b", "Sale (GSTR-1) (b2cs)", "HSN Sale - Sale Return (GSTR-1) (hsn)"],
+                         by["Monthly filing"])
+        self.assertEqual(["Sale (GSTR-1) (b2b)", "Sale Return (GSTR-1) (cdnr)"], by["More reports"][:2])
+
+    def test_a_wholesale_store(self):
+        cat, by = self.lists(wholesale=True)
+        self.assertEqual("wholesale", cat["kind"])
+        self.assertEqual(["GSTR-3b", "Sale (GSTR-1) (b2b)", "Sale Return (GSTR-1) (cdnr)",
+                          "HSN Sale - Sale Return (GSTR-1) (hsn)", "Sale (GSTR-1) (b2cs)"], by["Monthly filing"])
+        self.assertEqual(self.REGISTERS, by["Registers for your CA"])
+        self.assertEqual(["Purchase (GSTR-2) (b2b)", "Purchase (GSTR-2) (Party Wise)",
+                          "Purchase Return (GSTR-2) (dbnr)"], by["More reports"][:3])
+        # only registered buyers in these two days: b2cs folds away, still reachable
+        _, only_b2b = self.lists("2026-09-07", "2026-09-08", wholesale=True)
+        self.assertNotIn("Sale (GSTR-1) (b2cs)", only_b2b["Monthly filing"])
+        self.assertEqual("Sale (GSTR-1) (b2cs)", only_b2b["More reports"][0])
+
+    def test_a_composition_dealer(self):
         from core.bill_heading import save_bill_heading
 
         save_bill_heading(self.conn, "bill_of_supply", "composition")
-        items = gs.catalogue(self.conn)
-        titles = [i["title"] for i in items]
-        for t in ("Sale - Sale Return Composition GST", "Purchase Composition GST", "Annual GSTR4"):
-            self.assertIn(t, titles)
-        for t in ("GSTR-3b", "Sale (GSTR-1) (b2b)", "Annual GSTR"):
-            self.assertNotIn(t, titles)
-        self.assertFalse(any(i["json"] for i in items))
+        for ws in (False, True):
+            cat, by = self.lists(wholesale=ws)
+            self.assertEqual("composition", cat["kind"])
+            self.assertEqual(["Sale - Sale Return Composition GST", "Purchase Composition GST"], by["Monthly filing"])
+            self.assertEqual(self.REGISTERS, by["Registers for your CA"])
+            self.assertEqual(["Annual GSTR4"], by["More reports"])
+            self.assertFalse(any(i["json"] for i in cat["reports"]))
         save_bill_heading(self.conn, "bill_of_supply", "exempt")
-        self.assertNotIn("Annual GSTR4", [i["title"] for i in gs.catalogue(self.conn)])
+        self.assertEqual("retail", self.lists()[0]["kind"])
+
+    def test_every_listed_report_builds_under_its_marg_name(self):
+        for ws in (False, True):
+            for i in self.lists(wholesale=ws)[0]["reports"]:
+                self.assertEqual(i["title"], self.rep(i["key"])["title"])
+        self.assertEqual(self.rep("C")["sections"], self.rep("sale")["sections"])
 
     def test_gstr1_summary_has_its_sections_and_matches_the_tables(self):
         rep = self.rep("gstr1")

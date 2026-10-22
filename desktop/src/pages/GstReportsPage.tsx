@@ -1,15 +1,18 @@
 /** Settings > GST Reports (owner, 22 Oct 2026: "in the settings", "simple", "use the marg's
- *  names"). Marg's GST menu named as Marg names it, under plain GSTR-3B / GSTR-1 / GSTR-2 /
- *  Annual headers -- the Detail items are the registers in Marg's GST upload layout -- and for
- *  a composition dealer (Bill of Supply, composition) the composition reports instead of
- *  GSTR-3b and the GSTR-1 JSON. A month (or custom dates), and Excel / CSV / PDF / Print.
+ *  names", "sort them so they don't overwhelm"). Marg's GST reports under Marg's names in
+ *  three sections: Monthly filing, Registers for your CA (the Detail registers in Marg's GST
+ *  upload layout) and More reports (folded). A retail store, a wholesale store and a
+ *  composition dealer (Bill of Supply, composition) each get their own list from the engine;
+ *  a table that is empty this month leaves Monthly filing for More reports. A month (or
+ *  custom dates), and Excel / CSV / PDF / Print.
  *
  *  Every figure comes from the engine (core/gst_screen.py on core/gst_reports.py), which
  *  takes each bill's tax out the way the printed bill does -- the tables add up to the bills.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { getApiBase } from '../api'
 import { saveFileAndShow } from '../savedFiles'
+import { useBusinessMode } from '../wholesale/mode'
 import '../styles/gst-reports.css'
 
 type Cell = string | number
@@ -34,7 +37,18 @@ type Report = {
   counts: { bills: number; credit_notes: number; purchases: number; purchase_returns: number }
   checks: number
 }
-type Item = { key: string; title: string; group: string; json: boolean }
+type Item = { key: string; title: string; section: string; json: boolean; count: number }
+
+const MORE = 'More reports'
+const MORE_KEY = 'satpuda.gst.more_open'
+
+function readMoreOpen() {
+  try {
+    return window.localStorage.getItem(MORE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
 
 const pad = (n: number) => String(n).padStart(2, '0')
 const iso = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
@@ -107,7 +121,11 @@ function Table({ s }: { s: Section }) {
 
 export function GstReportsPage({ active }: { active: boolean }) {
   const [items, setItems] = useState<Item[]>([])
-  const [key, setKey] = useState('sale')
+  const [key, setKey] = useState('')
+  // Until the shop picks a report, the first Monthly filing item is the one shown.
+  const picked = useRef(false)
+  const [moreOpen, setMoreOpen] = useState(readMoreOpen)
+  const { isWholesale } = useBusinessMode()
   const [checking, setChecking] = useState(false)
   const [custom, setCustom] = useState(false)
   const [month, setMonth] = useState(lastMonth())
@@ -122,22 +140,42 @@ export function GstReportsPage({ active }: { active: boolean }) {
   const range = useMemo(() => (custom ? { from, to } : monthBounds(month)), [custom, month, from, to])
   const shownKey = checking ? 'check_bills' : key
 
-  // The list depends on the bill heading (composition or not): read it each time the tab opens.
+  // The list depends on the store (retail / wholesale), the bill heading (composition) and the
+  // month (b2b / cdnr / b2cs only when there are such bills): read it again when any changes.
   useEffect(() => {
     if (!active) return
-    fetch(`${getApiBase()}/api/reports/gst/catalogue`)
+    let alive = true
+    const q = new URLSearchParams({ from: range.from, to: range.to, mode: isWholesale ? 'wholesale' : 'retail' })
+    fetch(`${getApiBase()}/api/reports/gst/catalogue?${q}`)
       .then((r) => r.json())
       .then((d) => {
         if (d.ok === false) throw new Error(d.error || 'Could not read the GST report list')
+        if (!alive) return
         const list = d.reports as Item[]
         setItems(list)
-        setKey((k) => (list.some((i) => i.key === k) ? k : list[0]?.key || 'sale'))
+        setKey((k) => (picked.current && list.some((i) => i.key === k) ? k : list[0]?.key || 'sale'))
       })
-      .catch((e) => setErr(e instanceof Error ? e.message : String(e)))
-  }, [active])
+      .catch((e) => {
+        if (alive) setErr(e instanceof Error ? e.message : String(e))
+      })
+    return () => {
+      alive = false
+    }
+  }, [active, isWholesale, range.from, range.to, nonce])
+
+  const toggleMore = () => {
+    setMoreOpen((o) => {
+      try {
+        window.localStorage.setItem(MORE_KEY, o ? '0' : '1')
+      } catch {
+        /* the folded list just opens closed next time */
+      }
+      return !o
+    })
+  }
 
   useEffect(() => {
-    if (!active) return
+    if (!active || !shownKey) return
     let alive = true
     setBusy(true)
     setErr('')
@@ -235,19 +273,36 @@ export function GstReportsPage({ active }: { active: boolean }) {
 
       <div className="gst-main">
         <nav className="gst-list" aria-label="GST reports">
-          {items.map((i, n) => (
-            <div key={i.key}>
-              {n === 0 || items[n - 1].group !== i.group ? <div className="gst-group">{i.group}</div> : null}
-              <button type="button" className={`gst-item${i.key === key && !checking ? ' active' : ''}`}
-                onClick={() => {
-                  setKey(i.key)
-                  setChecking(false)
-                  setMsg('')
-                }}>
-                {i.title}
-              </button>
-            </div>
-          ))}
+          {items.map((i, n) => {
+            const head = n === 0 || items[n - 1].section !== i.section
+            const folded = i.section === MORE && !moreOpen
+            return (
+              <div key={i.key}>
+                {head ? (
+                  i.section === MORE ? (
+                    <button type="button" className="gst-group gst-group-toggle" aria-expanded={moreOpen}
+                      onClick={toggleMore}>
+                      {moreOpen ? '▾' : '▸'} {i.section} ({items.filter((x) => x.section === MORE).length})
+                    </button>
+                  ) : (
+                    <div className="gst-group">{i.section}</div>
+                  )
+                ) : null}
+                {folded && i.key !== key ? null : (
+                  <button type="button" className={`gst-item${i.key === key && !checking ? ' active' : ''}`}
+                    onClick={() => {
+                      picked.current = true
+                      setKey(i.key)
+                      setChecking(false)
+                      setMsg('')
+                    }}>
+                    {i.title}
+                    {i.count ? <span className="gst-count">{i.count}</span> : null}
+                  </button>
+                )}
+              </div>
+            )
+          })}
         </nav>
 
         <section className="gst-body">
