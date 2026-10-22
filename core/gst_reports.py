@@ -141,6 +141,8 @@ class Bill:
     wholesale: bool = False      # sales.invoice_mode = 'wholesale'
     buyer_gstin: str = ""        # sales.buyer_gstin: the GSTIN printed on the invoice
     buyer_pos: str = ""          # sales.place_of_supply (two-digit state code)
+    address: str = ""            # sales.customer_address (the GST registers' "Address")
+    credit: bool = False         # a due was left on the bill: CREDIT, else CASH
 
 
 @dataclass
@@ -162,6 +164,7 @@ class PurchaseLine:
     taxable: Decimal
     tax: Decimal
     known: bool
+    kind: str = ""           # the medicine type (Tablet -> UQC TBS), for the HSN tables
 
 
 @dataclass
@@ -179,6 +182,7 @@ class Purchase:
     value: Decimal
     lines: list
     lines_known: bool
+    address: str = ""
 
 
 @dataclass
@@ -191,6 +195,7 @@ class PurchaseReturn:
     tax: Decimal
     value: Decimal
     known: bool
+    lines: list = field(default_factory=list)       # [PurchaseLine] the goods sent back, priced as bought
 
 
 @dataclass
@@ -293,13 +298,15 @@ def _sale_head(conn) -> str:
             f"{_c(conn, 'sales', '', 'customer_name', chr(39) * 2)}, {_c(conn, 'sales', '', 'discount')}, "
             f"{_c(conn, 'sales', '', 'rounding')}, {_c(conn, 'sales', '', 'total_amount')}, "
             f"{_c(conn, 'sales', '', 'invoice_mode', chr(39) * 2)}, {_c(conn, 'sales', '', 'buyer_gstin', chr(39) * 2)}, "
-            f"{_c(conn, 'sales', '', 'place_of_supply', chr(39) * 2)} FROM sales")
+            f"{_c(conn, 'sales', '', 'place_of_supply', chr(39) * 2)}, "
+            f"{_c(conn, 'sales', '', 'customer_address', chr(39) * 2)}, {_c(conn, 'sales', '', 'due_amount')} FROM sales")
 
 
 def _head_bill(r, lines: dict) -> Bill:
     return Bill(int(r[0]), _shown_no(r[1]), _iso(r[2]), int(r[3] or 0), str(r[4]), _d(r[5]), _d(r[6]),
                 _d(r[7]), lines.get(int(r[0]), []), wholesale=_is_wholesale(r[8]),
-                buyer_gstin=clean_gstin(r[9]), buyer_pos=_state_code(r[10]))
+                buyer_gstin=clean_gstin(r[9]), buyer_pos=_state_code(r[10]),
+                address=" ".join(str(r[11] or "").split()), credit=_d(r[12]) > 0)
 
 
 def _is_wholesale(mode) -> bool:
@@ -356,7 +363,9 @@ def _bill_from_doc(doc: dict) -> Bill:
                 _iso(doc.get("bill_date")), int(doc.get("customer_id") or 0), str(doc.get("customer_name") or ""),
                 _d(doc.get("discount")), _d(doc.get("rounding")), _d(doc.get("total_amount")), lines,
                 wholesale=_is_wholesale(doc.get("invoice_mode")), buyer_gstin=clean_gstin(doc.get("buyer_gstin")),
-                buyer_pos=_state_code(doc.get("place_of_supply")))
+                buyer_pos=_state_code(doc.get("place_of_supply")),
+                address=" ".join(str(doc.get("customer_address") or "").split()),
+                credit=_d(doc.get("due_amount")) > 0)
 
 
 def _bills_online(start: str, end: str) -> list:
@@ -448,7 +457,7 @@ def _purchases_offline(conn, start: str, end: str) -> list:
                   {_c(conn, 'suppliers', 's', 'gstin', q)}, {_c(conn, 'purchases', 'p', 'bill_number', q)},
                   p.purchase_date, {_c(conn, 'purchases', 'p', 'subtotal')}, {_c(conn, 'purchases', 'p', 'cgst')},
                   {_c(conn, 'purchases', 'p', 'sgst')}, {_c(conn, 'purchases', 'p', 'total_gst')},
-                  {_c(conn, 'purchases', 'p', 'total_amount')}
+                  {_c(conn, 'purchases', 'p', 'total_amount')}, {_c(conn, 'suppliers', 's', 'address', q)}
            FROM purchases p LEFT JOIN suppliers s ON s.id = p.supplier_id
            WHERE {_live(conn, 'purchases', 'p')}
              AND p.purchase_date >= ? AND p.purchase_date <= ? ORDER BY p.purchase_date, p.id""",
@@ -464,12 +473,14 @@ def _purchases_offline(conn, start: str, end: str) -> list:
                       COALESCE({_raw(conn, 'purchase_items', 'pi', 'gst_amt')},
                                {_raw(conn, 'purchase_items', 'pi', 'gst_value')}),
                       COALESCE({_raw(conn, 'purchase_items', 'pi', 'item_amount')},
-                               {_raw(conn, 'purchase_items', 'pi', 'amount')}, 0)
+                               {_raw(conn, 'purchase_items', 'pi', 'amount')}, 0),
+                      COALESCE({_raw(conn, 'purchase_items', 'pi', 'type')}, {_raw(conn, 'medicines', 'm', 'type')}, '')
                FROM purchase_items pi LEFT JOIN medicines m ON m.id = pi.medicine_id
                WHERE pi.purchase_id=? ORDER BY pi.id""", (int(r[0]),)).fetchall()
         out.append(_purchase(int(r[0]), str(r[1]), str(r[2]), str(r[3]), str(r[4]), _iso(r[5]), r[6], r[7],
                              r[8], r[9], r[10], [dict(hsn=i[0], rate=i[1], qty=i[2], taxable=i[3], tax=i[4],
-                                                     amount=i[5]) for i in items]))
+                                                     amount=i[5], kind=i[6]) for i in items],
+                             address=" ".join(str(r[11] or "").split())))
     return out
 
 
@@ -481,10 +492,11 @@ def _purchases_online(start: str, end: str) -> list:
     from core import store_query_client as sq
     from core.server_crud import get_doc
 
-    sup = {}
+    sup, addr = {}, {}
     try:
         for s in (sq.list_suppliers(limit=5000) or {}).get("rows") or []:
             sup[int(s.get("id") or 0)] = clean_gstin(s.get("gstin"))
+            addr[int(s.get("id") or 0)] = " ".join(str(s.get("address") or "").split())
     except Exception:
         pass
     out = []
@@ -496,16 +508,19 @@ def _purchases_online(start: str, end: str) -> list:
             continue
         g = sup.get(int(doc.get("supplier_id") or 0)) or clean_gstin(doc.get("supplier_gstin"))
         items = [dict(hsn=i.get("hsn_code"), rate=i.get("gst_pct", i.get("gst_percent")), qty=i.get("qty"),
-                      taxable=i.get("taxable"), tax=i.get("gst_amt"), amount=i.get("item_amount") or i.get("amount"))
+                      taxable=i.get("taxable"), tax=i.get("gst_amt"), amount=i.get("item_amount") or i.get("amount"),
+                      kind=i.get("type"))
                  for i in doc.get("items") or [] if isinstance(i, dict)]
         out.append(_purchase(int(doc.get("id") or 0), str(doc.get("purchase_no") or ""),
                              str(doc.get("supplier_name") or ""), g, str(doc.get("bill_number") or ""),
                              _iso(doc.get("purchase_date")), doc.get("subtotal"), doc.get("cgst"), doc.get("sgst"),
-                             doc.get("total_gst"), doc.get("total_amount"), items))
+                             doc.get("total_gst"), doc.get("total_amount"), items,
+                             address=addr.get(int(doc.get("supplier_id") or 0), "")))
     return out
 
 
-def _purchase(pid, no, supplier, gstin, bill_number, when, subtotal, cgst, sgst, total_gst, total, items) -> Purchase:
+def _purchase(pid, no, supplier, gstin, bill_number, when, subtotal, cgst, sgst, total_gst, total, items,
+              address: str = "") -> Purchase:
     """A supplier bill as the supplier billed it: the header (its printed footer) is the ITC.
 
     Lines are used for the rate-wise split only when every line carries its taxable value;
@@ -522,13 +537,13 @@ def _purchase(pid, no, supplier, gstin, bill_number, when, subtotal, cgst, sgst,
             taxable, tax, ok = i.get("amount"), 0, True       # a 0% line: its amount is its value
         known = known and ok
         lines.append(PurchaseLine(_hsn(i.get("hsn")), rate, Decimal(str(i.get("qty") or 0)),
-                                  _d(taxable) if ok else ZERO, _d(tax) if ok else ZERO, ok))
+                                  _d(taxable) if ok else ZERO, _d(tax) if ok else ZERO, ok, str(i.get("kind") or "")))
     tax = _d(total_gst)
     c, s = _d(cgst), _d(sgst)
     if c + s != tax:
         c, s = split_tax(tax)
     return Purchase(pid, no, supplier, clean_gstin(gstin), bill_number, when, _d(subtotal), c, s, tax,
-                    _d(total), lines, known and bool(lines))
+                    _d(total), lines, known and bool(lines), address)
 
 
 def _purchase_returns_offline(conn, start: str, end: str, purchases_by_id: dict) -> list:
@@ -541,21 +556,29 @@ def _purchase_returns_offline(conn, start: str, end: str, purchases_by_id: dict)
            ORDER BY return_date, id""", (start, end)).fetchall()
     for r in rows:
         items = conn.execute(
-            f"""SELECT pri.medicine_id, COALESCE(pri.qty,0), pi.qty, pi.taxable, pi.gst_amt
+            f"""SELECT pri.medicine_id, COALESCE(pri.qty,0), pi.qty, pi.taxable, pi.gst_amt,
+                      COALESCE(NULLIF(pi.hsn, ''), {_raw(conn, 'medicines', 'm', 'hsn_code')}, ''),
+                      COALESCE(pi.rate, {_raw(conn, 'medicines', 'm', 'gst_percent')}, 0),
+                      COALESCE(NULLIF(pi.kind, ''), {_raw(conn, 'medicines', 'm', 'type')}, '')
                FROM purchase_return_items pri
                LEFT JOIN (SELECT medicine_id, SUM(COALESCE(qty,0)) AS qty,
                                  CASE WHEN MIN({_c(conn, 'purchase_items', '', 'taxable')}) > 0
                                       THEN SUM({_c(conn, 'purchase_items', '', 'taxable')}) END AS taxable,
-                                 SUM({_c(conn, 'purchase_items', '', 'gst_amt')}) AS gst_amt
+                                 SUM({_c(conn, 'purchase_items', '', 'gst_amt')}) AS gst_amt,
+                                 MAX({_raw(conn, 'purchase_items', '', 'hsn_code')}) AS hsn,
+                                 MAX(COALESCE({_raw(conn, 'purchase_items', '', 'gst_pct')},
+                                              {_raw(conn, 'purchase_items', '', 'gst_percent')})) AS rate,
+                                 MAX({_raw(conn, 'purchase_items', '', 'type')}) AS kind
                           FROM purchase_items WHERE purchase_id=? GROUP BY medicine_id) pi
                       ON pi.medicine_id = pri.medicine_id
+               LEFT JOIN medicines m ON m.id = pri.medicine_id
                WHERE pri.return_id=?""", (int(r[3] or 0), int(r[0]))).fetchall()
         p = purchases_by_id.get(int(r[3] or 0))
         if p is None and r[3]:
             found = _purchases_by_ids_offline(conn, [int(r[3])])
             p = found[0] if found else None
         out.append(_preturn(int(r[0]), str(r[1] or ""), _iso(r[2]), p, r[4],
-                            [(q, oq, t, g) for _, q, oq, t, g in items]))
+                            [(q, oq, t, g, h, rt, k) for _, q, oq, t, g, h, rt, k in items]))
     return out
 
 
@@ -598,7 +621,8 @@ def _purchase_returns_online(start: str, end: str, purchases_by_id: dict) -> lis
         rows = []
         for i in doc.get("items") or []:
             o = pdoc_items.get(int(i.get("medicine_id") or 0)) or {}
-            rows.append((i.get("qty"), o.get("qty"), o.get("taxable"), o.get("gst_amt")))
+            rows.append((i.get("qty"), o.get("qty"), o.get("taxable"), o.get("gst_amt"), o.get("hsn_code"),
+                         o.get("gst_pct", o.get("gst_percent")), o.get("type")))
         out.append(_preturn(int(doc.get("id") or 0), str(doc.get("return_no") or ""), rd, p,
                             doc.get("refund_amount"), rows))
     return out
@@ -608,14 +632,20 @@ def _preturn(rid, no, when, purchase, refund, rows) -> PurchaseReturn:
     """GST on goods sent back: the original line's taxable and tax per unit, times the units returned."""
     taxable = tax = ZERO
     known = bool(rows)
-    for qty, oqty, otax_able, otax in rows:
+    lines = []
+    for row in rows:
+        qty, oqty, otax_able, otax = row[:4]
+        hsn, rate, kind = (tuple(row[4:7]) + ("", 0, ""))[:3]
         q, oq = Decimal(str(qty or 0)), Decimal(str(oqty or 0))
         if not oq or otax_able is None or float(otax_able or 0) <= 0:
             known = False
             continue
-        taxable += _d(Decimal(str(otax_able)) * q / oq)
-        tax += _d(Decimal(str(otax or 0)) * q / oq)
-    return PurchaseReturn(rid, no, when, purchase, taxable, tax, _d(refund), known)
+        lt = _d(Decimal(str(otax_able)) * q / oq)
+        lg = _d(Decimal(str(otax or 0)) * q / oq)
+        taxable += lt
+        tax += lg
+        lines.append(PurchaseLine(_hsn(hsn), _rate(rate), q, lt, lg, True, str(kind or "")))
+    return PurchaseReturn(rid, no, when, purchase, taxable, tax, _d(refund), known, lines)
 
 
 def load_period(conn, start: str, end: str) -> Period:
@@ -1081,9 +1111,19 @@ def gstr1_json(p: Period, g1: Optional[dict] = None) -> dict:
                                                                                 "iamt": r["igst"], "csamt": 0}}
                                                      for k, r in enumerate(rs)]} for no, rs in invs.items()]}
                        for pos, invs in by_pos.items()]
-    if g1["b2cs"]:
+    # 0% sales to unregistered buyers go in Table 8 (nil rated), not as B2CS rows at rate 0.
+    nil: dict = defaultdict(lambda: ZERO)
+    for r in g1["b2cs"]:
+        if Decimal(str(r["rate"])) == 0:
+            nil["INTRB2C" if r["supply"] == "INTER" else "INTRAB2C"] += Decimal(str(r["taxable"]))
+    if any(nil.values()):
+        out["nil"] = {"inv": [{"sply_ty": k, "expt_amt": 0, "nil_amt": _f(v), "ngsup_amt": 0}
+                              for k, v in sorted(nil.items()) if v]}
+    if any(Decimal(str(r["rate"])) != 0 for r in g1["b2cs"]):
         out["b2cs"] = []
         for r in g1["b2cs"]:
+            if Decimal(str(r["rate"])) == 0:
+                continue
             row = {"sply_ty": r["supply"], "rt": r["rate"], "typ": "OE", "pos": r["pos"], "txval": r["taxable"],
                    "csamt": 0}
             if r["supply"] == "INTER":

@@ -12,7 +12,6 @@ import { HomeExportDialog } from '../components/HomeExportDialog'
 import { registerVoicePage, type VoiceHandler } from '../voice/voiceBus'
 import { usePageHotkeys } from '../hooks/usePageHotkeys'
 import { QuickActionIcon } from '../quickActionIcons'
-import { GstReportsDialog } from './GstReportsDialog'
 import { useBusinessMode } from '../wholesale/mode'
 import { WholesaleReportsDialog } from '../wholesale/WholesaleReportsDialog'
 import { Panel } from './pageChrome'
@@ -148,7 +147,6 @@ export function HomePage({ onNavigate, syncRefreshNonce = 0, active, storeName =
     FALLBACK_QUICK_ACTIONS,
   )
   const [error, setError] = useState('')
-  const [gstOpen, setGstOpen] = useState(false)
   const [wholesaleOpen, setWholesaleOpen] = useState(false)
   const { isWholesale } = useBusinessMode()
   // Kept apart from `error`: that one is worded for a dead local engine and
@@ -180,7 +178,7 @@ export function HomePage({ onNavigate, syncRefreshNonce = 0, active, storeName =
       else if (k === 'p') onNavigate('purchase')
       else if (k === 'i') onNavigate('inventory')
       else if (k === 'e') setExportOpen(true)
-      else if (k === 'g') setGstOpen(true)
+      else if (k === 'g') onNavigate('gst_reports')
     },
   })
 
@@ -333,7 +331,7 @@ export function HomePage({ onNavigate, syncRefreshNonce = 0, active, storeName =
                   type="button"
                   className={`qa-btn qa-${qaStyle(a.style)}`}
                   data-nav-order={i + 1}
-                  onClick={() => (a.key === 'gst_reports' ? setGstOpen(true) : handleQuickAction(a.key, onNavigate))}
+                  onClick={() => (a.key === 'gst_reports' ? onNavigate('gst_reports') : handleQuickAction(a.key, onNavigate))}
                 >
                   <QuickActionIcon actionKey={a.key} size={16} />
                   <span className="qa-label">{a.label}</span>
@@ -457,7 +455,6 @@ export function HomePage({ onNavigate, syncRefreshNonce = 0, active, storeName =
       </Panel>
       ) : null}
       <HomeExportDialog open={exportOpen} onClose={() => setExportOpen(false)} />
-      <GstReportsDialog open={gstOpen} onClose={() => setGstOpen(false)} />
       <WholesaleReportsDialog open={wholesaleOpen} onClose={() => setWholesaleOpen(false)} />
     </div>
   )

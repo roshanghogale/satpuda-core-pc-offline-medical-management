@@ -665,6 +665,15 @@ export function PharmacyPanel(props: Props) {
               onShow={(v) => setBillKey('show_store_gstin', v)}
             >
               <input id="ph-gstin" className="settings-input" value={text('gstin')} onChange={setText('gstin')} />
+              <button
+                type="button"
+                className="btn btn-neutral"
+                style={{ marginLeft: 6 }}
+                title="GSTR-1, GSTR-3B, registers, HSN, annual returns (main window GST tab, key 9)"
+                onClick={() => window.dispatchEvent(new CustomEvent('satpuda:navigate', { detail: { page: 'gst_reports' } }))}
+              >
+                GST Reports
+              </button>
             </ProfileField>
             <ProfileField
               id="ph-dl"
