@@ -669,8 +669,8 @@ export function PharmacyPanel(props: Props) {
                 type="button"
                 className="btn btn-neutral"
                 style={{ marginLeft: 6 }}
-                title="GSTR-1, GSTR-3B, registers, HSN, annual returns (main window GST tab, key 9)"
-                onClick={() => window.dispatchEvent(new CustomEvent('satpuda:navigate', { detail: { page: 'gst_reports' } }))}
+                title="Settings > GST Reports: sale / purchase registers, GSTR-1, GSTR-3B, HSN"
+                onClick={() => window.dispatchEvent(new CustomEvent('satpuda:settings-tab', { detail: { tab: 'gst_reports' } }))}
               >
                 GST Reports
               </button>

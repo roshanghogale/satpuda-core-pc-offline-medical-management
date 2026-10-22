@@ -252,8 +252,7 @@ def purchase_register_marg(c: Ctx) -> dict:
         entries.append(_entry(pu.date, pu.supplier, pu.address, "GST" if pu.gstin else "URD",
                               pu.bill_number or pu.no, buckets, pu.value,
                               None if known else _purchase_totals(c, pu)))
-    notes = ["Type: GST = supplier with a GSTIN (ITC), URD = unregistered supplier (no ITC).",
-             "Figures are the supplier bills' own printed totals (the ITC)."]
+    notes = []
     if unsplit:
         notes.append(f"{unsplit} supplier bill(s) were saved without line-wise taxable values: their totals "
                      "are in the Taxable Value / Tax columns, the rate columns are empty for them.")
@@ -264,7 +263,7 @@ def sale_return_register(c: Ctx) -> dict:
     entries = [_entry(n.date, n.bill.customer, n.bill.address, _kind(n.bill.credit), n.no, _note_buckets(c, n),
                       n.refund) for n in c.p.notes if not n.problem and n.bill and n.lines]
     bad = [n for n in c.p.notes if n.problem or not n.bill or not n.lines]
-    notes = ["Each credit note is the refund given, its tax backed out at the bill line's rate."]
+    notes = []
     if bad:
         notes.append(f"{len(bad)} return(s) could not be matched to their bill lines and are not here -- see Checks.")
     return {"sections": [_register("Sale Return GST", entries)], "notes": notes}
@@ -282,8 +281,7 @@ def purchase_return_register(c: Ctx) -> dict:
             totals = (r.taxable, *gr._split(r.tax, inter))
         entries.append(_entry(r.date, pu.supplier if pu else "", pu.address if pu else "",
                               "GST" if pu and pu.gstin else "URD", r.no, buckets, r.value, totals))
-    notes = ["Goods sent back are priced as they were bought: the purchase line's taxable value and GST "
-             "per unit, times the units returned."]
+    notes = []
     if unknown:
         notes.append(f"{unknown} return(s) come from purchase lines without taxable values: only what is known "
                      "is shown (see Checks).")
@@ -1032,9 +1030,94 @@ def _named_builder(key: str) -> Builder:
     return build
 
 
-def catalogue() -> list:
+def full_catalogue() -> list:
+    """Every report the engine can make (Marg's A..W list); the screen shows SIMPLE."""
     return [{"key": k, "letter": letter, "group": g, "title": t, "form": f, "partial": PARTIAL.get(k, "")}
             for k, letter, g, t, f, _ in CATALOGUE]
+
+
+# ── the screen: a short list in plain words (owner, 22 Oct 2026: "simple, not that much options") ──
+
+def gstr1_summary(c: Ctx) -> dict:
+    """GSTR-1 on one page: B2B, B2CL (when there is any), B2CS with nil, HSN, credit notes, documents."""
+    secs = [_legacy_table(c, "b2b", ["Taxable Value", "Cess Amount", "IGST", "CGST", "SGST"],
+                          nums=["Rate", "Invoice Value"], rename="B2B (buyers with GSTIN)")]
+    if c.g1["b2cl"]:
+        secs.append(_legacy_table(c, "b2cl", ["Taxable Value", "Cess Amount", "IGST"],
+                                  nums=["Rate", "Invoice Value"], rename="B2CL (other state, above Rs 1 lakh)"))
+    b2cs = b2cs_report(c)["sections"]
+    b2cs[0]["title"] = "B2CS (other sales, by rate)"
+    b2cs[1]["title"] = "Nil rated (0%)"
+    secs += b2cs
+    secs.append(_legacy_table(c, "hsn(b2b)", HSN_SUMS, nums=["Rate"], rename="HSN (B2B)"))
+    secs.append(_legacy_table(c, "hsn(b2c)", HSN_SUMS, nums=["Rate"], rename="HSN (B2C)"))
+    secs.append(_legacy_table(c, "cdnr", ["Taxable Value", "Cess Amount", "IGST", "CGST", "SGST"],
+                              nums=["Rate", "Note Value"], rename="Credit notes (buyers with GSTIN)"))
+    if c.g1["cdnur"]:
+        secs.append(_legacy_table(c, "cdnur", ["Taxable Value", "Cess Amount", "IGST"], nums=["Rate", "Note Value"],
+                                  rename="Credit notes (B2CL bills)"))
+    secs.append(docs_report(c)["sections"][0])
+    secs[-1]["title"] = "Documents issued"
+    bad = sum(1 for t in ("hsn_b2b", "hsn_b2c") for r in c.g1[t] if r["problem"])
+    notes = ([f"{bad} HSN row(s) have no HSN code: they are left out of the GSTR-1 JSON (Check bills)."]
+             if bad else [])
+    return {"sections": secs, "notes": notes}
+
+
+def gstr3b_summary(c: Ctx) -> dict:
+    out = gstr3b_report(c)
+    return {"sections": out["sections"],
+            "notes": ["Reverse charge, imports, interest and late fee are not kept by the software: shown as 0."]}
+
+
+def hsn_summary(c: Ctx) -> dict:
+    return {"sections": [hsn_sales(c, True, True, "HSN of sales (less returns)")], "notes": []}
+
+
+def composition_summary(c: Ctx) -> dict:
+    quarters = [_comp_row(c, k, sub) for k, sub in _quarters(c)]
+    months = [_comp_row(c, a[:7], sub) for a, _, sub in _months(c)]
+    sums = COMP_COLS[1:7] + COMP_COLS[8:]
+    return {"sections": [section("By quarter (CMP-08)", COMP_COLS, quarters, sums=sums, nums=["Rate"]),
+                         section("By month", COMP_COLS, months, sums=sums, nums=["Rate"])],
+            "notes": [f"Tax at {gr._rate_out(gr._rate(c.comp_rate))}% of sales less returns (trader); "
+                      "0% goods are left out."]}
+
+
+def check_bills(c: Ctx) -> dict:
+    return {"sections": [section("Bills to check", ["What", "Bill / Record", "Detail"],
+                                 [list(x) for x in c.p.checks])], "notes": []}
+
+
+# key, title, hint (the GST form, small and grey), builder, shown for: "regular" | "composition" | "both"
+SIMPLE = [
+    ("composition", "Composition summary", "CMP-08 / GSTR-4", composition_summary, "composition"),
+    ("sale", "Sale register (GST)", "Marg upload layout", sale_register, "both"),
+    ("sale_return", "Sale return register", "credit notes", sale_return_register, "both"),
+    ("purchase", "Purchase register", "input tax credit", purchase_register_marg, "both"),
+    ("purchase_return", "Purchase return register", "debit notes", purchase_return_register, "both"),
+    ("gstr1", "GSTR-1 summary", "GSTR-1", gstr1_summary, "regular"),
+    ("gstr3b", "GSTR-3B summary", "GSTR-3B", gstr3b_summary, "regular"),
+    ("hsn", "HSN summary", "GSTR-1 Table 12", hsn_summary, "both"),
+]
+HIDDEN = {"check_bills": ("Check bills", "problems", check_bills)}
+
+
+def is_composition(conn) -> bool:
+    """The shop prints a Bill of Supply as a composition dealer (Settings > Bill Template)."""
+    try:
+        from core.bill_heading import load_bill_heading
+
+        h = load_bill_heading(conn)
+        return bool(h.get("bill_of_supply")) and bool(h.get("supply_declaration"))
+    except Exception:
+        return False
+
+
+def catalogue(conn=None) -> list:
+    comp = is_composition(conn) if conn is not None else False
+    want = {"both", "composition" if comp else "regular"}
+    return [{"key": k, "title": t, "hint": h} for k, t, h, _, who in SIMPLE if who in want]
 
 
 def _find(key: str):
@@ -1046,11 +1129,19 @@ def _find(key: str):
 
 
 def build(conn, key: str, start: str, end: str, comp_rate: float = 1.0) -> dict:
-    """One report of the screen for one period."""
-    k, letter, group, title, form, builder = _find(key)
+    """One report of the screen for one period (a SIMPLE key, or any of Marg's list)."""
+    simple = {k: (t, h, b) for k, t, h, b, _ in SIMPLE}
+    simple.update(HIDDEN)
+    if str(key) in simple:
+        k = str(key)
+        title, form, builder = simple[k]
+        letter, group = "", ""
+    else:
+        k, letter, group, title, form, builder = _find(key)
+        builder = builder or _named_builder(k)
     p = period(conn, start, end)
     c = Ctx(conn, p, comp_rate)
-    out = (builder or _named_builder(k))(c)
+    out = builder(c)
     return {"key": k, "letter": letter, "group": group, "title": title, "form": form,
             "partial": PARTIAL.get(k, ""), "period": {"from": p.start, "to": p.end}, "shop": p.shop,
             "sections": out["sections"], "notes": out.get("notes", []),

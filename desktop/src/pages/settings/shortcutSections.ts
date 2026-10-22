@@ -35,7 +35,6 @@ export const SHORTCUT_SECTIONS: ShortcutSection[] = [
       ['6', 'Returns'],
       ['7', 'Payments'],
       ['8', 'Settings'],
-      ['9', 'GST Reports (then A - W picks a report, as in Marg)'],
       ['', 'Only while the cursor is not in a field and no popup is open — press Escape first to leave a field'],
     ],
   },

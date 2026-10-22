@@ -350,7 +350,7 @@ class CompositionAndAnnual(_Store):
 
 class EveryReport(_Store):
     def test_every_report_builds_and_its_totals_are_its_rows(self):
-        for item in gs.catalogue():
+        for item in gs.full_catalogue() + gs.catalogue() + [{"key": "check_bills"}]:
             rep = self.rep(item["key"])
             self.assertTrue(rep["sections"], item["key"])
             for sec in rep["sections"]:
@@ -362,7 +362,7 @@ class EveryReport(_Store):
                                                msg=(item["key"], sec["title"], sec["columns"][j]))
 
     def test_every_report_goes_to_csv_excel_and_pdf(self):
-        for item in gs.catalogue():
+        for item in gs.full_catalogue() + gs.catalogue():
             for fmt in ("csv", "xlsx"):
                 res = gs.export(self.conn, {"report": item["key"], "from": self.FROM, "to": self.TO, "format": fmt})
                 self.assertTrue(res["ok"] and res["content_base64"], (item["key"], fmt))
@@ -372,7 +372,7 @@ class EveryReport(_Store):
         self.assertTrue(js["filename"].endswith(".json"))
 
     def test_the_letters_are_margs(self):
-        letters = {i["letter"]: i["title"] for i in gs.catalogue() if i["letter"]}
+        letters = {i["letter"]: i["title"] for i in gs.full_catalogue() if i["letter"]}
         self.assertEqual("ABCDEFGHIJKLMNOPQRSTUVW", "".join(sorted(letters)))
         self.assertEqual("Sale (GSTR-1) Detail", letters["C"])
         self.assertEqual("HSN Sale - Sale Return (GSTR-1) hsn", letters["K"])
@@ -385,10 +385,44 @@ class EveryReport(_Store):
 
     def test_nothing_is_written(self):
         before = self.conn.total_changes
-        for item in gs.catalogue():
+        for item in gs.full_catalogue() + gs.catalogue(self.conn):
             self.rep(item["key"])
         self.assertEqual(before, self.conn.total_changes)
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheSimpleList(_Store):
+    """Owner, 22 Oct 2026: "simple, not that much options" -- eight reports in plain words."""
+
+    def test_a_regular_shop_sees_the_registers_gstr1_3b_and_hsn(self):
+        self.assertEqual(["sale", "sale_return", "purchase", "purchase_return", "gstr1", "gstr3b", "hsn"],
+                         [i["key"] for i in gs.catalogue(self.conn)])
+        self.assertEqual("Sale register (GST)", gs.catalogue(self.conn)[0]["title"])
+
+    def test_a_composition_shop_sees_composition_and_no_gstr1_or_3b(self):
+        from core.bill_heading import save_bill_heading
+
+        save_bill_heading(self.conn, "bill_of_supply", "composition")
+        keys = [i["key"] for i in gs.catalogue(self.conn)]
+        self.assertEqual("composition", keys[0])
+        self.assertNotIn("gstr1", keys)
+        self.assertNotIn("gstr3b", keys)
+        save_bill_heading(self.conn, "bill_of_supply", "exempt")
+        self.assertNotIn("composition", [i["key"] for i in gs.catalogue(self.conn)])
+
+    def test_gstr1_summary_has_its_sections_and_matches_the_tables(self):
+        rep = self.rep("gstr1")
+        titles = [s["title"] for s in rep["sections"]]
+        self.assertEqual(["B2B (buyers with GSTIN)", "B2CS (other sales, by rate)", "Nil rated (0%)", "HSN (B2B)",
+                          "HSN (B2C)", "Credit notes (buyers with GSTIN)", "Documents issued"], titles)
+        b2b = rep["sections"][0]
+        self.assertEqual(self.rep("b2b")["sections"][0]["total"], b2b["total"])
+
+    def test_hsn_summary_is_sales_less_returns(self):
+        net = self.rep("hsn")["sections"][0]
+        k = self.rep("K")["sections"]
+        t = self.col(net, "Taxable Value")
+        self.assertAlmostEqual(k[0]["total"][t] + k[1]["total"][t], net["total"][t], places=2)

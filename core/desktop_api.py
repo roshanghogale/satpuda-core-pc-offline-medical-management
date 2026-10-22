@@ -1007,7 +1007,7 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                     from core import gst_screen
 
                     if path.endswith("/catalogue"):
-                        out = {"reports": gst_screen.catalogue()}
+                        out = {"reports": gst_screen.catalogue(conn), "composition": gst_screen.is_composition(conn)}
                     else:
                         qs = {k: v[0] for k, v in parse_qs(urlparse(self.path).query).items() if v}
                         out = gst_screen.build(conn, qs.get("report") or "", qs.get("from") or "", qs.get("to") or "",

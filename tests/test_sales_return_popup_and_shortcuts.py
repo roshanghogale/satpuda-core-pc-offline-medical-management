@@ -291,7 +291,7 @@ class TheShortcutPageMatchesTheCode(unittest.TestCase):
     def test_page_navigation(self):
         kb = src(*UI, "keyboard.ts")
         keys = re.findall(r"^\s+'(.)': '\w+',$", between(kb, "const KEY_TO_PAGE", "}"), re.M)
-        self.assertEqual(len(keys), 11)
+        self.assertEqual(len(keys), 10)
         self.assert_page(["Global Navigation"], keys)
 
     def test_sales(self):

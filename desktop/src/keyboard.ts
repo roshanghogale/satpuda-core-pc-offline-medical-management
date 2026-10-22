@@ -14,7 +14,6 @@ export type PageId =
   | 'payment'
   | 'general_products'
   | 'settings'
-  | 'gst_reports'
 
 export const PAGE_NAV: { id: PageId; key: string; label: string; ready: boolean }[] = [
   { id: 'home', key: '0', label: 'Home', ready: true },
@@ -26,7 +25,6 @@ export const PAGE_NAV: { id: PageId; key: string; label: string; ready: boolean 
   { id: 'returns', key: '6', label: 'Returns', ready: true },
   { id: 'payment', key: '7', label: 'Payments', ready: true },
   { id: 'settings', key: '8', label: 'Settings', ready: true },
-  { id: 'gst_reports', key: '9', label: 'GST', ready: true },
 ]
 
 const KEY_TO_PAGE: Record<string, PageId> = {
@@ -40,7 +38,6 @@ const KEY_TO_PAGE: Record<string, PageId> = {
   '6': 'returns',
   '7': 'payment',
   '8': 'settings',
-  '9': 'gst_reports',
 }
 
 export function isTypingTarget(el: EventTarget | null): boolean {
