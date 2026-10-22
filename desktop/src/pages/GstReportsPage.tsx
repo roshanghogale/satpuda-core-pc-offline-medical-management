@@ -2,7 +2,7 @@
  *  options"). A short list in plain words -- the sale / purchase registers in Marg's GST upload
  *  layout, GSTR-1 and GSTR-3B summaries, HSN, and for a composition dealer (Bill of Supply,
  *  composition) the composition summary instead of GSTR-1 / 3B. A month (or custom dates),
- *  and Excel / PDF / Print.
+ *  and Excel / CSV / PDF / Print.
  *
  *  Every figure comes from the engine (core/gst_screen.py on core/gst_reports.py), which
  *  takes each bill's tax out the way the printed bill does -- the tables add up to the bills.
@@ -162,7 +162,7 @@ export function GstReportsPage({ active }: { active: boolean }) {
     }
   }, [active, shownKey, range.from, range.to, nonce])
 
-  async function exportAs(format: 'xlsx' | 'pdf' | 'print' | 'json') {
+  async function exportAs(format: 'xlsx' | 'csv' | 'pdf' | 'print' | 'json') {
     setBusy(true)
     setErr('')
     setMsg('')
@@ -263,6 +263,9 @@ export function GstReportsPage({ active }: { active: boolean }) {
             <div className="gst-actions">
               <button type="button" className="btn btn-primary" disabled={busy || !ready} onClick={() => void exportAs('xlsx')}>
                 Excel
+              </button>
+              <button type="button" className="btn btn-neutral" disabled={busy || !ready} onClick={() => void exportAs('csv')}>
+                CSV
               </button>
               <button type="button" className="btn btn-neutral" disabled={busy || !ready} onClick={() => void exportAs('pdf')}>
                 PDF
