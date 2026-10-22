@@ -360,25 +360,15 @@ def _local_business_counts(conn) -> dict[str, int]:
 
 
 def _server_collection_count(token: str, collection: str) -> int:
-    """Count rows the server actually holds. There is no count endpoint, so page."""
-    from core import server_api as api
+    """Count rows the server actually holds. There is no count endpoint, so page.
 
-    after_id = None
-    total = 0
-    while True:
-        docs, _ = api.pull_collection(
-            token, collection, after_id=after_id,
-            include_deleted=False, limit=5000, timeout=120.0,
-        )
-        if not docs:
-            break
-        total += len(docs)
-        last = docs[-1]
-        nxt = last.get("id") or last.get("local_id")
-        if nxt is None or nxt == after_id:
-            break
-        after_id = nxt
-    return total
+    The pages go by (updated_at, id) like every full pull. Asking for the next page with
+    after_id alone -- no updated_at -- the server answers the FIRST page again, so a list
+    of more than 5,000 was counted as 10,000 and the push refused as incomplete."""
+    from core.server_live import _iter_collection_pages
+
+    return sum(len(docs) for docs in _iter_collection_pages(
+        token, collection, since=None, include_deleted=False))
 
 
 def verify_push_before_wipe(conn, token: str, push_result: dict) -> tuple[bool, str]:
@@ -520,47 +510,48 @@ def push_local_then_wipe(
     return {"ok": True, "removed": removed, "pushed": count, "verified": message}
 
 
-def _restore_server_stock(conn, *, progress_cb: ProgressCb = None) -> int:
+def _restore_server_stock(conn, *, progress_cb: ProgressCb = None,
+                          server_stock: Optional[dict] = None) -> int:
     """Overwrite local stock_qty AND is_hidden with the server's figures.
 
     sync_down_all does not carry is_hidden, so every medicine landed locally as
     visible. Switching Online -> Offline -> Online then pushed that back and
     un-hid everything the shop had removed with "Remove out of stock" or "Remove
     expired" -- 24 rows reappeared in one round trip during testing. The server
-    copy is authoritative for both fields, and this loop is already fetching
-    exactly those documents.
-    """
-    from core import server_api as api
+    copy is authoritative for both fields.
 
-    token = _token_for_pull()
-    if not token:
-        return 0
-    after_id = None
-    fixed = 0
-    while True:
-        docs, _ = api.pull_collection(
-            token, "medicines", after_id=after_id,
-            include_deleted=False, limit=5000, timeout=90.0,
-        )
-        if not docs:
-            break
-        for d in docs:
-            try:
-                mid = int(d.get("id") or d.get("local_id") or 0)
-                if mid <= 0:
+    ``server_stock`` ({id: (stock, hidden)}, every live medicine the copy itself just
+    downloaded) saves downloading the whole medicine list a second time. Without it the
+    list is paged again -- by (updated_at, id): this loop used to ask for the next page
+    with after_id alone, which the server answers with the FIRST page again, so on a shop
+    with more than 5,000 medicines it never ended ("checking for correction of the
+    stock" for hours, Jagdamba, 61,561 medicines, 22 Oct 2026).
+    """
+    if server_stock is None:
+        from core.server_live import _iter_collection_pages
+
+        token = _token_for_pull()
+        if not token:
+            return 0
+        server_stock = {}
+        for docs in _iter_collection_pages(token, "medicines", since=None, include_deleted=False):
+            for d in docs:
+                try:
+                    mid = int(d.get("id") or d.get("local_id") or 0)
+                    if mid > 0:
+                        server_stock[mid] = (int(float(d.get("stock_qty") or 0)),
+                                             1 if d.get("is_hidden") else 0)
+                except Exception:
                     continue
-                qty = int(float(d.get("stock_qty") or 0))
-                hidden = 1 if d.get("is_hidden") else 0
-                conn.execute(
-                    "UPDATE medicines SET stock_qty=?, is_hidden=? WHERE id=?",
-                    (qty, hidden, mid),
-                )
-                fixed += 1
-            except Exception:
-                continue
-        after_id = docs[-1].get("id") or docs[-1].get("local_id")
-        if len(docs) < 5000:
-            break
+    # Only rows whose figures differ are written: an UPDATE of an unchanged row still
+    # fires the medicine triggers and rewrites the page.
+    rows = [(qty, hidden, mid) for mid, (qty, hidden) in server_stock.items()]
+    conn.executemany(
+        "UPDATE medicines SET stock_qty=?, is_hidden=? WHERE id=? "
+        "AND (stock_qty IS NOT ? OR is_hidden IS NOT ?)",
+        [(q, h, i, q, h) for q, h, i in rows],
+    )
+    fixed = len(rows)
     _progress(progress_cb, f"Stock corrected for {fixed} medicine(s).")
     return fixed
 
@@ -611,6 +602,8 @@ def download_store_for_offline(
     progress_cb: ProgressCb = None,
     db_path: str | None = None,
     preserve_sync_state: bool = False,
+    fast_copy: bool = True,
+    tracker=None,
 ) -> dict[str, Any]:
     """Fill the local SQLite from the server so Offline mode is a real fallback.
 
@@ -623,6 +616,12 @@ def download_store_for_offline(
     before Online went server-only); it was simply never called. This wires it
     back up: create the schema if needed, then pull every collection down,
     replacing whatever was there so the copy is clean rather than merged.
+
+    fast_copy (the default) downloads and writes at the same time, takes the stock from
+    the medicines it just downloaded, and reports real progress (core/copy_progress.py);
+    fast_copy=False is the old way, kept to check the two copies are the same
+    (tests/test_fast_store_copy.py). ``tracker``: a CopyProgress the caller made (it
+    keeps the end of the bar for its own steps); one is made here when none is given.
     """
     # db_path lets a caller materialise the server store somewhere else --
     # the backup uses a throwaway file so it can capture Online data without
@@ -641,11 +640,25 @@ def download_store_for_offline(
                           + ", ".join(f"{t} {n}" for t, n in pending.items())
                           + "). Aadhi Online madhe 'Push to Server' kara, mag Offline la ja.")}
     rows = 0
+    if fast_copy and tracker is None:
+        tracker = new_copy_tracker(progress_cb, tail_share=0.0)
     guard = _preserved_sync_watermarks() if preserve_sync_state else contextlib.nullcontext()
     with guard, allow_local_store_db():
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        conn = sqlite3.connect(path)
+        conn = sqlite3.connect(path, timeout=30)
         try:
+            if fast_copy:
+                # Sorting and the page cache in memory while the copy is written (the
+                # defaults are a 2 MB cache and temp files on disk).
+                conn.execute("PRAGMA temp_store=MEMORY")
+                conn.execute("PRAGMA cache_size=-65536")
+            # WAL, as the engine opens every store (desktop_api._open_conn): in the old
+            # rollback journal each of initialise()'s ~650 CREATE/ALTERs was its own synced
+            # commit with a journal file made and deleted -- 10-50 s before the first record
+            # on a shop PC, 2 s in WAL (18 Oct 2026). It also lets the app's own readers
+            # look at the file while the copy is written instead of blocking it.
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
             from core.db_setup import initialise
 
             initialise(conn)
@@ -653,43 +666,97 @@ def download_store_for_offline(
             _mark_mirror_started(conn)
             from core import server_live
 
+            server_stock: Optional[dict] = {} if fast_copy else None
             rows = int(
                 server_live.sync_down_all(
                     conn,
                     replace_local=True,
                     progress_cb=progress_cb,
+                    fast=fast_copy,
+                    tracker=tracker,
+                    server_stock=server_stock,
                 )
                 or 0
             )
             conn.commit()
+            if tracker is not None:
+                _check_copy_complete(conn, tracker.totals)
 
             # sync_down_all replays purchases, sales and returns into local
             # stock ON TOP of the absolute stock_qty it already wrote from the
             # medicine doc, so every quantity came out double-counted: a
             # medicine at 200 on the server landed as 400 locally. The server
             # figure is authoritative, so stamp it back over the replayed one.
-            _progress(progress_cb, "Correcting stock from server…")
-            fixed = _restore_server_stock(conn, progress_cb=progress_cb)
+            _stage(progress_cb, tracker, "Correcting stock from server…", 0.93)
+            fixed = _restore_server_stock(conn, progress_cb=None if fast_copy else progress_cb,
+                                          server_stock=server_stock)
             # The regular-medicine lists and customer GSTINs live in the server's
             # settings, which a replace pull leaves alone: bring them too, or Offline
             # starts without them (core/store_kv_carry.py).
-            _progress(progress_cb, "Regular medicines and customer GSTINs…")
+            _stage(progress_cb, tracker, "Regular medicines and customer GSTINs…", 0.95)
             from core.store_kv_carry import try_pull
 
             carried = try_pull(conn)
             # Bills from the server keep their serial, so a new bill lists on top.
             from core.fy_serial import backfill_missing_fy_serials
 
+            _stage(progress_cb, tracker, "Bill numbers…", 0.97)
             backfill_missing_fy_serials(conn)
             _mark_prepared_mirror(conn)
             conn.commit()
+            if fast_copy:
+                conn.execute("PRAGMA cache_size=-2000")
+                conn.execute("PRAGMA temp_store=DEFAULT")
         finally:
             try:
                 conn.close()
             except Exception:
                 pass
-    _progress(progress_cb, f"Offline copy ready ({rows} records).")
-    return {"ok": True, "rows": rows, "db_path": path, "settings_carried": carried}
+    _stage(progress_cb, tracker, f"Offline copy ready ({rows:,} records).", 1.0)
+    out = {"ok": True, "rows": rows, "db_path": path, "settings_carried": carried}
+    if tracker is not None:
+        out["seconds"] = int(time.monotonic() - tracker.started)
+    return out
+
+
+def new_copy_tracker(progress_cb: ProgressCb, *, tail_share: float):
+    """A CopyProgress with the server's record counts (asked first, all at once)."""
+    from core import copy_progress
+
+    copy_progress.clear()
+    totals: dict = {}
+    token = _token_for_pull()
+    if token:
+        _progress(progress_cb, "Counting the records on the server…")
+        totals = copy_progress.fetch_totals(token)
+    return copy_progress.CopyProgress(progress_cb, totals, tail_share=tail_share)
+
+
+def _check_copy_complete(conn, totals: dict) -> None:
+    """Refuse a copy that holds fewer live medicines than the server said it has (counted
+    before the copy started; a few made or removed meanwhile on another device are fine)."""
+    want = totals.get("medicines")
+    if not want:
+        return
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(medicines)")}
+        where = " WHERE COALESCE(deleted, 0) = 0" if "deleted" in cols else ""
+        got = int(conn.execute(f"SELECT COUNT(*) FROM medicines{where}").fetchone()[0] or 0)
+    except sqlite3.Error:
+        return
+    if got < want - max(25, want // 200):
+        raise RuntimeError(
+            f"Only {got:,} of the server's {want:,} medicines arrived. Nothing was changed; "
+            "please try again, and tell Satpuda support if it happens again."
+        )
+
+
+def _stage(progress_cb: ProgressCb, tracker, label: str, share: float) -> None:
+    """A finishing step: on the bar at ``share`` of the copy's part of it."""
+    if tracker is None:
+        _progress(progress_cb, label)
+        return
+    tracker.stage(label, 100.0 * (1.0 - tracker.tail_share) * share)
 
 
 def ensure_online_server_only_ready(

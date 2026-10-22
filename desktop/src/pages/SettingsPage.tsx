@@ -18,6 +18,7 @@ import { ensureLocalEngine } from '../backend'
 import type { AppNavigate } from '../App'
 import type { ReorderPrefill } from '../pagesApi'
 import { restartDesktopApp } from '../restartApp'
+import { CopyProgressBar, copyFigures, type CopyFigures } from '../components/CopyProgressBar'
 import { applyFontSize } from '../theme'
 import { SETTINGS_TABS, type SettingsTabId } from './settings/settingsConfig'
 import { isTypingTarget } from '../keyboard'
@@ -103,6 +104,8 @@ export function SettingsPage({
   const [bundle, setBundle] = useState<SettingsBundle | null>(null)
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
+  // The Online -> Offline store copy's figures while it runs (null otherwise).
+  const [offlineCopy, setOfflineCopy] = useState<CopyFigures | null>(null)
   const [saving, setSaving] = useState(false)
   const [onlineSwitchMsg, setOnlineSwitchMsg] = useState('')
   const [onlineSwitchBusy, setOnlineSwitchBusy] = useState(false)
@@ -453,7 +456,10 @@ export function SettingsPage({
       while (Date.now() - t0 < 60 * 60 * 1000) {
         await new Promise((r) => setTimeout(r, 800))
         const st = await systemAction({ action: 'heavy_job_status' })
-        setMsg(`Offline sathi server varun data PC var yet aahe — app band karu naka. ${String(st.message || '')}`)
+        setMsg('Offline sathi server varun data PC var yet aahe — app band karu naka.')
+        setOfflineCopy(
+          copyFigures((st as Record<string, unknown>).copy) || { pct: 0, label: String(st.message || '') },
+        )
         if (st.done) {
           const res = (st.result && typeof st.result === 'object' ? st.result : {}) as Record<string, unknown>
           if (st.ok === false || res.ok === false) {
@@ -470,6 +476,7 @@ export function SettingsPage({
       return false
     } finally {
       setSaving(false)
+      setOfflineCopy(null)
     }
   }
 
@@ -1143,6 +1150,14 @@ export function SettingsPage({
               <p className="muted" style={{ marginTop: 8 }}>
                 {msg}
               </p>
+            ) : null}
+            {offlineCopy ? (
+              <CopyProgressBar
+                pct={Math.round(offlineCopy.pct)}
+                label={offlineCopy.label}
+                etaS={offlineCopy.eta_s}
+                secs={offlineCopy.elapsed_s}
+              />
             ) : null}
           </div>
         </div>

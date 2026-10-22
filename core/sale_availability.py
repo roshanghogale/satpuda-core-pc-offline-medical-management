@@ -153,7 +153,7 @@ def _pull_all(
             fresh += 1
             if not d.get("deleted"):
                 out.append(d)
-            ts = d.get("updated_at") or d.get("synced_at")
+            ts = d.get("sync_cursor") or d.get("updated_at") or d.get("synced_at")
             if ts:
                 last_ts = str(ts)
             try:
