@@ -1656,7 +1656,8 @@ def apply_server_doc(conn, collection: str, doc: dict) -> str:
             try:
                 from core.client_uuid import ensure_client_uuid_schema
 
-                ensure_client_uuid_schema(conn)
+                if not getattr(conn, "client_uuid_ready", False):
+                    ensure_client_uuid_schema(conn)
                 cur = conn.cursor()
                 cur.execute(
                     f"UPDATE {collection} SET client_uuid=COALESCE(NULLIF(client_uuid,''), ?) "
@@ -1752,6 +1753,64 @@ def flush_entity_repush_queue(conn, progress_cb: ProgressCb = None) -> int:
     return 0
 
 
+_PRAGMA_TABLE_INFO = re.compile(r"^\s*PRAGMA\s+table_info\s*\(\s*['\"]?(\w+)['\"]?\s*\)\s*;?\s*$", re.I)
+_SCHEMA_CHANGE = re.compile(r"^\s*(ALTER\s+TABLE|CREATE\s+(TEMP\w*\s+)?TABLE|DROP\s+TABLE)\b", re.I)
+
+
+class _SchemaCachingCursor:
+    """A cursor that answers PRAGMA table_info from _BatchConn's cache; everything else
+    goes to the real cursor."""
+
+    __slots__ = ("_cur", "_owner", "_rows")
+
+    def __init__(self, cur, owner):
+        self._cur = cur
+        self._owner = owner
+        self._rows = None
+
+    def __getattr__(self, name):
+        return getattr(self._cur, name)
+
+    def execute(self, sql, *params):
+        rows = self._owner._cached_pragma(sql)
+        if rows is not None:
+            self._rows = list(rows)
+            return self
+        self._rows = None
+        self._cur.execute(sql, *params)
+        return self
+
+    def executemany(self, sql, seq):
+        self._rows = None
+        self._owner._cached_pragma(sql)
+        self._cur.executemany(sql, seq)
+        return self
+
+    def fetchall(self):
+        if self._rows is not None:
+            rows, self._rows = self._rows, []
+            return rows
+        return self._cur.fetchall()
+
+    def fetchone(self):
+        if self._rows is not None:
+            return self._rows.pop(0) if self._rows else None
+        return self._cur.fetchone()
+
+    def fetchmany(self, size=None):
+        if self._rows is not None:
+            n = self._cur.arraysize if size is None else int(size)
+            out, self._rows = self._rows[:n], self._rows[n:]
+            return out
+        return self._cur.fetchmany() if size is None else self._cur.fetchmany(size)
+
+    def __iter__(self):
+        if self._rows is not None:
+            rows, self._rows = self._rows, []
+            return iter(rows)
+        return iter(self._cur)
+
+
 class _BatchConn:
     """The store connection for a full download: the pull writers' own commit() does
     nothing, so a whole list lands in one transaction, and their rollback() undoes only the
@@ -1763,11 +1822,38 @@ class _BatchConn:
 
     _SP = "pull_doc"
 
-    def __init__(self, conn):
+    def __init__(self, conn, *, cache_schema: bool = False):
         self._c = conn
+        # {table: rows of PRAGMA table_info} -- see _SchemaCachingCursor.
+        self._schema: Optional[dict] = {} if cache_schema else None
 
     def __getattr__(self, name):
         return getattr(self._c, name)
+
+    # The writers ask PRAGMA table_info several times for every document (which columns
+    # this store's table has): 300,000 asks for one shop's 68,000 records, a third of the
+    # copy's time (22 Oct 2026). Nothing in a copy changes a table's columns except the
+    # rare ALTER, which empties the cache.
+    def cursor(self, *a, **k):
+        cur = self._c.cursor(*a, **k)
+        return _SchemaCachingCursor(cur, self) if self._schema is not None else cur
+
+    def execute(self, sql, *params):
+        if self._schema is None:
+            return self._c.execute(sql, *params)
+        return _SchemaCachingCursor(self._c.cursor(), self).execute(sql, *params)
+
+    def _cached_pragma(self, sql) -> Optional[list]:
+        m = _PRAGMA_TABLE_INFO.match(sql) if isinstance(sql, str) else None
+        if not m:
+            if isinstance(sql, str) and _SCHEMA_CHANGE.match(sql):
+                self._schema.clear()
+            return None
+        table = m.group(1).lower()
+        rows = self._schema.get(table)
+        if rows is None:
+            rows = self._schema[table] = self._c.execute(sql).fetchall()
+        return rows
 
     def begin(self) -> None:
         if not getattr(self._c, "in_transaction", False):
@@ -1804,28 +1890,60 @@ def _pull_collection_pages(
     page_size: int = _PULL_PAGE,
 ) -> tuple[list, dict]:
     """Paginate Node GET /api/sync/:collection via (since, after_id) keyset."""
-    from core import server_api as api
-
     all_docs: list = []
     meta: dict = {}
+    for docs in _iter_collection_pages(
+        token, collection, since=since, page_size=page_size, meta=meta,
+        before_page=lambda page: _progress(
+            progress_cb,
+            f"Downloading {collection}… page {page}"
+            + (f" ({len(all_docs):,} so far)" if all_docs else ""),
+        ),
+    ):
+        all_docs.extend(docs)
+    return all_docs, meta
+
+
+def _iter_collection_pages(
+    token: str,
+    collection: str,
+    *,
+    since: Optional[str],
+    page_size: Optional[int] = None,
+    meta: Optional[dict] = None,
+    before_page: Optional[Callable[[int], None]] = None,
+    include_deleted: bool = True,
+    max_pages: int = 4000,
+):
+    """The pages of GET /api/sync/:collection, one list of new documents at a time
+    ((since, after_id) keyset; a document already seen in this pull is left out).
+
+    Every page must move the cursor forward. The server pages on updated_at to the
+    microsecond but sends it to the millisecond, so a list written by one bulk statement
+    (Pallavi, store 145: all 43,544 medicines at 15:08:51.256972 on 22 Oct 2026) comes
+    back as the same first page again and again: this used to stop there and hand over
+    5,000 records as if they were the whole list. Now that raises PagingStuck. A server
+    that sends ``sync_cursor`` (updated_at to the microsecond) pages such a list fine."""
+    from core import server_api as api
+
+    if not page_size:
+        page_size = _PULL_PAGE
+    meta = meta if meta is not None else {}
     cursor_since = since
     after_id: Optional[int] = None
     page = 0
     seen_ids: set[str] = set()
     while True:
         page += 1
-        _progress(
-            progress_cb,
-            f"Downloading {collection}… page {page}"
-            + (f" ({len(all_docs):,} so far)" if all_docs else ""),
-        )
+        if before_page:
+            before_page(page)
         try:
             docs, m = api.pull_collection(
                 token,
                 collection,
                 since=cursor_since,
                 after_id=after_id,
-                include_deleted=True,
+                include_deleted=include_deleted,
                 limit=page_size,
                 timeout=120.0,
             )
@@ -1837,7 +1955,7 @@ def _pull_collection_pages(
                 collection,
                 since=cursor_since,
                 after_id=after_id,
-                include_deleted=True,
+                include_deleted=include_deleted,
                 limit=page_size,
                 timeout=180.0,
             )
@@ -1848,6 +1966,7 @@ def _pull_collection_pages(
         new_in_page = 0
         last_ts = cursor_since
         last_id = after_id
+        fresh: list = []
         for doc in docs:
             if not isinstance(doc, dict):
                 continue
@@ -1857,28 +1976,53 @@ def _pull_collection_pages(
                 continue
             if did:
                 seen_ids.add(did)
-            all_docs.append(doc)
+            fresh.append(doc)
             new_in_page += 1
-            ts = doc.get("updated_at") or doc.get("synced_at")
+            ts = doc.get("sync_cursor") or doc.get("updated_at") or doc.get("synced_at")
             if isinstance(ts, str) and ts:
                 last_ts = ts
             try:
                 last_id = int(raw_id)
             except (TypeError, ValueError):
                 pass
-        if len(docs) < page_size or new_in_page == 0:
+        if fresh:
+            yield fresh
+        if len(docs) < page_size:
             break
+        if new_in_page == 0:
+            raise PagingStuck(collection, len(seen_ids))
         # Advance keyset cursor. Prefer after_id so identical updated_at still pages.
+        before = (cursor_since, after_id)
         if last_id is None or last_id == after_id:
             if last_ts is None or last_ts == cursor_since:
-                break
+                raise PagingStuck(collection, len(seen_ids))
             cursor_since = last_ts
             after_id = None
         else:
             cursor_since = last_ts or cursor_since
             after_id = last_id
+        if (cursor_since, after_id) == before:
+            raise PagingStuck(collection, len(seen_ids))
+        if page >= max_pages:
+            raise PagingStuck(collection, len(seen_ids), pages=page)
         # No artificial page delay — keep-alive + rate limit handle pacing.
-    return all_docs, meta
+
+
+class PagingStuck(RuntimeError):
+    """The server kept answering the same part of a list: the copy would be incomplete."""
+
+    def __init__(self, collection: str, got: int, *, pages: int = 0):
+        from core.copy_progress import LABELS
+
+        self.collection = collection
+        self.got = got
+        name = LABELS.get(collection, collection.replace("_", " "))
+        why = (f"more than {pages:,} pages" if pages
+               else "the server kept sending the same part of it again")
+        super().__init__(
+            f"The {name} list could not be downloaded in full ({got:,} received; {why}). "
+            "Nothing was changed. Please tell Satpuda support."
+        )
 
 
 _REPLACE_PULL_TABLES = (
@@ -1940,6 +2084,157 @@ def clear_business_data_for_replace_pull(conn) -> None:
         pass
 
 
+class _PagePrefetcher:
+    """Downloads every list's pages in order on its own thread, a few pages ahead of the
+    writer, so the network and the disk work at the same time. Only a few pages are ever
+    held (a 5-lakh-medicine store must not sit in memory whole)."""
+
+    _END = object()
+
+    def __init__(self, token: str, collections, *, page_size: Optional[int] = None, ahead: int = 3):
+        import queue
+
+        self._q: "queue.Queue" = queue.Queue(maxsize=max(1, ahead))
+        self._stop = threading.Event()
+        self._t = threading.Thread(
+            target=self._run, args=(token, tuple(collections), page_size),
+            name="CopyPrefetch", daemon=True,
+        )
+        self._t.start()
+
+    def _put(self, item) -> bool:
+        import queue
+
+        while not self._stop.is_set():
+            try:
+                self._q.put(item, timeout=0.5)
+                return True
+            except queue.Full:
+                continue
+        return False
+
+    def _run(self, token, collections, page_size) -> None:
+        try:
+            for col in collections:
+                meta: dict = {}
+                for docs in _iter_collection_pages(token, col, since=None, page_size=page_size, meta=meta):
+                    if not self._put(("page", col, docs, None)):
+                        return
+                if not self._put(("end", col, None, meta)):
+                    return
+        except BaseException as exc:  # handed to the writer, which raises it
+            self._put(("error", None, exc, None))
+            return
+        self._put(("done", None, None, None))
+
+    def get(self):
+        return self._q.get()
+
+    def close(self) -> None:
+        self._stop.set()
+        try:
+            while True:
+                self._q.get_nowait()
+        except Exception:
+            pass
+
+
+def _copy_collections_streamed(conn, token: str, *, progress_cb: ProgressCb, tracker,
+                               server_stock: Optional[dict], meta: dict, changed_cols: set) -> int:
+    """The full pull of every list, written page by page as it downloads.
+
+    Owner, 22 Oct 2026: a 65,000-medicine shop took hours to go Offline. Each list used to
+    come down whole before a single record was written (the network idle while the disk
+    worked and back again), and the whole list sat in memory. Every document still goes
+    through apply_server_doc, exactly as before; what changed is around it."""
+    from core import sync_watermarks as wm
+    from core.layout_config import read_once
+
+    count = 0
+    total_cols = len(_COLLECTIONS)
+    pre = _PagePrefetcher(token, _COLLECTIONS)
+    batch = _BatchConn(conn, cache_schema=True)
+    try:
+        # The writers make the client_uuid columns on first sight of one; done once here.
+        try:
+            from core.client_uuid import ensure_client_uuid_schema
+
+            ensure_client_uuid_schema(batch)
+            batch.client_uuid_ready = True
+        except Exception:
+            pass
+        with read_once():
+            for idx, col in enumerate(_COLLECTIONS, 1):
+                if tracker is not None:
+                    tracker.begin(col)
+                else:
+                    _progress(progress_cb, f"Downloading {col} ({idx}/{total_cols})…")
+                max_ts = None
+                got_any = False
+                pending = 0  # written, not yet counted on the bar
+                while True:
+                    kind, c, payload, m = pre.get()
+                    if kind == "error":
+                        raise payload
+                    if kind == "done" or c != col:
+                        raise RuntimeError(f"store copy: {col} list ended early")
+                    if kind == "end":
+                        if (m or {}).get("server_time"):
+                            meta["server_time"] = m["server_time"]
+                        break
+                    got_any = True
+                    batch.begin()
+                    for doc in payload:
+                        batch.begin_doc()
+                        try:
+                            status = apply_server_doc(batch, col, doc)
+                        finally:
+                            batch.end_doc()
+                        if status in ("applied", "soft_deleted"):
+                            count += 1
+                            changed_cols.add(col)
+                        if status in ("applied", "soft_deleted", "kept_local", "skipped"):
+                            ts = doc.get("updated_at") or doc.get("synced_at")
+                            if isinstance(ts, str) and ts and (max_ts is None or ts > max_ts):
+                                max_ts = ts
+                        if server_stock is not None and col == "medicines" and not doc.get("deleted"):
+                            try:
+                                mid = int(doc.get("id") or doc.get("local_id") or 0)
+                                if mid > 0:
+                                    server_stock[mid] = (int(float(doc.get("stock_qty") or 0)),
+                                                         1 if doc.get("is_hidden") else 0)
+                            except (TypeError, ValueError):
+                                pass
+                        pending += 1
+                        if pending >= 1000:
+                            batch.flush()
+                            batch.begin()
+                            if tracker is not None:
+                                tracker.advance(col, pending)
+                            pending = 0
+                    batch.flush()
+                    if tracker is not None:
+                        tracker.advance(col, pending)
+                    else:
+                        _progress(progress_cb, f"Merging {col}…")
+                    pending = 0
+                if col in wm.WATERMARK_COLLECTIONS:
+                    if got_any and max_ts:
+                        wm.bump_watermark(col, max_ts)
+                    else:
+                        wm.seed_from_local(conn, col)
+                try:
+                    conn.commit()
+                except Exception:
+                    pass
+            last = pre.get()
+            if last[0] == "error":
+                raise last[2]
+    finally:
+        pre.close()
+    return count
+
+
 def sync_down_all(
     conn,
     *,
@@ -1947,12 +2242,21 @@ def sync_down_all(
     progress_cb: ProgressCb = None,
     incremental: bool = False,
     replace_local: bool = False,
+    fast: bool = False,
+    tracker=None,
+    server_stock: Optional[dict] = None,
 ) -> int:
     """Download from Satpuda Core Server (Node). Download-only — no bulk upload.
 
     Full pulls use per-collection pagination (never the giant GET /api/sync).
     Incremental poller uses a lighter per-collection pull with watermarks.
     When replace_local=True, clears local business tables first then pulls cleanly.
+
+    fast=True (a full pull only): pages are written as they arrive while the next ones
+    download, with the schema lookups cached (_copy_collections_streamed). The same
+    writer applies every document either way. ``tracker`` (core.copy_progress) is told
+    every record written; ``server_stock`` gets {medicine id: (stock, hidden)} of every
+    live medicine downloaded.
     """
     from core import server_api as api
     from core import sync_watermarks as wm
@@ -1981,7 +2285,12 @@ def sync_down_all(
 
         total_cols = len(_COLLECTIONS)
         changed_cols: set[str] = set()
-        for idx, col in enumerate(_COLLECTIONS, 1):
+        if fast and not incremental:
+            count += _copy_collections_streamed(
+                conn, token, progress_cb=progress_cb, tracker=tracker,
+                server_stock=server_stock, meta=meta, changed_cols=changed_cols,
+            )
+        for idx, col in enumerate(() if (fast and not incremental) else _COLLECTIONS, 1):
             col_since = None
             if incremental:
                 col_since = since or wm.query_since(col)

@@ -1,4 +1,4 @@
-import os, json, shutil, sys
+import contextlib, copy, os, json, shutil, sys, threading
 
 _DEFAULTS = {
     'billing_rows': 8,
@@ -565,8 +565,39 @@ def prune_custom_home_banners(keep: str) -> list:
     return removed
 
 
+_READ_ONCE = threading.local()
+
+
+@contextlib.contextmanager
+def read_once():
+    """Inside this block load_layout() reads the file once and hands out copies.
+
+    Copying a store from the server asks for the layout on every purchase line (whether
+    a medicine type counts in strips): 4,800 file reads for one shop's 386 purchases,
+    5 s of a 25 s copy (22 Oct 2026). Nothing in the copy saves the layout."""
+    depth = getattr(_READ_ONCE, "depth", 0)
+    _READ_ONCE.depth = depth + 1
+    try:
+        yield
+    finally:
+        _READ_ONCE.depth = depth
+        if not depth:
+            _READ_ONCE.cached = None
+
+
 def load_layout():
-    """Always reads fresh from disk."""
+    """Always reads fresh from disk (once per read_once() block)."""
+    if getattr(_READ_ONCE, "depth", 0):
+        cached = getattr(_READ_ONCE, "cached", None)
+        if cached is None:
+            cached = _READ_ONCE.cached = _read_layout()
+        # One level deep is enough for the readers inside the block (they look up
+        # values); a full deepcopy of the ~1,000 entries cost more than the file read.
+        return {k: (copy.copy(v) if isinstance(v, (dict, list)) else v) for k, v in cached.items()}
+    return _read_layout()
+
+
+def _read_layout():
     try:
         path = _get_config_path()
         if os.path.exists(path):

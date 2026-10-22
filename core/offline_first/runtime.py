@@ -129,7 +129,11 @@ def activate_from_online(progress_cb: ProgressCb = None, app_version: str = "") 
         finally:
             old.close()
     _progress(progress_cb, "Copying the store from the server… (app band karu naka)")
-    result = download_store_for_offline(progress_cb=progress_cb)
+    # One bar for the whole switch: the copy fills it to 96%, registration the rest.
+    from core.online_migrate import new_copy_tracker
+
+    tracker = new_copy_tracker(progress_cb, tail_share=0.04)
+    result = download_store_for_offline(progress_cb=progress_cb, tracker=tracker)
     if isinstance(result, dict) and result.get("ok") is False:
         raise RuntimeError(result.get("error") or "The store could not be copied from the server.")
     path = store_db_path()
@@ -137,12 +141,16 @@ def activate_from_online(progress_cb: ProgressCb = None, app_version: str = "") 
     try:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")  # the bookkeeping tables and triggers: one sync, not one each
+
+        def _reg_progress(msg: str) -> None:
+            tracker.stage(msg, 97.0)
+
         info = register_and_prepare(conn, head_revision=head, app_version=app_version,
-                                    progress_cb=progress_cb)
+                                    progress_cb=_reg_progress)
     finally:
         conn.close()
     set_sync_mode(MODE_OFFLINE_FIRST)
-    _progress(progress_cb, "Done: this PC now works on its own copy and keeps it in step with the server.")
+    tracker.stage("Done: this PC now works on its own copy and keeps it in step with the server.", 100.0)
     return {"ok": True, **info, "head_revision": head}
 
 

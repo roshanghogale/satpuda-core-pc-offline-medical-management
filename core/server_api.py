@@ -398,6 +398,17 @@ def request_deadline(deadline: Optional[float]):
         _DEADLINE.value = before
 
 
+def _decoded_body(resp, raw: bytes) -> bytes:
+    """The answer's body, unzipped when the server sent it gzip-compressed."""
+    getheader = getattr(resp, "getheader", None)
+    enc = str((getheader("Content-Encoding") if getheader else "") or "").strip().lower()
+    if enc == "gzip" and raw:
+        import gzip
+
+        return gzip.decompress(raw)
+    return raw
+
+
 def _request(
     method: str,
     path: str,
@@ -417,6 +428,10 @@ def _request(
     data = None
     headers = {
         "Accept": "application/json",
+        # The server compresses every answer over 1 KB when asked (compression() in its
+        # index.js); this client never asked, so a store's medicine list came down as
+        # plain JSON: 2.8 MB a page of 5,000 instead of 0.13 MB (22 Oct 2026).
+        "Accept-Encoding": "gzip",
         "User-Agent": _UA,
         "Connection": "keep-alive",
     }
@@ -442,7 +457,7 @@ def _request(
             conn.timeout = wait
             conn.request(method.upper(), full_path, body=data, headers=headers)
             resp = conn.getresponse()
-            raw = resp.read()
+            raw = _decoded_body(resp, resp.read())
             if resp.status >= 400:
                 try:
                     parsed_err = _json_loads(raw) if raw else {}
