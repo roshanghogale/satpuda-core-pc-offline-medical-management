@@ -1017,6 +1017,40 @@ export function PharmacyPanel(props: Props) {
             receipt.
           </Note>
         </Frame>
+        <Frame title="Bill heading">
+          <Field label="Bill heading">
+            <select
+              className="settings-input"
+              value={String(bill.bill_heading || 'tax_invoice')}
+              onChange={(e) =>
+                setBill((b) => ({ ...b, bill_heading: e.target.value }))
+              }
+            >
+              <option value="tax_invoice">Tax Invoice (normal GST bill)</option>
+              <option value="bill_of_supply">Bill of Supply (no GST on the bill)</option>
+            </select>
+          </Field>
+          {String(bill.bill_heading || 'tax_invoice') === 'bill_of_supply' && (
+            <Field label="Bill of Supply reason">
+              <select
+                className="settings-input"
+                value={String(bill.bill_supply_reason || 'composition')}
+                onChange={(e) =>
+                  setBill((b) => ({ ...b, bill_supply_reason: e.target.value }))
+                }
+              >
+                <option value="composition">Composition dealer</option>
+                <option value="exempt">Exempt goods</option>
+              </select>
+            </Field>
+          )}
+          <Note>
+            Bill of Supply is for a composition dealer or a shop selling exempt goods:
+            bills print BILL OF SUPPLY with no GST lines; amounts stay the same. A
+            composition dealer's bill also prints "Composition taxable person, not
+            eligible to collect tax on supplies". Shared with the shop's phone and web.
+          </Note>
+        </Frame>
         <Frame title="Bill footer style">
           <Field label="Signature box">
             <select

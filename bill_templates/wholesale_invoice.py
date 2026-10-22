@@ -24,11 +24,20 @@ bottom halves with a dashed cut line between (each half is exactly an A5 landsca
 with more rows than one box holds goes on over more boxes, the totals on the last.
 
 Input is ``invoice_context`` (a plain dict), so it renders without a database.
+
+Bill of Supply (inv["bill_of_supply"], the shop's "Bill heading" setting -- core/bill_heading.py,
+owner 22 Oct 2026): titled BILL OF SUPPLY, no SGST/CGST/IGST columns, no GST table and no tax
+rows in the totals. The tax is printed inside the RATE, GROSS AMT and Discount instead
+(_supply_gross), so SUB TOTAL - Discount + CR/DR is still the bill's total; the saved bill and
+its total are unchanged. A composition dealer's bill prints inv["supply_declaration"] where the
+GST table was. The web's src/services/wholesaleInvoice.js prints the same, byte for byte.
 """
 from __future__ import annotations
 
 from html import escape
 from typing import Any, Iterable
+
+from core.bill_heading import BILL_OF_SUPPLY_TITLE
 
 # Item-table rows one box holds (lines and Return rows alike, one text line each).
 ROWS_PER_PAGE = 18
@@ -112,7 +121,7 @@ def _shop_name_pt(name: str) -> float:
 
 # ── the parts of one box ──────────────────────────────────────────────────────
 
-def _columns(intra: bool) -> list[tuple[str, str, str, str]]:
+def _columns(intra: bool, supply: bool = False) -> list[tuple[str, str, str, str]]:
     """(key, header, align, width) of the item table; the name takes what is left."""
     cols = [
         ("sr", "S.", "c", "3.2%"), ("name", "PRODUCT NAME", "l", ""),
@@ -122,7 +131,9 @@ def _columns(intra: bool) -> list[tuple[str, str, str, str]]:
         ("qty", "QTY", "r", "4.4%"), ("free", "FREE", "r", "4.2%"),
         ("rate", "RATE", "r", "6.6%"),
     ]
-    if intra:
+    if supply:
+        pass                    # a Bill of Supply states no tax
+    elif intra:
         cols += [("sgst", "SGST%", "r", "5%"), ("cgst", "CGST%", "r", "5%")]
     else:
         cols += [("igst", "IGST%", "r", "6%")]
@@ -134,11 +145,34 @@ def _cls(key: str, align: str) -> str:
     return {"l": "t" if key == "name" else "l", "c": "c", "r": "n"}[align]
 
 
-def _line_cells(it: dict, sr: int) -> dict[str, str]:
+def _line_tax(it: dict) -> float:
+    """A line's tax in rupees (CGST + SGST + IGST)."""
+    return round(_f(it.get("cgst")) + _f(it.get("sgst")) + _f(it.get("igst")), 2)
+
+
+def _line_off(it: dict) -> float:
+    off = it.get("line_discount")
+    return _f(it.get("item_discount") if off is None else off)
+
+
+def _supply_gross(it: dict, gross: Any) -> float:
+    """A Bill of Supply line's GROSS AMT: what it charges before its discount, tax in. A line
+    with no discount is exactly gross + its tax; a discounted one takes the tax on its full
+    gross, and the difference (the discount's own tax) goes into the Discount row."""
+    if abs(_line_off(it)) < 0.005:
+        return round(_f(gross) + _line_tax(it), 2)
+    return round(_f(gross) + round(_f(gross) * _f(it.get("gst_percent")) / 100, 2), 2)
+
+
+def _line_cells(it: dict, sr: int, supply: bool = False) -> dict[str, str]:
     pct = _f(it.get("gst_percent"))
     gross = it.get("gross")
     if gross is None:
         gross = _f(it.get("qty")) * _f(it.get("rate"))
+    # Bill of Supply: the rate and the gross with the line's tax in them (what is charged).
+    rate = round(_f(it.get("rate")) * (100 + pct) / 100, 2) if supply else it.get("rate")
+    if supply:
+        gross = _supply_gross(it, gross)
     return {
         "sr": str(sr),
         "name": _e(str(it.get("name") or "").upper()),
@@ -150,7 +184,7 @@ def _line_cells(it: dict, sr: int) -> dict[str, str]:
         "mrp": _mb(it.get("mrp")),
         "qty": _qty(it.get("qty")),
         "free": _qty(it.get("free")),
-        "rate": _m(it.get("rate")),
+        "rate": _m(rate),
         "sgst": f"{pct / 2:.2f}",
         "cgst": f"{pct / 2:.2f}",
         "igst": f"{pct:.2f}",
@@ -201,14 +235,15 @@ def _return_row(r: Any, cols: list) -> str:
 
 
 def _items_table(inv: dict, entries: Iterable[tuple[str, Any]]) -> str:
-    cols = _columns(bool(inv.get("intra_state", True)))
+    supply = bool(inv.get("bill_of_supply"))
+    cols = _columns(bool(inv.get("intra_state", True)), supply)
     colgroup = "".join(f"<col style='width:{w}'>" if w else "<col>" for _k, _h, _a, w in cols)
     head = "".join(f"<th>{_e(h)}</th>" for _k, h, _a, _w in cols)
     body = []
     for kind, data in entries:
         if kind == "item":
             it, sr = data
-            cells = _line_cells(it, sr)
+            cells = _line_cells(it, sr, supply)
             body.append("<tr class='r'>" + "".join(
                 f"<td class='{_cls(k, a)}'>{cells.get(k, '')}</td>" for k, _h, a, _w in cols)
                 + "</tr>")
@@ -268,13 +303,31 @@ def _bank_lines(shop: dict) -> list[str]:
     return out
 
 
+def _sub_and_discount(inv: dict) -> tuple[Any, Any]:
+    """SUB TOTAL and Discount as printed. On a Bill of Supply the tax is inside both: SUB TOTAL
+    is the lines' GROSS AMT (_supply_gross), the Discount what takes it to the lines' amounts."""
+    if not inv.get("bill_of_supply"):
+        return inv.get("sub_total"), inv.get("line_discount")
+    sub = charged = 0.0
+    for it in inv.get("lines") or []:
+        gross = it.get("gross")
+        if gross is None:
+            gross = _f(it.get("qty")) * _f(it.get("rate"))
+        sub = round(sub + _supply_gross(it, gross), 2)
+        charged = round(charged + _f(gross) - _line_off(it) + _line_tax(it), 2)
+    return sub, round(sub - charged, 2)
+
+
 def _totals(inv: dict) -> str:
     intra = bool(inv.get("intra_state", True))
     ret = _f(inv.get("returns_total"))
-    rows = [("SUB TOTAL", _m(inv.get("sub_total"))),
-            ("Discount", _mb(inv.get("line_discount"))),
+    sub, disc = _sub_and_discount(inv)
+    rows = [("SUB TOTAL", _m(sub)),
+            ("Discount", _mb(disc)),
             ("Bill Disc", _mb(inv.get("bill_discount")))]
-    if intra:
+    if inv.get("bill_of_supply"):
+        pass                    # no tax rows
+    elif intra:
         rows += [("SGST Value", _mb(inv.get("sgst_total"))),
                  ("CGST Value", _mb(inv.get("cgst_total")))]
     else:
@@ -336,7 +389,8 @@ def _box(inv: dict, entries: list, page: int, pages: int, copy_label: str) -> st
         meta.append(("Due Date", _e(_date(inv.get("due_date")))))
     if pages > 1:
         meta.append(("Page", f"{page} of {pages}"))
-    mid = ("<div class='title'>GST INVOICE</div>"
+    supply = bool(inv.get("bill_of_supply"))
+    mid = (f"<div class='title'>{BILL_OF_SUPPLY_TITLE if supply else 'GST INVOICE'}</div>"
            f"<div class='pay'>({_e(inv.get('pay_label') or 'CREDIT')})</div>"
            "<table class='meta'>" + "".join(
                f"<tr><td>{k}</td><td>:</td><td class='b'>{v}</td></tr>" for k, v in meta)
@@ -365,7 +419,12 @@ def _box(inv: dict, entries: list, page: int, pages: int, copy_label: str) -> st
         bank = _bank_lines(shop)
         bank_html = ("<div class='cap'>BANK DETAILS</div>"
                      + "".join(f"<div class='line'>{b}</div>" for b in bank)) if bank else ""
-        foot_left = (f"{_gst_table(inv)}<div class='words'>{_e(_words(inv))}</div>"
+        decl = str(inv.get("supply_declaration") or "")
+        tax_block = (
+            (f"<div class='supply-decl' style='font-weight:700;font-size:8pt;text-align:center;"
+             f"padding:2mm 1.2mm'>{_e(decl)}</div>" if decl else "")
+            if supply else _gst_table(inv))
+        foot_left = (f"{tax_block}<div class='words'>{_e(_words(inv))}</div>"
                      f"<div class='decl'>{_e(inv.get('declaration') or '')}</div>")
         foot_mid = (f"<div class='line'>Total Item / Quantity : "
                     f"{int(inv.get('total_items') or 0)} / {_qty(inv.get('total_qty')) or 0}</div>"
@@ -503,8 +562,10 @@ def render_wholesale_invoices_html(invs: list[dict], *, paper: str = "A5",
         cut = "<div class='cut'></div>" if len(pair) > 1 else ""
         sheets.append(f"<div class='sheet'>{halves}{cut}</div>")
     title = " ".join(str(inv.get("bill_no") or "") for inv in invs[:3])
+    doc_title = (BILL_OF_SUPPLY_TITLE if invs and all(inv.get("bill_of_supply") for inv in invs)
+                 else "GST INVOICE")
     return f"""<!doctype html>
-<html><head><meta charset="utf-8"><title>GST INVOICE {_e(title)}</title>
+<html><head><meta charset="utf-8"><title>{doc_title} {_e(title)}</title>
 <style>{_css(paper)}</style></head>
 <body class="paper-{paper.lower()}">
 {''.join(sheets)}

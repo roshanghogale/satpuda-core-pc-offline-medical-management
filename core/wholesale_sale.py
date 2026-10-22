@@ -1274,7 +1274,21 @@ def invoice_context(conn, sale_id: Any) -> dict[str, Any]:
         "grand_total": sale["total_amount"],
         "round_off": sale["rounding"],
         "amount_in_words": amount_in_words(sale["total_amount"]),
+        **_bill_heading(conn),
     }
+
+
+def _bill_heading(conn) -> dict[str, Any]:
+    """Tax Invoice or Bill of Supply, the shop's own setting (core/bill_heading.py):
+    bill_of_supply and the composition dealer's supply_declaration for the renderer."""
+    try:
+        from core.bill_heading import load_bill_heading
+
+        info = load_bill_heading(conn)
+    except Exception:
+        return {"bill_of_supply": False, "supply_declaration": ""}
+    return {"bill_of_supply": bool(info["bill_of_supply"]),
+            "supply_declaration": str(info["supply_declaration"] or "")}
 
 
 DEFAULT_DECLARATION = (
