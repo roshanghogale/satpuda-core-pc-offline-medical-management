@@ -18,7 +18,7 @@ _PID_FILE = "desktop_api.pid"
 # events cannot each fire one.
 _CLOSE_BACKUP_DONE = False
 # Bump when routes/payload change so the Tauri shell can replace a stale engine.
-API_REVISION = 67
+API_REVISION = 68
 _server: Optional[ThreadingHTTPServer] = None
 _server_thread: Optional[threading.Thread] = None
 _port = _DEFAULT_PORT
@@ -778,6 +778,9 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                             "/api/reports/gst/export",
                             "/api/reports/gst/summary",
                             "/api/reports/gst/hsn",
+                            "/api/reports/gst/screen",
+                            "/api/reports/gst/catalogue",
+                            "/api/reports/gst/screen/export",
                             "/api/reports/doctor-margin",
                             "/api/reports/doctor-margin/options",
                             "/api/reports/doctor-margin/export",
@@ -987,6 +990,27 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                     from core import gst_reports
 
                     _json_response(self, 200, {"ok": True, "filed": gst_reports.list_filed(conn)})
+                except Exception as exc:
+                    _json_response(self, 400, {"ok": False, "error": str(exc)})
+                return
+            if path in ("/api/reports/gst/screen", "/api/reports/gst/catalogue"):
+                # The GST Reports screen (core/gst_screen.py): ?report=<key or Marg letter>&from&to&comp_rate
+                conn = _db.get("conn")
+                if conn is None:
+                    _json_response(self, 503, {"error": "Database not open"})
+                    return
+                try:
+                    from urllib.parse import parse_qs
+
+                    from core import gst_screen
+
+                    if path.endswith("/catalogue"):
+                        out = {"reports": gst_screen.catalogue()}
+                    else:
+                        qs = {k: v[0] for k, v in parse_qs(urlparse(self.path).query).items() if v}
+                        out = gst_screen.build(conn, qs.get("report") or "", qs.get("from") or "", qs.get("to") or "",
+                                               float(qs.get("comp_rate") or 1))
+                    _json_response(self, 200, {"ok": True, **out})
                 except Exception as exc:
                     _json_response(self, 400, {"ok": False, "error": str(exc)})
                 return
@@ -2919,6 +2943,19 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                     else:
                         raise ValueError("action save / compare / delete")
                     _json_response(self, 200, {"ok": True, **out})
+                except Exception as exc:
+                    _json_response(self, 400, {"ok": False, "error": str(exc)})
+                return
+            if path == "/api/reports/gst/screen/export":
+                # The GST Reports screen's Excel / CSV / PDF / Print / GSTR-1 JSON (core/gst_screen.export).
+                if conn is None:
+                    _json_response(self, 503, {"error": "Database not open"})
+                    return
+                try:
+                    from core import gst_screen
+
+                    out = gst_screen.export(conn, body)
+                    _json_response(self, 200 if out.get("ok") else 400, out)
                 except Exception as exc:
                     _json_response(self, 400, {"ok": False, "error": str(exc)})
                 return

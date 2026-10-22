@@ -39,6 +39,7 @@ import { ReturnsPage } from './pages/ReturnsPage'
 import { SalesHistoryPage } from './pages/SalesHistoryPage'
 import { SalesPage } from './pages/SalesPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { GstReportsPage } from './pages/GstReportsPage'
 import { StartupAlertsDialog } from './pages/StartupAlertsDialog'
 import { StartupSplashOverlay } from './components/StartupSplashOverlay'
 import {
@@ -79,6 +80,7 @@ const NAV_LABELS: Record<PageId, string> = {
   payment: 'Payments',
   general_products: 'General Products',
   settings: 'Settings',
+  gst_reports: 'GST Reports',
 }
 
 const DEFAULT_PREFS: DesktopUiPrefs = {
@@ -237,6 +239,17 @@ export default function App() {
     })
     setNavPayload(payload || {})
   }, [])
+
+  // Settings -> Pharmacy (next to the GSTIN) and other places without onNavigate
+  // open a page by name: window.dispatchEvent(new CustomEvent('satpuda:navigate', { detail: { page } })).
+  useEffect(() => {
+    const onNav = (e: Event) => {
+      const p = (e as CustomEvent).detail?.page
+      if (p === 'gst_reports') navigate('gst_reports')
+    }
+    window.addEventListener('satpuda:navigate', onNav)
+    return () => window.removeEventListener('satpuda:navigate', onNav)
+  }, [navigate])
 
   const clearNavPayload = useCallback(() => {
     setNavPayload({})
@@ -779,6 +792,18 @@ export default function App() {
               syncRefreshNonce={syncRefreshNonce}
               active={page === 'returns'}
             />
+          </div>
+        )}
+        {(visited.has('gst_reports') || page === 'gst_reports') && (
+          <div
+            style={{
+              display: page === 'gst_reports' ? 'flex' : 'none',
+              flexDirection: 'column',
+              flex: 1,
+              minHeight: 0,
+            }}
+          >
+            <GstReportsPage active={page === 'gst_reports'} />
           </div>
         )}
         {(visited.has('settings') ||

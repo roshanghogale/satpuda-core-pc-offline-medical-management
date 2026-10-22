@@ -161,7 +161,7 @@ class PrintAllSavePdf(_Reports):
 
 class ThePages(unittest.TestCase):
     def test_no_page_downloads_a_blob_any_more(self):
-        for f in ("ExportDialog.tsx", "GstReportsDialog.tsx", "StartupAlertsDialog.tsx",
+        for f in ("ExportDialog.tsx", "GstReportsPage.tsx", "StartupAlertsDialog.tsx",
                   os.path.join("settings", "InteractivePanels.tsx")):
             text = src("desktop", "src", "pages", f)
             self.assertNotIn("a.download = filename", text, f)
