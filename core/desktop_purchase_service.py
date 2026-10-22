@@ -814,6 +814,27 @@ def _returns_on_edit(conn, purchase_id: int, items: list) -> dict[str, Any]:
     return edit_returns_info(conn, "purchase", int(purchase_id), items, id_key="medicine_id")
 
 
+def entry_payment_for_edit(cash: Any, online: Any, paid_at_entry: Any, amount_paid: Any) -> tuple[float, float]:
+    """(cash, online) an edit of a saved purchase starts from: what the bill was paid at entry.
+
+    The same rule the supplier's due is worked out by (server PURCHASE_ENTRY_PAID_SQL, PC
+    due_fifo.purchase_entry_paid): cash + online at entry, else amount_paid_at_entry, else
+    amount_paid. Read from the cash/online columns alone, a purchase stored with only its
+    paid-at-entry figure (346 on the live server, stores 126 / 127 / 132, 22 Oct 2026) opened
+    with Cash 0, and saving the edit -- a line's qty, say -- turned the paid bill into a full
+    due on the supplier, which nobody had asked for. Such a bill opens with its paid amount
+    as Cash, which is what the phone's edit already does.
+    """
+    c, o = round(_safe_float(cash), 2), round(_safe_float(online), 2)
+    if c + o > 0.009:
+        return c, o
+    for paid in (paid_at_entry, amount_paid):
+        p = round(_safe_float(paid), 2)
+        if p > 0.009:
+            return p, 0.0
+    return c, o
+
+
 def load_purchase(conn, purchase_id: int) -> dict[str, Any]:
     from core.layout_config import is_strip_count_type, parse_tablets_per_stripe
     from core.purchase_calculator import reconcile_items_gst_with_header
@@ -851,7 +872,8 @@ def load_purchase(conn, purchase_id: int) -> dict[str, Any]:
                COALESCE(gst_calc_method, 'discount_before_gst'),
                COALESCE(cgst, 0), COALESCE(total_amount, 0),
                COALESCE(rounding, 0), COALESCE(expenditure, 0),
-               COALESCE(is_autosave,0), purchase_no
+               COALESCE(is_autosave,0), purchase_no,
+               COALESCE(amount_paid_at_entry, 0), COALESCE(amount_paid, 0)
         FROM purchases WHERE id=?
         """,
         (int(purchase_id),),
@@ -859,6 +881,7 @@ def load_purchase(conn, purchase_id: int) -> dict[str, Any]:
     hdr = cur.fetchone()
     if not hdr:
         return {"ok": False, "error": "Purchase not found.", "code": "not_found"}
+    hdr, (paid_at_entry, amount_paid) = hdr[:-2], hdr[-2:]
 
     (
         bill_number,
@@ -876,6 +899,7 @@ def load_purchase(conn, purchase_id: int) -> dict[str, Any]:
         is_autosave,
         purchase_no,
     ) = hdr
+    cash_paid, online_paid = entry_payment_for_edit(cash_paid, online_paid, paid_at_entry, amount_paid)
 
     method = (gst_calc_method or "discount_before_gst").strip()
     if method not in ("discount_before_gst", "discount_after_gst"):
@@ -1087,8 +1111,10 @@ def _load_purchase_online(conn, purchase_id: int) -> dict[str, Any]:
     }
 
     overall_disc = _safe_float(doc.get("overall_discount"))
-    cash_paid = _safe_float(doc.get("cash_paid_at_entry"))
-    online_paid = _safe_float(doc.get("online_paid_at_entry"))
+    cash_paid, online_paid = entry_payment_for_edit(
+        doc.get("cash_paid_at_entry"), doc.get("online_paid_at_entry"),
+        doc.get("amount_paid_at_entry"), doc.get("amount_paid"),
+    )
     prev_due = _safe_float(doc.get("previous_due"))
     prev_credit = _safe_float(doc.get("previous_credit"))
     pur_date = str(doc.get("purchase_date") or "")
