@@ -394,24 +394,38 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class TheSimpleList(_Store):
-    """Owner, 22 Oct 2026: "simple, not that much options" -- eight reports in plain words."""
+class TheScreenList(_Store):
+    """Owner, 22 Oct 2026: "use the marg's names" -- Marg's GST menu, named as Marg names it."""
 
-    def test_a_regular_shop_sees_the_registers_gstr1_3b_and_hsn(self):
-        self.assertEqual(["sale", "sale_return", "purchase", "purchase_return", "gstr1", "gstr3b", "hsn"],
-                         [i["key"] for i in gs.catalogue(self.conn)])
-        self.assertEqual("Sale register (GST)", gs.catalogue(self.conn)[0]["title"])
+    def test_a_regular_shop_sees_margs_list_in_margs_words(self):
+        titles = [i["title"] for i in gs.catalogue(self.conn)]
+        self.assertEqual([
+            "GSTR-3b", "Sale (GSTR-1) (Detail)", "Sale Return (GSTR-1) (Detail)", "Sale (GSTR-1) (b2b)",
+            "Sale (GSTR-1) (b2cs)", "HSN Sale (GSTR-1) (hsn)", "Sale Return (GSTR-1) (cdnr)",
+            "HSN Sale Return (GSTR-1) (hsn)", "HSN Sale - Sale Return (GSTR-1) (hsn)", "Sale GSTR-1 (club)",
+            "Purchase (GSTR-2) (Detail)", "Purchase Return (GSTR-2) (Detail)", "Purchase (GSTR-2) (b2b)",
+            "HSN Purchase (GSTR-2) (hsn)", "Purchase Return (GSTR-2) (dbnr)", "HSN Purchase Rtn (GSTR-2) (hsn)",
+            "HSN Purchase - Purchase Return (GSTR-2) (hsn)", "Purchase (GSTR-2) (Party Wise)",
+            "Purchase GSTR-2 (club)", "Annual GSTR"], titles)
+        by = {i["key"]: i for i in gs.catalogue(self.conn)}
+        self.assertTrue(by["sale"]["json"] and by["b2cs"]["json"])
+        self.assertFalse(by["purchase"]["json"] or by["gstr3b"]["json"])
+        self.assertEqual("Sale (GSTR-1) (Detail)", self.rep("sale")["title"])
+        self.assertEqual(self.rep("C")["sections"], self.rep("sale")["sections"])
 
-    def test_a_composition_shop_sees_composition_and_no_gstr1_or_3b(self):
+    def test_a_composition_shop_sees_composition_and_no_gstr3b_or_json(self):
         from core.bill_heading import save_bill_heading
 
         save_bill_heading(self.conn, "bill_of_supply", "composition")
-        keys = [i["key"] for i in gs.catalogue(self.conn)]
-        self.assertEqual("composition", keys[0])
-        self.assertNotIn("gstr1", keys)
-        self.assertNotIn("gstr3b", keys)
+        items = gs.catalogue(self.conn)
+        titles = [i["title"] for i in items]
+        for t in ("Sale - Sale Return Composition GST", "Purchase Composition GST", "Annual GSTR4"):
+            self.assertIn(t, titles)
+        for t in ("GSTR-3b", "Sale (GSTR-1) (b2b)", "Annual GSTR"):
+            self.assertNotIn(t, titles)
+        self.assertFalse(any(i["json"] for i in items))
         save_bill_heading(self.conn, "bill_of_supply", "exempt")
-        self.assertNotIn("composition", [i["key"] for i in gs.catalogue(self.conn)])
+        self.assertNotIn("Annual GSTR4", [i["title"] for i in gs.catalogue(self.conn)])
 
     def test_gstr1_summary_has_its_sections_and_matches_the_tables(self):
         rep = self.rep("gstr1")
