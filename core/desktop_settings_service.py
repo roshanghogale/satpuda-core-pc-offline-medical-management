@@ -1097,9 +1097,20 @@ def get_pharmacy(conn: sqlite3.Connection) -> dict[str, Any]:
         )
     except Exception:
         sumatra_detected = ""
+    bill = dict(load_bill_print_settings())
+    # Tax Invoice / Bill of Supply: the store's own setting (shared with its phone and the
+    # web), not this PC's bill print file -- core/bill_heading.py.
+    try:
+        from core.bill_heading import load_bill_heading
+
+        heading = load_bill_heading(conn)
+        bill["bill_heading"] = heading["bill_heading"]
+        bill["bill_supply_reason"] = heading["bill_supply_reason"]
+    except Exception:
+        pass
     return {
         "profile": profile,
-        "bill": load_bill_print_settings(),
+        "bill": bill,
         "login": {
             "enabled": bool(login.get("enabled")),
             "username": login.get("username") or "",
@@ -1125,8 +1136,25 @@ def save_pharmacy(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, A
         save_pharmacy_profile(conn, data["profile"])
 
     if "bill" in data and isinstance(data["bill"], dict):
+        bill_in = dict(data["bill"])
+        # The bill heading is the store's (core/bill_heading.py), never this PC's file.
+        heading = bill_in.pop("bill_heading", None)
+        reason = bill_in.pop("bill_supply_reason", None)
+        if heading is not None or reason is not None:
+            from core.bill_heading import (
+                clean_heading, clean_reason, load_bill_heading, save_bill_heading,
+            )
+
+            have = load_bill_heading(conn)
+            want_h = have["bill_heading"] if heading is None else heading
+            want_r = have["bill_supply_reason"] if reason is None else reason
+            if (clean_heading(want_h), clean_reason(want_r)) != (
+                    have["bill_heading"], have["bill_supply_reason"]):
+                save_bill_heading(conn, want_h, want_r)
         cur = load_bill_print_settings()
-        cur.update(data["bill"])
+        cur.pop("bill_heading", None)
+        cur.pop("bill_supply_reason", None)
+        cur.update(bill_in)
         # Clamp Print Sales slot copies like Tk (A6≤1, A5≤2, A4≤4)
         for slot in (1, 2):
             key = f"print_slot_{slot}"

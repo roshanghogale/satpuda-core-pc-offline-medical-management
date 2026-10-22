@@ -194,6 +194,25 @@ def _show_gst_details(settings: dict) -> bool:
     return _setting(settings, "show_gst", True)
 
 
+def _gst_shown(ctx, settings: dict) -> bool:
+    """GST is printed on this slip: the setting, a GST shop, a tax on the bill, and not a
+    Bill of Supply (core/bill_heading.py -- it states no tax at all)."""
+    from core import bill_heading
+
+    return bool(_show_gst_details(settings) and ctx.gst_enabled
+                and float(ctx.gst_amount or 0) > 0
+                and not bill_heading.is_bill_of_supply(ctx, settings))
+
+
+def _supply_declaration(ctx, settings: dict) -> str:
+    """A composition dealer's Bill of Supply declaration ("" on a carry-forward page)."""
+    from core import bill_heading
+
+    if getattr(ctx, "is_continued", False):
+        return ""
+    return _ascii_safe(bill_heading.supply_declaration(ctx, settings)).strip()
+
+
 def _bold(text: str) -> str:
     return f"{_BOLD_ON}{_ascii_safe(text)}{_BOLD_OFF}"
 
@@ -342,6 +361,10 @@ def _invoice_title(ctx, settings: dict) -> str:
     doc_title = (getattr(ctx, "document_title", None) or settings.get("document_title") or "").strip()
     if doc_title:
         return _ascii_safe(doc_title)
+    from core import bill_heading
+
+    if bill_heading.is_bill_of_supply(ctx, settings):
+        return bill_heading.BILL_OF_SUPPLY_TITLE
     return "TAX INVOICE" if _is_tax_invoice(settings) else "GST INVOICE"
 
 
@@ -1064,7 +1087,12 @@ def _footer_strip_lines(ctx, settings: dict) -> list[str]:
     if custom:
         return _wrap_text(_ascii_safe(custom), w)
     nice = _label(settings, "gst_day_line", "HAVE A NICE DAY")
-    if not _show_gst_details(settings) or not ctx.gst_enabled or float(ctx.gst_amount or 0) <= 0:
+    declaration = _supply_declaration(ctx, settings)
+    if declaration:
+        # A composition dealer's Bill of Supply: its declaration where the GST was.
+        return ([line for line in _wrap_text(declaration, w) if line]
+                + [line for line in _wrap_text(nice, w) if line])
+    if not _gst_shown(ctx, settings):
         return _wrap_text(nice, w)
     gst = _footer_strip_line(ctx, settings, gst_only=True)
     return [line for line in _wrap_text(gst, w) if line] + [line for line in _wrap_text(nice, w) if line]
@@ -1075,7 +1103,10 @@ def _footer_strip_line(ctx, settings: dict, gst_only: bool = False) -> str:
     if custom:
         return _ascii_safe(custom)
     nice = _label(settings, "gst_day_line", "HAVE A NICE DAY")
-    if not _show_gst_details(settings) or not ctx.gst_enabled or float(ctx.gst_amount or 0) <= 0:
+    declaration = _supply_declaration(ctx, settings)
+    if declaration:
+        return declaration if gst_only else f"{declaration}, {nice}"[:_dm(settings).foot_left_w]
+    if not _gst_shown(ctx, settings):
         return nice
     taxable, cgst, sgst = gst_strip_figures(ctx)
     rates = sorted({float(item.gst_percent or 0) for item in ctx.items if item.gst_percent})
@@ -1120,7 +1151,7 @@ def _totals_lines(ctx, settings: dict) -> list[str]:
         lines.append(_amt_row(_label(settings, "gross_total_label", "Gross Total"), gross))
     if _setting(settings, "show_discount", True) and float(ctx.discount or 0) > 0:
         lines.append(_amt_row(disc_l, float(ctx.discount)))
-    if _show_gst_details(settings) and ctx.gst_enabled and float(ctx.gst_amount or 0) > 0:
+    if _gst_shown(ctx, settings):
         lines.append(_amt_row("GST", float(ctx.gst_amount)))
     if abs(float(ctx.rounding or 0)) >= 0.01:
         lines.append(_amt_row("Rounding", float(ctx.rounding)))
@@ -1220,7 +1251,9 @@ def _compact_footer(ctx, settings: dict) -> list[str]:
     if _setting(settings, "show_signature", True):
         sign = _ascii_safe(_label(settings, "signature_caption", "SIGN OF Q.P."))
     left_lines: list[str] = []
-    if not getattr(ctx, "is_continued", False) and _setting(settings, "show_gst_strip", True):
+    # The Bill of Supply declaration prints even with the strip switched off: the law asks for it.
+    if not getattr(ctx, "is_continued", False) and (
+            _setting(settings, "show_gst_strip", True) or _supply_declaration(ctx, settings)):
         left_lines = [line for line in _footer_strip_lines(ctx, settings) if line]
     if _setting(settings, "dot_matrix_item_count", True):
         count = _item_count_line(ctx, settings)
@@ -1281,7 +1314,7 @@ def _build_footer_classic(ctx, settings: dict) -> list[str]:
         # The GST strip and the money are two different things: hiding the strip
         # used to take Total, LESS and Due down with it, because both lived
         # under the same switch and the bill came out with no amount on it.
-        show_strip = _setting(settings, "show_gst_strip", True)
+        show_strip = _setting(settings, "show_gst_strip", True) or bool(_supply_declaration(ctx, settings))
         strip = _footer_strip_lines(ctx, settings) if show_strip else []
         totals = _totals_lines(ctx, settings)
         if strip or totals:

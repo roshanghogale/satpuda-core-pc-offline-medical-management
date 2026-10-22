@@ -170,6 +170,15 @@ def _build_bill_context(profile, bill_info, items, pay_mode, cursor):
         due_amount=due_amt,
         total_due=total_due,
     )
+    # Tax Invoice or Bill of Supply: the store's own setting (core/bill_heading.py).
+    try:
+        from core.bill_heading import load_bill_heading
+
+        heading = load_bill_heading(getattr(cursor, "connection", None))
+        ctx.bill_heading = heading["bill_heading"]
+        ctx.bill_supply_reason = heading["bill_supply_reason"]
+    except Exception:
+        pass
     from core.upi_qr import apply_upi_qr_to_context
     apply_upi_qr_to_context(ctx)
     return ctx

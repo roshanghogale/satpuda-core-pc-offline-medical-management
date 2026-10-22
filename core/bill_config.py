@@ -339,6 +339,11 @@ class BillContext:
     # the whole bill's Return total; Net to pay = grand_total - returns_total.
     returns: List[BillReturnRow] = field(default_factory=list)
     returns_total: float = 0.0
+    # The shop's bill heading (core/bill_heading.py, owner 22 Oct 2026): "tax_invoice" or
+    # "bill_of_supply", and why ("composition" | "exempt"). "" = read the store's setting /
+    # the settings dict. A Bill of Supply prints no GST; the amounts above stay as they are.
+    bill_heading: str = ""
+    bill_supply_reason: str = ""
 
 
 def load_bill_print_settings() -> Dict[str, Any]:

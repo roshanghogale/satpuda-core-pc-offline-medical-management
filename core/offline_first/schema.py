@@ -45,15 +45,18 @@ LINE_TABLES = {
 # same-store switch (wholesale is a separate store now); still carried, read by nothing.
 # profile_bank_*: the shop's bank details (core/pharmacy_profile_io.BANK_KV) -- the server's
 # profile has no columns for them, so they travel as settings rows.
+# profile_bill_*: the bill heading, Tax Invoice or Bill of Supply (core/bill_heading.py).
 SHOP_WIDE_SETTING_PREFIXES = (
     "regular_meds:", "customer_gst:", "gst_filed:", "ws_margin_", "profile_bank_",
+    "profile_bill_",
 )
 SHOP_WIDE_SETTING_NAMES = ("billing_layout_prefs", "business_mode")
 # The settings triggers carry the list above in their WHEN; a longer list is a new version.
-_SETTINGS_TRIGGER_VERSION = "v4"
+_SETTINGS_TRIGGER_VERSION = "v5"
 _RETIRED_SETTINGS_TRIGGERS = (
     "of_insert_settings", "of_update_settings", "of_insert_settings_v2", "of_update_settings_v2",
     "of_insert_settings_v3", "of_update_settings_v3",
+    "of_insert_settings_v4", "of_update_settings_v4",
 )
 
 # Medicine columns whose change is bookkeeping or stock, not an edit of the medicine itself.

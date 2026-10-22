@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from core.bill_config import BillContext, get_bill_body_padding, get_bill_content_scale
+from core import bill_heading
 from core.bill_gst import gst_strip_figures
 from core.bill_page_config import (
     get_classic_layout,
@@ -49,9 +50,24 @@ def _show_gst_details(settings) -> bool:
     return bool(settings.get("show_gst", True))
 
 
+def _gst_shown(ctx, settings) -> bool:
+    """GST is printed on this bill: the setting, a GST shop, and not a Bill of Supply
+    (core/bill_heading.py -- a Bill of Supply states no tax at all)."""
+    return bool(_show_gst_details(settings) and ctx.gst_enabled
+                and not bill_heading.is_bill_of_supply(ctx, settings))
+
+
+def _supply_declaration(ctx, settings) -> str:
+    """A composition dealer's Bill of Supply declaration, "" on a carry-forward page and on
+    any other bill."""
+    if getattr(ctx, "is_continued", False):
+        return ""
+    return bill_heading.supply_declaration(ctx, settings).strip()
+
+
 def _gst_calc_line(ctx, settings) -> str:
     """GST breakdown only (no 'have a nice day' suffix)."""
-    if not _show_gst_details(settings) or not ctx.gst_enabled or ctx.gst_amount <= 0:
+    if not _gst_shown(ctx, settings) or ctx.gst_amount <= 0:
         return ""
 
     # Taxable value and CGST/SGST after the bill discount -- see core.bill_gst.
@@ -119,7 +135,7 @@ def _sum_table_row_count(ctx, settings) -> int:
     rows = 1 if gross_total_to_show(ctx, settings) else 0
     if settings.get("show_discount", True) and float(getattr(ctx, "discount", 0) or 0) > 0:
         rows += 1
-    if _show_gst_details(settings) and ctx.gst_enabled and float(ctx.gst_amount or 0) > 0:
+    if _gst_shown(ctx, settings) and float(ctx.gst_amount or 0) > 0:
         rows += 1
     if settings.get("show_total", True):
         rows += 1
@@ -470,6 +486,10 @@ def _bottom_zone_rows(ctx, settings, layout: dict, *, upright: bool = False) -> 
 
 
 def _footer_strip_text(ctx, settings) -> str:
+    # A composition dealer's Bill of Supply prints its declaration where the GST was.
+    declaration = _supply_declaration(ctx, settings)
+    if declaration:
+        return declaration
     custom = (
         getattr(ctx, "footer_strip_line", None)
         or settings.get("footer_strip_line")
@@ -485,7 +505,8 @@ def _bottom_zone_markup(ctx, settings, layout: dict, *, upright: bool = False) -
     strip_text = _footer_strip_text(ctx, settings) if not continued else ""
     gst_strip = (
         f'<div class="gst-strip">{esc(strip_text)}</div>'
-        if settings.get("show_gst_strip", True) and strip_text
+        # The declaration prints even with the GST strip switched off: the law asks for it.
+        if (settings.get("show_gst_strip", True) or _supply_declaration(ctx, settings)) and strip_text
         else '<div class="gst-strip"></div>'
     )
     show_disc = settings.get("show_discount", True)
@@ -494,7 +515,7 @@ def _bottom_zone_markup(ctx, settings, layout: dict, *, upright: bool = False) -
     total_label = (settings.get("total_label") or "Total").strip()
     gst_total_row = (
         f'<tr><td>GST</td><td class="r">{ctx.gst_amount:.2f}</td></tr>'
-        if _show_gst_details(settings) and ctx.gst_enabled and ctx.gst_amount > 0 and not continued
+        if _gst_shown(ctx, settings) and ctx.gst_amount > 0 and not continued
         else ""
     )
     totals_rows = "" if continued else _gross_total_row(ctx, settings)
@@ -527,7 +548,7 @@ def _bottom_zone_markup(ctx, settings, layout: dict, *, upright: bool = False) -
         return _one_row_footer(ctx, settings, layout, totals_rows, sum_class, upi, upright=upright)
 
     if upi:
-        gst_only = _gst_calc_line(ctx, settings)
+        gst_only = _supply_declaration(ctx, settings) or _gst_calc_line(ctx, settings)
         gst_row = (
             f'<div class="gst-strip gst-strip-gst-only">{esc(gst_only)}</div>'
             if gst_only
@@ -568,7 +589,7 @@ def _bottom_zone_markup(ctx, settings, layout: dict, *, upright: bool = False) -
 
 def _gst_detail_line(ctx, settings) -> str:
     """The GST working for the new footer: "Taxable 35.71 | SGST 6% 2.14 | CGST 6% 2.15"."""
-    if not _show_gst_details(settings) or not ctx.gst_enabled or ctx.gst_amount <= 0:
+    if not _gst_shown(ctx, settings) or ctx.gst_amount <= 0:
         return ""
     taxable, cgst, sgst = gst_strip_figures(ctx)
     rates = sorted({float(item.gst_percent or 0) for item in ctx.items if item.gst_percent})
@@ -594,6 +615,10 @@ def _one_row_footer(ctx, settings, layout, totals_rows, sum_class, upi, *, uprig
     to the medicine table, which is why the signature moved to the middle."""
     continued = bool(getattr(ctx, "is_continued", False))
     msgs = []
+    # A composition dealer's Bill of Supply: its declaration where the GST working was.
+    declaration = _supply_declaration(ctx, settings)
+    if declaration:
+        msgs.append(f'<div class="ft-gst ft-supply">{esc(declaration)}</div>')
     if not continued and settings.get("show_gst_strip", True):
         custom = (getattr(ctx, "footer_strip_line", None) or settings.get("footer_strip_line") or "").strip()
         if custom:
@@ -746,6 +771,8 @@ def _bill_copy(ctx, copy_label: str, settings, *, upright: bool = False, layout:
     doc_title = (getattr(ctx, "document_title", None) or settings.get("document_title") or "").strip()
     if doc_title:
         inv_title = doc_title
+    elif bill_heading.is_bill_of_supply(ctx, settings):
+        inv_title = bill_heading.BILL_OF_SUPPLY_TITLE
     else:
         inv_title = "TAX INVOICE" if _is_tax_invoice(settings) else "GST INVOICE"
     store_name_html = (
