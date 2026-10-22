@@ -1,5 +1,5 @@
-/* Settings > GST Reports, 22 Oct 2026. Left: Marg's GST report list in Marg's names under
- * plain GSTR-3B / GSTR-1 / GSTR-2 / Annual headers. Top: the month (or custom dates) and the shop's GSTIN. Right: the
+/* Settings > GST Reports, 22 Oct 2026. Left: Marg's GST reports in Marg's names under Monthly
+ * filing / Registers for your CA / More reports (folded). Top: the month (or custom dates) and the shop's GSTIN. Right: the
  * report's tables, one scroll. Theme variables only; .sat-table, .btn and .settings-input
  * are reused as they are. */
 
@@ -63,6 +63,23 @@
   letter-spacing: 0.4px;
   color: var(--text-secondary);
   padding: 8px 10px 2px;
+}
+.gst-group-toggle {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.gst-count {
+  float: right;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 .gst-item {
   display: block;

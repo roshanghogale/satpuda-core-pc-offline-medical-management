@@ -1006,10 +1006,13 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
 
                     from core import gst_screen
 
+                    qs = {k: v[0] for k, v in parse_qs(urlparse(self.path).query).items() if v}
                     if path.endswith("/catalogue"):
-                        out = {"reports": gst_screen.catalogue(conn), "composition": gst_screen.is_composition(conn)}
+                        # ?from&to (the counts that place b2b / cdnr / b2cs) &mode=retail|wholesale
+                        mode = str(qs.get("mode") or "").lower()
+                        out = gst_screen.catalogue(conn, qs.get("from") or "", qs.get("to") or "",
+                                                   None if mode not in ("retail", "wholesale") else mode == "wholesale")
                     else:
-                        qs = {k: v[0] for k, v in parse_qs(urlparse(self.path).query).items() if v}
                         out = gst_screen.build(conn, qs.get("report") or "", qs.get("from") or "", qs.get("to") or "",
                                                float(qs.get("comp_rate") or 1))
                     _json_response(self, 200, {"ok": True, **out})
