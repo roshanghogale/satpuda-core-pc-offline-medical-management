@@ -50,13 +50,15 @@ SHOP_WIDE_SETTING_PREFIXES = (
     "regular_meds:", "customer_gst:", "gst_filed:", "ws_margin_", "profile_bank_",
     "profile_bill_",
 )
-SHOP_WIDE_SETTING_NAMES = ("billing_layout_prefs", "business_mode")
+# doctor_margin_rules: the Doctor Margin Report's rules (core/doctor_margin_rules.py).
+SHOP_WIDE_SETTING_NAMES = ("billing_layout_prefs", "business_mode", "doctor_margin_rules")
 # The settings triggers carry the list above in their WHEN; a longer list is a new version.
-_SETTINGS_TRIGGER_VERSION = "v5"
+_SETTINGS_TRIGGER_VERSION = "v6"
 _RETIRED_SETTINGS_TRIGGERS = (
     "of_insert_settings", "of_update_settings", "of_insert_settings_v2", "of_update_settings_v2",
     "of_insert_settings_v3", "of_update_settings_v3",
     "of_insert_settings_v4", "of_update_settings_v4",
+    "of_insert_settings_v5", "of_update_settings_v5",
 )
 
 # Medicine columns whose change is bookkeeping or stock, not an edit of the medicine itself.

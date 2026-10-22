@@ -325,7 +325,14 @@ def _flag_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
 
 
 def build_report(conn, body: dict[str, Any]) -> dict[str, Any]:
-    """{ok, filters, mode, pct, rows, summary, doctors, totals, flag_counts} -- money in paise."""
+    """{ok, filters, mode, pct, rows, summary, doctors, totals, flag_counts} -- money in paise.
+
+    mode 'rules' (owner, 22 Oct 2026; the dialog's default): the report by the doctor margin
+    rules, from the doctor report's saved lines -- core/doctor_margin_rules_report.py."""
+    if str(body.get("mode") or "").strip().lower() == "rules":
+        from core import doctor_margin_rules_report
+
+        return doctor_margin_rules_report.build_report(conn, body)
     if _is_online():
         raise ReportError(
             "The Doctor Margin Report reads this PC's own books; an Online store's bills are "
@@ -616,6 +623,10 @@ def export_report(conn, body: dict[str, Any]) -> dict[str, Any]:
     in the reports folder and says where."""
     import base64
 
+    if str(body.get("mode") or "").strip().lower() == "rules":
+        from core import doctor_margin_rules_report
+
+        return doctor_margin_rules_report.export_report(conn, body)
     rep = build_report(conn, body)
     style = rep["filters"]["style"]
     rows = table_rows(rep, style)

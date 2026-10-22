@@ -19,8 +19,9 @@ log = logging.getLogger(__name__)
 # same-store switch (wholesale is a separate store now); still carried, read by nothing.
 # profile_bank_*: the shop's bank details (core/pharmacy_profile_io.BANK_KV).
 # profile_bill_*: the bill heading, Tax Invoice or Bill of Supply (core/bill_heading.py).
+# doctor_margin_rules: the Doctor Margin Report's rules (core/doctor_margin_rules.py).
 PREFIXES = ("regular_meds:", "customer_gst:", "gst_filed:", "business_mode", "ws_margin_",
-            "profile_bank_", "profile_bill_")
+            "profile_bank_", "profile_bill_", "doctor_margin_rules")
 
 
 def _carried(name: str) -> bool:

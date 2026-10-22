@@ -784,6 +784,8 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                             "/api/reports/doctor-margin",
                             "/api/reports/doctor-margin/options",
                             "/api/reports/doctor-margin/export",
+                            "/api/reports/doctor-margin/rules",
+                            "/api/reports/doctor-margin/products",
                             "/api/customers/gst",
                             "/api/voice/pack",
                             "/api/voice/ready",
@@ -1392,6 +1394,28 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 from core.doctor_margin_report import report_options
 
                 _json_response(self, 200, report_options(conn))
+                return
+
+            if path in ("/api/reports/doctor-margin/rules", "/api/reports/doctor-margin/products"):
+                # Doctor margin rules (core/doctor_margin_rules.py): the rules with the doctors and
+                # types, or the products of one type for the pick list (?type=&find=).
+                conn = _db.get("conn")
+                if conn is None:
+                    _json_response(self, 503, {"error": "Database not open"})
+                    return
+                from core import doctor_margin_rules_report as dmrr
+
+                try:
+                    if path.endswith("/products"):
+                        from urllib.parse import parse_qs
+
+                        qs = parse_qs(urlparse(self.path).query)
+                        _json_response(self, 200, dmrr.rule_products(
+                            conn, (qs.get("type") or [""])[0].strip(), (qs.get("find") or [""])[0].strip()))
+                    else:
+                        _json_response(self, 200, dmrr.rules_payload(conn))
+                except Exception as exc:
+                    _json_response(self, 400, {"ok": False, "error": str(exc)})
                 return
 
             if path == "/api/startup/alerts":
@@ -2187,6 +2211,13 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                         result = sales_svc.print_all_sales(conn, body)
                 else:
                     result = sales_svc.save_sale(conn, body)
+                if (path in ("/api/sales/save", "/api/sales/history/delete") and result.get("ok")
+                        and result.get("sale_id") and not result.get("is_autosave")):
+                    # The doctor report's own saved lines (core/doctor_margin_store.py): the bill
+                    # tables are not touched; this never fails the save.
+                    from core.doctor_margin_store import sync_sale
+
+                    sync_sale(conn, result.get("sale_id"))
                 status = 200
                 if result.get("need_confirm"):
                     status = 409
@@ -2331,6 +2362,20 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                     _json_response(self, 400, result)
                     return
                 _json_response(self, 200, result)
+                return
+            if path == "/api/reports/doctor-margin/rules":
+                # Save the doctor margin rules (a store setting, synced like the other shop ones).
+                from core import doctor_margin_rules as dmr
+
+                body = _read_json_body(self)
+                conn = _db.get("conn")
+                if conn is None:
+                    _json_response(self, 503, {"error": "Database not open"})
+                    return
+                try:
+                    _json_response(self, 200, {"ok": True, "rules": dmr.save_rules(conn, body.get("rules"))})
+                except Exception as exc:
+                    _json_response(self, 400, {"ok": False, "error": str(exc)})
                 return
             if path in ("/api/reports/doctor-margin", "/api/reports/doctor-margin/export"):
                 # Doctor Margin Report (core/doctor_margin_report.py): the preview, or a file
@@ -2507,6 +2552,15 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                     result = ret_svc.lookup_disposal_medicine(conn, body)
                 else:
                     result = ret_svc.submit_disposal(conn, body)
+                if path in ("/api/returns/sales/save", "/api/returns/sales/delete") and result.get("ok"):
+                    # A sales return takes its qty off the doctor report's saved lines.
+                    try:
+                        from core.doctor_margin_store import refresh_returns
+
+                        sid = int(result.get("sale_id") or body.get("sale_id") or 0)
+                        refresh_returns(conn, [sid] if sid > 0 else None)
+                    except Exception as exc:
+                        print(f"[doctor margin] returns: {exc}")
                 status = 200 if result.get("ok") else 400
                 _json_response(self, status, result)
                 return
