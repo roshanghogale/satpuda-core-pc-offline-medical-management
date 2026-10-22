@@ -1114,10 +1114,42 @@ def is_composition(conn) -> bool:
         return False
 
 
+# Owner, 22 Oct 2026: "use the marg's names". The screen lists Marg's GST menu, named as Marg
+# names it, in plain section headers: key, title, group, shown for ("regular" | "composition"
+# | "both"), quiet (drop the explanatory notes; a note about missing data stays).
+SCREEN = [
+    ("gstr3b", "GSTR-3b", "GSTR-3B", "regular", False),
+    ("sale", "Sale (GSTR-1) (Detail)", "GSTR-1", "both", False),
+    ("sale_return", "Sale Return (GSTR-1) (Detail)", "GSTR-1", "both", False),
+    ("b2b", "Sale (GSTR-1) (b2b)", "GSTR-1", "regular", True),
+    ("b2cs", "Sale (GSTR-1) (b2cs)", "GSTR-1", "regular", True),
+    ("hsn_sale", "HSN Sale (GSTR-1) (hsn)", "GSTR-1", "both", True),
+    ("cdnr", "Sale Return (GSTR-1) (cdnr)", "GSTR-1", "regular", True),
+    ("hsn_sale_return", "HSN Sale Return (GSTR-1) (hsn)", "GSTR-1", "both", True),
+    ("hsn_sale_net", "HSN Sale - Sale Return (GSTR-1) (hsn)", "GSTR-1", "both", True),
+    ("gstr1_club", "Sale GSTR-1 (club)", "GSTR-1", "regular", True),
+    ("purchase", "Purchase (GSTR-2) (Detail)", "GSTR-2", "both", False),
+    ("purchase_return", "Purchase Return (GSTR-2) (Detail)", "GSTR-2", "both", False),
+    ("purchase_b2b", "Purchase (GSTR-2) (b2b)", "GSTR-2", "regular", False),
+    ("hsn_purchase", "HSN Purchase (GSTR-2) (hsn)", "GSTR-2", "both", False),
+    ("dbnr", "Purchase Return (GSTR-2) (dbnr)", "GSTR-2", "regular", False),
+    ("hsn_purchase_return", "HSN Purchase Rtn (GSTR-2) (hsn)", "GSTR-2", "both", False),
+    ("hsn_purchase_net", "HSN Purchase - Purchase Return (GSTR-2) (hsn)", "GSTR-2", "both", False),
+    ("purchase_party", "Purchase (GSTR-2) (Party Wise)", "GSTR-2", "both", True),
+    ("gstr2_club", "Purchase GSTR-2 (club)", "GSTR-2", "both", True),
+    ("gstr9", "Annual GSTR", "Annual", "regular", False),
+    ("composition_sale", "Sale - Sale Return Composition GST", "Composition", "composition", False),
+    ("composition_purchase", "Purchase Composition GST", "Composition", "composition", False),
+    ("gstr4", "Annual GSTR4", "Composition", "composition", False),
+]
+GSTR1_KEYS = {k for k, _, g, _, _ in SCREEN if g == "GSTR-1"}
+
+
 def catalogue(conn=None) -> list:
     comp = is_composition(conn) if conn is not None else False
     want = {"both", "composition" if comp else "regular"}
-    return [{"key": k, "title": t, "hint": h} for k, t, h, _, who in SIMPLE if who in want]
+    return [{"key": k, "title": t, "group": g, "json": k in GSTR1_KEYS and not comp}
+            for k, t, g, who, _ in SCREEN if who in want]
 
 
 def _find(key: str):
@@ -1130,9 +1162,17 @@ def _find(key: str):
 
 def build(conn, key: str, start: str, end: str, comp_rate: float = 1.0) -> dict:
     """One report of the screen for one period (a SIMPLE key, or any of Marg's list)."""
+    screen = {k: (t, g, quiet) for k, t, g, _, quiet in SCREEN}
     simple = {k: (t, h, b) for k, t, h, b, _ in SIMPLE}
     simple.update(HIDDEN)
-    if str(key) in simple:
+    quiet = False
+    if str(key) in screen:
+        k = str(key)
+        title, group, quiet = screen[k]
+        letter, form = "", ""
+        builder = gstr3b_summary if k == "gstr3b" else next(row[5] for row in CATALOGUE if row[0] == k)
+        builder = builder or _named_builder(k)
+    elif str(key) in simple:
         k = str(key)
         title, form, builder = simple[k]
         letter, group = "", ""
@@ -1142,6 +1182,8 @@ def build(conn, key: str, start: str, end: str, comp_rate: float = 1.0) -> dict:
     p = period(conn, start, end)
     c = Ctx(conn, p, comp_rate)
     out = builder(c)
+    if quiet:
+        out = {**out, "notes": []}
     return {"key": k, "letter": letter, "group": group, "title": title, "form": form,
             "partial": PARTIAL.get(k, ""), "period": {"from": p.start, "to": p.end}, "shop": p.shop,
             "sections": out["sections"], "notes": out.get("notes", []),

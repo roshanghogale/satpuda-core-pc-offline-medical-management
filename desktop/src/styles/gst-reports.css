@@ -1,5 +1,5 @@
-/* Settings > GST Reports, 22 Oct 2026. Left: a short list of reports in plain words, the GST
- * form as a grey hint. Top: the month (or custom dates) and the shop's GSTIN. Right: the
+/* Settings > GST Reports, 22 Oct 2026. Left: Marg's GST report list in Marg's names under
+ * plain GSTR-3B / GSTR-1 / GSTR-2 / Annual headers. Top: the month (or custom dates) and the shop's GSTIN. Right: the
  * report's tables, one scroll. Theme variables only; .sat-table, .btn and .settings-input
  * are reused as they are. */
 
@@ -48,25 +48,31 @@
 }
 
 .gst-list {
-  width: 230px;
-  flex: 0 0 230px;
+  width: 270px;
+  flex: 0 0 270px;
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface);
   padding: 4px 0 8px;
 }
+.gst-group {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-secondary);
+  padding: 8px 10px 2px;
+}
 .gst-item {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
+  display: block;
   width: 100%;
   border: 0;
   background: transparent;
   color: inherit;
   text-align: left;
-  padding: 6px 10px;
-  font-size: 13px;
+  padding: 3px 10px;
+  font-size: 12.5px;
   cursor: pointer;
   border-left: 3px solid transparent;
 }
@@ -77,11 +83,6 @@
   background: var(--accent-soft);
   border-left-color: var(--primary);
   font-weight: 700;
-}
-.gst-hint {
-  font-size: 10.5px;
-  font-weight: 400;
-  color: var(--text-muted);
 }
 .gst-link {
   border: 0;

@@ -1,8 +1,8 @@
-/** Settings > GST Reports (owner, 22 Oct 2026: "in the settings ... simple, not that much
- *  options"). A short list in plain words -- the sale / purchase registers in Marg's GST upload
- *  layout, GSTR-1 and GSTR-3B summaries, HSN, and for a composition dealer (Bill of Supply,
- *  composition) the composition summary instead of GSTR-1 / 3B. A month (or custom dates),
- *  and Excel / CSV / PDF / Print.
+/** Settings > GST Reports (owner, 22 Oct 2026: "in the settings", "simple", "use the marg's
+ *  names"). Marg's GST menu named as Marg names it, under plain GSTR-3B / GSTR-1 / GSTR-2 /
+ *  Annual headers -- the Detail items are the registers in Marg's GST upload layout -- and for
+ *  a composition dealer (Bill of Supply, composition) the composition reports instead of
+ *  GSTR-3b and the GSTR-1 JSON. A month (or custom dates), and Excel / CSV / PDF / Print.
  *
  *  Every figure comes from the engine (core/gst_screen.py on core/gst_reports.py), which
  *  takes each bill's tax out the way the printed bill does -- the tables add up to the bills.
@@ -34,7 +34,7 @@ type Report = {
   counts: { bills: number; credit_notes: number; purchases: number; purchase_returns: number }
   checks: number
 }
-type Item = { key: string; title: string; hint: string }
+type Item = { key: string; title: string; group: string; json: boolean }
 
 const pad = (n: number) => String(n).padStart(2, '0')
 const iso = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
@@ -235,16 +235,18 @@ export function GstReportsPage({ active }: { active: boolean }) {
 
       <div className="gst-main">
         <nav className="gst-list" aria-label="GST reports">
-          {items.map((i) => (
-            <button key={i.key} type="button" className={`gst-item${i.key === key && !checking ? ' active' : ''}`}
-              onClick={() => {
-                setKey(i.key)
-                setChecking(false)
-                setMsg('')
-              }}>
-              <span>{i.title}</span>
-              <span className="gst-hint">{i.hint}</span>
-            </button>
+          {items.map((i, n) => (
+            <div key={i.key}>
+              {n === 0 || items[n - 1].group !== i.group ? <div className="gst-group">{i.group}</div> : null}
+              <button type="button" className={`gst-item${i.key === key && !checking ? ' active' : ''}`}
+                onClick={() => {
+                  setKey(i.key)
+                  setChecking(false)
+                  setMsg('')
+                }}>
+                {i.title}
+              </button>
+            </div>
           ))}
         </nav>
 
@@ -273,7 +275,7 @@ export function GstReportsPage({ active }: { active: boolean }) {
               <button type="button" className="btn btn-neutral" disabled={busy || !ready} onClick={() => void exportAs('print')}>
                 Print
               </button>
-              {shownKey === 'gstr1' ? (
+              {current?.json && !checking ? (
                 <button type="button" className="btn btn-neutral" disabled={busy || !ready}
                   title="The file the GST portal / offline tool takes for GSTR-1"
                   onClick={() => void exportAs('json')}>
