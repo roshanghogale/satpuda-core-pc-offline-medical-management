@@ -665,19 +665,28 @@ def download_store_for_offline(
             conn.commit()
             _mark_mirror_started(conn)
             from core import server_live
+            from core.server_entity_sync import offline_first_apply
 
             server_stock: Optional[dict] = {} if fast_copy else None
-            rows = int(
-                server_live.sync_down_all(
-                    conn,
-                    replace_local=True,
-                    progress_cb=progress_cb,
-                    fast=fast_copy,
-                    tracker=tracker,
-                    server_stock=server_stock,
+            # The copy writes whatever the sync mode is. sync_down_doc writes nothing unless
+            # the PC is Online ("skipped_offline"), and the Retail | Wholesale switch copies
+            # the other store while this PC is ALREADY offline-first: every record was
+            # skipped, so the wholesale store got an empty copy without a word and the
+            # retail one stopped at "Only 0 of the server's 1,792 medicines arrived"
+            # (Shree Gajanan, stores 127 / 153, 23 Oct 2026). The records are written in
+            # this thread (the prefetcher only downloads), where the flag is set.
+            with offline_first_apply():
+                rows = int(
+                    server_live.sync_down_all(
+                        conn,
+                        replace_local=True,
+                        progress_cb=progress_cb,
+                        fast=fast_copy,
+                        tracker=tracker,
+                        server_stock=server_stock,
+                    )
+                    or 0
                 )
-                or 0
-            )
             conn.commit()
             if tracker is not None:
                 _check_copy_complete(conn, tracker.totals)
@@ -732,23 +741,44 @@ def new_copy_tracker(progress_cb: ProgressCb, *, tail_share: float):
     return copy_progress.CopyProgress(progress_cb, totals, tail_share=tail_share)
 
 
+_EMPTY_IS_SHORT = ("sales", "purchases", "customers", "suppliers")
+
+
 def _check_copy_complete(conn, totals: dict) -> None:
     """Refuse a copy that holds fewer live medicines than the server said it has (counted
-    before the copy started; a few made or removed meanwhile on another device are fine)."""
-    want = totals.get("medicines")
-    if not want:
-        return
-    try:
-        cols = {r[1] for r in conn.execute("PRAGMA table_info(medicines)")}
-        where = " WHERE COALESCE(deleted, 0) = 0" if "deleted" in cols else ""
-        got = int(conn.execute(f"SELECT COUNT(*) FROM medicines{where}").fetchone()[0] or 0)
-    except sqlite3.Error:
-        return
-    if got < want - max(25, want // 200):
-        raise RuntimeError(
-            f"Only {got:,} of the server's {want:,} medicines arrived. Nothing was changed; "
-            "please try again, and tell Satpuda support if it happens again."
-        )
+    before the copy started; a few made or removed meanwhile on another device are fine).
+    A list the server has records in that arrived EMPTY is refused too, however short it
+    is: a small store (a new wholesale store, 22 medicines) slipped under the tolerance
+    when nothing at all was written."""
+    want = int(totals.get("medicines") or 0)
+    if want:
+        try:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(medicines)")}
+            where = " WHERE COALESCE(deleted, 0) = 0" if "deleted" in cols else ""
+            got = int(conn.execute(f"SELECT COUNT(*) FROM medicines{where}").fetchone()[0] or 0)
+        except sqlite3.Error:
+            got = None
+        if got is not None and (got == 0 or got < want - max(25, want // 200)):
+            raise RuntimeError(
+                f"Only {got:,} of the server's {want:,} medicines arrived. Nothing was changed; "
+                "please try again, and tell Satpuda support if it happens again."
+            )
+    from core.copy_progress import LABELS
+
+    for col in _EMPTY_IS_SHORT:
+        want = int(totals.get(col) or 0)
+        if not want:
+            continue
+        try:
+            got = int(conn.execute(f"SELECT COUNT(*) FROM {col}").fetchone()[0] or 0)
+        except sqlite3.Error:
+            continue
+        if got == 0:
+            name = LABELS.get(col, col)
+            raise RuntimeError(
+                f"None of the server's {want:,} {name} arrived. Nothing was changed; "
+                "please try again, and tell Satpuda support if it happens again."
+            )
 
 
 def _stage(progress_cb: ProgressCb, tracker, label: str, share: float) -> None:

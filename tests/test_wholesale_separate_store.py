@@ -303,6 +303,131 @@ class OfflineFirstGivesItsOwnCopy(_PC):
         self.assertTrue(sw.has_offline_first_copy(RETAIL_KEY))
 
 
+class TheRealCopyIsTheTargetStoresWhole(_PC):
+    """The real copy (activate_from_online -> download_store_for_offline) against two stand-in
+    stores, while this PC is ALREADY offline-first -- as a shop is once it has switched once.
+
+    Shree Gajanan, 23 Oct 2026 (stores 127 / 153): the switch back to retail stopped at "Only 0
+    of the server's 1,792 medicines arrived". Every call used the retail store's own token;
+    every record was thrown away because the copy applied server records only in Online mode
+    ("skipped_offline"). The way to wholesale had done the same, silently: a store of a few
+    medicines is under the short-copy tolerance."""
+
+    offline_first = True
+
+    def setUp(self):
+        super().setUp()
+        # the retail store's file is the server's copy too (the stand-in one-column table goes)
+        os.remove(smgr.get_store_db_path(RETAIL_KEY))
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import fake_sync_server
+        from test_fast_store_copy import store_data
+
+        self.retail_srv = fake_sync_server.FakeServer(store_data())
+        ws = store_data()
+        ws["medicines"] = [dict(d, name="WS " + d["name"]) for d in ws["medicines"][:6]]
+        for col in ("sales", "purchases", "sales_returns", "purchase_returns",
+                    "customer_payments", "supplier_payments"):
+            ws[col] = []
+        ws["customers"] = [dict(d, name="WS " + d["name"]) for d in ws["customers"][:2]]
+        self.ws_srv = fake_sync_server.FakeServer(ws)
+        self.tokens: list[str] = []
+
+        def server_for(token):
+            self.tokens.append(token or "")
+            return self.retail_srv if token == "t-" + RETAIL_KEY else self.ws_srv
+
+        def request(method, path, *, token=None, **kw):
+            srv = server_for(token)
+            if path.split("?")[0] == "/api/sync/status":
+                return {"ok": True, "data": {"head_revision": 0}}
+            return srv.request(method, path, token=token, **kw)
+
+        def pull(token, collection, **kw):
+            return server_for(token).pull_collection(token, collection, **kw)
+
+        def register(conn, **kw):
+            from core.offline_first import client
+
+            self.tokens.append(client._token())
+            return {"device_no": 1, "id_base": 0}
+
+        for p in (
+            mock.patch("core.server_api._request", side_effect=request),
+            mock.patch("core.server_api.pull_collection", side_effect=pull),
+            mock.patch("core.offline_first.runtime.register_and_prepare", side_effect=register),
+            mock.patch("core.server_live.start_poller", lambda *a, **k: None),
+            mock.patch("core.server_live._PULL_PAGE", 7),
+            mock.patch.object(wm, "_maybe_refresh", lambda *a, **k: None),
+            mock.patch("core.sync_prefs.set_sync_mode", lambda *_a, **_k: None),
+        ):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def names(self, store_key: str) -> list[str]:
+        c = sqlite3.connect(smgr.get_store_db_path(store_key))
+        try:
+            return [r[0] for r in c.execute(
+                "SELECT name FROM medicines WHERE COALESCE(deleted, 0) = 0 ORDER BY id")]
+        finally:
+            c.close()
+
+    def switch(self, mode: str) -> dict:
+        self.tokens.clear()
+        res = sw.switch_to(mode)
+        self.assertTrue(res.get("running"), res)
+        return self.wait_for_job()
+
+    def test_retail_to_wholesale_and_back_each_copy_whole_with_its_own_token(self):
+        job = self.switch("wholesale")
+        self.assertIsNone(job["error"])
+        ws_key = self.companion_key()
+        self.assertEqual(smgr.get_active_store_key(), ws_key)
+        self.assertEqual(set(self.tokens), {"t-" + ws_key})
+        names = self.names(ws_key)
+        self.assertEqual(len(names), 6, names)
+        self.assertTrue(all(n.startswith("WS ") for n in names), names)
+
+        job = self.switch("retail")
+        self.assertIsNone(job["error"])
+        self.assertEqual(smgr.get_active_store_key(), RETAIL_KEY)
+        self.assertEqual(set(self.tokens), {"t-" + RETAIL_KEY})
+        names = self.names(RETAIL_KEY)
+        # 39 live + the stubs two bills name (98, 99) (tests/test_fast_store_copy.py)
+        self.assertEqual(len(names), 41, names)
+        self.assertFalse([n for n in names if n.startswith("WS ")])
+        c = sqlite3.connect(smgr.get_store_db_path(RETAIL_KEY))
+        try:
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM sales").fetchone()[0], 14)
+        finally:
+            c.close()
+        # the wholesale copy was left alone
+        self.assertEqual(len(self.names(ws_key)), 6)
+
+    def test_a_real_short_copy_is_still_refused_and_the_open_store_stays(self):
+        self.assertIsNone(self.switch("wholesale")["error"])
+        ws_key = self.companion_key()
+        real = self.retail_srv.request
+
+        def more_on_the_server(method, path, **kw):
+            res = real(method, path, **kw)
+            if path.startswith("/api/store/inventory/counts"):
+                res["data"]["all"] = 500
+            return res
+
+        self.retail_srv.request = more_on_the_server
+        job = self.switch("retail")
+        self.assertIn("of the server's 500 medicines arrived", job["error"] or "")
+        self.assertEqual(smgr.get_active_store_key(), ws_key)
+
+    def test_a_small_store_that_arrives_empty_is_refused(self):
+        """Six medicines on the server, none written: under the tolerance, still refused."""
+        with mock.patch("core.server_entity_sync.sync_down_doc", return_value="skipped_offline"):
+            job = self.switch("wholesale")
+        self.assertIn("Only 0 of the server's 6 medicines arrived", job["error"] or "")
+        self.assertEqual(smgr.get_active_store_key(), RETAIL_KEY)
+
+
 class ActingForAnotherStore(unittest.TestCase):
     def test_only_this_thread_and_only_a_store_on_this_pc(self):
         tmp = tempfile.mkdtemp()

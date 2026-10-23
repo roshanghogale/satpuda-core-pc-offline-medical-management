@@ -279,6 +279,43 @@ class PagingAlwaysMovesOn(_Copy):
         self.assertIn("of the server's 500 medicines arrived", str(cm.exception))
 
 
+class CopyWhateverTheMode(_Copy):
+    """The copy writes the server's records whatever this PC's sync mode is: the Retail |
+    Wholesale switch copies the other store while the PC is already offline-first, and every
+    record used to be thrown away ("skipped_offline"; Shree Gajanan, 23 Oct 2026)."""
+
+    def offline_first_copy(self, name, *, fast=True, srv=None):
+        with mock.patch("core.sync_prefs.is_online_mode", lambda: False),                 mock.patch("core.sync_prefs.get_sync_mode", lambda: "offline_first"):
+            return self.copy(name, fast=fast, srv=srv)
+
+    def test_an_offline_first_pc_gets_the_whole_copy(self):
+        online, r1, _ = self.copy("online.db")
+        for fast in (True, False):
+            path, res, _ = self.offline_first_copy(f"of-{fast}.db", fast=fast)
+            self.assertTrue(res["ok"], res)
+            counts = store_copy_compare.summary(path)
+            self.assertEqual((42, 14, 8), (counts["medicines"], counts["sales"], counts["purchases"]))
+            self.assertEqual([], store_copy_compare.compare(online, path, run_started="2026-10-22T00:00:00"))
+
+    def test_the_mode_check_still_holds_outside_the_copy(self):
+        from core import server_entity_sync as fb
+
+        with mock.patch("core.sync_prefs.is_online_mode", lambda: False):
+            self.assertEqual("skipped_offline", fb.sync_down_doc(None, "medicines", "1", {"id": 1}))
+
+    def test_a_list_that_arrives_empty_is_refused(self):
+        srv = fake_sync_server.FakeServer(store_data())
+        real = srv.pull_collection
+
+        def no_bills(token, collection, **kw):
+            return ([], {}) if collection == "sales" else real(token, collection, **kw)
+
+        srv.pull_collection = no_bills
+        with self.assertRaises(RuntimeError) as cm:
+            self.copy("nobills.db", srv=srv)
+        self.assertIn("None of the server's 14 bills arrived", str(cm.exception))
+
+
 class RealProgress(_Copy):
     def test_the_bar_moves_with_the_records_and_ends_full(self):
         from core import copy_progress
