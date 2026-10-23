@@ -387,6 +387,10 @@ def recalculate_supplier_due(conn, supplier_id: int, *, commit: bool = True) -> 
         total_returns = 0.0
 
     net = round(total_purchased - total_entry_paid - total_payments - total_returns, 2)
+    # A paisa either way is nothing: a bill owing 0.01 is cleared (core/bill_clearing.py), so a
+    # supplier owing 0.01 showed a due with no open purchase (store 4, 22 Oct 2026).
+    if abs(net) <= 0.01:
+        net = 0.0
     total_due    = round(max(0.0,  net), 2)
     total_credit = round(max(0.0, -net), 2)
 

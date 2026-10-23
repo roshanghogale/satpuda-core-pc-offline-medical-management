@@ -269,6 +269,8 @@ def recalculate_customer_due(conn, customer_id, *, commit: bool = True, sync: bo
     old_credit = float(old[1]) if old else 0.0
 
     net_balance = round(total_billed - total_paid - total_standalone - total_returns, 2)
+    if abs(net_balance) <= 0.01:  # a paisa is nothing, as a bill owing 0.01 is cleared
+        net_balance = 0.0
     net_due     = round(max(0.0, net_balance), 2)
     net_credit  = round(max(0.0, -net_balance), 2)
 
