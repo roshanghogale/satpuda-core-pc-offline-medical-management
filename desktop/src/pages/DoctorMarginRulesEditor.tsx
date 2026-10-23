@@ -1,13 +1,16 @@
 /**
- * Doctor margin rules (owner, 22 Oct 2026): which medicines give a doctor a margin, and how much.
+ * Doctor margin rules (owner, 22 + 23 Oct 2026): which medicines give a doctor a margin, and how.
  *
  * Rules for "All doctors" and, where a doctor is different, that doctor's own (a type the doctor
- * has no rule for follows All doctors). Per medicine type: No margin / Whole type / Per group.
- * A group is a set of products of that type picked from the product list (tick boxes, Select all,
- * search, stock; a product can be limited to some of its batches), with its own margin; a
- * one-product group is that product's own margin; "Rest of this type" has a margin or none.
- * Margin: MRP − rate (the owner's Excel), % of MRP, or a fixed amount per unit.
- * Kept by the engine (core/doctor_margin_rules.py) as one shop setting, synced to every device.
+ * has no rule for follows All doctors). Per medicine type, one of two ways (or none):
+ *   On profit (groups)   only the products picked into a group count (tick boxes, Select all,
+ *                        search, stock; a product can be limited to some of its batches), each
+ *                        group with its own margin: MRP − rate (the owner's Excel), % of MRP, or
+ *                        a fixed amount per unit. A group can be "All products of this type".
+ *                        A product in no group is not in the report.
+ *   On total sales (%)   X% of the total sale value of every product of those types.
+ * Kept by the engine (core/doctor_margin_rules.py, rules version 2) as one shop setting, synced
+ * to every device.
  */
 
 import { useEffect, useMemo, useState } from 'react'
@@ -16,12 +19,18 @@ import { dmCall, money } from './DoctorMarginRulesReport'
 type Kind = 'mrp_rate' | 'pct_mrp' | 'fixed' | 'none'
 type Margin = { kind: Kind; value: number }
 type Item = { product: string; batches: string[] }
-type Group = { name: string; margin: Margin; items: Item[] }
-type TypeMode = 'none' | 'type' | 'groups'
-type TypeRule = { type: string; mode: TypeMode; margin: Margin | null; groups: Group[]; rest: Margin | null }
+type Group = { name: string; margin: Margin; all: boolean; items: Item[] }
+type TypeMode = 'none' | 'groups' | 'sales'
+type TypeRule = { type: string; mode: TypeMode; groups: Group[] }
 type Basis = 'purchase' | 'purchase_free'
-type RuleSet = { doctor: string; rate_basis: Basis | null; types: TypeRule[] }
+type RuleSet = { doctor: string; rate_basis: Basis | null; sales_pct: number | null; types: TypeRule[] }
 type Rules = { version: number; rate_basis: Basis; updated: string; sets: RuleSet[] }
+
+const MODE_TEXT: Record<TypeMode, string> = {
+  none: 'No margin',
+  groups: 'On profit (groups)',
+  sales: 'On total sales (%)',
+}
 
 type Product = {
   product: string
@@ -51,10 +60,16 @@ function marginText(m: Margin | null) {
   return 'MRP − rate'
 }
 
-function typeSummary(r: TypeRule | undefined) {
+function pctText(p: number) {
+  return `${Number((Number(p) || 0).toFixed(4))}%`
+}
+
+function typeSummary(r: TypeRule | undefined, salesPct: number) {
   if (!r || r.mode === 'none') return 'No margin'
-  if (r.mode === 'type') return `Whole type: ${marginText(r.margin)}`
-  return `${r.groups.length} group(s); rest: ${marginText(r.rest)}`
+  if (r.mode === 'sales') return `${pctText(salesPct)} of total sales`
+  if (r.groups.length === 1 && r.groups[0].all) return `All products: ${marginText(r.groups[0].margin)}`
+  const picked = r.groups.reduce((n, g) => n + (g.all ? 0 : g.items.length), 0)
+  return `${r.groups.length} group(s), ${picked} product(s)${r.groups.some((g) => g.all) ? ' + all products' : ''}`
 }
 
 function MarginEdit({ value, onChange, allowNone }: { value: Margin | null; onChange: (m: Margin | null) => void; allowNone?: boolean }) {
@@ -405,7 +420,7 @@ export function DoctorMarginRulesEditor({ onClose, onSaved }: { onClose: () => v
       const s = inSet(r)
       let rule = ruleOf(s, t)
       if (!rule) {
-        rule = { type: t, mode: 'none', margin: null, groups: [], rest: null }
+        rule = { type: t, mode: 'none', groups: [] }
         s.types.push(rule)
       }
       fn(rule)
@@ -421,9 +436,8 @@ export function DoctorMarginRulesEditor({ onClose, onSaved }: { onClose: () => v
     }
     setTypeRule(t, (rule) => {
       rule.mode = mode
-      if (mode === 'type' && !rule.margin) rule.margin = { kind: 'mrp_rate', value: 0 }
     })
-    if (mode === 'groups') setTypeKey(t)
+    setTypeKey(t)
   }
 
   const save = async () => {
@@ -448,6 +462,17 @@ export function DoctorMarginRulesEditor({ onClose, onSaved }: { onClose: () => v
 
   const selRule = typeKey ? ruleOf(set, typeKey) : undefined
   const groupsRule = selRule && selRule.mode === 'groups' ? selRule : undefined
+  // The % this set's total-sales types get: its own, or All doctors' when it has none.
+  const salesPct = set.sales_pct ?? defaults.sales_pct ?? 0
+  // Types on total sales for this set, its own and the ones it follows from All doctors.
+  const salesTypes = types.filter((t) => {
+    const r = ruleOf(set, t) || (isDefault ? undefined : ruleOf(defaults, t))
+    return r?.mode === 'sales'
+  })
+  const profitTypes = types.filter((t) => {
+    const r = ruleOf(set, t) || (isDefault ? undefined : ruleOf(defaults, t))
+    return r?.mode === 'groups'
+  })
   const freeDoctors = data.doctors.filter((d) => !rules.sets.some((s) => s.doctor === d))
   const otherGroups = (gi: number): Record<string, string> => {
     const out: Record<string, string> = {}
@@ -456,7 +481,7 @@ export function DoctorMarginRulesEditor({ onClose, onSaved }: { onClose: () => v
     })
     return out
   }
-  const emptyGroups = groupsRule?.groups.filter((g) => !g.items.length).length || 0
+  const emptyGroups = groupsRule?.groups.filter((g) => !g.all && !g.items.length).length || 0
 
   return (
     <div className="modal-backdrop dmr-editor-backdrop" role="presentation" onClick={close}>
@@ -513,7 +538,7 @@ export function DoctorMarginRulesEditor({ onClose, onSaved }: { onClose: () => v
                 disabled={!addDoctor}
                 onClick={() => {
                   change((r) => {
-                    r.sets.push({ doctor: addDoctor, rate_basis: null, types: [] })
+                    r.sets.push({ doctor: addDoctor, rate_basis: null, sales_pct: null, types: [] })
                   })
                   setSetKey(addDoctor)
                   setTypeKey('')
@@ -544,6 +569,28 @@ export function DoctorMarginRulesEditor({ onClose, onSaved }: { onClose: () => v
                   <option value="purchase">Purchase rate (as billed)</option>
                   <option value="purchase_free">Purchase rate with free included</option>
                 </select>
+              </label>
+              <label className="dmr-basis dmr-pct">
+                <span className="dm-label">% of total sales</span>
+                <span className="dmr-pct-box">
+                  <input
+                    type="number"
+                    className="settings-input dm-num"
+                    min={0}
+                    max={100}
+                    step={0.5}
+                    value={isDefault ? (set.sales_pct ?? 0) : (set.sales_pct ?? '')}
+                    placeholder={isDefault ? '0' : `${defaults.sales_pct ?? 0} (all)`}
+                    aria-label="Percent of total sales"
+                    onChange={(e) =>
+                      change((r) => {
+                        const v = e.target.value
+                        inSet(r).sales_pct = v === '' ? (isDefault ? 0 : null) : Math.min(100, Math.max(0, Number(v) || 0))
+                      })
+                    }
+                  />
+                  <span>%</span>
+                </span>
               </label>
               {!isDefault ? (
                 <span className="dmr-set-actions">
@@ -577,10 +624,24 @@ export function DoctorMarginRulesEditor({ onClose, onSaved }: { onClose: () => v
             </div>
             <p className="dmr-hint">
               {isDefault
-                ? 'Choose for each type: no margin, a margin for the whole type, or groups of products with their own margin.'
-                : 'A type set to "Same as all doctors" follows the All doctors rules.'}{' '}
-              Rate = the purchase rate of the batch sold. Free included: ₹100 for 10 + 5 free = ₹6.67 a unit.
+                ? 'Choose for each type one of two ways: On profit — only the products you put in groups, each group with its own margin; or On total sales — a % of the sale value of every product of the type.'
+                : 'A type set to "Same as all doctors" follows the All doctors rules. Leave the % box empty to use the All doctors %.'}{' '}
+              On profit, rate = the purchase rate of the batch sold (free included: ₹100 for 10 + 5 free = ₹6.67 a unit).
             </p>
+            <div className="dmr-ways" aria-label="The two ways">
+              <div className={`dmr-way ${profitTypes.length ? 'on' : ''}`}>
+                <b>On profit (groups)</b>
+                <span>{profitTypes.length ? profitTypes.join(', ') : 'no type'}</span>
+              </div>
+              <div className={`dmr-way ${salesTypes.length ? 'on' : ''}`}>
+                <b>On total sales — {pctText(salesPct)}</b>
+                <span>
+                  {salesTypes.length
+                    ? `${salesTypes.join(', ')}: ${pctText(salesPct)} of their total sale value (MRP rate as billed, less line discount, less returns)`
+                    : 'no type'}
+                </span>
+              </div>
+            </div>
             <div className="dmr-types-table">
               <table className="sat-table dm-table">
                 <thead>
@@ -612,20 +673,20 @@ export function DoctorMarginRulesEditor({ onClose, onSaved }: { onClose: () => v
                             onChange={(e) => setMode(t, e.target.value as TypeMode | 'default')}
                           >
                             {!isDefault ? <option value="default">Same as all doctors</option> : null}
-                            <option value="none">No margin</option>
-                            <option value="type">Whole type</option>
-                            <option value="groups">Per group</option>
+                            <option value="none">{MODE_TEXT.none}</option>
+                            <option value="groups">{MODE_TEXT.groups}</option>
+                            <option value="sales">{MODE_TEXT.sales}</option>
                           </select>
                         </td>
-                        <td onClick={(e) => mode === 'type' && e.stopPropagation()}>
-                          {mode === 'type' && own ? (
-                            <MarginEdit value={own.margin} onChange={(m) => setTypeRule(t, (r) => (r.margin = m || { kind: 'mrp_rate', value: 0 }))} />
-                          ) : mode === 'groups' && own ? (
+                        <td>
+                          {mode === 'groups' && own ? (
                             <button type="button" className="btn btn-neutral btn-sm" onClick={() => setTypeKey(t)}>
-                              {typeSummary(own)} ›
+                              {typeSummary(own, salesPct)} ›
                             </button>
+                          ) : mode === 'sales' && own ? (
+                            <span className="dmr-sales-tag">{typeSummary(own, salesPct)}</span>
                           ) : (
-                            <span className="muted">{mode === 'default' ? typeSummary(ruleOf(defaults, t)) : '—'}</span>
+                            <span className="muted">{mode === 'default' ? typeSummary(ruleOf(defaults, t), salesPct) : '—'}</span>
                           )}
                         </td>
                       </tr>
@@ -640,13 +701,13 @@ export function DoctorMarginRulesEditor({ onClose, onSaved }: { onClose: () => v
             {groupsRule ? (
               <>
                 <div className="dmr-groups-head">
-                  <h3>{groupsRule.type}: groups</h3>
+                  <h3>{groupsRule.type}: on profit, by groups</h3>
                   <button
                     type="button"
                     className="btn btn-primary btn-sm"
                     onClick={() => {
                       setTypeRule(groupsRule.type, (r) =>
-                        r.groups.push({ name: `Group ${r.groups.length + 1}`, margin: { kind: 'mrp_rate', value: 0 }, items: [] }),
+                        r.groups.push({ name: `Group ${r.groups.length + 1}`, margin: { kind: 'mrp_rate', value: 0 }, all: false, items: [] }),
                       )
                       setPicker({ group: groupsRule.groups.length })
                     }}
@@ -655,10 +716,14 @@ export function DoctorMarginRulesEditor({ onClose, onSaved }: { onClose: () => v
                   </button>
                 </div>
                 <p className="dmr-hint">
-                  A product in a one-product group, or limited to some batches, wins over a bigger group. Products in no group
-                  get the rest-of-type margin.
+                  Only the products in these groups are in the report; any other {groupsRule.type} product is left out.
+                  A product in a one-product group, or limited to some batches, wins over a bigger group; "All products" is
+                  the weakest.
                 </p>
                 {emptyGroups ? <p className="page-error">A group without products is not kept — pick its products.</p> : null}
+                {!groupsRule.groups.length ? (
+                  <p className="muted">No group yet: press + Group and pick the products that give the doctor a margin.</p>
+                ) : null}
                 <div className="dmr-group-list">
                   {groupsRule.groups.map((g, gi) => (
                     <div key={gi} className="dmr-group">
@@ -674,7 +739,25 @@ export function DoctorMarginRulesEditor({ onClose, onSaved }: { onClose: () => v
                           allowNone
                           onChange={(m) => setTypeRule(groupsRule.type, (r) => (r.groups[gi].margin = m || { kind: 'none', value: 0 }))}
                         />
-                        <button type="button" className="btn btn-neutral btn-sm" onClick={() => setPicker({ group: gi })}>
+                        <label className="dmr-all" title={`Every ${groupsRule.type} product, also ones bought later`}>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(g.all)}
+                            onChange={(e) =>
+                              setTypeRule(groupsRule.type, (r) => {
+                                r.groups[gi].all = e.target.checked
+                                if (e.target.checked) r.groups[gi].items = []
+                              })
+                            }
+                          />
+                          <span>All products</span>
+                        </label>
+                        <button
+                          type="button"
+                          className="btn btn-neutral btn-sm"
+                          disabled={Boolean(g.all)}
+                          onClick={() => setPicker({ group: gi })}
+                        >
                           Pick products…
                         </button>
                         <button
@@ -688,7 +771,9 @@ export function DoctorMarginRulesEditor({ onClose, onSaved }: { onClose: () => v
                         </button>
                       </div>
                       <div className="dmr-items">
-                        {g.items.length ? (
+                        {g.all ? (
+                          <span className="muted">Every {groupsRule.type} product (also ones bought later).</span>
+                        ) : g.items.length ? (
                           g.items.map((it) => (
                             <span key={it.product} className="dmr-item">
                               {it.product}
@@ -713,19 +798,26 @@ export function DoctorMarginRulesEditor({ onClose, onSaved }: { onClose: () => v
                     </div>
                   ))}
                 </div>
-                <div className="dmr-rest">
-                  <span className="dm-label">Rest of {groupsRule.type}</span>
-                  <MarginEdit
-                    value={groupsRule.rest || { kind: 'none', value: 0 }}
-                    allowNone
-                    onChange={(m) => setTypeRule(groupsRule.type, (r) => (r.rest = m && m.kind !== 'none' ? m : null))}
-                  />
-                </div>
               </>
+            ) : selRule && selRule.mode === 'sales' ? (
+              <div className="dmr-sales-panel">
+                <h3>{selRule.type}: on total sales</h3>
+                <p>
+                  The doctor gets <b>{pctText(salesPct)}</b> of the total sale value of every {selRule.type} product he
+                  prescribed in the period — the amount on the bill (MRP-based rate × qty, less the line's discount), less
+                  returns. No purchase rate is used.
+                </p>
+                <p className="muted">
+                  Example: {salesTypes.join(', ') || selRule.type} sold for ₹80,000 in 10 days at {pctText(salesPct)} → ₹
+                  {money((80000 * salesPct) / 100)}. Change the % in “% of total sales” above
+                  {isDefault ? '' : ' (empty = the All doctors %)'}.
+                </p>
+              </div>
             ) : (
               <p className="muted dmr-groups-empty">
-                Set a type to <b>Per group</b> to pick which of its products give a margin — some injections at
-                one margin, one injection at another, the rest at a third or none.
+                Set a type to <b>On profit (groups)</b> to pick which of its products give a margin — some injections at
+                one margin, one injection at another; products in no group give nothing. Or set it to <b>On total sales</b>{' '}
+                to give the doctor a % of everything of that type he prescribed.
               </p>
             )}
           </section>

@@ -1,7 +1,9 @@
-"""Doctor margin by rules (owner, 22 Oct 2026).
+"""Doctor margin by rules (owner, 22 + 23 Oct 2026).
 
-core/doctor_margin_rules.py  the rules (per type: none / whole type / groups + rest; a product's
-                             own group; batch-limited items) and the per-line margin
+core/doctor_margin_rules.py  the rules, version 2 (per type: none / on profit by groups -- only
+                             the products in a group, a product's own group, batch-limited
+                             items, an "All products" group -- / on total sales at a %), version
+                             1 read and turned into 2, the per-line margin and the commission
 core/doctor_margin_store.py  the doctor report's own saved lines, written when a bill is saved
 core/doctor_margin_rules_report.py  the report (only lines with a margin), Excel / PDF
 
@@ -33,7 +35,7 @@ RULES = {
     "rate_basis": "purchase",
     "sets": [
         {"doctor": "", "types": [
-            {"type": "Injection", "mode": "groups", "rest": {"kind": "pct_mrp", "value": 5}, "groups": [
+            {"type": "Injection", "mode": "groups", "groups": [
                 {"name": "Batch B1", "margin": fixed(30), "items": [{"product": "zifi 1gm", "batches": ["b1"]}]},
                 {"name": "Zifi own", "margin": fixed(20), "items": [{"product": "ZIFI 1GM"}]},
                 {"name": "Cef group", "margin": fixed(10),
@@ -56,12 +58,12 @@ class TheRules(unittest.TestCase):
         got = self.res.resolve(doctor, mtype, product, batch)
         return None if got is None else (got["kind"], got["value"])
 
-    def test_precedence_batch_product_group_rest_type_none(self):
+    def test_precedence_batch_product_group_all_none(self):
         self.assertEqual(self.kind_value("DR A", "Injection", "ZIFI 1GM", "B1"), ("fixed", 30))  # batch-limited
         self.assertEqual(self.kind_value("DR A", "Injection", "Zifi  1gm", "B2"), ("fixed", 20))  # its own group
         self.assertEqual(self.kind_value("DR A", "Injection", "LYCEFT 1GM", "L1"), ("fixed", 10))  # a group
-        self.assertEqual(self.kind_value("DR A", "Injection", "PIPZO 4.5", "P1"), ("pct_mrp", 5))  # rest of type
-        self.assertEqual(self.kind_value("DR A", "TABLET", "ANY TAB", "T1"), ("mrp_rate", 0))  # whole type
+        self.assertIsNone(self.kind_value("DR A", "Injection", "PIPZO 4.5", "P1"))  # in no group: not in the report
+        self.assertEqual(self.kind_value("DR A", "TABLET", "ANY TAB", "T1"), ("mrp_rate", 0))  # v1 whole type
         self.assertIsNone(self.kind_value("DR A", "Syrup", "ANY SYRUP", "S1"))  # type: no margin
         self.assertIsNone(self.kind_value("DR A", "Drops", "ANY DROPS", "D1"))  # type not in the rules
 
@@ -69,12 +71,71 @@ class TheRules(unittest.TestCase):
         # XONE is in "Cef group" (3 products) and alone in "Not these": the one-product group wins.
         self.assertIsNone(self.kind_value("DR A", "Injection", "XONE 1GM", "X1"))
 
-    def test_rest_none_gives_nothing(self):
-        r = {"sets": [{"doctor": "", "types": [{"type": "Injection", "mode": "groups", "rest": None, "groups": [
-            {"name": "G", "margin": fixed(5), "items": ["ZIFI 1GM"]}]}]}]}
+    def test_ungrouped_products_give_nothing_even_with_a_v1_rest(self):
+        r = {"sets": [{"doctor": "", "types": [{"type": "Injection", "mode": "groups",
+                                                "rest": {"kind": "pct_mrp", "value": 5}, "groups": [
+                                                    {"name": "G", "margin": fixed(5), "items": ["ZIFI 1GM"]}]}]}]}
         res = dmr.Resolver(r)
         self.assertIsNotNone(res.resolve("X", "Injection", "ZIFI 1GM", ""))
-        self.assertIsNone(res.resolve("X", "Injection", "OTHER", ""))
+        self.assertIsNone(res.resolve("X", "Injection", "OTHER", ""))  # the v1 rest is gone
+        self.assertNotIn("rest", dmr.clean_rules(r)["sets"][0]["types"][0])
+
+    def test_an_all_products_group_is_below_every_picked_group(self):
+        r = {"sets": [{"doctor": "", "types": [{"type": "Injection", "mode": "groups", "groups": [
+            {"name": "Every injection", "all": True, "margin": {"kind": "pct_mrp", "value": 5}},
+            {"name": "Two", "margin": fixed(9), "items": ["ZIFI 1GM", "XONE 1GM"]},
+            {"name": "Not this one", "margin": {"kind": "none"}, "items": ["XONE 1GM"]}]}]}]}
+        res = dmr.Resolver(r)
+        self.assertEqual(res.resolve("X", "Injection", "ZIFI 1GM", "")["value"], 9)
+        self.assertEqual(res.resolve("X", "Injection", "PIPZO", "")["kind"], "pct_mrp")
+        self.assertIsNone(res.resolve("X", "Injection", "XONE 1GM", ""))
+        self.assertEqual(dmr.clean_rules(r)["sets"][0]["types"][0]["groups"][0]["items"], [])
+
+    def test_total_sales_way_and_its_percent(self):
+        r = {"sets": [
+            {"doctor": "", "sales_pct": 10, "types": [
+                {"type": "Tablet", "mode": "sales"},
+                {"type": "Injection", "mode": "groups", "groups": [{"name": "G", "margin": fixed(5), "items": ["ZIFI"]}]}]},
+            {"doctor": "Dr B", "sales_pct": 12.5, "types": [{"type": "Injection", "mode": "sales"}]},
+            {"doctor": "Dr C", "sales_pct": None, "types": [{"type": "Syrup", "mode": "sales"}]}]}
+        res = dmr.Resolver(r)
+        self.assertEqual(res.resolve("DR A", "tablet", "ANY", "")["way"], "sales")
+        self.assertEqual(res.resolve("DR A", "tablet", "ANY", "")["value"], 10)
+        self.assertEqual(res.resolve("DR A", "Injection", "ZIFI", "")["way"], "profit")
+        self.assertEqual((res.resolve("DR B", "Injection", "ANYTHING", "")["value"],
+                          res.resolve("DR B", "Tablet", "ANY", "")["value"]), (12.5, 12.5))  # his own %
+        self.assertEqual(res.resolve("DR C", "Syrup", "S", "")["value"], 10)  # no % of his own: All doctors'
+        self.assertIsNone(res.resolve("DR A", "Syrup", "S", ""))
+        with self.assertRaises(ValueError):
+            dmr.clean_rules({"sets": [{"doctor": "", "sales_pct": 101, "types": []}]})
+        self.assertTrue(dmr.has_rules({"sets": [{"doctor": "", "types": [{"type": "Tablet", "mode": "sales"}]}]}))
+
+    def test_version_1_is_read_as_version_2(self):
+        v1 = {"version": 1, "rate_basis": "purchase_free", "updated": "2026-10-22T10:00:00", "sets": [
+            {"doctor": "", "rate_basis": None, "types": [
+                {"type": "Tablet", "mode": "type", "margin": {"kind": "pct_mrp", "value": 7}, "groups": [], "rest": None},
+                {"type": "Injection", "mode": "groups", "margin": None, "rest": {"kind": "fixed", "value": 2},
+                 "groups": [{"name": "Z", "margin": fixed(4), "items": [{"product": "ZIFI", "batches": []}]}]},
+                {"type": "Syrup", "mode": "none", "margin": None, "groups": [], "rest": None}]},
+            {"doctor": "DR B", "rate_basis": "purchase", "types": []}]}
+        v2 = dmr.clean_rules(v1)
+        self.assertEqual(v2, {"version": 2, "rate_basis": "purchase_free", "updated": "2026-10-22T10:00:00", "sets": [
+            {"doctor": "", "rate_basis": None, "sales_pct": 0.0, "types": [
+                {"type": "Tablet", "mode": "groups", "groups": [
+                    {"name": "All Tablet", "margin": {"kind": "pct_mrp", "value": 7.0}, "all": True, "items": []}]},
+                {"type": "Injection", "mode": "groups", "groups": [
+                    {"name": "Z", "margin": {"kind": "fixed", "value": 4.0}, "all": False,
+                     "items": [{"product": "ZIFI", "batches": []}]}]},
+                {"type": "Syrup", "mode": "none", "groups": []}]},
+            {"doctor": "DR B", "rate_basis": "purchase", "sales_pct": None, "types": []}]})
+        self.assertEqual(dmr.clean_rules(v2), v2)  # version 2 stays as it is
+        # the same figures as version 1 gave, except the rest of type
+        sale = _sale(1, "Dr A", [
+            {"medicine_id": 1, "name": "ANY TAB", "type": "Tablet", "batch": "T", "mrp_unit": 10, "qty": 3},
+            {"medicine_id": 2, "name": "ZIFI", "type": "Injection", "batch": "Z", "mrp_unit": 50, "qty": 2},
+            {"medicine_id": 3, "name": "OTHER INJ", "type": "Injection", "batch": "O", "mrp_unit": 50, "qty": 2}])
+        rep = dmr.compute([sale], [], v1)
+        self.assertEqual([(r["name"], r["value"]) for r in rep["rows"]], [("ANY TAB", 2.1), ("ZIFI", 8.0)])
 
     def test_a_doctors_own_rules_override_per_type(self):
         self.assertIsNone(self.kind_value("DR B", "Injection", "ZIFI 1GM", "B1"))  # his Injection: none
@@ -84,7 +145,7 @@ class TheRules(unittest.TestCase):
 
     def test_cleaning(self):
         clean = dmr.clean_rules(RULES)
-        self.assertEqual(clean["version"], 1)
+        self.assertEqual(clean["version"], 2)
         self.assertEqual(clean["sets"][0]["doctor"], "")
         self.assertEqual(clean["sets"][1]["doctor"], "DR B")
         g = clean["sets"][0]["types"][0]["groups"][0]
@@ -254,6 +315,18 @@ class SavedLines(unittest.TestCase):
         c.commit()
         return sid
 
+    def bill(self, doctor, lines, date="2026-10-12", bill="S1"):
+        """lines: (medicine id, qty, sale rate a unit, line discount Rs) -- amount = qty x rate - disc."""
+        c = self.conn
+        cust = c.execute("INSERT INTO customers (name) VALUES (?)", (f"PATIENT {bill}",)).lastrowid
+        sid = c.execute("INSERT INTO sales (bill_no, bill_date, doctor_name, customer_id, customer_name, total_amount) "
+                        "VALUES (?,?,?,?,?,0)", (bill, date, doctor, cust, f"PATIENT {bill}")).lastrowid
+        for mid, qty, rate, disc in lines:
+            c.execute("INSERT INTO sales_items (sale_id, medicine_id, qty, rate, amount, item_discount) "
+                      "VALUES (?,?,?,?,?,?)", (sid, mid, qty, rate, round(qty * rate - disc, 2), disc))
+        c.commit()
+        return sid
+
     def saved(self, sid):
         return self.conn.execute(
             "SELECT name, qty_sold, qty_returned, qty, rate, value FROM doctor_margin_lines WHERE sale_id=? "
@@ -401,7 +474,7 @@ class SavedLines(unittest.TestCase):
 
             wb = openpyxl.load_workbook(io.BytesIO(base64.b64decode(out["content_base64"])))
             cells = [c for row in wb.active.iter_rows(values_only=True) for c in row if c is not None]
-            self.assertIn("TOTAL value", cells)
+            self.assertIn("TOTAL value" if view == "doctor" else "TOTAL value (on profit)", cells)
             self.assertIn(rep["totals"]["value"], cells) if view == "detail" else None
         csv = rr.export_report(self.conn, {"from": FROM, "to": TO, "format": "csv"})
         self.assertTrue(csv["ok"])
@@ -447,6 +520,169 @@ class SavedLines(unittest.TestCase):
         self.assertEqual(dmr.load_rules(self.conn)["rate_basis"], "purchase_free")
         # the saved lines are this PC's working copy: no sync trigger on them
         self.assertFalse(any("doctor_margin" in n for n in names))
+
+
+
+# ── the second way: a % of the total sales (owner, 23 Oct 2026) ──────────────────────────
+
+SALES_RULES = {"rate_basis": "purchase_free", "sets": [
+    {"doctor": "", "sales_pct": 10, "types": [
+        {"type": "Tablet", "mode": "sales"},
+        {"type": "Syrup", "mode": "sales"},
+        {"type": "Injection", "mode": "groups", "groups": [
+            {"name": "Zifi", "margin": {"kind": "mrp_rate"}, "items": [{"product": "ZIFI 1GM"}]}]}]},
+    {"doctor": "Dr B", "sales_pct": 5, "types": []},
+]}
+
+
+def _line(mid, name, mtype, qty, rate, disc=0.0, pack="", mrp=None):
+    return {"medicine_id": mid, "name": name, "type": mtype, "batch": f"B{mid}", "qty": qty,
+            "mrp_unit": rate if mrp is None else mrp, "sale_rate": rate, "disc": disc,
+            "amount": round(qty * rate - disc, 2), "pack": pack}
+
+
+class TotalSalesCalculation(unittest.TestCase):
+    def test_percent_of_the_sale_value_net_of_line_discount_and_returns(self):
+        s1 = _sale(1, "Dr A", [_line(1, "TAB", "Tablet", 10, 10, disc=5, pack="10"),
+                               _line(2, "SYR", "Syrup", 2, 90),
+                               _line(3, "ZIFI 1GM", "Injection", 3, 66.64),
+                               _line(4, "LYCEFT 1GM", "Injection", 1, 66.40)],  # in no group: nowhere
+                   returns=[{"medicine_id": 1, "qty": 4}])
+        s2 = _sale(2, "Dr B", [_line(1, "TAB", "Tablet", 2, 10)])
+        purchases = [{"medicine_id": 3, "qty": 10, "free_qty": 0, "rate": 40, "units": 1}]
+        rep = dmr.compute([s1, s2], purchases, SALES_RULES)
+        self.assertEqual([(r["name"], r["way"]) for r in rep["rows"]], [("ZIFI 1GM", "profit")])
+        sales = rep["sales"]
+        a = next(d for d in sales["doctors"] if d["doctor"] == "DR A")
+        tab = next(r for r in sales["rows"] if r["doctor"] == "DR A" and r["name"] == "TAB")
+        self.assertEqual((tab["qty_sold"], tab["qty_returned"], tab["qty"]), (10, 4, 6))
+        self.assertEqual((tab["sale_rate"], tab["disc"], tab["amount"], tab["value"]), (10, 5, 95, 57.0))
+        self.assertEqual(a["value"], 57.0 + 180.0)
+        self.assertEqual(a["by_pct"], [{"pct": 10.0, "value": 237.0, "commission": 23.7}])
+        self.assertEqual(a["types"], ["Syrup", "Tablet"])
+        self.assertEqual([(p["name"], p["pack"], p["qty"], p["value"]) for p in a["products"]],
+                         [("SYR", "", 2, 180.0), ("TAB", "10", 6, 57.0)])
+        b = next(d for d in sales["doctors"] if d["doctor"] == "DR B")
+        self.assertEqual((b["value"], b["commission"]), (20.0, 1.0))  # his own 5%
+        g = {d["doctor"]: d for d in rep["grand"]["doctors"]}
+        self.assertEqual(g["DR A"]["profit"], round((66.64 - 40) * 3, 2))
+        self.assertEqual(g["DR A"]["total"], round(g["DR A"]["profit"] + 23.7, 2))
+        self.assertEqual(rep["grand"]["totals"]["total"], round(rep["totals"]["value"] + 24.7, 2))
+        self.assertEqual(sales["totals"]["commission"], 24.7)
+
+    def test_commission_on_the_total_not_line_by_line(self):
+        lines = [_line(i, f"T{i}", "Tablet", 1, 0.33) for i in range(1, 4)]
+        rep = dmr.compute([_sale(1, "Dr A", lines)], [], SALES_RULES)
+        d = rep["sales"]["doctors"][0]
+        self.assertEqual(d["value"], 0.99)
+        self.assertEqual(d["commission"], 0.1)  # 0.099 -> 0.10, not 3 x 0.03
+
+    def test_a_rate_choice_leaves_sales_lines_alone(self):
+        rep = dmr.compute([_sale(1, "Dr A", [_line(1, "TAB", "Tablet", 3, 10)])], [], SALES_RULES)
+        row = rep["sales"]["rows"][0]
+        self.assertIs(dmr.with_basis(row, "purchase"), row)
+
+
+class TotalSalesSaved(unittest.TestCase):
+    setUp = SavedLines.setUp
+    bill = SavedLines.bill
+    ret = SavedLines.ret
+
+    def lines(self, sid):
+        return self.conn.execute(
+            "SELECT name, way, qty_sold, qty, sale_rate, disc, amount, value, kind, kind_value, rules_at "
+            "FROM doctor_margin_lines WHERE sale_id=? ORDER BY line_no", (sid,)).fetchall()
+
+    def test_saved_at_bill_save_kept_until_recalculate(self):
+        dmr.save_rules(self.conn, SALES_RULES)
+        rules_at = dmr.load_rules(self.conn)["updated"]
+        sid = self.bill("Dr A", [(self.tab, 10, 10, 5), (self.syr, 2, 90, 0), (self.zifi, 3, 66.64, 0),
+                                 (self.lyc, 1, 66.40, 0)])
+        st.sync_sale(self.conn, sid)
+        got = self.lines(sid)
+        self.assertEqual([(r[0], r[1]) for r in got], [("TAB S", "sales"), ("SYR Z", "sales"), ("ZIFI 1GM", "profit")])
+        self.assertEqual(got[0][2:], (10, 10, 10, 5, 95, 95, "sales_pct", 10, rules_at))
+        rep = rr.build_report(self.conn, {"from": FROM, "to": TO})
+        d = rep["sales"]["doctors"][0]
+        self.assertEqual((d["value"], d["commission"]), (275.0, 27.5))
+        # a return: the sale value comes down with the qty
+        self.ret(sid, self.tab, 4)
+        st.refresh_returns(self.conn, [sid])
+        self.assertEqual(self.lines(sid)[0][3], 6)
+        self.assertEqual(self.lines(sid)[0][7], 57.0)
+        # the price edited (same medicines and qty): the bill's value, the saved %
+        self.conn.execute("UPDATE sales_items SET amount=90, item_discount=10 WHERE sale_id=? AND medicine_id=?",
+                          (sid, self.tab))
+        self.conn.commit()
+        self.assertTrue(st.sync_sale(self.conn, sid).get("kept"))
+        self.assertEqual(self.lines(sid)[0][5:8], (10, 90, 54.0))
+        # a new % waits for Recalculate
+        dmr.save_rules(self.conn, dict(SALES_RULES, sets=[dict(SALES_RULES["sets"][0], sales_pct=20)]))
+        rep = rr.build_report(self.conn, {"from": FROM, "to": TO})
+        self.assertEqual(rep["sales"]["doctors"][0]["by_pct"][0]["pct"], 10)
+        rep = rr.build_report(self.conn, {"from": FROM, "to": TO, "recalculate": True})
+        d = rep["sales"]["doctors"][0]
+        self.assertEqual((d["value"], d["by_pct"][0]["pct"], d["commission"]), (234.0, 20, 46.8))
+        self.assertEqual(rep["grand"]["doctors"][0]["total"], round(rep["totals"]["value"] + 46.8, 2))
+
+    def test_two_percents_in_one_period(self):
+        dmr.save_rules(self.conn, SALES_RULES)
+        a = self.bill("Dr A", [(self.tab, 10, 10, 0)])
+        st.sync_sale(self.conn, a)
+        dmr.save_rules(self.conn, dict(SALES_RULES, sets=[dict(SALES_RULES["sets"][0], sales_pct=20)]))
+        b = self.bill("Dr A", [(self.tab, 5, 10, 0)], bill="S2")
+        st.sync_sale(self.conn, b)
+        d = rr.build_report(self.conn, {"from": FROM, "to": TO})["sales"]["doctors"][0]
+        self.assertEqual(d["by_pct"], [{"pct": 20.0, "value": 50.0, "commission": 10.0},
+                                       {"pct": 10.0, "value": 100.0, "commission": 10.0}])
+        self.assertEqual(d["commission"], 20.0)
+
+    def test_a_table_made_before_gets_the_new_columns(self):
+        c = self.conn
+        c.execute("DROP TABLE IF EXISTS doctor_margin_lines")
+        c.execute("CREATE TABLE doctor_margin_lines (id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id INTEGER NOT NULL, "
+                  "sale_item_id INTEGER, line_no INTEGER, bill_no TEXT, bill_date TEXT, patient TEXT, doctor TEXT, "
+                  "medicine_id INTEGER, name TEXT, type TEXT, batch TEXT, qty_sold REAL DEFAULT 0, "
+                  "qty_returned REAL DEFAULT 0, qty REAL DEFAULT 0, mrp REAL DEFAULT 0, rate_purchase REAL DEFAULT 0, "
+                  "rate_free REAL DEFAULT 0, rate_basis TEXT, rate REAL DEFAULT 0, kind TEXT, kind_value REAL DEFAULT 0, "
+                  "margin_unit REAL DEFAULT 0, value REAL DEFAULT 0, rule TEXT, flags TEXT, saved_at TEXT)")
+        c.execute("INSERT INTO doctor_margin_lines (sale_id, line_no, bill_no, bill_date, doctor, name, type, qty_sold, "
+                  "qty, mrp, rate, rate_basis, kind, margin_unit, value, rule, flags) VALUES "
+                  "(99, 1, 'OLD', '2026-10-12', 'DR A', 'OLD INJ', 'Injection', 2, 2, 50, 20, 'purchase', 'mrp_rate', "
+                  "30, 60, 'Injection > rest of type', '[]')")
+        c.commit()
+        rows = st.read_lines(c, FROM, TO)
+        self.assertEqual([(r["name"], r["way"], r["value"]) for r in rows], [("OLD INJ", "profit", 60)])
+        self.assertTrue({"way", "pack", "sale_rate", "disc", "amount", "rules_at"} <= st._cols(c, "doctor_margin_lines"))
+        rep = dmr.assemble(rows)
+        self.assertEqual((rep["totals"]["value"], rep["sales"]["rows"]), (60, []))  # kept as saved
+
+    def test_files_carry_both_parts(self):
+        import base64
+
+        import openpyxl
+
+        dmr.save_rules(self.conn, SALES_RULES)
+        st.sync_sale(self.conn, self.bill("Dr A", [(self.tab, 10, 10, 5), (self.syr, 2, 90, 0), (self.zifi, 3, 66.64, 0)]))
+        st.sync_sale(self.conn, self.bill("Dr B", [(self.syr, 1, 90, 0)], bill="S2"))
+        body = {"from": FROM, "to": TO}
+        out = rr.export_report(self.conn, dict(body, format="xlsx"))
+        self.assertTrue(out["ok"], out)
+        wb = openpyxl.load_workbook(io.BytesIO(base64.b64decode(out["content_base64"])))
+        cells = [c for row in wb.active.iter_rows(values_only=True) for c in row if c is not None]
+        for want in ("TAB S 10", "SYR Z", "Sub Total:", "Total sales value (SYRUP, TABLET)", "Commission 10% of 275.00",
+                     27.5, "Commission 5% of 90.00", 4.5, "TOTAL value", "All doctors", "Doctor's margin"):
+            self.assertIn(want, cells)
+        page = base64.b64decode(rr.export_report(self.conn, dict(body, format="html"))["content_base64"]).decode()
+        self.assertIn("Customer-Wise Product-Batch Wise Sales From 11/10/2026 To 20/10/2026", page)
+        self.assertIn("size:A4 portrait", page)
+        self.assertIn("counter(pages)", page)
+        csv = base64.b64decode(rr.export_report(self.conn, dict(body, format="csv"))["content_base64"]).decode("utf-8-sig")
+        self.assertIn("Sub Total:", csv)
+        self.assertIn("27.50", csv)
+        # only total-sales lines (no profit part): a file all the same
+        only = rr.export_report(self.conn, dict(body, doctors=["DR B"], format="csv"))
+        self.assertTrue(only["ok"], only)
 
 
 if __name__ == "__main__":

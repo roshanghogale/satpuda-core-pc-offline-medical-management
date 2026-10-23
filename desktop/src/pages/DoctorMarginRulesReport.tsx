@@ -1,12 +1,15 @@
 /**
- * Doctor Margin Report by the margin rules (owner, 22 Oct 2026) — the default mode of the
+ * Doctor Margin Report by the margin rules (owner, 22 + 23 Oct 2026) — the default mode of the
  * Doctor Margin Report dialog (Sales History → Export).
  *
- * The owner's Excel: a period, then per doctor product / quantity / MRP / rate / total value
- * (total value = (MRP − rate) × quantity) and a TOTAL; only medicines a margin is given on. Or
- * customer-wise product-batch-wise with sub-totals. The figures are the doctor report's saved
- * lines (core/doctor_margin_store.py), written when each bill was saved; Recalculate works a
- * period out again with today's rules. The rules: DoctorMarginRulesEditor.
+ * Per doctor, two parts: On profit — the owner's Excel, product / quantity / MRP / rate / total
+ * value (total value = (MRP − rate) × quantity) and a TOTAL, only the products in a group (or
+ * customer-wise product-batch-wise with sub-totals); On total sales — the other software's
+ * "Customer-Wise Product-Batch Wise Sales": a heading per product, one row per bill line, a Sub
+ * Total, the total sale value and the commission (X% of it). Then the doctor's margin = both.
+ * The figures are the doctor report's saved lines (core/doctor_margin_store.py), written when
+ * each bill was saved; Recalculate works a period out again with today's rules. The rules:
+ * DoctorMarginRulesEditor.
  */
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
@@ -48,6 +51,36 @@ type SummaryLine = Pick<
   'doctor' | 'name' | 'type' | 'batch' | 'mrp' | 'rate' | 'rate_basis' | 'kind' | 'margin_unit' | 'qty' | 'value' | 'rule' | 'flags'
 >
 
+/** A total-sales line: the bill line's own rate, discount and value (net of returns). */
+type SalesLine = {
+  sale_id: number
+  bill_no: string
+  date: string
+  patient: string
+  doctor: string
+  name: string
+  pack: string
+  type: string
+  batch: string
+  qty: number
+  qty_returned: number
+  sale_rate: number
+  disc: number
+  value: number
+  kind_value: number
+}
+
+type SalesDoctor = {
+  doctor: string
+  qty: number
+  value: number
+  lines: number
+  types: string[]
+  by_pct: { pct: number; value: number; commission: number }[]
+  commission: number
+  products: { name: string; pack: string; type: string; qty: number; value: number; lines: SalesLine[] }[]
+}
+
 type RulesReport = {
   ok: boolean
   has_rules: boolean
@@ -57,8 +90,39 @@ type RulesReport = {
   doctors: { doctor: string; qty: number; value: number; lines: number }[]
   products: { name: string; type: string; qty: number; value: number; lines: MarginLine[] }[]
   totals: { qty: number; value: number; lines: number }
+  sales: {
+    rows: SalesLine[]
+    doctors: SalesDoctor[]
+    totals: { qty: number; value: number; lines: number; commission: number }
+  }
+  grand: {
+    doctors: { doctor: string; profit: number; sales_value: number; commission: number; total: number }[]
+    totals: { profit: number; sales_value: number; commission: number; total: number }
+  }
   flag_counts: Record<Flag, number>
   sync: { bills?: number; worked_out?: number; recalculated?: boolean; lines_written?: number }
+}
+
+function pctText(p: number) {
+  return `${Number((Number(p) || 0).toFixed(4))}%`
+}
+
+/** The on-profit detail layout of one doctor: per product, its lines and a sub-total. */
+function profitProducts(rows: MarginLine[]) {
+  const out = new Map<string, { name: string; qty: number; value: number; lines: MarginLine[] }>()
+  for (const r of [...rows].sort((a, b) =>
+    a.name === b.name ? (a.batch === b.batch ? (a.date === b.date ? a.bill_no.localeCompare(b.bill_no) : a.date.localeCompare(b.date)) : a.batch.localeCompare(b.batch)) : a.name.localeCompare(b.name),
+  )) {
+    let g = out.get(r.name)
+    if (!g) {
+      g = { name: r.name, qty: 0, value: 0, lines: [] }
+      out.set(r.name, g)
+    }
+    g.lines.push(r)
+    g.qty = Math.round((g.qty + r.qty) * 1000) / 1000
+    g.value = Math.round((g.value + r.value) * 100) / 100
+  }
+  return [...out.values()]
 }
 
 const FLAG_TEXT: Record<Flag, string> = {
@@ -248,7 +312,8 @@ export function DoctorMarginRulesReport({ modeSwitch, doctors, online, from, to,
 
   const t = report?.totals
   const counts = report?.flag_counts
-  const cannot = Boolean(busy) || Boolean(problem) || !report || !report.rows.length || online
+  const anyLines = Boolean(report && (report.rows.length || report.sales?.rows.length))
+  const cannot = Boolean(busy) || Boolean(problem) || !report || !anyLines || online
   let shownLeft = PREVIEW_ROWS
 
   return (
@@ -320,8 +385,8 @@ export function DoctorMarginRulesReport({ modeSwitch, doctors, online, from, to,
               </select>
             </div>
             <div className="dm-field dm-field-wide">
-              <span className="dm-label">Layout</span>
-              <div className="dm-seg" role="radiogroup" aria-label="Layout">
+              <span className="dm-label">On-profit layout</span>
+              <div className="dm-seg" role="radiogroup" aria-label="On-profit layout">
                 <button type="button" role="radio" aria-checked={view === 'doctor'} className={view === 'doctor' ? 'on' : ''} onClick={() => setView('doctor')}>
                   Doctor-wise (Excel)
                 </button>
@@ -373,7 +438,7 @@ export function DoctorMarginRulesReport({ modeSwitch, doctors, online, from, to,
                 {dmy(from, '-')} to {dmy(to, '-')}
               </h3>
               <span className="muted">
-                {loading ? 'Updating…' : report ? `${report.rate_basis_text} · only medicines with a doctor margin` : ''}
+                {loading ? 'Updating…' : report ? `On profit: ${report.rate_basis_text} · on total sales: % of the sale value` : ''}
               </span>
             </div>
             {report && t ? (
@@ -387,19 +452,23 @@ export function DoctorMarginRulesReport({ modeSwitch, doctors, online, from, to,
                 <div className="dm-cards">
                   <div className="dm-stat">
                     <span>Doctors</span>
-                    <b>{report.doctors.length}</b>
+                    <b>{report.grand.doctors.length}</b>
                   </div>
                   <div className="dm-stat">
-                    <span>Bill lines</span>
-                    <b>{t.lines}</b>
+                    <span>On profit</span>
+                    <b>₹{money(report.grand.totals.profit)}</b>
                   </div>
                   <div className="dm-stat">
-                    <span>Quantity</span>
-                    <b>{qtyText(t.qty)}</b>
+                    <span>Total sales</span>
+                    <b>₹{money(report.grand.totals.sales_value)}</b>
+                  </div>
+                  <div className="dm-stat">
+                    <span>Commission on sales</span>
+                    <b>₹{money(report.grand.totals.commission)}</b>
                   </div>
                   <div className="dm-stat dm-stat-main">
-                    <span>TOTAL value</span>
-                    <b>₹{money(t.value)}</b>
+                    <span>Doctors' margin</span>
+                    <b>₹{money(report.grand.totals.total)}</b>
                   </div>
                 </div>
                 {counts && (counts.estimated || counts.no_rate || counts.rate_over_mrp) ? (
@@ -425,144 +494,251 @@ export function DoctorMarginRulesReport({ modeSwitch, doctors, online, from, to,
                   </ul>
                 ) : null}
 
-                {!report.rows.length ? (
+                {!anyLines ? (
                   <p className="dm-empty">No doctor margin in this period{picked.length < doctors.length ? ' for these doctors' : ''}.</p>
-                ) : view === 'doctor' ? (
+                ) : (
                   <div className="dmr-doctors">
-                    {report.doctors.map((d) => {
-                      const mine = report.summary.filter((r) => r.doctor === d.doctor)
-                      const show = mine.slice(0, Math.max(0, shownLeft))
-                      shownLeft -= show.length
+                    {report.grand.doctors.map((g) => {
+                      const pd = report.doctors.find((d) => d.doctor === g.doctor)
+                      const sd = report.sales.doctors.find((d) => d.doctor === g.doctor)
+                      const mineSummary = report.summary.filter((r) => r.doctor === g.doctor)
+                      const mineRows = report.rows.filter((r) => r.doctor === g.doctor)
+                      const sumShow = view === 'doctor' ? mineSummary.slice(0, Math.max(0, shownLeft)) : []
+                      shownLeft -= sumShow.length
                       return (
-                        <section key={d.doctor} className="dmr-doctor">
+                        <section key={g.doctor} className="dmr-doctor">
                           <div className="dmr-doctor-head">
-                            <b>{d.doctor}</b>
+                            <b>{g.doctor}</b>
                             <span className="muted">
-                              {d.lines} bill line(s) · qty {qtyText(d.qty)}
+                              {pd ? `on profit ₹${money(g.profit)}` : ''}
+                              {pd && sd ? ' + ' : ''}
+                              {sd ? `commission ₹${money(g.commission)}` : ''}
                             </span>
-                            <span className="dmr-doctor-total">₹{money(d.value)}</span>
+                            <span className="dmr-doctor-total">₹{money(g.total)}</span>
                           </div>
-                          <table className="sat-table dm-table dmr-table">
-                            <thead>
-                              <tr>
-                                <th>Product name</th>
-                                <th>Batch</th>
-                                <th className="num">Quantity</th>
-                                <th className="num">MRP</th>
-                                <th className="num">Rate</th>
-                                <th className="num">Margin / unit</th>
-                                <th className="num">Total value</th>
-                                <th>Rule</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {show.map((r, i) => (
-                                <tr key={i}>
-                                  <td className="dm-wrap">
-                                    {r.name} <Flags flags={r.flags} />
-                                  </td>
-                                  <td>{r.batch}</td>
-                                  <td className="num">{qtyText(r.qty)}</td>
-                                  <td className="num">{money(r.mrp)}</td>
-                                  <td className="num">{money(r.rate)}</td>
-                                  <td className="num">{money(r.margin_unit)}</td>
-                                  <td className="num">{money(r.value)}</td>
-                                  <td className="dmr-rule" title={KIND_TEXT[r.kind] || r.kind}>
-                                    {r.rule}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                            <tfoot>
-                              <tr className="dm-total">
-                                <td colSpan={2}>TOTAL value</td>
-                                <td className="num">{qtyText(d.qty)}</td>
-                                <td colSpan={3} />
-                                <td className="num">{money(d.value)}</td>
-                                <td />
-                              </tr>
-                            </tfoot>
-                          </table>
+
+                          {pd ? (
+                            <div className="dmr-part">
+                              <div className="dmr-part-head">
+                                <b>On profit</b>
+                                <span className="muted">
+                                  products in the groups · {pd.lines} bill line(s) · qty {qtyText(pd.qty)}
+                                </span>
+                              </div>
+                              {view === 'doctor' ? (
+                                <table className="sat-table dm-table dmr-table">
+                                  <thead>
+                                    <tr>
+                                      <th>Product name</th>
+                                      <th>Batch</th>
+                                      <th className="num">Quantity</th>
+                                      <th className="num">MRP</th>
+                                      <th className="num">Rate</th>
+                                      <th className="num">Margin / unit</th>
+                                      <th className="num">Total value</th>
+                                      <th>Rule</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {sumShow.map((r, i) => (
+                                      <tr key={i}>
+                                        <td className="dm-wrap">
+                                          {r.name} <Flags flags={r.flags} />
+                                        </td>
+                                        <td>{r.batch}</td>
+                                        <td className="num">{qtyText(r.qty)}</td>
+                                        <td className="num">{money(r.mrp)}</td>
+                                        <td className="num">{money(r.rate)}</td>
+                                        <td className="num">{money(r.margin_unit)}</td>
+                                        <td className="num">{money(r.value)}</td>
+                                        <td className="dmr-rule" title={KIND_TEXT[r.kind] || r.kind}>
+                                          {r.rule}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                  <tfoot>
+                                    <tr className="dm-total">
+                                      <td colSpan={2}>TOTAL value</td>
+                                      <td className="num">{qtyText(pd.qty)}</td>
+                                      <td colSpan={3} />
+                                      <td className="num">{money(pd.value)}</td>
+                                      <td />
+                                    </tr>
+                                  </tfoot>
+                                </table>
+                              ) : (
+                                <table className="sat-table dm-table dmr-table">
+                                  <thead>
+                                    <tr>
+                                      <th>Customer</th>
+                                      <th>Bill no</th>
+                                      <th>Date</th>
+                                      <th>Batch</th>
+                                      <th className="num">Qty</th>
+                                      <th className="num">MRP</th>
+                                      <th className="num">Rate</th>
+                                      <th className="num">Margin / unit</th>
+                                      <th className="num">Value</th>
+                                      <th>Type</th>
+                                    </tr>
+                                  </thead>
+                                  {profitProducts(mineRows).map((p) => {
+                                    const show = p.lines.slice(0, Math.max(0, shownLeft))
+                                    shownLeft -= show.length
+                                    if (!show.length) return null
+                                    return (
+                                      <tbody key={p.name}>
+                                        <tr className="dmr-product">
+                                          <td colSpan={10}>{p.name}</td>
+                                        </tr>
+                                        {show.map((r, i) => (
+                                          <tr key={i}>
+                                            <td className="dm-wrap">{r.patient}</td>
+                                            <td>{r.bill_no}</td>
+                                            <td>{dmy(r.date)}</td>
+                                            <td>{r.batch}</td>
+                                            <td className="num">
+                                              {qtyText(r.qty)}
+                                              {r.qty_returned ? <span className="muted"> (−{qtyText(r.qty_returned)} ret.)</span> : null}
+                                            </td>
+                                            <td className="num">{money(r.mrp)}</td>
+                                            <td className="num">{money(r.rate)}</td>
+                                            <td className="num">{money(r.margin_unit)}</td>
+                                            <td className="num">{money(r.value)}</td>
+                                            <td>
+                                              {r.type} <Flags flags={r.flags} />
+                                            </td>
+                                          </tr>
+                                        ))}
+                                        <tr className="dmr-sub">
+                                          <td colSpan={4}>Sub total</td>
+                                          <td className="num">{qtyText(p.qty)}</td>
+                                          <td colSpan={3} />
+                                          <td className="num">{money(p.value)}</td>
+                                          <td />
+                                        </tr>
+                                      </tbody>
+                                    )
+                                  })}
+                                  <tfoot>
+                                    <tr className="dm-total">
+                                      <td colSpan={4}>TOTAL value</td>
+                                      <td className="num">{qtyText(pd.qty)}</td>
+                                      <td colSpan={3} />
+                                      <td className="num">{money(pd.value)}</td>
+                                      <td />
+                                    </tr>
+                                  </tfoot>
+                                </table>
+                              )}
+                            </div>
+                          ) : null}
+
+                          {sd ? (
+                            <div className="dmr-part">
+                              <div className="dmr-part-head">
+                                <b>On total sales</b>
+                                <span className="muted">
+                                  Customer-wise product-batch-wise sales {dmy(from)} – {dmy(to)} · {sd.types.join(', ')}
+                                </span>
+                              </div>
+                              <table className="sat-table dm-table dmr-table dmr-sales">
+                                <thead>
+                                  <tr>
+                                    <th>Customer name</th>
+                                    <th>Bill no</th>
+                                    <th>Date</th>
+                                    <th>Batch no</th>
+                                    <th className="num">Qty</th>
+                                    <th className="num">Rate</th>
+                                    <th className="num">Disc.</th>
+                                    <th className="num">Value</th>
+                                    <th>Doctor name</th>
+                                    <th>Type</th>
+                                  </tr>
+                                </thead>
+                                {sd.products.map((p) => {
+                                  const show = p.lines.slice(0, Math.max(0, shownLeft))
+                                  shownLeft -= show.length
+                                  if (!show.length) return null
+                                  return (
+                                    <tbody key={`${p.name}|${p.pack}`}>
+                                      <tr className="dmr-product">
+                                        <td colSpan={10}>
+                                          {p.name}
+                                          {p.pack ? <span className="dmr-pack"> {p.pack}</span> : null}
+                                        </td>
+                                      </tr>
+                                      {show.map((r, i) => (
+                                        <tr key={i}>
+                                          <td className="dm-wrap">{r.patient}</td>
+                                          <td>{r.bill_no}</td>
+                                          <td>{dmy(r.date)}</td>
+                                          <td>{r.batch}</td>
+                                          <td className="num">
+                                            {qtyText(r.qty)}
+                                            {r.qty_returned ? <span className="muted"> (−{qtyText(r.qty_returned)} ret.)</span> : null}
+                                          </td>
+                                          <td className="num">{money(r.sale_rate)}</td>
+                                          <td className="num">{r.disc ? money(r.disc) : '-'}</td>
+                                          <td className="num">{money(r.value)}</td>
+                                          <td className="dm-wrap">{r.doctor}</td>
+                                          <td>{String(r.type).toUpperCase()}</td>
+                                        </tr>
+                                      ))}
+                                      <tr className="dmr-sub">
+                                        <td colSpan={3} />
+                                        <td>Sub Total:</td>
+                                        <td className="num">{qtyText(p.qty)}</td>
+                                        <td colSpan={2} />
+                                        <td className="num">{money(p.value)}</td>
+                                        <td colSpan={2} />
+                                      </tr>
+                                    </tbody>
+                                  )
+                                })}
+                                <tfoot>
+                                  <tr className="dm-total">
+                                    <td colSpan={4}>Total sales value</td>
+                                    <td className="num">{qtyText(sd.qty)}</td>
+                                    <td colSpan={2} />
+                                    <td className="num">{money(sd.value)}</td>
+                                    <td colSpan={2} />
+                                  </tr>
+                                  {sd.by_pct.map((b) => (
+                                    <tr key={b.pct} className="dm-total dmr-commission">
+                                      <td colSpan={7}>
+                                        Commission {pctText(b.pct)} of ₹{money(b.value)}
+                                      </td>
+                                      <td className="num">{money(b.commission)}</td>
+                                      <td colSpan={2} />
+                                    </tr>
+                                  ))}
+                                </tfoot>
+                              </table>
+                            </div>
+                          ) : null}
+
+                          <div className="dmr-doctor-margin">
+                            <span>
+                              {g.doctor} — doctor's margin
+                              {pd && sd ? ` (on profit ₹${money(g.profit)} + commission ₹${money(g.commission)})` : ''}
+                            </span>
+                            <b>₹{money(g.total)}</b>
+                          </div>
                         </section>
                       )
                     })}
                   </div>
-                ) : (
-                  <div className="dm-table-wrap">
-                    <table className="sat-table dm-table dmr-table">
-                      <thead>
-                        <tr>
-                          <th>Customer</th>
-                          <th>Bill no</th>
-                          <th>Date</th>
-                          <th>Batch</th>
-                          <th className="num">Qty</th>
-                          <th className="num">MRP</th>
-                          <th className="num">Rate</th>
-                          <th className="num">Margin / unit</th>
-                          <th className="num">Value</th>
-                          <th>Doctor</th>
-                          <th>Type</th>
-                        </tr>
-                      </thead>
-                      {report.products.map((p) => {
-                        const show = p.lines.slice(0, Math.max(0, shownLeft))
-                        shownLeft -= show.length
-                        if (!show.length) return null
-                        return (
-                          <tbody key={p.name}>
-                            <tr className="dmr-product">
-                              <td colSpan={11}>{p.name}</td>
-                            </tr>
-                            {show.map((r, i) => (
-                              <tr key={i}>
-                                <td className="dm-wrap">{r.patient}</td>
-                                <td>{r.bill_no}</td>
-                                <td>{dmy(r.date)}</td>
-                                <td>{r.batch}</td>
-                                <td className="num">
-                                  {qtyText(r.qty)}
-                                  {r.qty_returned ? <span className="muted"> (−{qtyText(r.qty_returned)} ret.)</span> : null}
-                                </td>
-                                <td className="num">{money(r.mrp)}</td>
-                                <td className="num">{money(r.rate)}</td>
-                                <td className="num">{money(r.margin_unit)}</td>
-                                <td className="num">{money(r.value)}</td>
-                                <td className="dm-wrap">{r.doctor}</td>
-                                <td>
-                                  {r.type} <Flags flags={r.flags} />
-                                </td>
-                              </tr>
-                            ))}
-                            <tr className="dmr-sub">
-                              <td colSpan={4}>Sub total</td>
-                              <td className="num">{qtyText(p.qty)}</td>
-                              <td colSpan={3} />
-                              <td className="num">{money(p.value)}</td>
-                              <td colSpan={2} />
-                            </tr>
-                          </tbody>
-                        )
-                      })}
-                      <tfoot>
-                        <tr className="dm-total">
-                          <td colSpan={4}>TOTAL value</td>
-                          <td className="num">{qtyText(t.qty)}</td>
-                          <td colSpan={3} />
-                          <td className="num">{money(t.value)}</td>
-                          <td colSpan={2} />
-                        </tr>
-                      </tfoot>
-                    </table>
-                  </div>
                 )}
-                {report.rows.length > PREVIEW_ROWS ? (
+                {report.rows.length + report.sales.rows.length > PREVIEW_ROWS ? (
                   <p className="muted dm-more">The preview shows the first {PREVIEW_ROWS} rows; Excel / PDF / Print carry all of them.</p>
                 ) : null}
-                {view === 'doctor' && report.doctors.length > 1 ? (
+                {report.grand.doctors.length > 1 ? (
                   <div className="dmr-grand">
-                    <span>All doctors — TOTAL value</span>
-                    <b>₹{money(t.value)}</b>
+                    <span>All doctors — doctors' margin</span>
+                    <b>₹{money(report.grand.totals.total)}</b>
                   </div>
                 ) : null}
               </>

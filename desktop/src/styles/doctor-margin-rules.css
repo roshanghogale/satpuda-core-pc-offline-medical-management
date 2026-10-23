@@ -280,13 +280,100 @@ tr.dmr-focus td {
   line-height: 1;
   padding: 0 3px;
 }
-.dmr-rest {
+/* The two ways (23 Oct 2026): what each covers, the % box, a group of every product. */
+.dmr-ways {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.dmr-way {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+.dmr-way b {
+  font-size: 12px;
+  color: var(--text-primary);
+}
+.dmr-way.on {
+  border-color: var(--accent);
+  background: var(--surface-alt);
+}
+.dmr-pct-box {
   display: flex;
   align-items: center;
+  gap: 4px;
+}
+.dmr-pct-box .settings-input.dm-num {
+  width: 84px;
+  height: 28px;
+}
+.dmr-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.dmr-sales-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+}
+.dmr-sales-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.dmr-sales-panel h3,
+.dmr-sales-panel p {
+  margin: 0;
+}
+
+/* Report: a doctor's two parts and his margin. */
+.dmr-part + .dmr-part {
+  border-top: 1px solid var(--border);
+}
+.dmr-part-head {
+  display: flex;
+  align-items: baseline;
   gap: 10px;
-  padding: 8px;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-md);
+  padding: 6px 10px 4px;
+  font-size: 12px;
+}
+.dmr-part-head .muted {
+  font-size: 11.5px;
+}
+.dmr-table .dmr-pack {
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+.dmr-table tr.dmr-commission td {
+  font-weight: 700;
+}
+.dmr-doctor-margin {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 10px;
+  border-top: 2px solid var(--border-strong);
+  background: var(--surface-alt);
+  font-size: 13px;
+  font-weight: 600;
+}
+.dmr-doctor-margin b {
+  font-variant-numeric: tabular-nums;
 }
 
 /* Product pick list (owner's image 13). */
