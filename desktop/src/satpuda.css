@@ -542,6 +542,19 @@ textarea {
   min-height: 60px;
   padding: 6px 8px;
 }
+/* The list a native <select> opens is drawn outside the page, from the options' own colours.
+ * They were transparent, which leaves the list's background to WebView2: on Windows 11 it can
+ * be black, and with a light theme's dark text the list shows as an empty black box (owner's
+ * PC, Settings > Sales & Billing > Default doctor). Every theme now gives the options its own
+ * input colours. */
+select option,
+select optgroup {
+  background-color: var(--inputbg, var(--surface));
+  color: var(--inputfg, var(--text-primary));
+}
+select option:disabled {
+  color: var(--text-muted);
+}
 input:focus,
 select:focus,
 textarea:focus {

@@ -22,6 +22,7 @@ import {
   SaveBtn,
 } from './SettingsChrome'
 import { ListEditor } from './ListEditor'
+import { ModernCombo } from '../ModernCombo'
 import { FolderInput } from './FolderInput'
 import '../../styles/prefs-settings.css'
 
@@ -95,30 +96,63 @@ function DefaultDoctorField({
   // A saved doctor since removed from the list still shows, so the box never
   // claims "None" while new bills keep starting with that name.
   const missing = Boolean(cur) && !seen.has(cur.toUpperCase())
+  // The app's own list, not a native <select>: on the owner's PC (WebView2, Windows 11) the
+  // native drop-down of this box opened as an empty black box. Typing filters the doctors;
+  // only a picked doctor (or an emptied box = None) is taken, anything else typed goes back.
+  const [draft, setDraft] = useState<string | null>(null)
+  const commitTyped = () => {
+    if (draft == null) return
+    const t = draft.trim()
+    if (!t) onChange('')
+    else {
+      const hit = names.find((n) => n.name.toUpperCase() === t.toUpperCase())
+      if (hit) onChange(hit.name)
+    }
+    setDraft(null)
+  }
   return (
     <div className="prefs-default-doctor">
       <Field label="Default doctor">
-        <select
-          className="settings-input"
-          value={missing ? cur : names.find((n) => n.name.toUpperCase() === cur.toUpperCase())?.name ?? ''}
-          onChange={(e) => onChange(e.target.value)}
-          disabled={!doctors && !cur}
-        >
-          <option value="">None — new bills start without a doctor</option>
-          {missing ? <option value={cur}>{cur} (not in the doctors list)</option> : null}
-          {names.map((n) => (
-            <option key={n.name} value={n.name}>
-              {n.extra ? `${n.name} — ${n.extra}` : n.name}
-            </option>
-          ))}
-        </select>
+        <div className="prefs-inline">
+          <ModernCombo
+            className="settings-input"
+            value={draft ?? cur}
+            onChange={(v) => setDraft(v)}
+            onPick={(it) => {
+              setDraft(null)
+              onChange(it.label)
+            }}
+            onBlur={commitTyped}
+            items={names.map((n) => ({ id: n.name, label: n.name, meta: n.extra || undefined }))}
+            minChars={0}
+            filterLocal
+            listLabel="Doctors"
+            emptyText={names.length ? 'No doctor of that name' : 'No doctors saved yet'}
+            placeholder="None — new bills start without a doctor"
+            disabled={!doctors && !cur}
+          />
+          {cur ? (
+            <button
+              type="button"
+              className="settings-action-btn prefs-btn-secondary prefs-btn-small"
+              onClick={() => {
+                setDraft(null)
+                onChange('')
+              }}
+            >
+              None
+            </button>
+          ) : null}
+        </div>
       </Field>
       <p className="prefs-check-hint">
-        {doctors
-          ? names.length
-            ? 'Every new Sales bill starts with this doctor and their number. Clear or change it on a bill when needed.'
-            : 'No doctors saved yet. Add them in Contacts > Doctors.'
-          : 'Loading the doctors list…'}
+        {missing
+          ? `${cur} is not in the doctors list any more; new bills still start with this name.`
+          : doctors
+            ? names.length
+              ? 'Every new Sales bill starts with this doctor and their number. Clear or change it on a bill when needed.'
+              : 'No doctors saved yet. Add them in Contacts > Doctors.'
+            : 'Loading the doctors list…'}
       </p>
     </div>
   )
