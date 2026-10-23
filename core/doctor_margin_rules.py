@@ -44,6 +44,11 @@ from datetime import datetime
 from typing import Any
 
 SETTING_NAME = "doctor_margin_rules"
+# The periods recalculated on this PC, {version: 1, runs: [{from, to, at, rules_updated}]}: a
+# shop setting synced like the rules, so the server's report (web, phone) works those bills
+# out with the rules of the recalculation too (server src/services/doctorMarginRulesStore.js).
+RECALC_SETTING = "doctor_margin_rules_recalc"
+RECALC_KEEP = 200
 VERSION = 1
 NO_DOCTOR = "(No doctor)"
 RATE_BASES = ("purchase", "purchase_free")
@@ -544,3 +549,23 @@ def save_rules(conn, data: Any) -> dict[str, Any]:
         _setting_set(conn, SETTING_NAME, raw)
         conn.commit()
     return rules
+
+
+def note_recalculate(conn, from_date: str, to_date: str, rules: dict[str, Any]) -> dict[str, str]:
+    """Keep "this period was recalculated now, with these rules" in the shop settings (the
+    last RECALC_KEEP runs). Recalculate runs on this PC's own books (Offline / offline-first),
+    so the row is written here and travels with the shop settings."""
+    from core.desktop_settings_service import _setting_get, _setting_set
+
+    try:
+        data = json.loads(_setting_get(conn, RECALC_SETTING, "") or "{}")
+    except ValueError:
+        data = {}
+    runs = [r for r in (data.get("runs") or []) if isinstance(r, dict)] if isinstance(data, dict) else []
+    run = {"from": str(from_date)[:10], "to": str(to_date)[:10],
+           "at": datetime.now().isoformat(timespec="seconds"), "rules_updated": str(rules.get("updated") or "")}
+    runs.append(run)
+    _setting_set(conn, RECALC_SETTING, json.dumps({"version": VERSION, "runs": runs[-RECALC_KEEP:]},
+                                                  ensure_ascii=False, separators=(",", ":")))
+    conn.commit()
+    return run

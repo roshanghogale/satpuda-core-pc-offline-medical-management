@@ -459,6 +459,10 @@ def recalculate(conn, from_date: str, to_date: str) -> dict[str, int]:
         sales, purchases = read_bills(conn, want)
         wrote = _write(conn, rules, sales, purchases)
     conn.commit()
+    try:  # the server's report (web, phone) follows the same recalculated period
+        dmr.note_recalculate(conn, from_date, to_date, rules)
+    except Exception as exc:  # pragma: no cover - logged, never in the report's way
+        log.warning("doctor margin recalc marker: %s", exc)
     return {"bills": len(want), "lines_written": wrote}
 
 
