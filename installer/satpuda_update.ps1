@@ -97,14 +97,19 @@ function Compare-Version([string]$a, [string]$b) {   # 1 if a>b, -1 if a<b, 0 eq
 #   2. HKCU ...\Tag - the same value, recorded when a wizard run finished.
 #   3. HKCU ...\Version - the version of the INSTALLER that ran, which is only
 #      a rough stand-in and is used last for that reason.
-$installed = ''
+$installed    = ''
+$installedSha = ''     # which BUILD of that version: sha256 of its zip, '' when not recorded
 if (-not $AppRoot) {
     try { $AppRoot = (Get-ItemProperty -Path $RegKey -Name 'InstallPath' -ErrorAction Stop).InstallPath } catch { }
 }
 if ($AppRoot) {
     try {
         $marker = Join-Path (Join-Path $AppRoot 'app') '.satpuda-install.json'
-        if (Test-Path -LiteralPath $marker) { $installed = (Get-Content -LiteralPath $marker -Raw | ConvertFrom-Json).tag }
+        if (Test-Path -LiteralPath $marker) {
+            $m = Get-Content -LiteralPath $marker -Raw | ConvertFrom-Json
+            $installed = $m.tag
+            if ([string]$m.sha256 -match '^[0-9a-fA-F]{64}$') { $installedSha = ([string]$m.sha256).ToLower() }
+        }
     } catch { }
 }
 if (-not $installed) {
@@ -232,7 +237,36 @@ if (-not $latestTag) {
 $cmp = Compare-Version $latestTag $installed
 Log ("compare " + $latestTag + " vs " + $installed + " = " + $cmp)
 
-if ($cmp -le 0) {
+# SAME TAG, NEW BUILD. New builds are published into the same release tag, so
+# an equal version number is not the end of it: compare the release's .sha256
+# with the build recorded in the marker. Different - or nothing recorded (an
+# install made before builds were recorded) - offers the update. After it, the
+# marker carries the new sha256 and this goes quiet again.
+$newerBuild = $false
+if ($cmp -eq 0 -and ($latestTag -notmatch '-')) {
+    $remoteSha = ''
+    foreach ($a in $assets) {
+        if ($a.name -eq 'SatpudaCore_Desktop_Win10.zip.sha256') {
+            try {
+                $r = [System.Net.HttpWebRequest]::Create([string]$a.browser_download_url)
+                $r.UserAgent = 'SatpudaCoreUpdateCheck'
+                $r.Timeout = 20000; $r.ReadWriteTimeout = 20000
+                $resp = $r.GetResponse()
+                try {
+                    $sr = New-Object System.IO.StreamReader($resp.GetResponseStream())
+                    $txt = $sr.ReadToEnd(); $sr.Dispose()
+                } finally { $resp.Close() }
+                if ($txt -match '([0-9a-fA-F]{64})') { $remoteSha = $Matches[1].ToLower() }
+            } catch { Log ("checksum sidecar could not be read: " + $_.Exception.Message) }
+        }
+    }
+    # Unknown on GitHub's side (no sidecar, or one being replaced right now)
+    # offers nothing: there is nothing to compare with.
+    if ($remoteSha -and ($remoteSha -ne $installedSha)) { $newerBuild = $true }
+    Log ("same version; installed build '" + $installedSha + "', published build '" + $remoteSha + "', newer build = " + $newerBuild)
+}
+
+if ($cmp -lt 0 -or ($cmp -eq 0 -and -not $newerBuild)) {
     Say "$AppName is up to date.`n`nInstalled version: $installed"
     exit 0
 }
@@ -248,7 +282,11 @@ if (-not $url) {
     exit 0
 }
 
-if (-not (Ask "A new version of $AppName is available.`n`n    You have:   $installed`n    Available:  $latestTag`n`nDownload and install it now?")) {
+$question = "A new version of $AppName is available.`n`n    You have:   $installed`n    Available:  $latestTag`n`nDownload and install it now?"
+if ($newerBuild) {
+    $question = "A newer build of $AppName $latestTag is available (same version number, new files).`n`nDownload the installer now? In it, choose `"Update to the newest build`"."
+}
+if (-not (Ask $question)) {
     Log 'user declined'
     exit 0
 }

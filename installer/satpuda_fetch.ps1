@@ -56,7 +56,14 @@ param(
     [int]    $Segments  = 16,                              # parallel range connections
     [switch] $Repair,                                      # distrust the cached zip; this run exists to fix corruption
     [switch] $CheckOnly,                                   # just report the newest published tag, then quit
-    [string] $OutFile   = ''                               # where -CheckOnly writes its answer
+    [string] $OutFile   = '',                              # where -CheckOnly writes its answer
+    # The owner publishes new builds INTO THE SAME TAG, and "gh release upload
+    # --clobber" deletes the old asset about a minute before the new one has
+    # finished uploading. For that long the release has no zip (or no .sha256).
+    # A run that lands in that window waits for GitHub instead of failing.
+    [int]    $UpdateWaitSecs = 180,                        # how long to wait for a release that is being re-published
+    [int]    $UpdatePollSecs = 15,                         # how often to look again while waiting
+    [string] $ApiBase   = 'https://api.github.com'         # only ever changed by the tests (a local fake GitHub)
 )
 
 $ErrorActionPreference = 'Stop'
@@ -64,6 +71,10 @@ $ProgressPreference    = 'SilentlyContinue'   # harmless here; see the header no
 
 if ($Segments -lt 1)  { $Segments = 1 }
 if ($Segments -gt 32) { $Segments = 32 }
+if ($UpdateWaitSecs -lt 0)   { $UpdateWaitSecs = 0 }
+if ($UpdateWaitSecs -gt 900) { $UpdateWaitSecs = 900 }
+if ($UpdatePollSecs -lt 1)   { $UpdatePollSecs = 1 }
+$ApiBase = $ApiBase.TrimEnd('/')
 
 # --------------------------------------------------------------- CheckOnly --
 #
@@ -78,8 +89,9 @@ if ($CheckOnly) {
             [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls11 -bor [Net.SecurityProtocolType]::Tls
         try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 12288 } catch { }
     } catch { }
+    $latestRel = $null
     try {
-        $r = [System.Net.HttpWebRequest]::Create("https://api.github.com/repos/$Repo/releases/latest")
+        $r = [System.Net.HttpWebRequest]::Create("$ApiBase/repos/$Repo/releases/latest")
         $r.UserAgent        = 'SatpudaCoreInstaller'
         $r.Accept           = 'application/vnd.github+json'
         $r.Timeout          = 4000
@@ -87,9 +99,37 @@ if ($CheckOnly) {
         $resp = $r.GetResponse()
         try {
             $sr = New-Object System.IO.StreamReader($resp.GetResponseStream())
-            try { $tag = ($sr.ReadToEnd() | ConvertFrom-Json).tag_name } finally { $sr.Dispose() }
+            try { $latestRel = $sr.ReadToEnd() | ConvertFrom-Json; $tag = $latestRel.tag_name } finally { $sr.Dispose() }
         } finally { $resp.Close() }
     } catch { $tag = '' }
+
+    # The checksum of the LATEST release's zip, from its .sha256 sidecar. The
+    # owner republishes builds into the same tag, so "same tag" no longer means
+    # "same program": the maintenance page compares this with the sha256 in the
+    # install marker and offers "Update to the newest build" when they differ.
+    # Same 4-second ceiling and the same silence on failure: '' means "cannot
+    # tell", and the page then behaves exactly as it did before.
+    $sha = ''
+    try {
+        $shaUrl = ''
+        if ($latestRel) {
+            foreach ($a in @($latestRel.assets)) {
+                if ($a.name -eq ($AssetName + '.sha256')) { $shaUrl = [string]$a.browser_download_url }
+            }
+        }
+        if ($shaUrl) {
+            $r = [System.Net.HttpWebRequest]::Create($shaUrl)
+            $r.UserAgent        = 'SatpudaCoreInstaller'
+            $r.Timeout          = 4000
+            $r.ReadWriteTimeout = 4000
+            $resp = $r.GetResponse()
+            try {
+                $sr = New-Object System.IO.StreamReader($resp.GetResponseStream())
+                try { $txt = $sr.ReadToEnd() } finally { $sr.Dispose() }
+            } finally { $resp.Close() }
+            if ($txt -match '([0-9a-fA-F]{64})') { $sha = $Matches[1].ToLower() }
+        }
+    } catch { $sha = '' }
 
     # The newest PRE-RELEASE, for the administrator's "install the test
     # version" choice. releases/latest never returns one, so this is a second
@@ -107,7 +147,7 @@ if ($CheckOnly) {
     $pre = ''
     $preKey = $null
     try {
-        $r = [System.Net.HttpWebRequest]::Create("https://api.github.com/repos/$Repo/releases?per_page=100")
+        $r = [System.Net.HttpWebRequest]::Create("$ApiBase/repos/$Repo/releases?per_page=100")
         $r.UserAgent        = 'SatpudaCoreInstaller'
         $r.Accept           = 'application/vnd.github+json'
         $r.Timeout          = 4000
@@ -143,10 +183,11 @@ if ($CheckOnly) {
     } catch { $pre = '' }
 
     if ($OutFile) {
-        try { [System.IO.File]::WriteAllText($OutFile, ("LATEST|" + $tag + "`r`nPRE|" + $pre)) } catch { }
+        try { [System.IO.File]::WriteAllText($OutFile, ("LATEST|" + $tag + "`r`nPRE|" + $pre + "`r`nSHA|" + $sha)) } catch { }
     }
     [Console]::Out.WriteLine("LATEST|" + $tag)
     [Console]::Out.WriteLine("PRE|" + $pre)
+    [Console]::Out.WriteLine("SHA|" + $sha)
     exit 0
 }
 
@@ -173,6 +214,13 @@ function Progress([int]$pct, [string]$t) {
         $script:LastPct = $pct
         Emit ("P|" + $pct + "|" + $t)
     }
+}
+# The same line even when the percentage has not moved - for a countdown, whose
+# text is the only thing that changes.
+function Say-Progress([int]$pct, [string]$t) {
+    if ($pct -lt 0) { $pct = 0 } elseif ($pct -gt 100) { $pct = 100 }
+    $script:LastPct = $pct
+    Emit ("P|" + $pct + "|" + $t)
 }
 
 # ------------------------------------------------------------------ cancel --
@@ -313,13 +361,39 @@ if (Test-Path -LiteralPath $script:Staging) {
 Assert-NotCancelled
 
 # ------------------------------------------------------- 1. resolve the asset --
-
-Step 'Looking up the download'
-Progress 0 'Contacting GitHub'
+#
+# Only functions here; they are called from the download loop further down,
+# once everything they use has been defined.
+#
+# SAME TAG, NEW BUILD. The owner publishes new builds into the SAME release tag
+# (v1.0.11 had its files replaced several times), and "gh release upload
+# --clobber" deletes the old asset about a minute before the new one finishes
+# uploading. A shop that runs the installer in that minute used to be told the
+# download "is no longer on the release page". Now:
+#
+#   * no zip on the release (or the direct link answers 404): wait and look
+#     again every $UpdatePollSecs, for up to $UpdateWaitSecs, showing
+#     "GitHub is updating this release - trying again in N s...". Only then
+#     fail with the old message.
+#   * the zip is there but its .sha256 is not, and the zip was replaced only
+#     minutes ago: wait for the sidecar the same way, so a half-updated release
+#     is not installed with an unchecked file. After the wait, carry on without
+#     it exactly as before. (A release that simply never had a sidecar is not
+#     waited for: its zip is not fresh.)
+#   * the file changes while it is downloading (404 on a chunk, a different
+#     total size, or a checksum/size mismatch at the end while the release now
+#     shows a different asset or checksum): start again ONCE from the top.
 
 $Url          = $DirectUrl
 $ExpectedSize = 0
 $ExpectedHash = ''
+$script:Used   = $null
+$script:ApiNow = [DateTime]::MinValue      # GitHub's own clock, from the last API answer
+
+function ConvertFrom-HttpDate([string]$s) {
+    return [DateTime]::Parse($s, [Globalization.CultureInfo]::InvariantCulture,
+        ([Globalization.DateTimeStyles]::AdjustToUniversal -bor [Globalization.DateTimeStyles]::AssumeUniversal))
+}
 
 function Invoke-Api([string]$u) {
     $r = [System.Net.HttpWebRequest]::Create($u)
@@ -329,40 +403,169 @@ function Invoke-Api([string]$u) {
     $r.ReadWriteTimeout = 30000
     $resp = $r.GetResponse()
     try {
+        try { $d = $resp.Headers['Date']; if ($d) { $script:ApiNow = ConvertFrom-HttpDate $d } } catch { }
         $sr = New-Object System.IO.StreamReader($resp.GetResponseStream())
         try { return $sr.ReadToEnd() } finally { $sr.Dispose() }
     } finally { $resp.Close() }
 }
 
-try {
-    $json = Invoke-Api ("https://api.github.com/repos/$Repo/releases/tags/$Tag")
-    $rel  = $json | ConvertFrom-Json
-    foreach ($a in $rel.assets) {
-        if ($a.name -eq $AssetName)             { $Url = $a.browser_download_url; $ExpectedSize = [int64]$a.size }
-        elseif ($a.name -eq ($AssetName + '.sha256')) { $ShaAssetUrl = $a.browser_download_url }
+# The HTTP status of a failed call, 0 when no HTTP answer came back at all.
+# PowerShell wraps .NET exceptions (MethodInvocationException), so walk down.
+function Get-HttpStatus($ex) {
+    $e = $ex
+    for ($i = 0; ($i -lt 5) -and $e; $i++) {
+        $we = $e -as [System.Net.WebException]
+        if ($we) {
+            if ($we.Response) { try { return [int]$we.Response.StatusCode } catch { return 0 } }
+            return 0
+        }
+        $e = $e.InnerException
     }
-    if ($Url) { Dbg ("asset resolved, size=" + $ExpectedSize) }
+    return 0
+}
 
+# One look at the release. Never throws.
+function Read-Release {
+    $info = @{ ApiOk = $false; Url = ''; Size = [int64]0; Id = ''; Updated = ''; ShaListed = $false; Hash = '' }
+    $rel = $null
+    try {
+        $rel = (Invoke-Api ("$ApiBase/repos/$Repo/releases/tags/$Tag")) | ConvertFrom-Json
+        $info.ApiOk = $true
+    } catch {
+        Dbg ("release API failed: " + $_.Exception.Message)
+        return $info
+    }
+    $shaUrl = ''
+    foreach ($a in @($rel.assets)) {
+        # An asset GitHub is still receiving is listed with a state other than
+        # "uploaded". It is not a file yet.
+        if ($a.state -and ([string]$a.state -ne 'uploaded')) { continue }
+        if ($a.name -eq $AssetName) {
+            $info.Url     = [string]$a.browser_download_url
+            $info.Size    = [int64]$a.size
+            $info.Id      = [string]$a.id
+            $info.Updated = [string]$a.updated_at
+        }
+        elseif ($a.name -eq ($AssetName + '.sha256')) { $shaUrl = [string]$a.browser_download_url }
+    }
     # Optional checksum sidecar. Publishing one is what upgrades verification
     # from "right number of bytes" to "byte-for-byte correct".
-    if ($ShaAssetUrl) {
+    if ($shaUrl) {
+        $info.ShaListed = $true
         try {
-            $txt = Invoke-Api $ShaAssetUrl
-            if ($txt -match '([0-9a-fA-F]{64})') { $ExpectedHash = $Matches[1].ToLower(); Dbg 'checksum sidecar found' }
-        } catch { Dbg 'checksum sidecar could not be read' }
+            $txt = Invoke-Api $shaUrl
+            if ($txt -match '([0-9a-fA-F]{64})') { $info.Hash = $Matches[1].ToLower() }
+            else { Dbg 'checksum sidecar has no sha256 in it' }
+        } catch {
+            Dbg ('checksum sidecar could not be read: ' + $_.Exception.Message)
+            # Deleted between the list and the read: it is being replaced.
+            if ((Get-HttpStatus $_.Exception) -eq 404) { $info.ShaListed = $false }
+        }
     }
-} catch {
-    # Rate limited, offline, or the release went private. We are not dead yet -
-    # the direct asset URL may still work. Size then comes from the range probe.
-    Dbg ("release API failed: " + $_.Exception.Message)
-    Warn 'Could not read the release details from GitHub; falling back to the direct link.'
+    return $info
 }
 
-if (-not $Url) {
-    Fail 'NOASSET' ("Could not find " + $AssetName + " on release " + $Tag + ".")
+# Was the zip put on the release only minutes ago? Measured on GitHub's clock
+# (the API's Date header), not the shop PC's, which is often wrong.
+function Test-FreshAsset([string]$updated) {
+    if (-not $updated) { return $false }
+    try {
+        $u   = ConvertFrom-HttpDate $updated
+        $now = if ($script:ApiNow -ne [DateTime]::MinValue) { $script:ApiNow } else { [DateTime]::UtcNow }
+        return (($now - $u).TotalMinutes -lt 15)
+    } catch { return $false }
 }
 
-Assert-NotCancelled
+# One wait between two looks at a release that is being re-published. Returns
+# $false, without waiting, once the deadline has passed. Stop works throughout.
+function Wait-Republish([DateTime]$deadline, [string]$why) {
+    $left = [int][Math]::Ceiling(($deadline - [DateTime]::UtcNow).TotalSeconds)
+    if ($left -le 0) { return $false }
+    $wait = [Math]::Min($UpdatePollSecs, $left)
+    Dbg ('release ' + $Tag + ' is not complete (' + $why + '); looking again in ' + $wait + ' s')
+    Step 'GitHub is updating this release'
+    $end = [DateTime]::UtcNow.AddSeconds($wait)
+    while ($true) {
+        $s = [int][Math]::Ceiling(($end - [DateTime]::UtcNow).TotalSeconds)
+        if ($s -le 0) { break }
+        Say-Progress 0 ('GitHub is updating this release - trying again in ' + $s + ' s...')
+        # A line every 5 seconds is enough of a countdown, and keeps the
+        # installer's log short over a three-minute wait.
+        $chunk = $s % 5
+        if ($chunk -eq 0) { $chunk = 5 }
+        if (Wait-Cancellable ($chunk * 1000)) { Exit-Clean 3 }
+    }
+    return $true
+}
+
+# Sets $script:Url, $script:ExpectedSize, $script:ExpectedHash and
+# $script:Used (what the release looked like), waiting for a release that is
+# half way through being re-published. Fails only after the wait.
+function Resolve-Asset {
+    Step 'Looking up the download'
+    Progress 0 'Contacting GitHub'
+    $deadline = [DateTime]::UtcNow.AddSeconds($UpdateWaitSecs)
+    $warned   = $false
+    while ($true) {
+        Assert-NotCancelled
+        $r = Read-Release
+        if ($r.ApiOk) {
+            if (-not $r.Url) {
+                if (Wait-Republish $deadline ('no ' + $AssetName + ' on it')) { continue }
+                Fail 'NOASSET' ("Could not find " + $AssetName + " on release " + $Tag + ".")
+            }
+            if ((-not $r.ShaListed) -and (Test-FreshAsset $r.Updated)) {
+                if (Wait-Republish $deadline ('the zip was replaced at ' + $r.Updated + ' and its .sha256 is not there yet')) { continue }
+                Dbg 'the zip is fresh but no checksum sidecar appeared; carrying on without one'
+            }
+            $script:Url          = $r.Url
+            $script:ExpectedSize = $r.Size
+            $script:ExpectedHash = $r.Hash
+            $script:Used         = $r
+            Dbg ("asset resolved, id=" + $r.Id + " size=" + $r.Size + " updated=" + $r.Updated)
+            if ($r.Hash) { Dbg 'checksum sidecar found' }
+            return
+        }
+
+        # Rate limited, offline, or the release went private. We are not dead
+        # yet - the direct asset URL may still work. Size then comes from the
+        # range probe. A 404 THERE is the same half-published release.
+        if (-not $warned) {
+            Warn 'Could not read the release details from GitHub; falling back to the direct link.'
+            $warned = $true
+        }
+        if (-not $DirectUrl) {
+            if (Wait-Republish $deadline 'the release API did not answer') { continue }
+            Fail 'NOASSET' ("Could not find " + $AssetName + " on release " + $Tag + ".")
+        }
+        $probe = Get-RangeSupport $DirectUrl
+        if ($probe.Status -eq 404) {
+            if (Wait-Republish $deadline 'the direct link answers 404') { continue }
+            Fail 'GONE' 'The download link no longer exists on GitHub.'
+        }
+        $script:Url          = $DirectUrl
+        $script:ExpectedSize = [int64]0
+        $script:ExpectedHash = ''
+        $script:Used         = $null
+        return
+    }
+}
+
+# After a download that came out wrong: does the release now show a different
+# file (or none, or a different checksum) from the one this run started with?
+# $false when that cannot be told - then the old failure stands.
+function Test-ReleaseChanged {
+    $r = Read-Release
+    if (-not $r.ApiOk) { return $false }
+    $u = $script:Used
+    if ($null -eq $u) { return [bool](-not $r.Url) }
+    if (-not $r.Url)                             { Dbg 'the zip is no longer on the release'; return $true }
+    if ($r.Id -and $u.Id -and ($r.Id -ne $u.Id)) { Dbg ('the zip was replaced (asset ' + $u.Id + ' -> ' + $r.Id + ')'); return $true }
+    if ($r.Size -ne $u.Size)                     { Dbg ('the zip changed size (' + $u.Size + ' -> ' + $r.Size + ')'); return $true }
+    if ($r.Hash -and ($r.Hash -ne $u.Hash))      { Dbg 'the checksum sidecar changed'; return $true }
+    if ((-not $r.ShaListed) -and $u.ShaListed)   { Dbg 'the checksum sidecar is being replaced'; return $true }
+    return $false
+}
 
 # --------------------------------------------------- 2. resumable download --
 
@@ -397,7 +600,7 @@ function Get-FileLength([string]$path) {
 # Range (so the file can be pulled in parallel) and tells us the true total size
 # even when the release API was unreachable.
 function Get-RangeSupport([string]$u) {
-    $info = @{ Ranges = $false; Total = [int64]0 }
+    $info = @{ Ranges = $false; Total = [int64]0; Status = 0 }
     $req = $null; $resp = $null
     try {
         $req = [System.Net.HttpWebRequest]::Create($u)
@@ -407,6 +610,7 @@ function Get-RangeSupport([string]$u) {
         $req.AllowAutoRedirect = $true
         $req.AddRange([int64]0, [int64]0)
         $resp = $req.GetResponse()
+        $info.Status = [int]$resp.StatusCode
         if ([int]$resp.StatusCode -eq 206) {
             $cr = $resp.Headers['Content-Range']         # "bytes 0-0/127827033"
             if ($cr -and ($cr -match '/(\d+)\s*$')) {
@@ -414,7 +618,10 @@ function Get-RangeSupport([string]$u) {
                 $info.Total  = [int64]$Matches[1]
             }
         }
-    } catch { Dbg ('range probe failed: ' + $_.Exception.Message) }
+    } catch {
+        $info.Status = Get-HttpStatus $_.Exception
+        Dbg ('range probe failed: ' + $_.Exception.Message)
+    }
     finally {
         if ($resp) { try { $resp.Close() } catch { } }
     }
@@ -491,6 +698,16 @@ $SegmentWorker = {
 
                 $resp = $req.GetResponse()
                 if ([int]$resp.StatusCode -ne 206) { throw 'server ignored the Range header' }
+                # The total after the "/" is the size of the file GitHub is
+                # serving NOW. If it is not the size this layout was cut for,
+                # the asset was replaced mid-download: stop, rather than glue
+                # bytes of two different builds together.
+                $cr = $resp.Headers['Content-Range']
+                if ($cr -and ($cr -match '/(\d+)\s*$') -and ([int64]$Matches[1] -ne ([int64]$Bounds[$Bounds.Count - 1][1] + 1))) {
+                    $Sync['lasterr' + $c] = ('the file changed size on the server (' + $cr + ')')
+                    $Sync['changed'] = $true
+                    return
+                }
 
                 $ins  = $resp.GetResponseStream()
                 $outs = New-Object System.IO.FileStream($lp, [System.IO.FileMode]::Append,
@@ -508,6 +725,17 @@ $SegmentWorker = {
             }
             catch {
                 if (-not $Sync['Cancel']) { $Sync['lasterr' + $c] = $_.Exception.Message }
+                # 404: the asset was deleted (a new build is being uploaded in
+                # its place). 416: our range is past the end of a now-smaller
+                # file. Either way retrying this chunk cannot help.
+                $ex = $_.Exception; $sc = 0
+                for ($k = 0; ($k -lt 5) -and $ex; $k++) {
+                    $we = $ex -as [System.Net.WebException]
+                    if ($we) { if ($we.Response) { try { $sc = [int]$we.Response.StatusCode } catch { } }; break }
+                    $ex = $ex.InnerException
+                }
+                if ($sc -eq 404) { $Sync['gone'] = $true }
+                if ($sc -eq 416) { $Sync['changed'] = $true }
             }
             finally {
                 $Sync['req' + $c] = $null
@@ -517,6 +745,7 @@ $SegmentWorker = {
             }
 
             if ($Sync['Cancel']) { return }
+            if ($Sync['gone'] -or $Sync['changed']) { return }
 
             $have = 0
             if ([System.IO.File]::Exists($lp)) { $have = (New-Object System.IO.FileInfo($lp)).Length }
@@ -631,6 +860,16 @@ function Invoke-SegmentedDownload([string]$u, [int64]$total, [int]$segs, [int]$p
                 Exit-Clean 3
             }
 
+            # The release's file was deleted or replaced under us (a new build
+            # going into the same tag). Every connection stops; the caller
+            # looks at the release again and starts over.
+            if ($Sync['gone'] -or $Sync['changed']) {
+                Dbg ('segmented download: the file on GitHub was ' + $(if ($Sync['gone']) { 'deleted (404)' } else { 'replaced (different size)' }) + ' mid-download')
+                Stop-Segments $pool $handles $Sync $count
+                $script:Replaced = $true
+                return $false
+            }
+
             $got = [int64]0
             for ($i = 0; $i -lt $count; $i++) { $got += [int64]$Sync['done' + $i] }
 
@@ -690,6 +929,11 @@ function Invoke-SegmentedDownload([string]$u, [int64]$total, [int]$segs, [int]$p
 
         if ($stalled) { Dbg 'no bytes for 120s; restarting the pass' }
         Stop-Segments $pool $handles $Sync $count
+        if ($Sync['gone'] -or $Sync['changed']) {
+            Dbg 'segmented download: the file on GitHub was deleted or replaced mid-download'
+            $script:Replaced = $true
+            return $false
+        }
 
         # How much really landed on disk (Sync is a hint; the files are the truth).
         $onDisk = [int64]0
@@ -790,6 +1034,21 @@ function Invoke-SingleDownload([string]$u) {
                 if (Test-Path -LiteralPath $PartFile) { Remove-Item -LiteralPath $PartFile -Force }
             }
 
+            # The size of the file GitHub is serving NOW. Not the size the
+            # release listed when this run started: the asset was replaced
+            # mid-download, and appending to the old bytes would only make a
+            # damaged file. The caller looks at the release again.
+            $serverTotal = [int64]0
+            if ($status -eq 206) {
+                $cr = $resp.Headers['Content-Range']
+                if ($cr -and ($cr -match '/(\d+)\s*$')) { $serverTotal = [int64]$Matches[1] }
+            } elseif ($len -gt 0) { $serverTotal = [int64]$len }
+            if ($script:ExpectedSize -gt 0 -and $serverTotal -gt 0 -and $serverTotal -ne $script:ExpectedSize) {
+                Dbg ('the file on GitHub is now ' + $serverTotal + ' bytes, not ' + $script:ExpectedSize + ': it was replaced')
+                $script:Replaced = $true
+                return $false
+            }
+
             $total = if ($script:ExpectedSize -gt 0) { $script:ExpectedSize } elseif ($len -gt 0) { $have + $len } else { 0 }
             if ($script:ExpectedSize -eq 0 -and $total -gt 0) { $script:ExpectedSize = $total; Dbg ("size from Content-Length: " + $total) }
 
@@ -860,7 +1119,14 @@ function Invoke-SingleDownload([string]$u) {
                     if (Test-Path -LiteralPath $PartFile) { Remove-Item -LiteralPath $PartFile -Force }
                     continue
                 }
-                if ($code -eq 404) { Fail 'GONE' 'The download link no longer exists on GitHub.' }
+                if ($code -eq 404) {
+                    # Deleted under us - usually a new build going into the
+                    # same tag. The caller waits for it and starts again.
+                    Dbg '404 - the file is no longer on the release'
+                    $script:Replaced = $true
+                    $script:Gone     = $true
+                    return $false
+                }
                 if ($code -eq 403) { Fail 'FORBID' 'GitHub refused the download. The release may not be public.' }
             }
 
@@ -885,46 +1151,86 @@ function Invoke-SingleDownload([string]$u) {
     return $false
 }
 
-# A complete, verified zip from an earlier run: reuse it instead of pulling
-# 122 MB down the shop's connection a second time.
-#
-# The cached file sat on a shop PC's disk between runs, so "it was correct when
-# we wrote it" is not the same as "it is correct now" - a failing disk or a
-# half-restored backup can change it underneath us. When a checksum is
-# published, re-check it here too. In Repair mode the whole point of the run is
-# that something on this PC is damaged, so a cache that cannot be PROVED good
-# (no published checksum) is thrown away rather than trusted.
-$script:ExpectedSize = $ExpectedSize
-$haveDone = $false
-if (Test-Path -LiteralPath $DoneFile) {
-    $dl = Get-FileLength $DoneFile
-    if ($script:ExpectedSize -eq 0 -or $dl -eq $script:ExpectedSize) {
-        $haveDone = $true
-        if ($ExpectedHash) {
-            Progress 5 'Checking the saved download'
-            try {
-                $h = Get-Sha256 $DoneFile
-                Assert-NotCancelled
-                if ($h -ne $ExpectedHash) {
-                    Dbg 'cached zip failed its checksum; downloading again'
-                    $haveDone = $false
-                }
-            } catch { Dbg ('could not checksum the cached zip: ' + $_.Exception.Message); $haveDone = $false }
-        }
-        elseif ($Repair) {
-            Dbg 'repair run with no published checksum: not trusting the cached zip'
-            $haveDone = $false
-        }
-        if ($haveDone) { Dbg 'reusing previously downloaded zip' }
-        else { Remove-Item -LiteralPath $DoneFile -Force -ErrorAction SilentlyContinue }
-    }
-    else { Remove-Item -LiteralPath $DoneFile -Force -ErrorAction SilentlyContinue }
+# Everything a download left in the cache: the single-stream .part and every
+# chunk file. Used when the file on GitHub turned out to be a different build.
+function Clear-DownloadCache {
+    try { if (Test-Path -LiteralPath $PartFile) { Remove-Item -LiteralPath $PartFile -Force -ErrorAction SilentlyContinue } } catch { }
+    Get-ChildItem -LiteralPath $CacheDir -Filter ($AssetName + '.*.seg*') -Force -ErrorAction SilentlyContinue |
+        ForEach-Object { try { Remove-Item -LiteralPath $_.FullName -Force } catch { } }
 }
 
-if (-not $haveDone) {
+# Round 1 is the normal run. Round 2 happens only when the release's file was
+# deleted or replaced while this run was fetching it (a new build going into
+# the same tag): the release is looked up again - waiting for the new file if
+# it is still uploading - and the download starts over. Once, never more.
+$MaxRounds = 2
+$script:InstalledHash = ''
+$script:HashVerified  = $false
+
+for ($round = 1; $round -le $MaxRounds; $round++) {
+    $script:Replaced = $false
+    $script:Gone     = $false
+    $lastRound = ($round -ge $MaxRounds)
+
+    if ($round -gt 1) {
+        Step 'GitHub replaced the file while it was downloading - starting again'
+        Dbg ('round ' + $round + ': looking the release up again')
+    }
+    Resolve-Asset
+    Assert-NotCancelled
+
+    # A complete, verified zip from an earlier run: reuse it instead of pulling
+    # 122 MB down the shop's connection a second time.
+    #
+    # The cached file sat on a shop PC's disk between runs, so "it was correct when
+    # we wrote it" is not the same as "it is correct now" - a failing disk or a
+    # half-restored backup can change it underneath us. When a checksum is
+    # published, re-check it here too. In Repair mode the whole point of the run is
+    # that something on this PC is damaged, so a cache that cannot be PROVED good
+    # (no published checksum) is thrown away rather than trusted.
+    $haveDone = $false
+    if (Test-Path -LiteralPath $DoneFile) {
+        $dl = Get-FileLength $DoneFile
+        if ($script:ExpectedSize -eq 0 -or $dl -eq $script:ExpectedSize) {
+            $haveDone = $true
+            if ($ExpectedHash) {
+                Progress 5 'Checking the saved download'
+                try {
+                    $h = Get-Sha256 $DoneFile
+                    Assert-NotCancelled
+                    if ($h -ne $ExpectedHash) {
+                        Dbg 'cached zip failed its checksum; downloading again'
+                        $haveDone = $false
+                    } else {
+                        $script:InstalledHash = $h
+                        $script:HashVerified  = $true
+                    }
+                } catch { Dbg ('could not checksum the cached zip: ' + $_.Exception.Message); $haveDone = $false }
+            }
+            elseif ($Repair) {
+                Dbg 'repair run with no published checksum: not trusting the cached zip'
+                $haveDone = $false
+            }
+            if ($haveDone) { Dbg 'reusing previously downloaded zip' }
+            else { Remove-Item -LiteralPath $DoneFile -Force -ErrorAction SilentlyContinue }
+        }
+        else { Remove-Item -LiteralPath $DoneFile -Force -ErrorAction SilentlyContinue }
+    }
+
+    if ($haveDone) { break }
+
     Step 'Downloading Satpuda Core'
 
     $probe = Get-RangeSupport $Url
+    # The file the release listed a moment ago is gone (404), or the file
+    # behind the link is not the size the release listed: it is being
+    # replaced right now.
+    if (($probe.Status -eq 404) -or
+        ($script:ExpectedSize -gt 0 -and $probe.Total -gt 0 -and $probe.Total -ne $script:ExpectedSize)) {
+        Dbg ('range probe: status ' + $probe.Status + ', size ' + $probe.Total + ' (release said ' + $script:ExpectedSize + ')')
+        if (-not $lastRound) { continue }
+        Fail 'CHANGED' ('The file on release ' + $Tag + ' kept changing while it was being downloaded.')
+    }
     if ($script:ExpectedSize -eq 0 -and $probe.Total -gt 0) {
         $script:ExpectedSize = $probe.Total
         Dbg ('size from range probe: ' + $script:ExpectedSize)
@@ -942,7 +1248,7 @@ if (-not $haveDone) {
         Dbg ('segmented download: ' + $Segments + ' connections')
         $ok = Invoke-SegmentedDownload $Url $script:ExpectedSize $Segments 4
         if ($ok) { Join-Segments $script:ExpectedSize }
-        else {
+        elseif (-not $script:Replaced) {
             Warn 'The parallel download did not finish; falling back to a single connection.'
             Dbg 'segmented download failed; falling back to single stream'
             # Whatever the segments managed is still on disk and will be reused
@@ -952,10 +1258,18 @@ if (-not $haveDone) {
         Dbg 'single-stream download (server does not support ranges, or size unknown)'
     }
 
-    if (-not $ok) {
+    if ((-not $ok) -and (-not $script:Replaced)) {
         if (-not (Invoke-SingleDownload $Url)) {
-            Fail 'NET' 'The download could not be completed.'
+            if (-not $script:Replaced) { Fail 'NET' 'The download could not be completed.' }
         }
+    }
+
+    if ($script:Replaced) {
+        # Bytes of a build that is no longer on the release are worth nothing.
+        Clear-DownloadCache
+        if (-not $lastRound) { continue }
+        if ($script:Gone) { Fail 'GONE' 'The download link no longer exists on GitHub.' }
+        Fail 'CHANGED' ('The file on release ' + $Tag + ' kept changing while it was being downloaded.')
     }
 
     Assert-NotCancelled
@@ -969,6 +1283,7 @@ if (-not $haveDone) {
     $actual = Get-FileLength $PartFile
 
     if ($script:ExpectedSize -gt 0 -and $actual -lt $script:ExpectedSize) {
+        if ((-not $lastRound) -and (Test-ReleaseChanged)) { Clear-DownloadCache; continue }
         # Short, not corrupt. Keep it: the next run resumes from here rather
         # than pulling the whole 122 MB down again.
         Fail 'NET' ('The download is incomplete (' + [math]::Round($actual / 1MB) + ' of ' +
@@ -978,6 +1293,7 @@ if (-not $haveDone) {
         # Longer than the real asset means the file is genuinely wrong, so it
         # is worth throwing away.
         Remove-Item -LiteralPath $PartFile -Force -ErrorAction SilentlyContinue
+        if ((-not $lastRound) -and (Test-ReleaseChanged)) { Clear-DownloadCache; continue }
         Fail 'SIZE' ('The downloaded file is the wrong size (' + $actual + ' bytes, expected ' + $script:ExpectedSize + ').')
     }
     if ($actual -lt 1048576) {
@@ -990,16 +1306,39 @@ if (-not $haveDone) {
         $hash = Get-Sha256 $PartFile
         Assert-NotCancelled
         if ($hash -ne $ExpectedHash) {
+            if ((-not $lastRound) -and (Test-ReleaseChanged)) {
+                # The checksum on the release changed while we downloaded: the
+                # file we have may well BE the new build (zip uploaded, sidecar
+                # replaced a moment later). Keep it where the next round's
+                # cache check tests it against the new checksum - a match
+                # costs no second download.
+                Dbg 'checksum did not match, but the release changed; checking the file against the new checksum'
+                if (Test-Path -LiteralPath $DoneFile) { Remove-Item -LiteralPath $DoneFile -Force -ErrorAction SilentlyContinue }
+                try { [System.IO.File]::Move((Get-LongPath $PartFile), (Get-LongPath $DoneFile)) } catch { Clear-DownloadCache }
+                continue
+            }
             Remove-Item -LiteralPath $PartFile -Force -ErrorAction SilentlyContinue
             Fail 'HASH' 'The downloaded file is damaged (checksum did not match).'
         }
         Dbg 'checksum ok'
+        $script:InstalledHash = $hash
+        $script:HashVerified  = $true
     } else {
         Dbg 'no checksum published; verified by size and zip structure only'
     }
 
     if (Test-Path -LiteralPath $DoneFile) { Remove-Item -LiteralPath $DoneFile -Force -ErrorAction SilentlyContinue }
     [System.IO.File]::Move((Get-LongPath $PartFile), (Get-LongPath $DoneFile))
+    break
+}
+
+# What was installed, by content. With no published checksum the hash is still
+# worked out here, so the record can be compared with a checksum published
+# later for the same tag (a couple of seconds on 130 MB).
+if (-not $script:InstalledHash) {
+    Progress 64 'Recording the build'
+    try { $script:InstalledHash = Get-Sha256 $DoneFile } catch { $script:InstalledHash = '' }
+    Assert-NotCancelled
 }
 
 Assert-NotCancelled
@@ -1133,12 +1472,25 @@ if (-not (Test-Path -LiteralPath $engine)) { Warn 'The data engine was not found
 # ran to the end. The installer and the update check both read the version out
 # of here, so it is the authoritative record of WHICH payload is on this disk -
 # the installer's own AppVersion only says which installer put it there.
+#
+# It is also the record of WHICH BUILD is on this disk. The owner republishes
+# builds into the same tag, so the tag alone cannot tell two builds apart; the
+# sha256 of the zip can. The maintenance page (via -CheckOnly's SHA| line), the
+# logon update check and the app's own "Check for updates" all compare it with
+# the release's .sha256 and offer "the newest build of vX" when they differ.
+# sha256 is the published checksum when there was one (sha256Verified true),
+# otherwise the hash of the zip as downloaded. Because the record lives INSIDE
+# the payload folder it is swapped in with it: it can never describe a payload
+# that is not there.
 $marker = @{
-    tag        = $Tag
-    asset      = $AssetName
-    bytes      = $script:ExpectedSize
-    sha256     = $ExpectedHash
-    installedAt = (Get-Date).ToString('s')
+    tag            = $Tag
+    asset          = $AssetName
+    bytes          = (Get-FileLength $DoneFile)
+    sha256         = $script:InstalledHash
+    sha256Verified = [bool]$script:HashVerified
+    assetId        = $(if ($script:Used) { [string]$script:Used.Id } else { '' })
+    assetUpdatedAt = $(if ($script:Used) { [string]$script:Used.Updated } else { '' })
+    installedAt    = (Get-Date).ToString('s')
 } | ConvertTo-Json
 [System.IO.File]::WriteAllText((Get-LongPath (Join-Path $script:Staging '.satpuda-install.json')), $marker)
 

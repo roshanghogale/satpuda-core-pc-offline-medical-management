@@ -2726,7 +2726,10 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
               </div>
               <div className="iset-stat">
                 <span>Latest</span>
-                <strong>v{String(updateInfo.latest_version)}</strong>
+                <strong>
+                  v{String(updateInfo.latest_version)}
+                  {updateInfo.available && updateInfo.same_version_build ? ' (newer build)' : ''}
+                </strong>
               </div>
             </div>
           ) : null}

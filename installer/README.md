@@ -267,8 +267,9 @@ the update check starts comparing against `1.0.3`.
 **The two edits go together, in this order: release first, installer second.**
 The version is what the download URL is built from, so an installer bumped ahead
 of its release does not degrade — it 404s on every single install. The file
-currently says `1.0.10`; `v1.0.10` is published (the current Latest) with
-`SatpudaCore_Desktop_Win10.zip` attached, so the fallback URL resolves.
+currently says `1.0.11`; `v1.0.11` is published (the current Latest) with
+`SatpudaCore_Desktop_Win10.zip` and its `.sha256` attached, so the fallback URL
+resolves.
 
 **2. On GitHub, create release `v1.0.3`** in `roshanghogale/exes-for-satpuda-core`
 and attach:
@@ -301,6 +302,62 @@ of only checking the size. One line on the build PC:
 Attach that file to the release. It is optional — without it the installer
 still checks the exact byte count from the GitHub API and verifies that the zip
 opens and contains the app, which catches almost everything.
+
+It is **no longer optional for a new build in the same tag** (next section):
+the sidecar is how every shop finds out that the build changed.
+
+### A new build into the SAME tag
+
+New builds are often published into the existing release (v1.0.11 had its zip
+replaced several times) instead of a new version number. Since October 2026
+that works end to end:
+
+- **What is installed is recorded by build.** The worker's marker,
+  `<install>\app\.satpuda-install.json`, carries `tag` **and** `sha256` — the
+  published checksum when there was one (`sha256Verified: true`), otherwise
+  the hash of the zip as downloaded — plus `assetId`, `assetUpdatedAt`,
+  `bytes`, `installedAt`. It lives inside the payload folder, so it is swapped
+  in with the payload and can never describe files that are not there. Every
+  install, update and repair writes it, including those started from the app.
+- **The maintenance page** (`-CheckOnly` now also prints `SHA|<sha256 of the
+  latest release's .sha256>`): when GitHub's latest tag is the installed tag
+  but the sidecar differs from the recorded `sha256` — or nothing is recorded
+  (installs from before this) — it offers **"Update to the newest build of
+  v1.0.11"** (the normal Update path, same tag) instead of "This is the newest
+  version". No sidecar on GitHub, or offline: the page says what it always
+  said. The Administrator test-version choice is unchanged.
+- **The app's Check for updates** (`core/github_updater.py`) and the **logon
+  check** (`satpuda_update.ps1`) apply the same rule. After the update the
+  record matches the sidecar, so neither asks again. Pre-releases stay ignored.
+- **A shop that installs while you are uploading** no longer fails. The worker
+  waits — "GitHub is updating this release - trying again in N s..." — up to
+  3 minutes (every 15 s) when the release has no zip or the direct link 404s,
+  and waits the same way for the `.sha256` when the zip was replaced in the
+  last 15 minutes and its sidecar is not there yet (after the wait it carries
+  on without it, as before). If the file is deleted or replaced while it is
+  downloading (404 on a chunk, a different total size, or a checksum mismatch
+  while the release now shows a different asset or checksum) it starts again
+  once, re-using the downloaded file if it matches the new checksum.
+
+**Upload order — this is the one that keeps every check safe:**
+
+```bat
+gh release delete-asset v1.0.11 SatpudaCore_Desktop_Win10.zip.sha256 -R roshanghogale/exes-for-satpuda-core -y
+gh release upload v1.0.11 SatpudaCore_Desktop_Win10.zip --clobber -R roshanghogale/exes-for-satpuda-core
+gh release upload v1.0.11 SatpudaCore_Desktop_Win10.zip.sha256 --clobber -R roshanghogale/exes-for-satpuda-core
+```
+
+1. **Old `.sha256` off first.** From then on the release never pairs a new zip
+   with an old checksum (or the reverse), and no shop is told about a new build
+   whose zip is not there yet.
+2. **The zip.** While it uploads, installers wait for it; the update offers stay
+   quiet (no sidecar = nothing to compare).
+3. **The new `.sha256` LAST.** Its arrival is the signal: installers waiting
+   for it carry on with a verified download, and maintenance pages / the app /
+   the logon check start offering "the newest build".
+
+Other orders do not break an install any more (the worker re-checks and starts
+again once), but they can cost a shop a second download or a 3-minute wait.
 
 ---
 
