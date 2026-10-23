@@ -62,6 +62,12 @@ class FakeGitHub:
         self.on_api = None          # callable(n) -> None, may change self.release
         self.served = {}            # asset id -> bytes
         self.serve_override = None  # callable(asset_id) -> bytes|None (None = 404)
+        # What an HTTPS-scanning antivirus / proxy does to Range requests:
+        # None | '416' (every Range refused) | 'nocr' (206 without
+        # Content-Range) | 'badtotal' (206 with a wrong total after the "/")
+        self.range_mode = None
+        self.fail_once = set()      # range starts that answer 404 the first time
+        self.plain_gets = 0         # GETs of the zip without a Range header
 
     def release_json(self, base):
         r = self.release
@@ -118,10 +124,26 @@ def make_handler(gh: FakeGitHub):
                 if data is None:
                     return self._send(404, b"Not Found")
                 rng = self.headers.get("Range")
+                if not rng:
+                    with gh.lock:
+                        gh.plain_gets += 1
                 if rng and rng.startswith("bytes="):
                     a, _, b = rng[6:].partition("-")
                     a = int(a)
                     b = int(b) if b else len(data) - 1
+                    with gh.lock:
+                        if a in gh.fail_once and a != 0:
+                            gh.fail_once.discard(a)
+                            return self._send(404, b"Not Found")
+                    if gh.range_mode == "416":
+                        return self._send(416, b"", {"Content-Range": f"bytes */{len(data)}"})
+                    if gh.range_mode == "nocr":
+                        b = min(b, len(data) - 1)
+                        return self._send(206, data[a:b + 1])
+                    if gh.range_mode == "badtotal":
+                        b = min(b, len(data) - 1)
+                        return self._send(206, data[a:b + 1],
+                                          {"Content-Range": f"bytes {a}-{b}/{len(data) + 12345}"})
                     if a >= len(data):
                         return self._send(416, b"", {"Content-Range": f"bytes */{len(data)}"})
                     b = min(b, len(data) - 1)
@@ -282,7 +304,8 @@ class FetchWorkerRepublish(unittest.TestCase):
 
         rc, out, rec = self.run_worker()
         self.assertEqual(rc, 0, out)
-        self.assertIn("GitHub is updating this release", out)
+        self.assertIn("the release now shows another file", out)
+        self.assertIn("starting again", out)
         self.assertEqual(rec["assetId"], "11")
         self.assertEqual(rec["sha256"], sha)
 
@@ -317,6 +340,77 @@ class FetchWorkerRepublish(unittest.TestCase):
         self.assertNotIn("falling back to a single connection", out)
         self.assertEqual(rec["assetId"], "14")
         self.assertEqual(rec["sha256"], sha)
+
+    # ---- the release did NOT change: nothing may be called CHANGED --------
+
+    def _steady(self, seed):
+        data = make_zip(seed)
+        sha = hashlib.sha256(data).hexdigest()
+        self.gh.release = {"zip": data, "sha": sha, "id": 20 + seed,
+                           "updated": iso(datetime.now(timezone.utc) - timedelta(days=1))}
+        return data, sha
+
+    def _assert_installed(self, rc, out, rec, sha):
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("E|", out)
+        self.assertNotIn("starting again", out)
+        self.assertEqual(rec["sha256"], sha)
+        self.assertTrue(rec["sha256Verified"])
+
+    def test_stale_cache_from_other_builds_is_never_resumed(self):
+        """Chunks, .part and a finished zip left by earlier builds - one of
+        ANOTHER size, and complete-looking junk chunks of the SAME size named
+        the way the previous installer named them (no asset id) - must all be
+        thrown away, not resumed."""
+        data, sha = self._steady(1)
+        cache = os.path.join(self.tmp, "cache")
+        os.makedirs(cache)
+        size = len(data)
+        chunk = 2097152
+        junk = b"\xee" * chunk
+        for i in range(3):
+            n = min(chunk, size - i * chunk)
+            with open(os.path.join(cache, f"{ZIP}.{size}.c{chunk}.seg{i}"), "wb") as fh:
+                fh.write(junk[:n])                       # same size, old naming
+            with open(os.path.join(cache, f"{ZIP}.132766295.c{chunk}.seg{i}"), "wb") as fh:
+                fh.write(junk[:1000])                    # another build's size
+        with open(os.path.join(cache, ZIP + ".part"), "wb") as fh:
+            fh.write(junk[:5000])
+        with open(os.path.join(cache, ZIP), "wb") as fh:
+            fh.write(b"\xee" * size)                    # a "finished" zip of the right size
+        rc, out, rec = self.run_worker()
+        self._assert_installed(rc, out, rec, sha)
+        self.assertIn("clearing it", out)
+        left = [f for f in os.listdir(cache) if ".seg" in f]
+        self.assertEqual(left, [])
+
+    def test_every_range_answered_416_falls_back_to_one_plain_get(self):
+        data, sha = self._steady(2)
+        self.gh.range_mode = "416"
+        rc, out, rec = self.run_worker()
+        self._assert_installed(rc, out, rec, sha)
+        self.assertIn("release has NOT changed", out)
+        self.assertGreaterEqual(self.gh.plain_gets, 1)
+
+    def test_206_without_content_range(self):
+        data, sha = self._steady(3)
+        self.gh.range_mode = "nocr"
+        rc, out, rec = self.run_worker()
+        self._assert_installed(rc, out, rec, sha)
+
+    def test_206_with_a_wrong_total(self):
+        data, sha = self._steady(4)
+        self.gh.range_mode = "badtotal"
+        rc, out, rec = self.run_worker()
+        self._assert_installed(rc, out, rec, sha)
+        self.assertIn("release has NOT changed", out)
+
+    def test_one_chunk_404_with_the_release_unchanged(self):
+        data, sha = self._steady(5)
+        self.gh.fail_once = {2097152}
+        rc, out, rec = self.run_worker()
+        self._assert_installed(rc, out, rec, sha)
+        self.assertIn("release has NOT changed", out)
 
     def test_check_only_reports_the_latest_sha(self):
         """-CheckOnly's SHA| line, read by the maintenance page."""
