@@ -123,8 +123,8 @@ def _total(values: Iterable[float]) -> float:
 def clear_bills(bills: list[dict], credits: list[dict], *, overpay_joins: bool = True) -> dict:
     """bills:   [{id, date, total, paid}] -- any order; cleared oldest (date, id) first.
     credits: [{kind, id, date, amount, allocations}] -- payments and returns.
-    overpay_joins: True for sales (a counter overpayment on one bill pays older ones),
-                   False for purchases (as before).
+    overpay_joins: a counter / entry overpayment on one bill pays the party's other bills.
+                   True for sales and, since 23 Oct 2026, purchases (False kept for the vectors).
 
     Returns {"bills": [{id, remaining, cleared}], "applied": [{credit_kind, credit_id,
     bill_id, amount, how}]}, how = "chosen" (rule 2) or "oldest" (rule 3).
@@ -348,7 +348,10 @@ def party_ledgers(
         for led in out.values():
             led["bills"] = [b for b in led["bills"] if b["id"] != int(leave_out_bill)]
     for pid, led in out.items():
-        led["result"] = clear_bills(led["bills"], led["credits"], overpay_joins=(k == "customer"))
+        # Purchases too (23 Oct 2026): what a purchase was paid past its total at entry paid the
+        # supplier's older purchases, as the supplier's due always counted it (server-live
+        # partyDueCascade.js, Android PartyBills).
+        led["result"] = clear_bills(led["bills"], led["credits"], overpay_joins=True)
     return out
 
 

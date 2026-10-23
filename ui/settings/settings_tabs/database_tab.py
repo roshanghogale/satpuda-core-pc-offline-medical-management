@@ -2960,7 +2960,7 @@ class DatabaseTab:
                            COALESCE(pi.qty,0), COALESCE(pi.free_qty,0),
                            COALESCE(pi.rate,0), COALESCE(pi.mrp,0),
                            COALESCE(pi.batch_no,''), COALESCE(pi.expiry_date,''),
-                           p.total_amount, COALESCE(p.amount_paid,0),
+                           p.total_amount, COALESCE(NULLIF(COALESCE(p.cash_paid_at_entry,0)+COALESCE(p.online_paid_at_entry,0),0), NULLIF(p.amount_paid_at_entry,0), p.amount_paid, 0),
                            COALESCE(p.due_amount,0), COALESCE(p.total_due,0)
                     FROM purchases p
                     JOIN suppliers s       ON p.supplier_id   = s.id
@@ -3066,7 +3066,7 @@ class DatabaseTab:
                            COALESCE(pi.qty,0), COALESCE(pi.free_qty,0),
                            COALESCE(pi.rate,0), COALESCE(pi.mrp,0),
                            COALESCE(pi.batch_no,''), COALESCE(pi.expiry_date,''),
-                           p.total_amount, COALESCE(p.amount_paid,0),
+                           p.total_amount, COALESCE(NULLIF(COALESCE(p.cash_paid_at_entry,0)+COALESCE(p.online_paid_at_entry,0),0), NULLIF(p.amount_paid_at_entry,0), p.amount_paid, 0),
                            COALESCE(p.due_amount,0), COALESCE(p.total_due,0)
                     FROM purchases p
                     JOIN suppliers s       ON p.supplier_id   = s.id

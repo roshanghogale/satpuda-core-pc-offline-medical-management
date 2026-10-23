@@ -2,7 +2,8 @@
 
 Sales: pool = standalone payments + returns + excess paid on later bills
        (amount_paid - total_amount), which is how previous dues are paid.
-Purchases: pool = supplier payments + returns (entry paid is already on each bill).
+Purchases: the same since 23 Oct 2026 -- supplier payments + returns + excess paid at entry
+           (bill + previous due paid on a new purchase).
 
 Since 17 Oct 2026 a payment can name the bills it pays (``allocations``); the per-bill
 figures come from core/bill_clearing.py, which pays those first and runs exactly this pool
@@ -101,7 +102,7 @@ def fifo_paid_via_by_bill(
     paid_map: dict[int, float] = {}
     for sid, bills in bills_by_sid.items():
         unpaid = {b["id"]: max(0.0, _r2(b["total"] - b["paid"])) for b in bills}
-        res = clear_bills(bills, credits_by_sid.get(sid, []), overpay_joins=False)
+        res = clear_bills(bills, credits_by_sid.get(sid, []), overpay_joins=True)
         for b in res["bills"]:
             pid = int(b["id"])
             paid_map[pid] = _r2(max(0.0, unpaid.get(pid, 0.0) - float(b["remaining"] or 0)))

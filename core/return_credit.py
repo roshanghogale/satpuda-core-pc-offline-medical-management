@@ -176,7 +176,7 @@ def open_returns(conn: sqlite3.Connection, kind: str, party_id: int, *,
         if c["kind"] == "return":
             c = dict(c, amount=r2(c["amount"] - by_no.get(no_of.get(int(c["id"]), ""), 0)))
         credits.append(c)
-    res = clear_bills(led["bills"], credits, overpay_joins=(k == "customer"))
+    res = clear_bills(led["bills"], credits, overpay_joins=True)
     left = {int(x["credit_id"]): r2(x["left"]) for x in res.get("left") or []
             if x["credit_kind"] == "return" and x["left"] > 0.009}
     if not left:

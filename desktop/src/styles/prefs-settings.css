@@ -178,6 +178,11 @@
 .prefs-default-doctor {
   margin-top: 10px;
 }
+/* The last box of the section, above the sticky Save bar: its list opens upward. */
+.prefs-default-doctor .modern-combo-drop {
+  top: auto;
+  bottom: calc(100% + 4px);
+}
 
 /* Medicine Types / Schedules: a tall list box, label above it. */
 .prefs-list-field {
