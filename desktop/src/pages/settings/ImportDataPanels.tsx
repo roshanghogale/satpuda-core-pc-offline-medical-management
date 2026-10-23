@@ -27,6 +27,7 @@ import { beginStoreSwitch } from '../../components/StoreSwitchDialog'
 import { fetchBusinessMode } from '../../wholesale/mode'
 import '../../styles/interactive-settings.css'
 import { VoicePackPanel } from '../../voice/VoicePackPanel'
+import { LanPanel } from './LanPanel'
 
 /** A box with its label above it (rows of boxes, tool bars). */
 function StackField({
@@ -2786,6 +2787,10 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
         <StatusBar msg={msg} err={err} busy={busy} />
       </>
     )
+  }
+
+  if (sectionId === 'lan') {
+    return <LanPanel />
   }
 
   if (sectionId === 'my_assist') {

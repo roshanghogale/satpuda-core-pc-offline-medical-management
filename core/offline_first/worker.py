@@ -185,6 +185,14 @@ class SyncCycle:
         except Exception as exc:                 # offline: blocks are topped up later
             log.debug("number blocks: %s", exc)
         sent = self.push()
+        try:
+            # A Main PC on the LAN: its counters' handed-over bills go on to the server
+            # (core/lan/bridge.py). Nothing to do anywhere else.
+            from core.lan.bridge import relay_to_cloud
+
+            sent += relay_to_cloud(conn)
+        except Exception as exc:
+            log.debug("lan relay: %s", exc)
         got = self.pull()
         with write_batch(conn):
             meta_set(conn, "last_error", None)

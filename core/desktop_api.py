@@ -18,7 +18,7 @@ _PID_FILE = "desktop_api.pid"
 # events cannot each fire one.
 _CLOSE_BACKUP_DONE = False
 # Bump when routes/payload change so the Tauri shell can replace a stale engine.
-API_REVISION = 68
+API_REVISION = 69
 _server: Optional[ThreadingHTTPServer] = None
 _server_thread: Optional[threading.Thread] = None
 _port = _DEFAULT_PORT
@@ -649,6 +649,60 @@ def _read_json_body(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _lan_pre(handler: BaseHTTPRequestHandler, method: str) -> bool:
+    try:
+        from core.lan import service as lan
+
+        return lan.engine_pre(handler, method)
+    except Exception as exc:
+        print(f"[lan] {exc}", flush=True)
+        return False
+
+
+def _lan_changes() -> int:
+    try:
+        from core.lan import service as lan
+
+        return lan.total_changes() if lan.role() == "main" else 0
+    except Exception:
+        return 0
+
+
+class _NoLanGuard:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _lan_guard(method: str, raw_path: str):
+    try:
+        from core.lan import service as lan
+
+        return lan.write_guard(method, raw_path)
+    except Exception:
+        return _NoLanGuard()
+
+
+def _lan_brief() -> dict:
+    try:
+        from core.lan import service as lan
+
+        return lan.brief()
+    except Exception:
+        return {"role": "off"}
+
+
+def _lan_post(handler: BaseHTTPRequestHandler, method: str, before: int) -> None:
+    try:
+        from core.lan import service as lan
+
+        lan.engine_post(handler, method, before)
+    except Exception:
+        pass
+
+
 class _DesktopApiHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:
         return
@@ -656,7 +710,35 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self) -> None:
         _json_response(self, 204, {})
 
+    def send_response(self, code, message=None) -> None:
+        # Kept for the LAN step after a write (core/lan/service.engine_post).
+        self._lan_status = code
+        super().send_response(code, message)
+
+    # This PC on the LAN (core/lan): a Counter PC's requests go to the Main PC, and a Main PC
+    # tells its counters what changed. With the LAN off (the default) both steps do nothing.
     def do_GET(self) -> None:
+        if _lan_pre(self, "GET"):
+            return
+        self._do_GET()
+
+    def do_PUT(self) -> None:
+        if _lan_pre(self, "PUT"):
+            return
+        with _lan_guard("PUT", self.path):
+            before = _lan_changes()
+            self._do_PUT()
+        _lan_post(self, "PUT", before)
+
+    def do_POST(self) -> None:
+        if _lan_pre(self, "POST"):
+            return
+        with _lan_guard("POST", self.path):
+            before = _lan_changes()
+            self._do_POST()
+        _lan_post(self, "POST", before)
+
+    def _do_GET(self) -> None:
         path = urlparse(self.path).path.rstrip("/") or "/"
         try:
             if path not in (
@@ -747,6 +829,7 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                         "db": _db.get("conn") is not None,
                         "db_path": _db.get("path") or "",
                         "online_mode": online,
+                        "lan_role": _lan_brief().get("role", "off"),
                         "server_only": bool(_db.get("server_only")) or online,
                         "needs_migrate": bool(
                             (_db.get("migrate_gate") or {}).get("needs_migrate")
@@ -928,6 +1011,9 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                         # ensure_active_store_on_server swallows the exception,
                         # so without this the sentence reaches nobody.
                         "store_link_error": _store_link_error_text(),
+                        # This PC on the LAN (core/lan): the counter's "Main PC not
+                        # reachable" line, and whether to poll every second.
+                        "lan": _lan_brief(),
                     },
                 )
                 return
@@ -2109,10 +2195,10 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             _json_response(self, 500, _failure_payload(path, exc))
 
-    def do_PUT(self) -> None:
+    def _do_PUT(self) -> None:
         self._handle_settings_write()
 
-    def do_POST(self) -> None:
+    def _do_POST(self) -> None:
         path = urlparse(self.path).path.rstrip("/") or "/"
         if path.startswith("/api/settings/"):
             self._handle_settings_write()
@@ -3330,6 +3416,7 @@ def start_desktop_api(
     except Exception:
         pass
     _start_backup_schedule()
+    start_lan()
     try:
         # the voice pack, when this store has it and voice is on: start its service
         import atexit
@@ -3354,8 +3441,24 @@ def start_desktop_api(
     return get_api_base_url()
 
 
+def start_lan() -> None:
+    """This PC's role on the LAN (core/lan): Main PC listener / Counter PC link. Off: nothing."""
+    try:
+        from core.lan import service as lan
+
+        lan.start(engine_port=_port, conn=lambda: _db.get("conn"), db_path=lambda: _db.get("path") or "")
+    except Exception as exc:
+        print(f"[lan] not started: {exc}", flush=True)
+
+
 def stop_desktop_api() -> None:
     global _server, _server_thread
+    try:
+        from core.lan import service as lan
+
+        lan.stop()
+    except Exception:
+        pass
     try:
         from core.desktop_sync_launch import stop_desktop_online_sync
 

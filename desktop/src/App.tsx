@@ -397,6 +397,8 @@ export default function App() {
   // every caller of ensure_active_store_on_server that runs unattended catches
   // the exception, so the sentence it raised with used to reach nobody.
   const [storeLinkError, setStoreLinkError] = useState('')
+  // This PC on the LAN (core/lan): a Counter PC whose Main PC does not answer says so here.
+  const [lanBanner, setLanBanner] = useState('')
 
   const syncRefreshNonce = useSyncRefreshPoller({
     enabled:
@@ -410,6 +412,7 @@ export default function App() {
     offlineFirst: meta?.sync_mode === 'offline_first',
     onCatalogError: setCatalogError,
     onStoreLinkError: setStoreLinkError,
+    onLan: (lan) => setLanBanner(lan?.role === 'counter' ? lan.banner || '' : ''),
   })
 
   useEffect(() => {
@@ -624,6 +627,23 @@ export default function App() {
               }
             >
               Connect this PC to its store
+            </button>
+          </div>
+        ) : null}
+        {lanBanner && !IS_DEMO ? (
+          <div className="error" role="status" style={{ margin: '12px 16px 0' }}>
+            {lanBanner}{' '}
+            <button
+              type="button"
+              className="btn btn-neutral btn-sm"
+              onClick={() =>
+                navigate('settings', {
+                  settingsTab: 'data_system',
+                  settingsSection: 'lan',
+                })
+              }
+            >
+              LAN settings
             </button>
           </div>
         ) : null}

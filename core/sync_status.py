@@ -59,6 +59,34 @@ def note_collection_change(collection: str) -> None:
     with _lock:
         _refresh_collections.add(col)
         _refresh_seq += 1
+    try:
+        # A Main PC on the LAN tells its counters too (core/lan/hints.py).
+        from core.lan import hints
+
+        hints.note((col,), origin="pull")
+    except Exception:
+        pass
+
+
+def note_screen_change(collections, origin: str = "") -> None:
+    """A save through this engine: the LAN's counters are told (core/lan/hints.py); this PC's
+    own screen is told too when the save came from a counter (``origin``) -- its own saves it
+    refreshes by itself."""
+    global _refresh_seq
+    cols = [str(c or "").strip() for c in collections or ()]
+    cols = [c for c in cols if c]
+    if not cols:
+        return
+    if origin:
+        with _lock:
+            _refresh_collections.update(cols)
+            _refresh_seq += 1
+    try:
+        from core.lan import hints
+
+        hints.note(cols, origin=origin)
+    except Exception:
+        pass
 
 
 def note_sync_engine_state(state: str) -> None:
