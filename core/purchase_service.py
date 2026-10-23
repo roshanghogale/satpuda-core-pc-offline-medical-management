@@ -1687,7 +1687,10 @@ def _apply_stock_for_purchase(cur, purchase_id: int):
             item['tablets_per_stripe'] = parse_tablets_per_stripe(unit_str)
         increase = _get_stock_decrease(item)  # same qty math as reverse
         if log_units:
-            cur.execute("UPDATE purchase_items SET stock_units=? WHERE id=?", (increase, line_id))
+            # A pulled line that already recorded its own pack (pulled_line_stock_units) keeps it:
+            # the batch row may have a different pack from what the line actually stocked.
+            cur.execute("UPDATE purchase_items SET stock_units=? WHERE id=? AND stock_units IS NULL",
+                        (increase, line_id))
         if increase <= 0:
             continue
         cur.execute(
