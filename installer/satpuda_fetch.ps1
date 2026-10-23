@@ -562,7 +562,9 @@ function Test-ReleaseChanged {
     if (-not $r.Url)                             { Dbg 'the zip is no longer on the release'; return $true }
     if ($r.Id -and $u.Id -and ($r.Id -ne $u.Id)) { Dbg ('the zip was replaced (asset ' + $u.Id + ' -> ' + $r.Id + ')'); return $true }
     if ($r.Size -ne $u.Size)                     { Dbg ('the zip changed size (' + $u.Size + ' -> ' + $r.Size + ')'); return $true }
-    if ($r.Hash -and ($r.Hash -ne $u.Hash))      { Dbg 'the checksum sidecar changed'; return $true }
+    # Both sides must have READ a checksum: a sidecar that could not be read
+    # at the start (antivirus, a dropped connection) is not a change.
+    if ($r.Hash -and $u.Hash -and ($r.Hash -ne $u.Hash)) { Dbg 'the checksum sidecar changed'; return $true }
     if ((-not $r.ShaListed) -and $u.ShaListed)   { Dbg 'the checksum sidecar is being replaced'; return $true }
     return $false
 }
@@ -796,7 +798,9 @@ function Stop-Segments($pool, $handles, $Sync, [int]$Chunks) {
 # be resumed from the wrong pieces. The connection count is NOT in the name: any
 # number of connections can resume the same chunks.
 function Get-ChunkLayout([int64]$total) {
-    $prefix = Join-Path $CacheDir ($AssetName + '.' + $total + '.c' + $ChunkBytes + '.seg')
+    # The asset id is in the name too: two builds of the same SIZE (same tag,
+    # republished) must never share chunk files.
+    $prefix = Join-Path $CacheDir ($AssetName + '.' + $total + '.' + (Get-CacheIdentity) + '.c' + $ChunkBytes + '.seg')
     $bounds = @()
     $count  = [int][Math]::Ceiling($total / [double]$ChunkBytes)
     for ($i = 0; $i -lt $count; $i++) {
@@ -998,13 +1002,21 @@ function Join-Segments([int64]$total) {
 # The original one-connection loop. Still here because it is the only thing that
 # works when the server refuses Range requests, and because it is what resumes a
 # .part file left by an older version of this installer.
-function Invoke-SingleDownload([string]$u) {
+#
+# -NoRange: the whole file in one plain GET, every attempt from byte 0, no
+# Range header at all. Used when range answers looked wrong although the
+# release had NOT changed - an HTTPS-scanning antivirus or proxy (seen on a
+# shop PC with Net Protector) can answer Range requests with 416, drop or alter
+# Content-Range, or hand back 200. A plain GET is the one thing they all pass.
+function Invoke-SingleDownload([string]$u, [switch]$NoRange) {
     $maxAttempts    = 6
     $backoff        = @(2, 5, 10, 20, 30, 30)
     $noProgressRuns = 0
+    $last404        = $false
 
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         Assert-NotCancelled
+        if ($NoRange -and (Test-Path -LiteralPath $PartFile)) { Remove-Item -LiteralPath $PartFile -Force -ErrorAction SilentlyContinue }
         $have = Get-FileLength $PartFile
 
         if ($script:ExpectedSize -gt 0 -and $have -ge $script:ExpectedSize) { Dbg 'part file already complete'; return $true }
@@ -1043,7 +1055,7 @@ function Invoke-SingleDownload([string]$u) {
                 $cr = $resp.Headers['Content-Range']
                 if ($cr -and ($cr -match '/(\d+)\s*$')) { $serverTotal = [int64]$Matches[1] }
             } elseif ($len -gt 0) { $serverTotal = [int64]$len }
-            if ($script:ExpectedSize -gt 0 -and $serverTotal -gt 0 -and $serverTotal -ne $script:ExpectedSize) {
+            if ((-not $NoRange) -and $script:ExpectedSize -gt 0 -and $serverTotal -gt 0 -and $serverTotal -ne $script:ExpectedSize) {
                 Dbg ('the file on GitHub is now ' + $serverTotal + ' bytes, not ' + $script:ExpectedSize + ': it was replaced')
                 $script:Replaced = $true
                 return $false
@@ -1121,16 +1133,23 @@ function Invoke-SingleDownload([string]$u) {
                 }
                 if ($code -eq 404) {
                     # Deleted under us - usually a new build going into the
-                    # same tag. The caller waits for it and starts again.
-                    Dbg '404 - the file is no longer on the release'
-                    $script:Replaced = $true
-                    $script:Gone     = $true
-                    return $false
+                    # same tag. The caller waits for it and starts again. In
+                    # -NoRange mode the release is asked first: unchanged means
+                    # this 404 came from something between us and GitHub, and
+                    # it is retried like any other network error.
+                    Dbg '404 - the file is not there'
+                    if ((-not $NoRange) -or (Test-ReleaseChanged)) {
+                        $script:Replaced = $true
+                        $script:Gone     = $true
+                        return $false
+                    }
+                    $last404 = $true
                 }
                 if ($code -eq 403) { Fail 'FORBID' 'GitHub refused the download. The release may not be public.' }
             }
 
             if ($attempt -ge $maxAttempts) {
+                if ($last404) { Fail 'GONE' 'The download link no longer exists on GitHub.' }
                 Fail 'NET' ('Download failed after ' + $maxAttempts + ' tries: ' + $msg)
             }
             if ($gained -eq 0) { $noProgressRuns++ } else { $noProgressRuns = 0 }
@@ -1152,11 +1171,59 @@ function Invoke-SingleDownload([string]$u) {
 }
 
 # Everything a download left in the cache: the single-stream .part and every
-# chunk file. Used when the file on GitHub turned out to be a different build.
+# chunk file (the finished zip is handled by the cache check, which can prove
+# it good or bad by its checksum).
 function Clear-DownloadCache {
     try { if (Test-Path -LiteralPath $PartFile) { Remove-Item -LiteralPath $PartFile -Force -ErrorAction SilentlyContinue } } catch { }
     Get-ChildItem -LiteralPath $CacheDir -Filter ($AssetName + '.*.seg*') -Force -ErrorAction SilentlyContinue |
         ForEach-Object { try { Remove-Item -LiteralPath $_.FullName -Force } catch { } }
+}
+
+# Which file the cache is for: the asset id GitHub gave it ('direct' when the
+# API could not be read). Part of every chunk file's name.
+function Get-CacheIdentity {
+    if ($script:Used -and $script:Used.Id) { return ('a' + $script:Used.Id) }
+    return 'direct'
+}
+
+# Before anything else in a round: a cache left by ANOTHER build (another
+# size or asset id - same tag republished, or an older installer whose files
+# carry no id) is thrown away, so no byte of it can ever be resumed into this
+# download. The record is a small text file next to the cache.
+function Initialize-Cache {
+    $keyFile = Join-Path $CacheDir ($AssetName + '.build')
+    $want    = ([string]$script:ExpectedSize + '|' + (Get-CacheIdentity))
+    $have    = ''
+    try { if (Test-Path -LiteralPath $keyFile) { $have = ([System.IO.File]::ReadAllText($keyFile)).Trim() } } catch { }
+    if ($have -ne $want) {
+        Dbg ("download cache was for '" + $have + "', this download is '" + $want + "'; clearing it")
+        Clear-DownloadCache
+        # A finished zip is kept only when a published checksum will test it.
+        if ((-not $ExpectedHash) -and (Test-Path -LiteralPath $DoneFile)) {
+            Remove-Item -LiteralPath $DoneFile -Force -ErrorAction SilentlyContinue
+        }
+        try { [System.IO.File]::WriteAllText($keyFile, $want) } catch { }
+    }
+}
+
+# A range answer looked wrong (404, 416, another total, ...). Only when the
+# RELEASE itself now shows another file is that "GitHub replaced it"; then
+# the round starts again (once) and, the second time, it is CHANGED. When the
+# release is unchanged it is something between this PC and GitHub - an
+# HTTPS-scanning antivirus or proxy - and the round carries on with one plain
+# GET and no Range header. Returns 'restart' or 'plain'; fails on the last round.
+function Resolve-RangeTrouble([bool]$lastRound, [string]$what) {
+    if (Test-ReleaseChanged) {
+        Dbg ($what + ', and the release now shows another file')
+        Clear-DownloadCache
+        if (-not $lastRound) { return 'restart' }
+        Fail 'CHANGED' ('The file on release ' + $Tag + ' kept changing while it was being downloaded.')
+    }
+    Dbg ($what + ', but the release has NOT changed: treating it as a local network problem; one plain download without ranges')
+    Clear-DownloadCache
+    $script:Replaced = $false
+    $script:Gone     = $false
+    return 'plain'
 }
 
 # Round 1 is the normal run. Round 2 happens only when the release's file was
@@ -1178,6 +1245,7 @@ for ($round = 1; $round -le $MaxRounds; $round++) {
     }
     Resolve-Asset
     Assert-NotCancelled
+    Initialize-Cache
 
     # A complete, verified zip from an earlier run: reuse it instead of pulling
     # 122 MB down the shop's connection a second time.
@@ -1221,23 +1289,21 @@ for ($round = 1; $round -le $MaxRounds; $round++) {
 
     Step 'Downloading Satpuda Core'
 
+    $plain = $false     # one plain GET, no Range header (see Resolve-RangeTrouble)
     $probe = Get-RangeSupport $Url
-    # The file the release listed a moment ago is gone (404), or the file
-    # behind the link is not the size the release listed: it is being
-    # replaced right now.
-    if (($probe.Status -eq 404) -or
+    if (($probe.Status -eq 404) -or ($probe.Status -eq 416) -or
         ($script:ExpectedSize -gt 0 -and $probe.Total -gt 0 -and $probe.Total -ne $script:ExpectedSize)) {
-        Dbg ('range probe: status ' + $probe.Status + ', size ' + $probe.Total + ' (release said ' + $script:ExpectedSize + ')')
-        if (-not $lastRound) { continue }
-        Fail 'CHANGED' ('The file on release ' + $Tag + ' kept changing while it was being downloaded.')
+        $what = ('range probe answered ' + $probe.Status + ', size ' + $probe.Total + ' (release said ' + $script:ExpectedSize + ')')
+        if ((Resolve-RangeTrouble $lastRound $what) -eq 'restart') { continue }
+        $plain = $true
     }
-    if ($script:ExpectedSize -eq 0 -and $probe.Total -gt 0) {
+    if ((-not $plain) -and $script:ExpectedSize -eq 0 -and $probe.Total -gt 0) {
         $script:ExpectedSize = $probe.Total
         Dbg ('size from range probe: ' + $script:ExpectedSize)
     }
     Assert-NotCancelled
 
-    $useSegments = ($Segments -gt 1) -and $probe.Ranges -and ($script:ExpectedSize -gt 4194304) -and
+    $useSegments = (-not $plain) -and ($Segments -gt 1) -and $probe.Ranges -and ($script:ExpectedSize -gt 4194304) -and
                    ($probe.Total -eq 0 -or $probe.Total -eq $script:ExpectedSize)
 
     $ok = $false
@@ -1248,28 +1314,41 @@ for ($round = 1; $round -le $MaxRounds; $round++) {
         Dbg ('segmented download: ' + $Segments + ' connections')
         $ok = Invoke-SegmentedDownload $Url $script:ExpectedSize $Segments 4
         if ($ok) { Join-Segments $script:ExpectedSize }
-        elseif (-not $script:Replaced) {
+        elseif ($script:Replaced) {
+            if ((Resolve-RangeTrouble $lastRound 'a chunk answered 404/416 or another total size') -eq 'restart') { continue }
+            $plain = $true
+            Warn 'The parallel download got answers that do not add up; downloading in one piece instead.'
+        }
+        else {
             Warn 'The parallel download did not finish; falling back to a single connection.'
             Dbg 'segmented download failed; falling back to single stream'
             # Whatever the segments managed is still on disk and will be reused
             # if the shopkeeper runs the installer again with a better line.
         }
+    } elseif ($plain) {
+        Dbg 'single plain download without ranges'
     } else {
         Dbg 'single-stream download (server does not support ranges, or size unknown)'
     }
 
-    if ((-not $ok) -and (-not $script:Replaced)) {
-        if (-not (Invoke-SingleDownload $Url)) {
-            if (-not $script:Replaced) { Fail 'NET' 'The download could not be completed.' }
+    if (-not $ok) {
+        $ok = Invoke-SingleDownload $Url -NoRange:$plain
+        if ((-not $ok) -and $script:Replaced -and (-not $plain)) {
+            # A resumed single stream hit 404 or another total size.
+            if ((Resolve-RangeTrouble $lastRound 'the single download answered 404 or another total size') -eq 'restart') { continue }
+            $plain = $true
+            $ok = Invoke-SingleDownload $Url -NoRange
         }
-    }
-
-    if ($script:Replaced) {
-        # Bytes of a build that is no longer on the release are worth nothing.
-        Clear-DownloadCache
-        if (-not $lastRound) { continue }
-        if ($script:Gone) { Fail 'GONE' 'The download link no longer exists on GitHub.' }
-        Fail 'CHANGED' ('The file on release ' + $Tag + ' kept changing while it was being downloaded.')
+        if (-not $ok) {
+            if ($script:Replaced) {
+                # -NoRange already asked the release: it really changed.
+                Clear-DownloadCache
+                if (-not $lastRound) { continue }
+                if ($script:Gone) { Fail 'GONE' 'The download link no longer exists on GitHub.' }
+                Fail 'CHANGED' ('The file on release ' + $Tag + ' kept changing while it was being downloaded.')
+            }
+            Fail 'NET' 'The download could not be completed.'
+        }
     }
 
     Assert-NotCancelled
