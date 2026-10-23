@@ -11,7 +11,12 @@ rules change later; only "Recalculate" (a period, on purpose) works them out aga
   doctor_margin_bills  one row per bill looked at: its fingerprint (doctor, date, patient, the
                        lines' medicine + qty) and how many margin lines it gave (0 is a row too,
                        so a bill without a margin is not looked at again and again)
-  doctor_margin_lines  only the lines a margin is given on
+  doctor_margin_lines  only the lines a margin is given on, both ways (column way):
+                       'profit' (MRP, both purchase rates, the rate used, margin per unit,
+                       value = the margin) and 'sales' (the bill line's sale rate, discount and
+                       amount, kind 'sales_pct' with kind_value = the %, value = the sale value
+                       at the net qty); every line keeps rules_at (the rules' "updated" stamp it
+                       was worked out with). Rows saved before 23 Oct 2026 have way NULL = profit.
 
 Kept right by:
   sync_sale(conn, sale_id)       after a bill is saved / edited / deleted (desktop_api); an edit
@@ -74,7 +79,13 @@ _DDL = (
         value         REAL DEFAULT 0,
         rule          TEXT,
         flags         TEXT,
-        saved_at      TEXT
+        saved_at      TEXT,
+        way           TEXT,
+        pack          TEXT,
+        sale_rate     REAL DEFAULT 0,
+        disc          REAL DEFAULT 0,
+        amount        REAL DEFAULT 0,
+        rules_at      TEXT
     )""",
     "CREATE INDEX IF NOT EXISTS ix_dml_date ON doctor_margin_lines (bill_date, doctor)",
     "CREATE INDEX IF NOT EXISTS ix_dml_sale ON doctor_margin_lines (sale_id)",
@@ -84,13 +95,21 @@ _LINE_COLS = (
     "sale_id", "sale_item_id", "line_no", "bill_no", "bill_date", "patient", "doctor", "medicine_id",
     "name", "type", "batch", "qty_sold", "qty_returned", "qty", "mrp", "rate_purchase", "rate_free",
     "rate_basis", "rate", "kind", "kind_value", "margin_unit", "value", "rule", "flags", "saved_at",
+    "way", "pack", "sale_rate", "disc", "amount", "rules_at",
 )
+# Columns added on 23 Oct 2026 (the total-sales way): a table made before gets them.
+_ADDED = (("way", "TEXT"), ("pack", "TEXT"), ("sale_rate", "REAL DEFAULT 0"), ("disc", "REAL DEFAULT 0"),
+          ("amount", "REAL DEFAULT 0"), ("rules_at", "TEXT"))
 _CHUNK = 400
 
 
 def ensure_tables(conn) -> None:
     for stmt in _DDL:
         conn.execute(stmt)
+    have = _cols(conn, "doctor_margin_lines")
+    for col, decl in _ADDED:
+        if col not in have:
+            conn.execute(f"ALTER TABLE doctor_margin_lines ADD COLUMN {col} {decl}")
 
 
 def _cols(conn, table: str) -> set[str]:
@@ -179,11 +198,12 @@ def read_bills(conn, sale_ids: Iterable[int]) -> tuple[list[dict[str, Any]], lis
     med_ids: set[int] = set()
     for part in _chunks(sales):
         q = ",".join("?" * len(part))
-        for iid, sid, mid, name, mtype, batch, unit, mrp, mrate, qty, cost in conn.execute(
+        for iid, sid, mid, name, mtype, batch, unit, mrp, mrate, qty, cost, srate, amount, disc in conn.execute(
             f"""
             SELECT si.id, si.sale_id, si.medicine_id, COALESCE(m.name,''), COALESCE(m.type,''),
                    COALESCE(m.batch_no,''), COALESCE(m.unit,'1'), COALESCE(m.mrp,0), COALESCE(m.rate,0),
-                   COALESCE(si.qty,0), COALESCE(si.cost_price,0)
+                   COALESCE(si.qty,0), COALESCE(si.cost_price,0), COALESCE(si.rate,0), COALESCE(si.amount,0),
+                   COALESCE(si.item_discount,0)
             FROM sales_items si LEFT JOIN medicines m ON m.id = si.medicine_id
             WHERE si.sale_id IN ({q}){item_live}
             ORDER BY si.sale_id, si.id
@@ -195,6 +215,8 @@ def read_bills(conn, sale_ids: Iterable[int]) -> tuple[list[dict[str, Any]], lis
                 "id": int(iid), "medicine_id": int(mid or 0), "name": str(name), "type": str(mtype),
                 "batch": str(batch), "qty": float(qty or 0), "mrp_unit": float(mrp or 0) / d,
                 "med_rate_unit": float(mrate or 0) / d, "cost_price": float(cost or 0),
+                "sale_rate": float(srate or 0), "amount": float(amount or 0), "disc": float(disc or 0),
+                "pack": pack_text(unit),
             })
             med_ids.add(int(mid or 0))
     for sid, rets in _returns(conn, list(sales)).items():
@@ -249,6 +271,12 @@ def _returns(conn, sale_ids: list[int]) -> dict[int, list[dict[str, Any]]]:
     return out
 
 
+def pack_text(unit: Any) -> str:
+    """The medicine's pack as the product heading shows it ("15", "30ML"); a bare 1 is none."""
+    u = " ".join(str(unit or "").split())
+    return "" if u in ("", "1", "0") else u
+
+
 def fingerprint(sale: dict[str, Any]) -> str:
     """What the saved figures depend on in a bill: doctor, date, patient and its lines."""
     parts = [dmr.norm_name(sale.get("doctor")), str(sale.get("date") or "")[:10],
@@ -276,7 +304,8 @@ def _write(conn, rules: dict[str, Any], sales: list[dict[str, Any]], purchases: 
     for s in sales:
         lines = dmr.bill_lines(res, s, rates)
         for ln in lines:
-            row = dict(ln, bill_date=ln["date"], flags=json.dumps(ln["flags"]), saved_at=now)
+            row = dict(ln, bill_date=ln["date"], flags=json.dumps(ln["flags"]), saved_at=now,
+                       rules_at=rules.get("updated") or "")
             conn.execute(
                 f"INSERT INTO doctor_margin_lines ({','.join(_LINE_COLS)}) VALUES ({','.join('?' * len(_LINE_COLS))})",
                 [row.get(c) for c in _LINE_COLS],
@@ -343,7 +372,11 @@ def sync_sale(conn, sale_id: Any, *, force: bool = False) -> dict[str, Any]:
 
 def refresh_returns(conn, sale_ids: Iterable[int] | None = None) -> int:
     """Returned qty off the saved lines again (rates and rule stay as saved). None = every
-    saved bill. Returns lines changed."""
+    saved bill. Returns lines changed.
+
+    A total-sales line also takes the bill line's amount, sale rate and discount as the bill
+    has them now (an edit of the price that left the medicines and qty alone): the sale value
+    is the bill's; only the % stays as saved."""
     ensure_tables(conn)
     if sale_ids is None:
         ids = [int(r[0]) for r in conn.execute("SELECT DISTINCT sale_id FROM doctor_margin_lines")]
@@ -356,14 +389,17 @@ def refresh_returns(conn, sale_ids: Iterable[int] | None = None) -> int:
     for part in _chunks(ids):
         q = ",".join("?" * len(part))
         by_sale: dict[int, list[dict[str, Any]]] = {}
-        for lid, sid, mid, sold, ret, unit, item_id, line_no in conn.execute(
-            f"SELECT id, sale_id, medicine_id, qty_sold, qty_returned, margin_unit, sale_item_id, line_no "
+        for lid, sid, mid, sold, ret, unit, item_id, line_no, way, amount, value, srate, disc in conn.execute(
+            f"SELECT id, sale_id, medicine_id, qty_sold, qty_returned, margin_unit, sale_item_id, line_no, "
+            f"COALESCE(way,''), COALESCE(amount,0), COALESCE(value,0), COALESCE(sale_rate,0), COALESCE(disc,0) "
             f"FROM doctor_margin_lines WHERE sale_id IN ({q}) ORDER BY sale_id, line_no, id",
             part,
         ):
             by_sale.setdefault(int(sid), []).append({
                 "id": lid, "medicine_id": mid, "qty_sold": sold, "old": ret, "margin_unit": unit,
-                "sale_item_id": item_id, "line_no": line_no,
+                "sale_item_id": item_id, "line_no": line_no, "way": way or "profit",
+                "amount": amount, "sale_rate": srate, "disc": disc,
+                "old_value": value, "old_amount": amount, "old_rate": srate, "old_disc": disc,
             })
         for sid, saved in by_sale.items():
             # A return is shared over ALL the bill's lines of that medicine in bill order, the
@@ -373,10 +409,14 @@ def refresh_returns(conn, sale_ids: Iterable[int] | None = None) -> int:
             for ln in lines:
                 if ln.get("id") is None:
                     continue
-                if abs(float(ln["qty_returned"]) - float(ln["old"] or 0)) > 1e-9:
+                if any(abs(float(ln[a] or 0) - float(ln[b] or 0)) > 1e-9 for a, b in (
+                        ("qty_returned", "old"), ("value", "old_value"), ("amount", "old_amount"),
+                        ("sale_rate", "old_rate"), ("disc", "old_disc"))):
                     conn.execute(
-                        "UPDATE doctor_margin_lines SET qty_returned=?, qty=?, value=? WHERE id=?",
-                        (ln["qty_returned"], ln["qty"], ln["value"], ln["id"]),
+                        "UPDATE doctor_margin_lines SET qty_returned=?, qty=?, value=?, amount=?, sale_rate=?, disc=? "
+                        "WHERE id=?",
+                        (ln["qty_returned"], ln["qty"], ln["value"], ln["amount"], ln["sale_rate"], ln["disc"],
+                         ln["id"]),
                     )
                     changed += 1
     conn.commit()
@@ -391,14 +431,18 @@ def _all_lines_for_returns(conn, sale_id: int, saved: list[dict[str, Any]]) -> l
     item_live = " AND ".join([""] + _live(conn, "sales_items", "si"))
     have = {int(s["line_no"] or 0): s for s in saved}
     out: list[dict[str, Any]] = []
-    for n, (mid, qty) in enumerate(conn.execute(
-        f"SELECT si.medicine_id, COALESCE(si.qty,0) FROM sales_items si "
+    for n, (mid, qty, srate, amount, disc) in enumerate(conn.execute(
+        f"SELECT si.medicine_id, COALESCE(si.qty,0), COALESCE(si.rate,0), COALESCE(si.amount,0), "
+        f"COALESCE(si.item_discount,0) FROM sales_items si "
         f"WHERE si.sale_id=?{item_live} ORDER BY si.id",
         (sale_id,),
     ), 1):
         s = have.get(n)
         if s is not None and int(s["medicine_id"] or 0) == int(mid or 0):
             have.pop(n)
+            if s["way"] == "sales" and abs(float(qty or 0) - float(s["qty_sold"] or 0)) < 1e-9:
+                s.update(amount=dmr.r2(float(amount or 0)), sale_rate=round(float(srate or 0), 4),
+                         disc=dmr.r2(float(disc or 0)))
             out.append(s)
         else:
             out.append({"id": None, "medicine_id": mid, "qty_sold": qty, "margin_unit": 0.0})
@@ -475,14 +519,17 @@ def read_lines(conn, from_date: str, to_date: str, doctors: Iterable[str] = ()) 
     if want:
         where += f" AND doctor IN ({','.join('?' * len(want))})"
         args += want
-    cols = ("sale_id", "sale_item_id", "line_no", "bill_no", "bill_date", "patient", "doctor", "medicine_id",
-            "name", "type", "batch", "qty_sold", "qty_returned", "qty", "mrp", "rate_purchase", "rate_free",
-            "rate_basis", "rate", "kind", "kind_value", "margin_unit", "value", "rule", "flags", "saved_at")
+    cols = _LINE_COLS
     out = []
     for r in conn.execute(f"SELECT {','.join(cols)} FROM doctor_margin_lines WHERE {where} "
                           f"ORDER BY doctor, name, batch, bill_date, bill_no, line_no", args):
         d = dict(zip(cols, r))
         d["date"] = d.pop("bill_date")
+        d["way"] = d.get("way") or "profit"  # saved before 23 Oct 2026: on profit
+        d["pack"] = d.get("pack") or ""
+        d["rules_at"] = d.get("rules_at") or ""
+        for k in ("sale_rate", "disc", "amount"):
+            d[k] = float(d.get(k) or 0)
         try:
             d["flags"] = json.loads(d["flags"] or "[]")
         except ValueError:
