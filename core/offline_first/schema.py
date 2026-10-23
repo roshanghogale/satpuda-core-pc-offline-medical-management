@@ -69,6 +69,25 @@ _MEDICINE_NOT_AN_EDIT = {
     "stock_qty", "updated_at", "version", "sync_status", "synced_at", "device_id", "sync_state",
 }
 
+_BOOKKEEPING = {"updated_at", "version", "sync_status", "synced_at", "device_id", "sync_state"}
+
+# Bills and parties: the figures a payment, a return or another bill of the party moves --
+# the server's dues cascade (server-live partyDueCascade.js) works out the same fields from
+# the bills and sends them back. A change of only these is not an edit of the record.
+#
+# Sending the whole bill for them was a lost edit (offline-first audit, 23 Oct 2026): a receipt
+# on PC A re-cleared A's copy of a bill and sent that copy -- old lines and all -- while PC B
+# had just edited the bill: B's edit was replaced on the server and on both PCs, and the bill
+# no longer matched the stock B had put back. A party's phone edited on one PC was replaced
+# the same way by the other PC's next bill for that party.
+_NOT_AN_EDIT = {
+    "medicines": _MEDICINE_NOT_AN_EDIT,
+    "sales": _BOOKKEEPING | {"total_due", "due_amount", "account_cleared", "bill_cleared"},
+    "purchases": _BOOKKEEPING | {"due_amount", "due", "total_due", "bill_cleared", "account_cleared"},
+    "customers": _BOOKKEEPING | {"total_due", "total_credit", "last_updated"},
+    "suppliers": _BOOKKEEPING | {"total_due", "total_credit"},
+}
+
 _TABLES = """
 CREATE TABLE IF NOT EXISTS of_meta (k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS of_flags (k TEXT PRIMARY KEY, v TEXT);
@@ -143,6 +162,12 @@ def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
     ).fetchone())
 
 
+def _edit_columns(conn: sqlite3.Connection, table: str) -> list[str]:
+    """The columns whose change is an edit of the record (see _NOT_AN_EDIT)."""
+    skip = _NOT_AN_EDIT.get(table, set())
+    return [c for c in _columns(conn, table) if c not in skip and c != "id"]
+
+
 def trigger_sql(conn: sqlite3.Connection) -> list[str]:
     """CREATE TRIGGER statements for the tables this store database has."""
     out: list[str] = []
@@ -168,11 +193,15 @@ def trigger_sql(conn: sqlite3.Connection) -> list[str]:
                 f"WHEN {_CAPTURE_ON} BEGIN {_mark(table, 'OLD.id', 'delete')} END;",
             ]
             continue
+        edit_when = ""
+        if table in _NOT_AN_EDIT:
+            cols = _edit_columns(conn, table)
+            edit_when = " AND (" + (" OR ".join(f"OLD.{c} IS NOT NEW.{c}" for c in cols) or "0") + ")"
         out += [
             f"CREATE TRIGGER IF NOT EXISTS of_ins_{table} AFTER INSERT ON {table} "
             f"WHEN {_CAPTURE_ON} BEGIN {_mark(table, 'NEW.id', 'upsert')} END;",
             f"CREATE TRIGGER IF NOT EXISTS of_upd_{table} AFTER UPDATE ON {table} "
-            f"WHEN {_CAPTURE_ON} BEGIN {_mark(table, 'NEW.id', 'upsert')} END;",
+            f"WHEN {_CAPTURE_ON}{edit_when} BEGIN {_mark(table, 'NEW.id', 'upsert')} END;",
             f"CREATE TRIGGER IF NOT EXISTS of_del_{table} AFTER DELETE ON {table} "
             f"WHEN {_CAPTURE_ON} BEGIN {_mark(table, 'OLD.id', 'delete')} END;",
         ]
@@ -223,25 +252,27 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     # Retired triggers (replaced by a narrower / wider version).
     for old in _RETIRED_SETTINGS_TRIGGERS:
         conn.execute(f"DROP TRIGGER IF EXISTS {old}")
-    _drop_stale_medicine_update_trigger(conn)
+    _drop_stale_update_triggers(conn)
     for stmt in trigger_sql(conn):
         conn.execute(stmt)
     conn.commit()
 
 
-def _drop_stale_medicine_update_trigger(conn: sqlite3.Connection) -> None:
-    """The medicines update trigger lists the columns that count as an edit when it is made.
-    A column added later (rate_a, rate_b, ... for wholesale) is not in it, so changing only
-    that column would never reach the server. Such a trigger is dropped and made again."""
-    row = conn.execute(
-        "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='of_upd_medicines'"
-    ).fetchone()
-    if not row or not _table_exists(conn, "medicines"):
-        return
-    sql = str(row[0] or "")
-    cols = [c for c in _columns(conn, "medicines") if c not in _MEDICINE_NOT_AN_EDIT and c != "id"]
-    if any(not re.search(rf"\bNEW\.{re.escape(c)}\b", sql) for c in cols):
-        conn.execute("DROP TRIGGER IF EXISTS of_upd_medicines")
+def _drop_stale_update_triggers(conn: sqlite3.Connection) -> None:
+    """An update trigger that lists the columns counting as an edit (medicines, bills,
+    parties) names them when it is made. A column added later (rate_a, rate_b, ... for
+    wholesale) is not in it, so changing only that column would never reach the server; and a
+    trigger from before a table got its list notes every update. Such a trigger is dropped
+    and made again."""
+    for table in _NOT_AN_EDIT:
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?", (f"of_upd_{table}",)
+        ).fetchone()
+        if not row or not _table_exists(conn, table):
+            continue
+        sql = str(row[0] or "")
+        if any(not re.search(rf"\bNEW\.{re.escape(c)}\b", sql) for c in _edit_columns(conn, table)):
+            conn.execute(f"DROP TRIGGER IF EXISTS of_upd_{table}")
 
 
 def drop_triggers(conn: sqlite3.Connection) -> None:

@@ -67,6 +67,25 @@ def build_doc(conn: sqlite3.Connection, collection: str, local_id: int) -> Optio
     return docs[0] if docs else None
 
 
+def _never_left_this_pc(conn: sqlite3.Connection, collection: str, local_id: int) -> bool:
+    """A record of this PC's own id range that no event ever carried and the server never
+    sent: nobody else can hold it."""
+    try:
+        base = int(meta_get(conn, "id_base", 0) or 0)
+        top = int(meta_get(conn, "id_max", 0) or 0)
+    except (TypeError, ValueError):
+        return False
+    if not base or not (base < int(local_id) <= top):
+        return False
+    if conn.execute("SELECT 1 FROM of_events WHERE collection=? AND local_id=? LIMIT 1",
+                    (collection, int(local_id))).fetchone():
+        return False
+    if conn.execute("SELECT 1 FROM of_versions WHERE collection=? AND local_id=? LIMIT 1",
+                    (collection, int(local_id))).fetchone():
+        return False
+    return True
+
+
 def _next_seq(conn: sqlite3.Connection) -> int:
     top = conn.execute("SELECT COALESCE(MAX(seq), 0) FROM of_events").fetchone()[0]
     server = int(meta_get(conn, "server_last_seq", 0) or 0)
@@ -87,7 +106,10 @@ def build_events(conn: sqlite3.Connection, install_id: str) -> int:
             if doc is None and collection not in ("pharmacy_profile", "settings"):
                 op = "delete"
         if op == "delete":
-            if collection in ("pharmacy_profile", "settings"):
+            if collection in ("pharmacy_profile", "settings") or _never_left_this_pc(conn, collection, int(local_id)):
+                # Made and deleted here before a sync (a bill saved and deleted at once): the
+                # server never had it, and a delete event only came back flagged
+                # "delete_missing" -- a warning for nothing in the sync status.
                 conn.execute("DELETE FROM of_dirty WHERE collection=? AND local_id=?", (collection, local_id))
                 continue
             doc = {"id": int(local_id)}
@@ -99,6 +121,13 @@ def build_events(conn: sqlite3.Connection, install_id: str) -> int:
                 (collection, int(local_id)),
             ).fetchone()
             ver = int(v[0]) if v else 0
+            if isinstance(doc, dict) and install_id:
+                # The event is THIS PC's write. The record's own device_id column names
+                # whoever wrote the row before (an import, the old online id, the download),
+                # and the server keeps the doc's device_id as the last writer: a second edit
+                # of the same record before the next pull then read as another device's clash
+                # ("concurrent_edit" on a one-PC shop, live store 149, 23 Oct 2026).
+                doc["device_id"] = str(install_id)
         seq = _next_seq(conn)
         event = {
             "seq": seq,
@@ -234,6 +263,17 @@ def pending_stock_by_medicine(conn: sqlite3.Connection) -> dict[int, int]:
     return out
 
 
+# Flags the shop has nothing to look at: a customer / supplier whose record two PCs sent at
+# about the same time only because each one's bill moved the party's due -- the server works
+# the due out again from the bills (its dues cascade), so neither copy is lost -- and a
+# delete of something the server never had. Counted, "Sync: N to check" stayed up for good
+# on any shop with two PCs billing the same party (offline-first audit, 23 Oct 2026).
+_NOTHING_TO_CHECK = (
+    "(collection IN ('customers','suppliers') AND COALESCE(flag_code,'') = 'concurrent_edit')"
+    " OR COALESCE(flag_code,'') = 'delete_missing'"
+)
+
+
 def counts(conn: sqlite3.Connection) -> dict:
     """For the status line: what is waiting, what was flagged."""
     row = conn.execute(
@@ -241,7 +281,8 @@ def counts(conn: sqlite3.Connection) -> dict:
         " (SELECT COUNT(*) FROM of_dirty),"
         " (SELECT COUNT(*) FROM of_events WHERE status='pending'),"
         " (SELECT COUNT(*) FROM of_stock_journal WHERE event_seq IS NULL),"
-        " (SELECT COUNT(*) FROM of_events WHERE status='sent' AND outcome IN ('flagged','quarantined'))"
+        " (SELECT COUNT(*) FROM of_events WHERE status='sent' AND outcome IN ('flagged','quarantined')"
+        f"  AND NOT ({_NOTHING_TO_CHECK}))"
     ).fetchone()
     return {"noted": int(row[0]), "waiting": int(row[1]), "stock_moves_waiting": int(row[2]),
             "flagged": int(row[3])}

@@ -541,6 +541,30 @@ def _ws_doc_fields(table: str, row) -> dict:
     return doc_fields(table, row)
 
 
+def purchase_line_tax(row) -> dict:
+    """A purchase line's discount %, taxable value and GST amount for its server document
+    (server columns discount_pct / taxable / gst_amt). Only what the row holds: an old store
+    file without the columns sends nothing, as before.
+
+    Without them every purchase a PC sent came back -- to itself on the next pull and to every
+    other device -- with no line discount and a zero taxable value: an edit opened without the
+    discount and the GST purchase register read 0 (offline-first audit, 23 Oct 2026)."""
+    out: dict = {}
+    if not isinstance(row, dict):
+        return out
+    for key, alt in (("discount_pct", "discount_percent"), ("taxable", None), ("gst_amt", None)):
+        val = row.get(key)
+        if val in (None, "") and alt:
+            val = row.get(alt)
+        if val in (None, ""):
+            continue
+        try:
+            out[key] = float(val)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 def build_customer_payload(conn, customer_id: int) -> Optional[dict]:
     cur = conn.cursor()
     cur.execute('SELECT * FROM customers WHERE id=?', (customer_id,))
@@ -637,7 +661,8 @@ def build_purchase_payload(conn, purchase_id: int) -> Optional[dict]:
         _pi_cols = {r[1] for r in cur.execute("PRAGMA table_info(purchase_items)")}
     except Exception:
         _pi_cols = set()
-    _extra = [f"pi.{c}" for c in ("schedule", "hsn_code", "manufacturer", "rate_a", "rate_b", "rate_c")
+    _extra = [f"pi.{c}" for c in ("schedule", "hsn_code", "manufacturer", "rate_a", "rate_b", "rate_c",
+                                  "discount_pct", "discount_percent", "taxable", "gst_amt")
               if c in _pi_cols]
     _extra_sql = ("," + ", ".join(_extra)) if _extra else ""
     cur.execute(
@@ -677,6 +702,7 @@ def build_purchase_payload(conn, purchase_id: int) -> Optional[dict]:
                 'hsn_code': item.get('hsn_code') or item.get('med_hsn_code'),
                 'manufacturer': item.get('manufacturer') or item.get('med_manufacturer'),
                 'item_amount': item.get('item_amount', 0),
+                **purchase_line_tax(item),
                 **_ws_doc_fields('purchase_items', item),
             }
         )
@@ -1515,12 +1541,18 @@ def _restore_purchase_return_stock(cur, return_id: int) -> None:
 
 
 def _apply_purchase_return_stock(cur, return_id: int) -> None:
+    # Each pulled line records what it took off (stock_units), as a saved line does: a later
+    # delete of the return then puts back exactly that, not a figure worked out again from
+    # whatever pack the medicine has by then (offline-first audit, 23 Oct 2026).
+    log_units = 'stock_units' in {r[1] for r in cur.execute('PRAGMA table_info(purchase_return_items)').fetchall()}
     cur.execute(
-        'SELECT medicine_id, qty FROM purchase_return_items WHERE return_id=?',
+        'SELECT medicine_id, qty, id FROM purchase_return_items WHERE return_id=?',
         (return_id,),
     )
-    for med_id, qty in cur.fetchall():
+    for med_id, qty, line_id in cur.fetchall():
         units = _purchase_return_stock_units(cur, med_id, qty)
+        if log_units:
+            cur.execute('UPDATE purchase_return_items SET stock_units=? WHERE id=?', (units, line_id))
         _bump_medicine_stock(cur, med_id, -units)
 
 
@@ -1859,6 +1891,10 @@ def sync_down_doc(conn, collection: str, doc_id: str, data: dict) -> str:
                     ))
                 # Wholesale purchase rate / Rate A / B / C of the batch (upsert keeps the rest).
                 _ws.apply_doc(cur, 'medicines', med_id, data)
+                if str(data.get('supplier_name') or '').strip() and 'supplier_name' in med_cols:
+                    # Who supplied the batch, as the device that bought it wrote it.
+                    cur.execute('UPDATE medicines SET supplier_name=? WHERE id=?',
+                                (str(data.get('supplier_name')).strip(), med_id))
                 conn.commit()
             elif collection == 'sales':
                 sale_id = int(doc_id)
@@ -2056,6 +2092,10 @@ def sync_down_doc(conn, collection: str, doc_id: str, data: dict) -> str:
                     'fy_start_year': data.get('fy_start_year'),
                     'fy_serial': data.get('fy_serial'),
                     'created_at': data.get('created_at'),
+                    # How the bill's discount and GST were worked out: INSERT OR REPLACE
+                    # wiped it, and an edit then re-worked a "discount after GST" bill the
+                    # other way, changing its total (offline-first audit, 23 Oct 2026).
+                    'gst_calc_method': data.get('gst_calc_method') or None,
                 }
                 insert_cols = [c for c in base_cols]
                 insert_vals = [
@@ -2141,6 +2181,11 @@ def sync_down_doc(conn, collection: str, doc_id: str, data: dict) -> str:
                             extra['stock_units'] = _units
                     except Exception:
                         pass
+                    # The line amount the PC's own screens read (purchase return, column
+                    # picker) besides item_amount; the insert left it 0.
+                    if item.get('item_amount') not in (None, '') or item.get('amount') not in (None, ''):
+                        extra['amount'] = item.get('amount') if item.get('amount') not in (None, '') \
+                            else item.get('item_amount')
                     if extra:
                         row_id = cur.lastrowid
                         have = {r[1] for r in cur.execute('PRAGMA table_info(purchase_items)').fetchall()}

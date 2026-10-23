@@ -543,14 +543,33 @@ def find_todays_counter_sale_id(conn, customer_id, bill_date=None):
     if customer_id not in cust_ids:
         cust_ids.append(customer_id)
     placeholders = ','.join('?' * len(cust_ids))
+    own_sql, own_args = _own_bills_only(conn)
     cur.execute(
         f"SELECT id FROM sales WHERE customer_id IN ({placeholders}) "
         f"AND bill_date=? AND COALESCE(is_autosave,0)=0 "
-        f"AND COALESCE(deleted,0)=0 ORDER BY id DESC LIMIT 1",
-        (*cust_ids, bdate),
+        f"AND COALESCE(deleted,0)=0{own_sql} ORDER BY id DESC LIMIT 1",
+        (*cust_ids, bdate, *own_args),
     )
     found = cur.fetchone()
     return found[0] if found else None
+
+
+def _own_bills_only(conn) -> tuple[str, tuple]:
+    """Offline-first: walk-in lines go into the counter bill THIS PC made today, never into
+    one another PC made. Two PCs adding to the same bill at once each sent the whole bill and
+    the later one replaced the other's lines -- the stock went out but the sale and its cash
+    were gone from the bill (offline-first audit, 23 Oct 2026). Each PC keeps its own day bill."""
+    try:
+        from core.offline_first.ids import OfConnection, device_range
+
+        if not isinstance(conn, OfConnection):
+            return "", ()
+        rng = device_range(conn)
+        if not rng or getattr(conn, "legacy_ids", False):
+            return "", ()
+        return " AND id > ? AND id <= ?", (int(rng[0]), int(rng[1]))
+    except Exception:
+        return "", ()
 
 
 def load_sale_medicines(conn, sale_id, *, doc=None):

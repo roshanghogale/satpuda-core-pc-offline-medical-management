@@ -342,6 +342,10 @@ def _build_flat_docs(conn, collection: str, ids=None) -> list[dict]:
                     "synced_at": row.get("synced_at"),
                     "created_at": row.get("created_at"),
                 }
+                if row.get("supplier_name"):
+                    # Who supplied the batch (the purchase or opening stock writes it; the
+                    # supplier alerts read it). The server keeps it when a doc has none.
+                    payload["supplier_name"] = row.get("supplier_name")
             elif collection == "doctors":
                 payload = {
                     "name": row.get("name"),
@@ -570,7 +574,9 @@ def _purchase_line_pack(ir: dict) -> dict:
 
 def _build_purchases_docs(conn, ids=None) -> list[dict]:
     """Bulk purchases + items + suppliers."""
-    from core.server_entity_sync import _line_medicine_id, _sanitize_server_doc, _sync_meta_fields_from_row
+    from core.server_entity_sync import (
+        _line_medicine_id, _sanitize_server_doc, _sync_meta_fields_from_row, purchase_line_tax,
+    )
 
     cur = conn.cursor()
     where, params = _id_filter(ids)
@@ -593,7 +599,8 @@ def _build_purchases_docs(conn, ids=None) -> list[dict]:
         _pi_cols = {r[1] for r in cur.execute("PRAGMA table_info(purchase_items)")}
     except Exception:
         _pi_cols = set()
-    _extra = [f"pi.{c}" for c in ("schedule", "hsn_code", "manufacturer", "rate_a", "rate_b", "rate_c")
+    _extra = [f"pi.{c}" for c in ("schedule", "hsn_code", "manufacturer", "rate_a", "rate_b", "rate_c",
+                                  "discount_pct", "discount_percent", "taxable", "gst_amt")
               if c in _pi_cols]
     if "stock_units" in _pi_cols:
         _extra.append("pi.stock_units")
@@ -643,6 +650,7 @@ def _build_purchases_docs(conn, ids=None) -> list[dict]:
                     "hsn_code": ir.get("hsn_code") or ir.get("med_hsn_code"),
                     "manufacturer": ir.get("manufacturer") or ir.get("med_manufacturer"),
                     "item_amount": ir.get("item_amount", 0),
+                    **purchase_line_tax(ir),
                     **_ws_doc_fields("purchase_items", ir),
                     **_purchase_line_pack(ir),
                 }
