@@ -278,6 +278,77 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class CopiedDownFromOnline(PurchaseReachesSale):
+    """Store 148 (23 Oct 2026): purchases made Online on 21 Oct, copied down by the switch to
+    offline-first, then Tabs/Strip corrected 1 -> 10 on the PC. The pulled lines kept no pack,
+    so the edit took a line back by the batch's pack, showed the batch's pack on the screen and
+    went up to the server with no pack at all."""
+
+    MID, PID, SID = 258, 8, 31
+
+    def copy_down(self, *, med_unit, line_tps, server_stock):
+        from core.offline_first import pull, worker
+
+        w = worker.open_worker_connection(self.path)
+        self.addCleanup(w.close)
+        med = {"id": self.MID, "local_id": self.MID, "name": NAME, "type": "Tablet",
+               "unit": med_unit, "stock_qty": server_stock, "mrp": 30.0, "rate": 20.0,
+               "gst_percent": 12, "batch_no": "B1", "expiry_date": "2027-10-01", "version": 2,
+               "updated_at": "2026-10-21T06:00:00Z", "created_at": "2026-10-21T06:00:00Z"}
+        sup = {"id": self.SID, "local_id": self.SID, "name": "STG SUP", "version": 1}
+        pur = {"id": self.PID, "local_id": self.PID, "purchase_no": "8/FY2026-27",
+               "supplier_id": self.SID, "supplier_name": "STG SUP",
+               "purchase_date": "2026-10-21", "bill_number": "INV1", "subtotal": 200,
+               "total_gst": 24, "cgst": 12, "sgst": 12, "total_amount": 224,
+               "final_amount": 224, "need_to_pay": 224, "version": 1,
+               "items": [{"medicine_id": self.MID, "name": NAME, "type": "Tablet", "qty": 10,
+                          "free_qty": 0, "rate": 20, "mrp": 30, "gst_pct": 12,
+                          "batch_no": "B1", "expiry_date": "2027-10-01", "item_amount": 224,
+                          "unit": str(line_tps), "tablets_per_stripe": line_tps}]}
+        with worker.write_batch(w, capture_paused=True):
+            pull.apply_page(w, [{"collection": c, "local_id": d["id"], "operation": "upsert",
+                                 "doc": d} for c, d in (("suppliers", sup), ("medicines", med),
+                                                        ("purchases", pur))], to_revision=3)
+            pull.set_stock_from_server(w, [[self.MID, server_stock, 0]])
+        return w
+
+    def edit_to_ten(self, w):
+        from core.offline_first import outbox, worker
+
+        lines = self.loaded_lines(self.PID)
+        self.assertEqual((lines[0]["unit"], lines[0]["tablets_per_stripe"]), ("1", 1),
+                         "the edit screen must show the pack the line was bought in")
+        self._set_pack(lines[0], 10)
+        lines[0]["mrp"] = 35.0
+        self.save(lines, editing=self.PID)
+        with worker.write_batch(w):
+            outbox.build_events(w, "pc-test-install")
+        return {e["collection"]: e for e in outbox.pending_events(w)}
+
+    def check(self, evs):
+        b = self.one_batch()
+        self.assertEqual((b["unit"], b["stock"], b["mrp"]), ("10", 100.0, 35.0))
+        rate = float(self._sale_rate(b["id"])["line"]["rate"])
+        self.assertAlmostEqual(rate, 3.5, places=2)
+        # Up to the server: the batch row, and the line WITH its pack.
+        self.assertEqual((evs["medicines"]["doc"]["unit"], float(evs["medicines"]["doc"]["mrp"])),
+                         ("10", 35.0))
+        [line] = evs["purchases"]["doc"]["items"]
+        self.assertEqual((line["unit"], line["tablets_per_stripe"]), ("10", 10))
+        moved = sum(int(o["qty_delta"]) for o in evs["stock_operations"]["stock_ops"])
+        self.assertEqual(moved, 90)
+
+    def test_a_batch_of_its_own_from_online_takes_the_corrected_pack(self):
+        w = self.copy_down(med_unit="1", line_tps=1, server_stock=10)
+        self.check(self.edit_to_ten(w))
+
+    def test_a_batch_already_on_ten_takes_back_only_what_the_line_stocked(self):
+        # The batch row was already strips of 10 (the keep-the-pack rule kept it when the
+        # line was typed as 1): the line stocked 10 tablets, not 100.
+        w = self.copy_down(med_unit="10", line_tps=1, server_stock=10)
+        self.check(self.edit_to_ten(w))
+
+
 from tests.test_a_loose_purchase_line_stocks_its_own_pack import (  # noqa: E402
     MID as _ONLINE_MID,
     _Online,

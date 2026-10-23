@@ -2130,6 +2130,17 @@ def sync_down_doc(conn, collection: str, doc_id: str, data: dict) -> str:
                     # columns this store's table has, after the insert it always made.
                     extra = {k: item.get(k) for k in ('hsn_code', 'discount_pct', 'taxable', 'gst_amt')
                              if item.get(k) not in (None, '')}
+                    # What the line put on the shelf, by ITS pack (the server's unit /
+                    # tablets_per_stripe), so an edit on this PC takes back exactly that and
+                    # sends the line up with its pack again (purchase_service).
+                    try:
+                        from core.purchase_service import pulled_line_stock_units
+
+                        _units = pulled_line_stock_units(item)
+                        if _units is not None:
+                            extra['stock_units'] = _units
+                    except Exception:
+                        pass
                     if extra:
                         row_id = cur.lastrowid
                         have = {r[1] for r in cur.execute('PRAGMA table_info(purchase_items)').fetchall()}

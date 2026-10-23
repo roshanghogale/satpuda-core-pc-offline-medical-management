@@ -3493,6 +3493,49 @@ def _adopt_quick_sale_placeholder(name: str, batch: str) -> int:
     return best
 
 
+def pulled_line_stock_units(item: dict):
+    """What a purchase line from the server put on the shelf, in stock units, or None.
+
+    The server keeps each line's own pack (unit / tablets_per_stripe). This PC's purchase_items
+    keep it only as stock_units; a pulled line used to arrive without it, so the first edit of
+    a purchase copied down from Online took the line back by the medicine's pack instead of
+    the line's, and the line went up again with no pack at all (store 148, 23 Oct 2026).
+    """
+    if not isinstance(item, dict):
+        return None
+    med_type = str(item.get("type") or "")
+    if is_strip_count_type(med_type):
+        try:
+            tps = int(float(item.get("tablets_per_stripe") or 0))
+        except (TypeError, ValueError):
+            tps = 0
+        if tps <= 0 and item.get("unit"):
+            tps = parse_tablets_per_stripe(str(item.get("unit")))
+        if tps <= 0:
+            return None
+        line = {"type": med_type, "qty": item.get("qty"), "free_qty": item.get("free_qty"),
+                "tablets_per_stripe": tps, "unit": str(tps)}
+        return max(0.0, float(_get_stock_increase(line) or 0))
+    return max(0.0, float(item.get("qty") or 0) + float(item.get("free_qty") or 0))
+
+
+def line_pack_from_units(med_type, qty, free_qty, stock_units, fallback: str) -> str:
+    """The pack a stored strip line was bought in: stock_units / (qty + free), else ``fallback``."""
+    if stock_units is None or not is_strip_count_type(str(med_type or "")):
+        return fallback
+    try:
+        strips = float(qty or 0) + float(free_qty or 0)
+        units = float(stock_units)
+    except (TypeError, ValueError):
+        return fallback
+    if strips <= 0 or units <= 0:
+        return fallback
+    tps = units / strips
+    if abs(tps - round(tps)) > 1e-6 or round(tps) < 1:
+        return fallback
+    return str(int(round(tps)))
+
+
 def _batches_only_in_purchase(cur, purchase_id: int) -> set[int]:
     """Batch rows that no other purchase has a line on: their pack came from this bill."""
     try:
