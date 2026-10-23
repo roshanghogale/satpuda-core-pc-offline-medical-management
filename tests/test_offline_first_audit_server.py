@@ -532,6 +532,34 @@ class Audit(unittest.TestCase):
         self.assertEqual(self.stock(self.a, self.m1), 100)
         self.assertEqual(self.party(self.a), (0.0, 0.0))
 
+    def test_sale_deleted_after_a_receipt_cleared_it(self):
+        s1 = self.sell(self.a, [_item(self.m1, "S", 5, 10.0)], payment_mode="Due", pay_full=False)
+        self.sell(self.a, [_item(self.m2, "T", 1, 20.0)], payment_mode="Due", pay_full=False)
+        self.pay(self.a, "customer", 50)
+        self.settle()
+        from core import desktop_sales_service as sales_svc
+
+        with self.b.acting():
+            out = sales_svc.delete_saved_sale(self.b.till, {"sale_id": s1["sale_id"]})
+        self.assertTrue(out.get("ok"), out)
+        self.check(doer=self.b, label="paid bill deleted on B")
+        self.assertEqual(self.party(self.a), (0.0, 30.0))
+
+    def test_return_credit_used_in_a_bill_then_the_return_deleted(self):
+        from core import desktop_returns_service as returns_svc
+
+        s1 = self.sell(self.a, [_item(self.m1, "S", 3, 10.0)])
+        with self.a.acting():
+            ret = returns_svc.save_sales_return(self.a.till, {
+                "sale_id": s1["sale_id"], "customer_id": self.cid(self.a), "settle_mode": "ledger",
+                "items": [{"medicine_id": self.m1, "qty": 1, "rate": 10.0}]})
+        self.settle()
+        self.sell(self.b, [_item(self.m2, "T", 2, 20.0)], apply_returns=[ret["return_id"]])
+        self.settle()
+        with self.a.acting():
+            d = returns_svc.delete_sales_return(self.a.till, {"id": ret["return_id"]})
+        self.check(label=f"used return deleted on A ({d.get('ok')}, {d.get('error')})")
+
     def test_sale_delete_on_a(self):
         res = self.sell(self.a, [_item(self.m1, "S", 5, 10.0)])
         from core import desktop_sales_service as sales_svc
@@ -805,6 +833,48 @@ class Audit(unittest.TestCase):
         self.check(doer=self.b, label="purchase edit on B, supplier changed")
         self.assertEqual(self.stock(self.a, self.m1), 106)
         self.assertEqual(self.party(self.a, "supplier"), (0.0, 0.0))
+
+    def test_purchase_edit_paid_at_entry_on_other_pc(self):
+        res = self.buy(self.a, f"P{self.run_id}", [self.pline(self.m1, "S", 10)], cash_paid=10)
+        self.settle()
+        from core import desktop_purchase_service as purchase_svc
+
+        with self.b.acting():
+            out = purchase_svc.save_purchase_bill(self.b.till, {
+                "supplier_name": self.supp, "bill_number": f"P{self.run_id}", "purchase_date": DAY,
+                "items": [self.pline(self.m1, "S", 10)], "cash_paid": 50, "rounding": 0,
+                "editing_purchase_id": res["purchase_id"]})
+        self.assertTrue(out.get("ok"), out)
+        self.assertEqual(self.party(self.b, "supplier"), (0.0, 0.0))
+        self.check(doer=self.b, label="purchase paid-at-entry edited on B")
+        self.assertEqual(self.party(self.a, "supplier"), (0.0, 0.0))
+        self.assertEqual(self.a.one("SELECT bill_cleared FROM purchases WHERE id=?", res["purchase_id"]), 1)
+
+    def test_purchase_deleted_after_a_payment_cleared_it(self):
+        p1 = self.buy(self.a, f"P{self.run_id}a", [self.pline(self.m1, "S", 10)])
+        self.buy(self.a, f"P{self.run_id}b", [self.pline(self.m2, "T", 4)])
+        self.pay(self.a, "supplier", 50)        # clears the older bill
+        self.settle()
+        from core import desktop_purchase_service as purchase_svc
+
+        with self.b.acting():
+            out = purchase_svc.delete_saved_purchase(self.b.till, {"purchase_id": p1["purchase_id"]})
+        self.assertTrue(out.get("ok"), out)
+        self.check(doer=self.b, label="paid purchase deleted on B")
+        self.assertEqual(self.party(self.a, "supplier"), (0.0, 30.0))
+
+    def test_purchase_return_cash_refund(self):
+        from core import desktop_returns_service as returns_svc
+
+        p = self.buy(self.a, f"P{self.run_id}", [self.pline(self.m1, "S", 10)], cash_paid=50)
+        self.settle()
+        with self.b.acting():
+            r = returns_svc.save_purchase_return(self.b.till, {
+                "purchase_id": p["purchase_id"], "supplier_id": self.sid(self.b), "settle_mode": "cash",
+                "items": [{"medicine_id": self.m1, "qty": 2, "rate": 5.0}]})
+        self.assertTrue(r.get("ok"), r)
+        self.check(doer=self.b, label="purchase return with cash refund on B")
+        self.assertEqual(self.stock(self.a, self.m1), 108)
 
     def test_purchase_delete(self):
         res = self.buy(self.a, f"P{self.run_id}", [self.pline(self.m1, "S", 10)])
