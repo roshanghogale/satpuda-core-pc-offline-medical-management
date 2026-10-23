@@ -51,6 +51,43 @@ def _locally_pending(conn: sqlite3.Connection) -> set[tuple[str, int]]:
     return {(str(c), int(i)) for c, i in rows}
 
 
+def _shop_wide(name: str) -> bool:
+    from core.offline_first.schema import SHOP_WIDE_SETTING_NAMES, SHOP_WIDE_SETTING_PREFIXES
+
+    return name in SHOP_WIDE_SETTING_NAMES or name.startswith(SHOP_WIDE_SETTING_PREFIXES)
+
+
+def _apply_settings_bundle(conn: sqlite3.Connection, rows: list, pending: set) -> int:
+    """The server sends a settings change as ONE document holding every row of the shop
+    ({"settings": [{name, value}, ...]}). Each shop-wide row is written as its own setting;
+    a row this PC changed and has not sent yet is left alone (its own change goes up first).
+
+    The worker handed the whole bundle to the one-row code, which read no name in it and wrote
+    nothing: a customer's regular medicines, a party's GSTIN, the bank details, the bill heading
+    and the doctor-margin rules saved on one PC never reached the others (audit, 23 Oct 2026)."""
+    from core import server_live as sl
+
+    mine = {i for c, i in pending if c == "settings"}
+    held = set()
+    if mine:
+        q = ",".join("?" * len(mine))
+        held = {str(n) for (n,) in conn.execute(f"SELECT name FROM settings WHERE id IN ({q})", tuple(mine))}
+    n = 0
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("name") or "").strip()
+        if not name or not _shop_wide(name) or name in held:
+            continue
+        cur = conn.execute("SELECT value FROM settings WHERE name=?", (name,)).fetchone()
+        value = row.get("value")
+        if cur is not None and str(cur[0] if cur[0] is not None else "") == str(value if value is not None else ""):
+            continue
+        sl.apply_server_doc(conn, "settings", {"name": name, "value": value})
+        n += 1
+    return n
+
+
 def apply_page(conn: sqlite3.Connection, changes: list[dict], *, to_revision: int) -> dict:
     """Write one page of changes. Call inside the worker's write transaction with capture paused."""
     from core import server_entity_sync as fb
@@ -65,6 +102,9 @@ def apply_page(conn: sqlite3.Connection, changes: list[dict], *, to_revision: in
             doc = ch.get("doc")
             if col == "stock_operations":
                 continue                      # stock comes from the server's figure, below
+            if col == "settings" and isinstance(doc, dict) and isinstance(doc.get("settings"), list):
+                applied += _apply_settings_bundle(conn, doc["settings"], pending)
+                continue
             if col in _SINGLETONS:
                 if isinstance(doc, dict):
                     sl.apply_server_doc(conn, col, doc)

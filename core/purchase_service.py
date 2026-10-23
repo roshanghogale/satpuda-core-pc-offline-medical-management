@@ -1663,16 +1663,21 @@ def _reverse_stock_for_purchase(cur, purchase_id: int):
 
 
 def _apply_stock_for_purchase(cur, purchase_id: int):
-    """Add stock for an existing purchase's line items (Server pull / restore)."""
+    """Add stock for an existing purchase's line items (Server pull / restore).
+
+    Each line also records what it added (stock_units), as a saved line does: the pulled
+    lines are new rows, and without it a later delete or edit of the purchase worked the
+    units out again from whatever pack the medicine has by then."""
+    log_units = "stock_units" in _purchase_item_columns(cur)
     cur.execute("""
         SELECT pi.medicine_id, pi.qty, pi.free_qty,
                COALESCE(NULLIF(TRIM(pi.type), ''), m.type),
-               COALESCE(m.unit, '1')
+               COALESCE(m.unit, '1'), pi.id
         FROM purchase_items pi
         JOIN medicines m ON pi.medicine_id = m.id
         WHERE pi.purchase_id = ?
     """, (purchase_id,))
-    for med_id, qty, free_qty, med_type, unit_str in cur.fetchall():
+    for med_id, qty, free_qty, med_type, unit_str, line_id in cur.fetchall():
         item = {
             'type':     med_type or '',
             'qty':      float(qty or 0),
@@ -1681,6 +1686,8 @@ def _apply_stock_for_purchase(cur, purchase_id: int):
         if is_strip_count_type(med_type or ''):
             item['tablets_per_stripe'] = parse_tablets_per_stripe(unit_str)
         increase = _get_stock_decrease(item)  # same qty math as reverse
+        if log_units:
+            cur.execute("UPDATE purchase_items SET stock_units=? WHERE id=?", (increase, line_id))
         if increase <= 0:
             continue
         cur.execute(
