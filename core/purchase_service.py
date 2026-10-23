@@ -1856,6 +1856,13 @@ def save_purchase_online_now(
             mp["name"] = name
         if it.get("hsn_code"):
             mp["hsn_code"] = it.get("hsn_code")
+        # The line's MRP / rate / GST become the batch's. A line that came with the batch's
+        # id (picked from the batch list) skipped get_or_create_medicine, so a new MRP on a
+        # known batch stayed on the bill and never reached the Sales screen.
+        _attrs = _line_medicine_attrs(it)
+        for _k in ("mrp", "rate", "gst_percent", "manufacturer", "schedule"):
+            if _k in _attrs:
+                mp[_k] = _attrs[_k]
         # Wholesale: the line's Rate A / B / C (and purchase rate) become the batch's.
         mp.update(_ws_medicine_rates(it))
         # Where this medicine came from, for reference. Only on a line that
@@ -3134,6 +3141,7 @@ def update_purchase(conn, purchase_id: int, supplier_id: int,
 
     cash_paid, online_paid, entry_paid = payment_split_from_calc(calc_result)
 
+    only_here = _batches_only_in_purchase(cur, purchase_id)
     _reverse_stock_for_purchase(cur, purchase_id)
 
     gst_calc_method = (
@@ -3189,6 +3197,7 @@ def update_purchase(conn, purchase_id: int, supplier_id: int,
 
     cur.execute("DELETE FROM purchase_items WHERE purchase_id=?", (purchase_id,))
     _insert_items(cur, purchase_id, items, conn=conn, supplier_id=supplier_id)
+    _corrected_pack_onto_own_batches(cur, items, only_here)
 
     recalculate_supplier_due(conn, supplier_id, commit=False)
     if old_supplier_id and old_supplier_id != supplier_id:
@@ -3484,6 +3493,108 @@ def _adopt_quick_sale_placeholder(name: str, batch: str) -> int:
     return best
 
 
+def _batches_only_in_purchase(cur, purchase_id: int) -> set[int]:
+    """Batch rows that no other purchase has a line on: their pack came from this bill."""
+    try:
+        return _batches_only_in_purchase_q(cur, purchase_id)
+    except sqlite3.Error:
+        return set()
+
+
+def _batches_only_in_purchase_q(cur, purchase_id: int) -> set[int]:
+    rows = cur.execute(
+        "SELECT DISTINCT pi.medicine_id FROM purchase_items pi WHERE pi.purchase_id=? "
+        "AND NOT EXISTS (SELECT 1 FROM purchase_items o JOIN purchases p ON p.id = o.purchase_id "
+        "WHERE o.medicine_id = pi.medicine_id AND o.purchase_id <> pi.purchase_id "
+        "AND COALESCE(p.deleted, 0) = 0 AND COALESCE(p.is_autosave, 0) = 0)",
+        (int(purchase_id),),
+    ).fetchall()
+    return {int(r[0]) for r in rows if r and r[0]}
+
+
+def _corrected_pack_onto_own_batches(cur, items: list, only_here: set[int]) -> None:
+    """An edit that corrects Tabs/Strip on a batch only this purchase stocked: the batch takes it.
+
+    _batch_row_pack keeps a strip row's pack once it is more than 1 (a loose line must not
+    turn a strip-of-10 batch into strips of 1), so a pack typed 10 for 15, or 10 for a loose
+    1, could never be corrected by editing the bill: the Sales screen kept dividing the MRP by
+    the old figure. When no other purchase stocks that batch, its pack can only have come from
+    this bill, and the corrected line is the truth.
+    """
+    if not only_here:
+        return
+    pack_by_med: dict[int, str] = {}
+    for it in items or []:
+        try:
+            mid = int(it.get("medicine_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if mid not in only_here:
+            continue
+        line = _get_unit_value(it)
+        if not line or not is_strip_count_type(str(it.get("type") or "")):
+            continue
+        held = pack_by_med.get(mid)
+        pack_by_med[mid] = _batch_row_pack(held, line, it.get("type")) if held else line
+    for mid, pack in pack_by_med.items():
+        cur.execute(
+            "UPDATE medicines SET unit=? WHERE id=? AND COALESCE(unit,'') <> ?",
+            (pack, mid, pack),
+        )
+
+
+def _line_medicine_attrs(item: dict) -> dict[str, Any]:
+    """What a purchase line says about its batch: MRP, rate, GST, expiry and the rest.
+
+    Only what the line actually carries: an MRP or rate of 0 is "not typed", a blank text field
+    is left alone. GST is taken when the line has one at all (0% is a real rate).
+    """
+    keep: dict[str, Any] = {}
+    for key in ("mrp", "rate"):
+        try:
+            val = float(item.get(key) or 0)
+        except (TypeError, ValueError):
+            val = 0.0
+        if val > 0:
+            keep[key] = val
+    gst = item.get("gst_pct", item.get("gst_percent", item.get("gst_value")))
+    if gst not in (None, ""):
+        try:
+            keep["gst_percent"] = float(gst)
+        except (TypeError, ValueError):
+            pass
+    exp = _expiry_db(item.get("expiry") or item.get("expiry_date"))
+    if exp:
+        keep["expiry_date"] = exp
+    for key in ("type", "manufacturer", "hsn_code", "schedule", "content_drug"):
+        val_s = str(item.get(key) or "").strip()
+        if val_s:
+            keep[key] = val_s
+    return keep
+
+
+def _line_onto_medicine_row(cur, medicine_id: int, item: dict) -> None:
+    """Offline / offline-first: the line's MRP, rate, GST, expiry ... onto its batch row.
+
+    A line that came with its medicine_id (every line of a purchase opened for edit, and a new
+    line picked from the batch list) was matched by id and returned before the batch row was
+    touched, so the bill changed and the Sales screen kept the old MRP / rate / expiry (owner,
+    23 Oct 2026, v1.0.11 offline-first). Online sends the same fields with the edit
+    (update_purchase_online_now). Pack and stock are _insert_items' business.
+    """
+    keep = _line_medicine_attrs(item)
+    if not keep:
+        return
+    have = {str(r[1]) for r in cur.execute("PRAGMA table_info(medicines)").fetchall()}
+    keep = {k: v for k, v in keep.items() if k in have}
+    if not keep:
+        return
+    cur.execute(
+        "UPDATE medicines SET " + ", ".join(f"{k}=?" for k in keep) + " WHERE id=?",
+        (*keep.values(), int(medicine_id)),
+    )
+
+
 def _resolve_purchase_item_medicine_id(conn, item: dict) -> int:
     """
     Match purchase line to medicines row (name + batch + expiry).
@@ -3535,6 +3646,7 @@ def _resolve_purchase_item_medicine_id(conn, item: dict) -> int:
                         {"name": row[0], "batch_no": row[1]}, name, batch
                     ):
                         item["medicine_id"] = existing_id
+                        _line_onto_medicine_row(cur, existing_id, item)
                         return existing_id
                 existing_id = 0
                 item.pop("medicine_id", None)

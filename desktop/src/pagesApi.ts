@@ -1724,10 +1724,16 @@ export function deleteSalesBill(sale_id: number) {
 }
 
 export function deletePurchaseBill(purchase_id: number) {
+  // The deleted bill's stock leaves its batches: Sales, Inventory and Purchase reload now.
   return postJson<{ ok: boolean; error?: string; purchase_id?: number; code?: string }>(
     '/api/purchase/history/delete',
     { purchase_id },
-  )
+  ).then((res) => {
+    if (res?.ok !== false) {
+      dispatchDataChanged(['medicines', 'purchases', 'suppliers'])
+    }
+    return res
+  })
 }
 
 export type PrintAllCandidate = {
