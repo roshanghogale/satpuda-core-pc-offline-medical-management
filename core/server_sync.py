@@ -540,6 +540,34 @@ def _build_sales_docs(conn, ids=None) -> list[dict]:
     return docs
 
 
+def _purchase_line_pack(ir: dict) -> dict:
+    """unit / tablets_per_stripe of a stored purchase line, for the server's purchase_items.
+
+    The PC keeps a line's pack as stock_units (what it stocked); the batch's unit is the
+    fallback. Sent without them, the server filled every line from the batch row, so an
+    offline-first edit that corrected Tabs/Strip went up with no pack (store 148, 23 Oct 2026).
+    """
+    from core.layout_config import is_strip_count_type, parse_tablets_per_stripe
+    from core.purchase_service import line_pack_from_units
+
+    med_type = ir.get("type") or ir.get("med_type") or ""
+    fallback = str(ir.get("med_unit") or "").strip()
+    pack = line_pack_from_units(
+        med_type, ir.get("qty"), ir.get("free_qty"), ir.get("stock_units"), fallback
+    )
+    if not pack:
+        return {}
+    out = {"unit": pack, "quantity_value": pack}
+    if is_strip_count_type(str(med_type)):
+        try:
+            tps = int(parse_tablets_per_stripe(pack))
+        except Exception:
+            tps = 0
+        if tps > 0:
+            out["tablets_per_stripe"] = tps
+    return out
+
+
 def _build_purchases_docs(conn, ids=None) -> list[dict]:
     """Bulk purchases + items + suppliers."""
     from core.server_entity_sync import _line_medicine_id, _sanitize_server_doc, _sync_meta_fields_from_row
@@ -567,6 +595,8 @@ def _build_purchases_docs(conn, ids=None) -> list[dict]:
         _pi_cols = set()
     _extra = [f"pi.{c}" for c in ("schedule", "hsn_code", "manufacturer", "rate_a", "rate_b", "rate_c")
               if c in _pi_cols]
+    if "stock_units" in _pi_cols:
+        _extra.append("pi.stock_units")
     _extra_sql = ("," + ", ".join(_extra)) if _extra else ""
 
     for i in range(0, len(purchase_ids), 800):
@@ -582,7 +612,9 @@ def _build_purchases_docs(conn, ids=None) -> list[dict]:
                 m.name AS med_name,
                 m.schedule AS med_schedule,
                 m.hsn_code AS med_hsn_code,
-                m.manufacturer AS med_manufacturer
+                m.manufacturer AS med_manufacturer,
+                m.unit AS med_unit,
+                m.type AS med_type
             FROM purchase_items pi
             LEFT JOIN medicines m ON pi.medicine_id = m.id
             WHERE pi.purchase_id IN ({placeholders})
@@ -612,6 +644,7 @@ def _build_purchases_docs(conn, ids=None) -> list[dict]:
                     "manufacturer": ir.get("manufacturer") or ir.get("med_manufacturer"),
                     "item_amount": ir.get("item_amount", 0),
                     **_ws_doc_fields("purchase_items", ir),
+                    **_purchase_line_pack(ir),
                 }
             )
 

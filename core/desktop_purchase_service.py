@@ -905,8 +905,10 @@ def load_purchase(conn, purchase_id: int) -> dict[str, Any]:
     if method not in ("discount_before_gst", "discount_after_gst"):
         method = "discount_before_gst"
 
+    from core.purchase_service import line_pack_from_units
     from core.wholesale_rates import rate_select_sql
 
+    _pi_cols = {str(r[1]) for r in cur.execute("PRAGMA table_info(purchase_items)").fetchall()}
     cur.execute(
         """
         SELECT pi.medicine_id, m.name, pi.type, pi.batch_no, pi.expiry_date,
@@ -921,6 +923,7 @@ def load_purchase(conn, purchase_id: int) -> dict[str, Any]:
                COALESCE(pi.taxable, 0),
                COALESCE(pi.gst_amt, 0)"""
         + rate_select_sql(conn, "pi")
+        + (", pi.stock_units" if "stock_units" in _pi_cols else ", NULL")
         + """
         FROM purchase_items pi JOIN medicines m ON pi.medicine_id=m.id
         WHERE pi.purchase_id=?
@@ -932,7 +935,9 @@ def load_purchase(conn, purchase_id: int) -> dict[str, Any]:
         med_type = row[2] or ""
         qty = float(row[5] or 0)
         free_qty = float(row[6] or 0)
-        unit = row[16] or ""
+        # The line's own pack (what it stocked / its strips), not the batch's: a line bought
+        # loose on a strip-of-10 batch, or a mistyped Tabs/Strip, shows as it was saved.
+        unit = line_pack_from_units(med_type, qty, free_qty, row[22], row[16] or "")
         item = {
             "medicine_id": row[0],
             "id": row[0],
