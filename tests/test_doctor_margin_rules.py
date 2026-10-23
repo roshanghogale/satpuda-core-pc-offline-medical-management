@@ -332,6 +332,35 @@ class SavedLines(unittest.TestCase):
         self.assertEqual(rep["totals"]["value"], 6.0)  # Rs 2 x 3 with today's rules
         self.assertEqual(self.saved(sid)[0][5], 6.0)
 
+    def test_recalculate_leaves_a_marker_for_the_server(self):
+        """The server's report (web, phone) follows a period recalculated here."""
+        import json
+
+        from core.desktop_settings_service import _setting_get
+
+        self.assertEqual(_setting_get(self.conn, dmr.RECALC_SETTING, ""), "")
+        rr.build_report(self.conn, {"from": FROM, "to": TO})  # opening the report: no marker
+        self.assertEqual(_setting_get(self.conn, dmr.RECALC_SETTING, ""), "")
+        rules = dmr.load_rules(self.conn)
+        rr.build_report(self.conn, {"from": FROM, "to": TO, "recalculate": True})
+        rr.build_report(self.conn, {"from": "2026-10-01", "to": "2026-10-05", "recalculate": True})
+        data = json.loads(_setting_get(self.conn, dmr.RECALC_SETTING, ""))
+        self.assertEqual(data["version"], 1)
+        self.assertEqual([(r["from"], r["to"]) for r in data["runs"]], [(FROM, TO), ("2026-10-01", "2026-10-05")])
+        self.assertEqual({r["rules_updated"] for r in data["runs"]}, {rules["updated"]})
+        self.assertTrue(all(len(r["at"]) == 19 for r in data["runs"]))
+        # only the last RECALC_KEEP runs are kept
+        with mock.patch.object(dmr, "RECALC_KEEP", 2):
+            rr.build_report(self.conn, {"from": TO, "to": TO, "recalculate": True})
+        data = json.loads(_setting_get(self.conn, dmr.RECALC_SETTING, ""))
+        self.assertEqual([r["from"] for r in data["runs"]], ["2026-10-01", TO])
+        # it travels with the shop settings (offline-first triggers, mode switch carry)
+        from core import store_kv_carry
+        from core.offline_first import schema
+
+        self.assertIn(dmr.RECALC_SETTING, schema.SHOP_WIDE_SETTING_NAMES)
+        self.assertTrue(store_kv_carry._carried(dmr.RECALC_SETTING))
+
     def test_report_fills_bills_that_arrived_by_sync(self):
         a = self.sale("Dr A", [(self.zifi, 2)])  # saved on another device: no hook ran here
         b = self.sale("Dr B", [(self.lyc, 1), (self.syr, 2)], bill="S2")
@@ -412,7 +441,8 @@ class SavedLines(unittest.TestCase):
         self.assertTrue(store_kv_carry._carried(dmr.SETTING_NAME))
         schema.ensure_schema(self.conn)
         names = {r[0] for r in self.conn.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
-        self.assertIn("of_insert_settings_v6", names)
+        self.assertIn("of_insert_settings_v7", names)
+        self.assertNotIn("of_insert_settings_v6", names)
         self.assertNotIn("of_insert_settings_v4", names)
         self.assertEqual(dmr.load_rules(self.conn)["rate_basis"], "purchase_free")
         # the saved lines are this PC's working copy: no sync trigger on them
