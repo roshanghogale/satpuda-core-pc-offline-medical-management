@@ -179,12 +179,25 @@ export type SyncStatusResponse = {
   store_link_error?: string
   refresh_seq?: number
   refresh_collections?: string[]
+  /** This PC on the LAN (core/lan): role, and on a Counter PC whether the Main PC answers. */
+  lan?: LanBrief
   snapshot?: {
     last_sync_at?: string | null
     pending_count?: number
     skip_count?: number
     errors?: string[]
   }
+}
+
+export type LanBrief = {
+  role: 'off' | 'main' | 'counter' | string
+  main_reachable?: boolean
+  paired?: boolean
+  main_name?: string
+  counters_connected?: number
+  counters?: number
+  /** A sentence for the top of the screen ("" when all is well). */
+  banner?: string
 }
 
 export function fetchSyncStatus() {

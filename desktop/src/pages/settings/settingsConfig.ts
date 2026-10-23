@@ -152,6 +152,7 @@ export const SETTINGS_TABS: TabDef[] = [
     layout: 'sections',
     sections: [
       { id: 'stores', label: 'Stores & Startup Alerts' },
+      { id: 'lan', label: 'This PC on the LAN' },
       { id: 'export', label: 'Export Data' },
       { id: 'maintenance', label: 'Data Maintenance' },
       { id: 'backup', label: 'Google Drive Backup' },

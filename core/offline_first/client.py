@@ -50,6 +50,12 @@ def push(events: list[dict]) -> dict:
     return _call("POST", "/api/sync/v2/push", {"install_id": install_id(), "events": events}, timeout=180.0)
 
 
+def push_as(install: str, events: list[dict]) -> dict:
+    """A Main PC on the LAN sending a counter's handed-over events under the counter's own
+    device id (core/lan/bridge.py). The server keeps one copy of each event, whoever brings it."""
+    return _call("POST", "/api/sync/v2/push", {"install_id": str(install), "events": events}, timeout=180.0)
+
+
 def status() -> dict:
     from urllib.parse import quote
 

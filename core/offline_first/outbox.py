@@ -221,7 +221,17 @@ def pending_stock_by_medicine(conn: sqlite3.Connection) -> dict[int, int]:
         "WHERE event_seq IS NULL OR event_seq IN (SELECT seq FROM of_events WHERE status='pending') "
         "GROUP BY medicine_id"
     ).fetchall()
-    return {int(m): int(d or 0) for m, d in rows}
+    out = {int(m): int(d or 0) for m, d in rows}
+    # A Main PC on the LAN: what its counters handed over and the server does not have yet is
+    # in this copy's stock too (core/lan/bridge.py).
+    try:
+        from core.lan.bridge import pending_relay_stock
+
+        for mid, delta in pending_relay_stock(conn).items():
+            out[mid] = out.get(mid, 0) + delta
+    except Exception:
+        pass
+    return out
 
 
 def counts(conn: sqlite3.Connection) -> dict:

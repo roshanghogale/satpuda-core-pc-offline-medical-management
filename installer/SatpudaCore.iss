@@ -320,6 +320,19 @@ var
   GPrePage        : TWizardPage;   { after the shop page; see CreateTestVersionPage }
   GPreCheck       : TNewCheckBox;
   GPreNote        : TNewStaticText;
+
+  { This PC on the LAN (core/lan): Single PC / Main PC / Counter PC. A new
+    install only; written to lan_config.json, the file the app's own Settings
+    screen (Data & System > This PC on the LAN) writes. }
+  GLanPage        : TWizardPage;
+  GLanSingle      : TNewRadioButton;
+  GLanMain        : TNewRadioButton;
+  GLanCounter     : TNewRadioButton;
+  GLanHostLbl     : TNewStaticText;
+  GLanHostEdit    : TNewEdit;
+  GLanCodeLbl     : TNewStaticText;
+  GLanCodeEdit    : TNewEdit;
+  GLanRole        : String;    { 'off', 'main' or 'counter' }
   GMaintTest      : TNewRadioButton;
   GMaintTestNote  : TNewStaticText;
   GMaintAdminBtn  : TNewButton;
@@ -3342,6 +3355,187 @@ begin
   Result := (V = '1') or (V = 'yes') or (V = 'true');
 end;
 
+{ ======================================================================== }
+{  This PC on the LAN - Single PC / Main PC / Counter PC  (core/lan)        }
+{                                                                           }
+{  Two or more PCs of one shop on one LAN cable / switch work on the same   }
+{  data at once, without internet. One is the Main PC, the others Counter   }
+{  PCs. Asked on a NEW install only, after the shop page; Single PC (the    }
+{  default) writes nothing and the app behaves exactly as before.           }
+{                                                                           }
+{  The answer goes into %LOCALAPPDATA%\VeterinaryApp\lan_config.json - the  }
+{  file Settings > Data & System > This PC on the LAN writes. A Counter PC  }
+{  carries the Main PC's 6-digit pairing code there as pending_code; the    }
+{  app pairs with it on its first start (finding the Main PC on the LAN     }
+{  when no address was typed) and then forgets the code. A Main PC gets    }
+{  the Windows Firewall rules (LAN only), through one Windows prompt.       }
+{ ======================================================================== }
+
+const
+  LAN_PORT      = 8775;
+  LAN_FIND_PORT = 8776;
+
+procedure LanRoleClick(Sender: TObject);
+var
+  Show: Boolean;
+begin
+  Show := GLanCounter.Checked;
+  GLanHostLbl.Visible  := Show;
+  GLanHostEdit.Visible := Show;
+  GLanCodeLbl.Visible  := Show;
+  GLanCodeEdit.Visible := Show;
+end;
+
+procedure CreateLanPage;
+var
+  Lbl: TNewStaticText;
+  Y: Integer;
+begin
+  GLanPage := CreateCustomPage(GPrePage.ID,
+    'This PC on the LAN',
+    'Only for a shop with two or more PCs joined by a LAN cable or switch.');
+
+  Y := 0;
+  Y := LayoutLabel(GLanPage, Lbl, 'This PC is:', Y, 0, 4, True);
+
+  GLanSingle := TNewRadioButton.Create(GLanPage);
+  GLanSingle.Parent  := GLanPage.Surface;
+  GLanSingle.Left    := 0;
+  GLanSingle.Top     := Y;
+  GLanSingle.Width   := GLanPage.SurfaceWidth;
+  GLanSingle.Height  := ScaleY(17);
+  GLanSingle.Caption := 'Single PC  -  the only PC of this shop (most shops)';
+  GLanSingle.Checked := True;
+  GLanSingle.OnClick := @LanRoleClick;
+  Y := Y + GLanSingle.Height + ScaleY(6);
+
+  GLanMain := TNewRadioButton.Create(GLanPage);
+  GLanMain.Parent  := GLanPage.Surface;
+  GLanMain.Left    := 0;
+  GLanMain.Top     := Y;
+  GLanMain.Width   := GLanPage.SurfaceWidth;
+  GLanMain.Height  := ScaleY(17);
+  GLanMain.Caption := 'Main PC  -  the other PCs of the shop connect to this one';
+  GLanMain.OnClick := @LanRoleClick;
+  Y := Y + GLanMain.Height + ScaleY(2);
+  Y := LayoutLabel(GLanPage, Lbl,
+         'Keep it on while the shop works. Its pairing code is in Settings > Data & System > ' +
+         'This PC on the LAN. Windows may ask once to allow it on the LAN.', Y, 16, 8, False);
+
+  GLanCounter := TNewRadioButton.Create(GLanPage);
+  GLanCounter.Parent  := GLanPage.Surface;
+  GLanCounter.Left    := 0;
+  GLanCounter.Top     := Y;
+  GLanCounter.Width   := GLanPage.SurfaceWidth;
+  GLanCounter.Height  := ScaleY(17);
+  GLanCounter.Caption := 'Counter PC  -  works on the Main PC''s data, prints on its own printer';
+  GLanCounter.OnClick := @LanRoleClick;
+  Y := Y + GLanCounter.Height + ScaleY(6);
+
+  Y := LayoutLabel(GLanPage, GLanCodeLbl,
+         'Pairing code shown on the Main PC (6 digits):', Y, 16, 2, False);
+  GLanCodeEdit := TNewEdit.Create(GLanPage);
+  GLanCodeEdit.Parent    := GLanPage.Surface;
+  GLanCodeEdit.Left      := ScaleX(16);
+  GLanCodeEdit.Top       := Y;
+  GLanCodeEdit.Width     := ScaleX(90);
+  GLanCodeEdit.Height    := ScaleY(23);
+  GLanCodeEdit.MaxLength := 6;
+  Y := Y + GLanCodeEdit.Height + ScaleY(6);
+
+  Y := LayoutLabel(GLanPage, GLanHostLbl,
+         'Main PC address (optional - leave empty to find it on the LAN):', Y, 16, 2, False);
+  GLanHostEdit := TNewEdit.Create(GLanPage);
+  GLanHostEdit.Parent := GLanPage.Surface;
+  GLanHostEdit.Left   := ScaleX(16);
+  GLanHostEdit.Top    := Y;
+  GLanHostEdit.Width  := ScaleX(200);
+  GLanHostEdit.Height := ScaleY(23);
+
+  GLanRole := 'off';
+  LanRoleClick(nil);
+end;
+
+function LanDigitsOnly(const S: String): String;
+var
+  I: Integer;
+begin
+  Result := '';
+  for I := 1 to Length(S) do
+    if (S[I] >= '0') and (S[I] <= '9') then
+      Result := Result + S[I];
+end;
+
+{ The Main PC's address as typed: "192.168.1.10" or "192.168.1.10:8775". }
+procedure SplitLanHost(const S: String; var Host: String; var Port: Integer);
+var
+  P: Integer;
+begin
+  Host := Trim(S);
+  Port := LAN_PORT;
+  P := Pos(':', Host);
+  if P > 0 then
+  begin
+    Port := StrToIntDef(Copy(Host, P + 1, 5), LAN_PORT);
+    Host := Copy(Host, 1, P - 1);
+  end;
+end;
+
+procedure WriteLanConfigFile;
+var
+  Lines: TArrayOfString;
+  Dir, Path, Host: String;
+  Port: Integer;
+begin
+  if (GLanRole <> 'main') and (GLanRole <> 'counter') then
+    Exit;
+  SetArrayLength(Lines, 1);
+  if GLanRole = 'main' then
+    Lines[0] := '{"role": "main", "port": ' + IntToStr(LAN_PORT) +
+                ', "discovery_port": ' + IntToStr(LAN_FIND_PORT) + '}'
+  else
+  begin
+    SplitLanHost(GLanHostEdit.Text, Host, Port);
+    Lines[0] := '{"role": "counter", "port": ' + IntToStr(LAN_PORT) +
+                ', "discovery_port": ' + IntToStr(LAN_FIND_PORT) +
+                ', "counter": {"main_host": "' + JsonEscape(Host) +
+                '", "main_port": ' + IntToStr(Port) +
+                ', "pending_code": "' + LanDigitsOnly(GLanCodeEdit.Text) + '"}}';
+  end;
+  Dir := AppDataDir;
+  if ForceDirectories(Dir) then
+  begin
+    Path := AddBackslash(Dir) + 'lan_config.json';
+    if not SaveStringsToUTF8File(Path, Lines, False) then
+      Log('could not write ' + Path);
+  end
+  else
+    Log('could not create ' + Dir);
+end;
+
+{ The Main PC's two firewall rules, LAN only, through ONE Windows prompt (the
+  install itself needs no administrator). Refused or cancelled: the app's
+  Settings screen offers the same button, and Windows' own "Allow access" box
+  appears the first time the Main PC listens. }
+procedure OpenLanFirewall;
+var
+  Rc: Integer;
+  Cmd: String;
+begin
+  if GLanRole <> 'main' then
+    Exit;
+  Cmd := '/c netsh advfirewall firewall delete rule name="Satpuda Core LAN (Main PC)"' +
+         ' & netsh advfirewall firewall delete rule name="Satpuda Core LAN (find Main PC)"' +
+         ' & netsh advfirewall firewall add rule name="Satpuda Core LAN (Main PC)" dir=in action=allow' +
+         ' protocol=TCP localport=' + IntToStr(LAN_PORT) + ' remoteip=localsubnet profile=any' +
+         ' & netsh advfirewall firewall add rule name="Satpuda Core LAN (find Main PC)" dir=in action=allow' +
+         ' protocol=UDP localport=' + IntToStr(LAN_FIND_PORT) + ' remoteip=localsubnet profile=any';
+  if not ShellExec('runas', ExpandConstant('{cmd}'), Cmd, '', SW_HIDE, ewWaitUntilTerminated, Rc) then
+    Log('LAN firewall rules not added (prompt refused or failed): ' + SysErrorMessage(Rc))
+  else
+    Log('LAN firewall rules added, exit code ' + IntToStr(Rc));
+end;
+
 procedure InitializeWizard;
 var
   Lbl: TNewStaticText;
@@ -3412,6 +3606,7 @@ begin
   CreateMaintenancePage;
   CreateSetupQuestionsPage;
   CreateTestVersionPage;
+  CreateLanPage;
 
   { Created here rather than inside PrepareToInstall: Inno's own documentation
     asks for wizard pages to be made in InitializeWizard, and it lets the Stop
@@ -3467,6 +3662,11 @@ begin
     otherwise the maintenance page made the choice. }
   if (GPrePage <> nil) and (PageID = GPrePage.ID) then
     Result := (not GAdminUnlocked) or (GPreTag = '') or ForbidStoreChoice or GHaveInstall;
+
+  { This PC on the LAN: a new install only. An update or a repair keeps what
+    Settings already says. }
+  if (GLanPage <> nil) and (PageID = GLanPage.ID) then
+    Result := GHaveInstall;
 
   { Update and repair go back into the folder the program is already in.
     Offering to move it there would only create a second copy. }
@@ -3554,6 +3754,31 @@ begin
   begin
     ApplyTestChoice(GPreCheck.Checked, 'on the test version page');
     ShowResolvedVersionInTitle;
+    Exit;
+  end;
+
+  { This PC on the LAN. A Counter PC needs the Main PC's pairing code; the
+    address may be left empty (the app finds the Main PC on the LAN). }
+  if (GLanPage <> nil) and (CurPageID = GLanPage.ID) then
+  begin
+    if GLanMain.Checked then
+      GLanRole := 'main'
+    else if GLanCounter.Checked then
+    begin
+      if Length(LanDigitsOnly(GLanCodeEdit.Text)) <> 6 then
+      begin
+        MsgBox('Type the 6-digit pairing code shown on the Main PC.' + #13#10#13#10 +
+               'On the Main PC: Satpuda > Settings > Data & System > This PC on the LAN. ' +
+               'Or pick Single PC now and pair later from that same screen on this PC.',
+               mbError, MB_OK);
+        WizardForm.ActiveControl := GLanCodeEdit;
+        Result := False;
+        Exit;
+      end;
+      GLanRole := 'counter';
+    end
+    else
+      GLanRole := 'off';
     Exit;
   end;
 
@@ -3656,6 +3881,10 @@ begin
     { The two answers, handed to the app. Written only after the download has
       succeeded: an install that failed leaves no file to act on. }
     WriteProvisionFile;
+
+    { This PC on the LAN (new installs that chose Main PC or Counter PC). }
+    WriteLanConfigFile;
+    OpenLanFirewall;
 
     { ---- The saved server address -------------------------------------
       Here, and only here, because ssPostInstall is the ONE step that a first

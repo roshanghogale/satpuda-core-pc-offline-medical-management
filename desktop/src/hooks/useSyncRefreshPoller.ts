@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { fetchSyncStatus } from '../api'
+import { fetchSyncStatus, type LanBrief } from '../api'
 import type { PageId } from '../keyboard'
 import {
   pageAffectedBySync,
@@ -8,6 +8,8 @@ import {
 } from '../syncRefresh'
 
 const POLL_MS = 10000
+/** A Main PC or Counter PC on the LAN (core/lan): a sale on the other PC shows within ~1.5 s. */
+const LAN_POLL_MS = 1500
 const DEBOUNCE_MS = 400
 
 /** Poll sync status (fed by DataChangeBus → note_collection_change) and bump refresh nonce. */
@@ -22,6 +24,8 @@ export function useSyncRefreshPoller(opts: {
   onCatalogError?: (message: string) => void
   /** Called every poll with the store-link failure ("" when fine). */
   onStoreLinkError?: (message: string) => void
+  /** Called every poll with this PC's place on the LAN (role, banner). */
+  onLan?: (lan: LanBrief | null) => void
 }) {
   const { enabled, page, online } = opts
   const offlineFirst = Boolean(opts.offlineFirst)
@@ -34,6 +38,10 @@ export function useSyncRefreshPoller(opts: {
   onCatalogErrorRef.current = opts.onCatalogError
   const onStoreLinkErrorRef = useRef(opts.onStoreLinkError)
   onStoreLinkErrorRef.current = opts.onStoreLinkError
+  const onLanRef = useRef(opts.onLan)
+  onLanRef.current = opts.onLan
+  // On the LAN (Main PC / Counter PC) the poll runs every 1.5 s instead of 10 s.
+  const lanFastRef = useRef(false)
   const [syncRefreshNonce, setSyncRefreshNonce] = useState(0)
   const pendingColsRef = useRef(new Set<string>())
   const debounceRef = useRef<number | null>(null)
@@ -79,9 +87,13 @@ export function useSyncRefreshPoller(opts: {
         onStatusLineRef.current?.(s.status_line || '')
         onCatalogErrorRef.current?.(s.catalog_error || '')
         onStoreLinkErrorRef.current?.(s.store_link_error || '')
+        const lan = s.lan || null
+        lanFastRef.current = Boolean(lan && lan.role && lan.role !== 'off')
+        onLanRef.current?.(lan)
         // Online: the server's hints. Offline-first: what the background sync pulled in from
-        // other devices (core/offline_first/worker.py notes it). Plain Offline: nothing comes in.
-        if (!online && !offlineFirst) return
+        // other devices (core/offline_first/worker.py notes it). On the LAN: what the other
+        // PCs saved (core/lan/hints.py). Plain Offline: nothing comes in.
+        if (!online && !offlineFirst && !lanFastRef.current) return
         const cols = (s.refresh_collections || []).filter(Boolean)
         if (!cols.length) return
         // 'all' still remounts, but empty/no-op polls no longer emit it from sync_engine.
@@ -109,12 +121,17 @@ export function useSyncRefreshPoller(opts: {
     window.addEventListener(PAYMENTS_CHANGED_EVENT, onPaymentsChanged)
     window.addEventListener(DATA_CHANGED_EVENT, onDataChanged)
 
-    void poll()
     const intervalMs = online || offlineFirst ? POLL_MS : 15000
-    const timer = window.setInterval(poll, intervalMs)
+    let timer: number | null = null
+    const loop = async () => {
+      await poll()
+      if (cancelled) return
+      timer = window.setTimeout(loop, lanFastRef.current ? LAN_POLL_MS : intervalMs)
+    }
+    void loop()
     return () => {
       cancelled = true
-      window.clearInterval(timer)
+      if (timer != null) window.clearTimeout(timer)
       window.removeEventListener(PAYMENTS_CHANGED_EVENT, onPaymentsChanged)
       window.removeEventListener(DATA_CHANGED_EVENT, onDataChanged)
       if (debounceRef.current != null) {
