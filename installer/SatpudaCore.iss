@@ -33,7 +33,7 @@
 ; ============================================================================
 
 #define MyAppName        "Satpuda Core"
-#define MyAppVersion     "1.0.10"
+#define MyAppVersion     "1.0.11"
 #define MyAppPublisher   "Satpuda"
 #define MyAppExeName     "SatpudaCore_Desktop.exe"
 #define MyEngineExeName  "SatpudaEngine.exe"
@@ -348,6 +348,8 @@ var
   GInstalledTag   : String;    { payload tag on disk, '' when unknown }
   GInstalledWhen  : String;    { date from the payload marker, '' when unknown }
   GLatestTag      : String;    { newest tag on GitHub, '' when the check failed }
+  GLatestSha      : String;    { sha256 in that release's .sha256 sidecar, '' when unknown }
+  GInstalledSha   : String;    { sha256 recorded in the payload marker, '' when not recorded }
   GTargetTag      : String;    { release this run installs; '' until ResolveTargetTag }
   GMaintPage      : TWizardPage;
   GMaintUpdate    : TNewRadioButton;
@@ -471,6 +473,57 @@ begin
   Q2 := Pos('"', S);
   if Q2 = 0 then Exit;
   Result := Copy(Trim(Copy(S, 1, Q2 - 1)), 1, 10);   { just the date part }
+end;
+
+{ Is S exactly 64 hex digits? Anything else read from a file or from GitHub is
+  treated as "no checksum". }
+function IsSha256Hex(const S: String): Boolean;
+var
+  I: Integer;
+  C: Char;
+begin
+  Result := (Length(S) = 64);
+  if not Result then Exit;
+  for I := 1 to 64 do
+  begin
+    C := S[I];
+    if not (((C >= '0') and (C <= '9')) or ((C >= 'a') and (C <= 'f')) or
+            ((C >= 'A') and (C <= 'F'))) then
+    begin
+      Result := False;
+      Exit;
+    end;
+  end;
+end;
+
+{ "sha256": "<64 hex>" out of the marker: the build that is on the disk. The
+  key is matched WITH its closing quote, so "sha256Verified" is not mistaken
+  for it. '' for a marker written before builds were recorded, or for one
+  whose value is empty or not a hash. }
+function ShaFromMarker(const MarkerPath: String): String;
+var
+  Raw: AnsiString;
+  S: String;
+  P, Q1, Q2: Integer;
+begin
+  Result := '';
+  if not FileExists(MarkerPath) then Exit;
+  if not LoadStringFromFile(MarkerPath, Raw) then Exit;
+  S := Raw;
+  P := Pos('"sha256"', S);
+  if P = 0 then Exit;
+  S := Copy(S, P + 8, Length(S));
+  P := Pos(':', S);
+  if P = 0 then Exit;
+  S := Copy(S, P + 1, Length(S));
+  Q1 := Pos('"', S);
+  if Q1 = 0 then Exit;
+  S := Copy(S, Q1 + 1, Length(S));
+  Q2 := Pos('"', S);
+  if Q2 = 0 then Exit;
+  S := LowerCase(Trim(Copy(S, 1, Q2 - 1)));
+  if IsSha256Hex(S) then
+    Result := S;
 end;
 
 { 'v1.0.10' vs '1.0.9' -> compares numerically, per component, tolerant of a
@@ -763,10 +816,15 @@ begin
   GHaveInstall   := (GInstalledPath <> '');
   GInstalledTag  := '';
   GInstalledWhen := '';
+  GInstalledSha  := '';
   if not GHaveInstall then Exit;
 
   GInstalledTag  := TagFromMarker(AddBackslash(GInstalledPath) + 'app\.satpuda-install.json');
   GInstalledWhen := DateFromMarker(AddBackslash(GInstalledPath) + 'app\.satpuda-install.json');
+  { Only meaningful next to the marker's own tag; a tag found in the registry
+    below says nothing about which build of it is on the disk. }
+  if GInstalledTag <> '' then
+    GInstalledSha := ShaFromMarker(AddBackslash(GInstalledPath) + 'app\.satpuda-install.json');
 
   if GInstalledTag = '' then
     if RegQueryStringValue(HKCU, 'Software\Satpuda\SatpudaCore', 'Tag', S) then
@@ -780,7 +838,7 @@ begin
     if GetVersionNumbersString(Exe, S) then
       GInstalledTag := S;
   end;
-  Log('detected install at ' + GInstalledPath + ', version "' + GInstalledTag + '"');
+  Log('detected install at ' + GInstalledPath + ', version "' + GInstalledTag + '", build sha256 "' + GInstalledSha + '"');
 end;
 
 { Shown wherever a version belongs. Never blank: if we genuinely cannot tell,
@@ -1988,9 +2046,17 @@ begin
       'The published zip has probably changed shape. Nothing on this computer was altered. ' +
       'Please tell Roshan, and mention version ' + TargetTag + '.'
   else if (Code = 'GONE') or (Code = 'NOASSET') then
+    { Only after the worker has waited about three minutes for it: a new build
+      being put into the same release takes the file away for a minute or so. }
     Result :=
-      'The Satpuda Core download is no longer on the release page.' + #13#10#13#10 +
-      'Nothing on this computer was altered. Please tell Roshan that {#MyAssetName} is missing from release ' + TargetTag + '.'
+      'The Satpuda Core download is not on the release page, even after waiting a few minutes for it.' + #13#10#13#10 +
+      'Nothing on this computer was altered. If a new version is being published right now, run this ' +
+      'installer again in ten minutes. If it still fails, please tell Roshan that {#MyAssetName} is ' +
+      'missing from release ' + TargetTag + '.'
+  else if Code = 'CHANGED' then
+    Result :=
+      'A new build of Satpuda Core was being published on GitHub while this computer was downloading it.' + #13#10#13#10 +
+      'Nothing on this computer was altered. Wait ten minutes, then run this installer again.'
   else if Code = 'FORBID' then
     Result :=
       'GitHub refused to hand over the download.' + #13#10#13#10 +
@@ -2589,13 +2655,40 @@ begin
 end;
 
 { Is the release this run will install newer than what is on the disk? }
-function UpdateIsAvailable: Boolean;
+function NewerVersionAvailable: Boolean;
 begin
   { NormalTag, not TargetTag: "Update" is always the normal release; the test
     version is its own choice. ComparePreTags answers exactly as CompareTags
     for two plain tags, and also sees v1.1.0 as newer than v1.1.0-beta.9. }
   Result := GHaveInstall and (GInstalledTag <> '') and
             (ComparePreTags(NormalTag, GInstalledTag) > 0);
+end;
+
+{ SAME TAG, NEW BUILD. The owner publishes new builds into the same release
+  tag, so "the installed tag is the newest tag" no longer means "nothing to
+  do". When GitHub's latest release IS the version on the disk, its .sha256
+  (GLatestSha, from -CheckOnly) is compared with the sha256 the worker
+  recorded in the marker. Different - or nothing recorded, which is every
+  install made before builds were recorded - means a newer build may be
+  there, and the normal Update path (same tag) is offered.
+
+  Only for the NORMAL release: GLatestSha belongs to releases/latest, and
+  NormalTag must be that very tag. Unknown on GitHub's side (offline, no
+  sidecar, sidecar mid-replacement) offers nothing - the page then says what
+  it always said. }
+function NewerBuildAvailable: Boolean;
+begin
+  Result := GHaveInstall and (GInstalledTag <> '') and
+            (GLatestSha <> '') and IsPlainTag(GLatestTag) and
+            (CompareText(NormalTag, GLatestTag) = 0) and
+            (ComparePreTags(NormalTag, GInstalledTag) = 0) and
+            (not IsPreReleaseTag(GInstalledTag)) and
+            (CompareText(GInstalledSha, GLatestSha) <> 0);
+end;
+
+function UpdateIsAvailable: Boolean;
+begin
+  Result := NewerVersionAvailable or NewerBuildAvailable;
 end;
 
 { The text after "Key" up to the end of its line, trimmed. }
@@ -2670,6 +2763,12 @@ begin
     GPreTag := '';
   end;
   Log('newest pre-release on GitHub: "' + GPreTag + '"');
+  { SHA|<64 hex> - the checksum of the latest release's zip. A worker from an
+    older installer does not print the line, and that reads as "unknown". }
+  GLatestSha := LowerCase(LineValue(S, 'SHA|'));
+  if not IsSha256Hex(GLatestSha) then
+    GLatestSha := '';
+  Log('latest build on GitHub: sha256 "' + GLatestSha + '"');
 end;
 
 { Put the version that is really going to be installed at the top of the
@@ -3120,8 +3219,15 @@ begin
     S := S + '        (installed ' + GInstalledWhen + ')';
   S := S + #13#10 + '      Folder:   ' + GInstalledPath + #13#10#13#10;
 
-  if UpdateIsAvailable then
+  if NewerVersionAvailable then
     S := S + 'A newer version is available: ' + NormalTag + '.'
+  else if NewerBuildAvailable and (GInstalledSha = '') then
+    S := S + 'A newer build of ' + NormalTag + ' may have been published since this one was ' +
+             'installed (same version number, new files). Update brings this computer to the ' +
+             'newest build.'
+  else if NewerBuildAvailable then
+    S := S + 'A newer build of ' + NormalTag + ' has been published (same version number, ' +
+             'new files). Update brings this computer to it.'
   else if (GInstalledTag <> '') and (ComparePreTags(NormalTag, GInstalledTag) = 0) then
     S := S + 'This is the newest version.'
   else if GInstalledTag = '' then
@@ -3133,6 +3239,11 @@ begin
              'Repair / Reinstall puts the normal version back.'
   else
     S := S + 'What is installed is newer than the newest release found (' + NormalTag + ').';
+
+  if NewerBuildAvailable and not NewerVersionAvailable then
+    GMaintUpdate.Caption := 'Update to the newest build of ' + NormalTag;
+  Log('maintenance page: newer version ' + IntToStr(Ord(NewerVersionAvailable)) +
+      ', newer build of the same version ' + IntToStr(Ord(NewerBuildAvailable)));
 
   GMaintNote.Caption       := S + Addr;
   GMaintPrompt.Visible     := True;

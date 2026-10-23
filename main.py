@@ -2473,9 +2473,14 @@ class VeterinaryManagementSystem:
                 def _prompt():
                     from core.themed_messagebox import askyesno
                     notes = format_release_summary(info)
+                    headline = (
+                        "A newer build of this version is available."
+                        if getattr(info, "same_version_build", False)
+                        else "A new version is available."
+                    )
                     if askyesno(
                         "Update Available",
-                        f"A new version is available.\n\n{notes}\n\n"
+                        f"{headline}\n\n{notes}\n\n"
                         "Open Settings → Management → App Updates to install now?",
                         parent=self.root,
                     ):

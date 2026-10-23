@@ -63,6 +63,11 @@ class UpdateInfo:
     html_url: str = ""
     error: str = ""
     update_mode: str = "zip"  # zip | exe | installer_only
+    # Same version number, different files: the owner republishes builds into
+    # the same release tag. True when the update offered is such a build.
+    same_version_build: bool = False
+    latest_sha256: str = ""      # from the release's <zip>.sha256 sidecar
+    installed_sha256: str = ""   # from the install marker; "" when not recorded
 
     @property
     def has_download(self) -> bool:
@@ -247,7 +252,140 @@ def _fetch_latest_release() -> dict:
     for rel in releases:
         if not rel.get("draft") and not rel.get("prerelease"):
             return rel
-    return releases[0]
+    # Only drafts / pre-releases: the normal updater never offers those.
+    raise urllib.error.HTTPError(
+        GITHUB_API_LATEST, 404, "No releases", hdrs=None, fp=None,
+    )
+
+
+# ── Which BUILD is installed ─────────────────────────────────────────────────
+#
+# The owner publishes new builds INTO THE SAME TAG (v1.0.11 had its files
+# replaced several times), so "APP_VERSION == latest tag" no longer means
+# "up to date". The installer's download worker (installer/satpuda_fetch.ps1)
+# writes <install>\app\.satpuda-install.json as the last step of every install,
+# update and repair - including the ones started from this app, which opens
+# that same installer - with the tag and the sha256 of the zip it installed.
+# The release carries <zip>.sha256. Different (or not recorded) = a newer build.
+
+INSTALL_MARKER_NAME = ".satpuda-install.json"
+_SHA_RE = re.compile(r"\b([0-9a-fA-F]{64})\b")
+
+
+def _marker_candidates() -> List[str]:
+    out: List[str] = []
+    if getattr(sys, "frozen", False):
+        # The engine runs from <install>\app\engine\, the desktop exe from
+        # <install>\app\ - walk up a few folders.
+        d = os.path.dirname(os.path.abspath(sys.executable))
+        for _ in range(4):
+            out.append(os.path.join(d, INSTALL_MARKER_NAME))
+            out.append(os.path.join(d, "app", INSTALL_MARKER_NAME))
+            parent = os.path.dirname(d)
+            if parent == d:
+                break
+            d = parent
+    try:
+        import winreg  # type: ignore
+
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Satpuda\SatpudaCore") as key:
+            root, _ = winreg.QueryValueEx(key, "InstallPath")
+            if root:
+                out.append(os.path.join(str(root), "app", INSTALL_MARKER_NAME))
+    except Exception:
+        pass
+    seen = set()
+    uniq = []
+    for p in out:
+        k = os.path.normcase(os.path.abspath(p))
+        if k not in seen:
+            seen.add(k)
+            uniq.append(p)
+    return uniq
+
+
+def installed_build_record() -> Optional[dict]:
+    """The install marker as a dict ({tag, sha256, bytes, installedAt, ...}),
+    or None when this copy was not put here by the installer (or the file is
+    unreadable)."""
+    for path in _marker_candidates():
+        try:
+            if os.path.isfile(path):
+                with open(path, encoding="utf-8-sig") as fh:
+                    data = json.load(fh)
+                if isinstance(data, dict):
+                    return data
+        except Exception:
+            continue
+    return None
+
+
+def _norm_sha(value: object) -> str:
+    text = str(value or "").strip().lower()
+    return text if re.fullmatch(r"[0-9a-f]{64}", text) else ""
+
+
+def newer_build_available(latest_tag: str, latest_sha: str, record: Optional[dict]) -> bool:
+    """Same version on both sides: is the published build a different one?
+
+    * nothing published to compare with (no sidecar, or it is being replaced
+      right now) -> False: nothing can be said, and nagging would be wrong;
+    * no record, a record of another tag, or a record without a sha256 (an
+      install made before builds were recorded) -> True: a newer build MAY be
+      there, and updating is what records it;
+    * otherwise -> the two sha256 differ.
+    """
+    remote = _norm_sha(latest_sha)
+    if not remote:
+        return False
+    if not record:
+        return True
+    rec_tag = str(record.get("tag") or "").strip()
+    if not rec_tag or parse_version(rec_tag) != parse_version(latest_tag):
+        return True
+    local = _norm_sha(record.get("sha256"))
+    if not local:
+        return True
+    return local != remote
+
+
+# The zip the installer downloads (installer/SatpudaCore.iss, MyAssetName).
+INSTALLER_ZIP_NAME = "SatpudaCore_Desktop_Win10.zip"
+
+
+def _zip_sha_asset(assets: List[dict], preferred: str = "") -> Tuple[str, str]:
+    """(zip name, url of its .sha256 sidecar); ("", "") when the release has
+    no such zip or no sidecar for it. The zip is the one named in the install
+    marker, else the installer's zip, else this platform's portable zip."""
+    names = {str(a.get("name") or "").strip().lower(): a for a in assets or []}
+    candidates = [preferred, INSTALLER_ZIP_NAME]
+    try:
+        from core.install_updater import pick_zip_asset
+        candidates.append(pick_zip_asset(assets)[0])
+    except Exception:
+        pass
+    for zip_name in candidates:
+        zip_name = str(zip_name or "").strip()
+        if not zip_name or zip_name.lower() not in names:
+            continue
+        side = names.get((zip_name + ".sha256").lower())
+        if not side or str(side.get("state") or "uploaded") != "uploaded":
+            return zip_name, ""
+        return zip_name, str(side.get("browser_download_url") or "").strip()
+    return "", ""
+
+
+def _fetch_sha256(url: str, timeout: int = 15) -> str:
+    if not url:
+        return ""
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
+        with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as resp:
+            text = resp.read(4096).decode("utf-8", "replace")
+    except Exception:
+        return ""
+    m = _SHA_RE.search(text)
+    return m.group(1).lower() if m else ""
 
 
 def _pick_asset(assets: List[dict]) -> Tuple[str, str, str]:
@@ -332,13 +470,31 @@ def check_for_update(current: str = APP_VERSION) -> UpdateInfo:
 
     mark_checked_today()
 
-    if not is_newer_version(latest, current):
-        return info
-
-    if get_skipped_version() and parse_version(get_skipped_version()) >= parse_version(latest):
+    # The normal updater never offers a pre-release (releases/latest does not
+    # return one; this guards the fallback path too).
+    if payload.get("prerelease") or payload.get("draft"):
         return info
 
     assets = payload.get("assets") or []
+
+    if is_newer_version(latest, current):
+        if get_skipped_version() and parse_version(get_skipped_version()) >= parse_version(latest):
+            return info
+    elif parse_version(latest) == parse_version(current):
+        # Same version number: is the published BUILD a different one?
+        record = installed_build_record()
+        if record is None and not getattr(sys, "frozen", False):
+            return info  # running from source: there is no installed build
+        _zip_name, sha_url = _zip_sha_asset(assets, str((record or {}).get("asset") or ""))
+        latest_sha = _fetch_sha256(sha_url)
+        info.latest_sha256 = latest_sha
+        info.installed_sha256 = _norm_sha((record or {}).get("sha256"))
+        if not newer_build_available(tag or latest, latest_sha, record):
+            return info
+        info.same_version_build = True
+    else:
+        return info
+
     inst_name, inst_url = _pick_installer_asset(assets)
     info.installer_download_name = inst_name
     info.installer_download_url = inst_url
@@ -359,8 +515,9 @@ def check_for_update(current: str = APP_VERSION) -> UpdateInfo:
         info.download_url = inst_url
         info.update_mode = "installer"
     else:
+        what = f"A newer build of version {latest}" if info.same_version_build else f"Version {latest}"
         info.error = (
-            f"Version {latest} is available but SatpudaCoreInstaller.exe was not found "
+            f"{what} is available but SatpudaCoreInstaller.exe was not found "
             f"on this PC or on the GitHub release."
         )
     return info
@@ -462,6 +619,28 @@ def apply_update(
                 {"message": f"Downloading installer… {pct}%" if total else "Downloading installer…"},
             )
 
+    if info.same_version_build and info.installer_download_url:
+        # A newer build of the SAME version: an installer already on this PC
+        # may predate same-tag builds and would call this "the newest version".
+        # Take the release's own installer fresh; fall back to the local one.
+        try:
+            from core.install_updater import download_installer_exe, launch_installer
+
+            # Into a fresh temp folder: a half-finished download must never
+            # replace the installer that is already on this PC.
+            path = download_installer_exe(
+                info.installer_download_url,
+                info.installer_download_name,
+                install_dir=tempfile.mkdtemp(prefix="satpuda_installer_"),
+                force=True,
+                progress_cb=_dl_progress,
+            )
+        except Exception:
+            path = ""
+        if path:
+            launch_installer(path, parent=parent)
+            return
+
     open_or_download_installer(
         info.installer_download_url,
         info.installer_download_name,
@@ -519,6 +698,15 @@ def format_release_summary(info: UpdateInfo) -> str:
         f"Current version: v{info.current_version}",
         f"Latest version:  v{info.latest_version}",
     ]
+    if info.available and info.same_version_build:
+        lines.append(
+            f"A newer build of v{info.latest_version} has been published "
+            "(same version number, new files)."
+        )
+        lines.append(
+            'In the installer, choose "Update to the newest build of '
+            f'v{info.latest_version}".'
+        )
     if info.release_name:
         lines.append(f"Release: {info.release_name}")
     if info.published_at:

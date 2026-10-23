@@ -183,6 +183,7 @@ def _serialize_update_info(info: Any) -> dict[str, Any]:
         "error": str(getattr(info, "error", "") or ""),
         "update_mode": str(getattr(info, "update_mode", "") or ""),
         "can_install_via_installer": bool(getattr(info, "can_install_via_installer", False)),
+        "same_version_build": bool(getattr(info, "same_version_build", False)),
     }
 
 
