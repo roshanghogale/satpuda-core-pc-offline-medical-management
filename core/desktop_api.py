@@ -2771,7 +2771,7 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 _json_response(self, 200, result)
                 return
             if path in ("/api/settings/layout_lists", "/api/settings/save/layout_lists"):
-                _json_response(self, 200, svc.save_layout_lists(body))
+                _json_response(self, 200, svc.save_layout_lists(body, conn))
                 return
             if path in ("/api/settings/sales_billing", "/api/settings/save/sales_billing"):
                 _json_response(self, 200, svc.save_sales_billing(body))

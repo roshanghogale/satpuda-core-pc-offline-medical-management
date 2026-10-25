@@ -457,8 +457,10 @@ def save_purchase_bill(conn, body: dict[str, Any]) -> dict[str, Any]:
             "need_confirm": True,
             "code": "duplicate_bill",
             "message": (
-                f"Bill {bill_number} from {supplier_name} is already saved as purchase "
-                f"{already.get('purchase_no')}"
+                f"Bill {bill_number} from {supplier_name} is already saved "
+                + ("on another device (it reaches this PC in a moment) "
+                   if already.get("on_another_device") else "")
+                + f"as purchase {already.get('purchase_no')}"
                 + (f" on {already.get('purchase_date')}" if already.get("purchase_date") else "")
                 + f" with {int(already.get('item_count') or 0)} item(s), "
                 f"₹{_safe_float(already.get('total')):.2f}.\n\n"
@@ -2711,6 +2713,10 @@ def delete_saved_purchase(conn, body: dict[str, Any]) -> dict[str, Any]:
             """,
             (purchase_id,),
         )
+        # Per medicine, not per line: two lines of one batch each passed against the whole
+        # stock (10 + 10 out of 15) and the delete took it to -5.
+        take_back: dict[int, float] = {}
+        on_hand: dict[int, float] = {}
         for med_id, qty, free_qty, med_type, unit_str, stock, logged in cur.fetchall():
             if logged is not None:
                 decrease = float(logged or 0)
@@ -2720,12 +2726,40 @@ def delete_saved_purchase(conn, body: dict[str, Any]) -> dict[str, Any]:
                 decrease = (float(qty or 0) + float(free_qty or 0)) * tps
             else:
                 decrease = float(qty or 0) + float(free_qty or 0)
-            if float(stock or 0) < decrease:
+            take_back[int(med_id)] = take_back.get(int(med_id), 0.0) + decrease
+            on_hand[int(med_id)] = float(stock or 0)
+        for med_id, decrease in take_back.items():
+            stock = on_hand.get(med_id, 0.0)
+            if stock < decrease:
                 return {
                     "ok": False,
                     "error": (
                         "Cannot delete — stock would go negative. "
-                        f"Current: {stock}, required to remove: {decrease:.0f}"
+                        f"Current: {stock:g}, required to remove: {decrease:.0f}"
+                    ),
+                    "code": "insufficient_stock",
+                }
+        # Offline-first: this PC's copy lags the other devices by what it has not pulled yet.
+        # A sale on the phone or the other PC a moment ago is not in it, the check above
+        # passed, and the delete's stock movement then took the shop's real stock below zero
+        # on every device. Asked of the server when the sync is working (no internet: the
+        # local check above stands, as before).
+        try:
+            from core.offline_first.server_check import stock_after_sync
+
+            synced = stock_after_sync(conn, take_back.keys()) or {}
+        except Exception:
+            synced = {}
+        for med_id, decrease in take_back.items():
+            if med_id in synced and synced[med_id] < decrease:
+                return {
+                    "ok": False,
+                    "error": (
+                        "Cannot delete — another device has sold some of this stock and this PC "
+                        "has not received that sale yet. "
+                        f"Stock with every device's sales: {synced[med_id]}, "
+                        f"required to remove: {decrease:.0f}. "
+                        "Wait for 'Synced', then check the bill again."
                     ),
                     "code": "insufficient_stock",
                 }

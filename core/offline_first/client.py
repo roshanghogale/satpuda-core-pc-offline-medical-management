@@ -108,8 +108,9 @@ def status() -> dict:
     return _call("GET", f"/api/sync/v2/status?install_id={quote(install_id())}")
 
 
-def stock(ids: Optional[list[int]] = None) -> dict:
-    return _call("POST", "/api/sync/v2/stock", {"ids": list(ids) if ids is not None else None}, timeout=120.0)
+def stock(ids: Optional[list[int]] = None, *, timeout: float = 120.0) -> dict:
+    return _call("POST", "/api/sync/v2/stock", {"ids": list(ids) if ids is not None else None},
+                 timeout=timeout)
 
 
 def changes(after: int, limit: int = 200) -> dict:

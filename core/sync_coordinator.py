@@ -922,9 +922,13 @@ def after_villages_saved(conn) -> None:
 
 
 def after_layout_saved(conn=None) -> None:
-    """Push med_types / schedules after layout settings save (Online)."""
+    """Send med_types / schedules after Settings > Layout & Lists saves them: Online pushes the
+    dropdowns now; offline-first notes them for the worker like a village save (sent when the
+    internet is there), else sends them at once. Called by
+    desktop_settings_service.save_layout_lists when either list changed."""
     if not is_online_mode():
-        _offline_first_push_dropdowns(conn)
+        if not note_offline_first_singleton(conn, 'dropdowns'):
+            _offline_first_push_dropdowns(conn)
         return
     from core import server_live as live
     from core.online_guard import CloudSaveError, ensure_can_mutate

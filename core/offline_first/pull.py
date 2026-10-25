@@ -120,6 +120,13 @@ def apply_page(conn: sqlite3.Connection, changes: list[dict], *, to_revision: in
                 applied += _apply_settings_bundle(conn, doc["settings"], pending)
                 continue
             if col in _SINGLETONS:
+                if col != "settings" and (col, 0) in pending:
+                    # This PC's own change of the store's profile / dropdowns / shelf flag is
+                    # still to go up (noted under 0): an older copy from another device must not
+                    # replace it first -- the event is built from the PC's state when it is sent,
+                    # so the change would be lost on both sides.
+                    skipped += 1
+                    continue
                 if isinstance(doc, dict):
                     sl.apply_server_doc(conn, col, doc)
                     applied += 1

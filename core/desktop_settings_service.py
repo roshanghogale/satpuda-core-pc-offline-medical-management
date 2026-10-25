@@ -1047,12 +1047,13 @@ def _clamp_table_rows(key: str, raw: Any, fallback: int) -> int:
     return max(mn, min(mx, n))
 
 
-def save_layout_lists(data: dict[str, Any]) -> dict[str, Any]:
+def save_layout_lists(data: dict[str, Any], conn: Optional[sqlite3.Connection] = None) -> dict[str, Any]:
     from core.app_prefs import save_app_mode
     from core.layout_config import load_layout, save_layout
     from core.record_indicators import save_record_indicator_prefs
 
     layout = load_layout()
+    lists_before = (list(layout.get("med_types") or []), list(layout.get("schedules") or []))
     for key in (
         "billing_rows",
         "inventory_rows",
@@ -1097,6 +1098,21 @@ def save_layout_lists(data: dict[str, Any]) -> dict[str, Any]:
     if "export_column_visibility" in data:
         layout["export_column_visibility"] = data["export_column_visibility"]
     save_layout(layout)
+    # The medicine types and schedules are the store's (the phone and the other PCs show the
+    # same lists): sync_coordinator.after_layout_saved was written for this save and never
+    # called, so a type added here reached no other device in any mode -- and the next village
+    # saved on another device sent ITS lists, which then replaced this PC's on the pull.
+    sync_warning = ""
+    if (list(layout.get("med_types") or []), list(layout.get("schedules") or [])) != lists_before:
+        try:
+            from core.sync_coordinator import after_layout_saved
+
+            after_layout_saved(conn)
+        except Exception as exc:
+            sync_warning = (
+                f"Saved on this PC, but the medicine types / schedules did not reach the server: "
+                f"{exc}. Save again when the internet is back."
+            )
     margin_updates = {
         k: data[k]
         for k in (
@@ -1118,7 +1134,10 @@ def save_layout_lists(data: dict[str, Any]) -> dict[str, Any]:
         save_app_mode(str(data["app_mode"]))
     if "record_indicators" in data and isinstance(data["record_indicators"], dict):
         save_record_indicator_prefs(data["record_indicators"])
-    return get_layout_lists()
+    out = get_layout_lists()
+    if sync_warning:
+        out["sync_warning"] = sync_warning
+    return out
 
 
 def get_sales_billing() -> dict[str, Any]:

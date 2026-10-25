@@ -528,7 +528,16 @@ def _apply_purchases(conn, data: dict[str, Any]) -> dict[str, Any]:
 
     saved = 0
     errors: list[str] = []
+    # Offline / offline-first: one bill is all or nothing. A bill that failed partway (a line
+    # with no name, a bad figure, a database error) kept the supplier and the medicines it had
+    # made or rewritten before the failure -- the loop's final commit saved them, and offline-
+    # first sent them to every device. Online writes each record to the server as it goes, so
+    # there everything that can refuse a bill is checked before the first write instead.
+    from core.sync_prefs import is_online_mode
+
+    local_db = not is_online_mode()
     for i, purchase in enumerate(purchases):
+        bill_open = False
         try:
             supplier_name = (
                 purchase.get("supplier_name")
@@ -551,20 +560,15 @@ def _apply_purchases(conn, data: dict[str, Any]) -> dict[str, Any]:
                         f"already saved as purchase {already.get('purchase_no') or ''}".strip()
                         + "; not saved again"
                     )
-            sup_data = supplier_lookup.get(supplier_name, {})
-            if not sup_data and isinstance(purchase.get("supplier"), dict):
-                sup_data = purchase["supplier"]
-            supplier_id = get_or_create_supplier(
-                conn,
-                supplier_name,
-                sup_data.get("address", ""),
-                sup_data.get("phone", ""),
-                sup_data.get("gstin", ""),
-                sup_data.get("dl_numbers", ""),
-            )
             raw_items = purchase.get("items") or []
             if not raw_items:
                 raise ValueError("No items in purchase")
+            if any(
+                not isinstance(it, dict)
+                or not str(it.get("name") or it.get("medicine_name") or "").strip()
+                for it in raw_items
+            ):
+                raise ValueError("Purchase item missing medicine name")
             if wholesale:
                 # Checked before anything is written, so a refused bill leaves no trace.
                 named = [
@@ -581,6 +585,32 @@ def _apply_purchases(conn, data: dict[str, Any]) -> dict[str, Any]:
                         + ". A wholesale purchase needs Rate A on every medicine; "
                         "type it on the phone and send again"
                     )
+            if local_db:
+                if conn.in_transaction:
+                    conn.commit()
+                conn.execute("SAVEPOINT mobile_import_bill")
+                bill_open = True
+            sup_data = supplier_lookup.get(supplier_name, {})
+            if not sup_data and isinstance(purchase.get("supplier"), dict):
+                sup_data = purchase["supplier"]
+            sup_fields = {
+                k: str(sup_data.get(k) or "").strip()
+                for k in ("address", "phone", "gstin", "dl_numbers")
+            }
+            if local_db:
+                # The PC's own supplier save writes every field it is given, blanks too; a
+                # phone export often carries the supplier's name alone, and the shop's saved
+                # address / phone / GSTIN / DL were wiped (and, offline-first, sent to every
+                # device). A field the export leaves empty keeps what the PC has, as Online.
+                sup_fields = _keep_saved_supplier_fields(conn, supplier_name, sup_fields)
+            supplier_id = get_or_create_supplier(
+                conn,
+                supplier_name,
+                sup_fields["address"],
+                sup_fields["phone"],
+                sup_fields["gstin"],
+                sup_fields["dl_numbers"],
+            )
             items = []
             for it in raw_items:
                 med_type = it.get("type", "")
@@ -675,10 +705,17 @@ def _apply_purchases(conn, data: dict[str, Any]) -> dict[str, Any]:
                 result,
                 items,
             )
+            bill_open = False                    # save_purchase committed the bill
             if wholesale:
                 _save_line_rates(conn, supplier_id, items)
             saved += 1
         except Exception as exc:
+            if bill_open:
+                try:
+                    conn.execute("ROLLBACK TO mobile_import_bill")
+                    conn.execute("RELEASE mobile_import_bill")
+                except Exception:
+                    pass                         # already committed or ended: nothing left open
             bill_no = purchase.get("bill_number", f"#{i + 1}")
             errors.append(f"Bill {bill_no}: {exc}")
     conn.commit()
@@ -689,6 +726,27 @@ def _apply_purchases(conn, data: dict[str, Any]) -> dict[str, Any]:
         "total": len(purchases),
         "errors": errors[:20],
     }
+
+
+def _keep_saved_supplier_fields(conn, supplier_name: str, fields: dict) -> dict:
+    """``fields`` with each empty one filled from the supplier this PC already has (matched the
+    way get_or_create_supplier matches it), so a name-only export changes nothing else."""
+    try:
+        from core.name_utils import storage_name_from_entry
+
+        name = storage_name_from_entry(supplier_name) or supplier_name.strip().upper()
+        row = conn.execute(
+            "SELECT address, phone, gstin, dl_numbers FROM suppliers WHERE name=?", (name,)
+        ).fetchone()
+    except Exception:
+        row = None
+    if not row:
+        return fields
+    out = dict(fields)
+    for key, saved in zip(("address", "phone", "gstin", "dl_numbers"), row):
+        if not out.get(key) and str(saved or "").strip():
+            out[key] = str(saved).strip()
+    return out
 
 
 def _save_line_rates(conn, supplier_id, items: list) -> None:
