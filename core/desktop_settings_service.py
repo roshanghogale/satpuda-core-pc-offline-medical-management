@@ -103,6 +103,185 @@ def _vendor_admin_token(data: dict[str, Any]) -> Any:
         }
 
 
+# ── "Delete all data" (core/store_wipe.py) ─────────────────────────────────────────────────
+
+def _wipe_mode() -> str:
+    from core.sync_prefs import is_offline_first, is_online_mode
+
+    if is_online_mode():
+        return "online"
+    if is_offline_first():
+        return "offline_first"
+    return "offline"
+
+
+def _session_store_id() -> Optional[str]:
+    try:
+        from core import server_api as api
+        from core.store_manager import get_active_store_key
+
+        return api.load_session(get_active_store_key() or "").get("store_id") or None
+    except Exception:
+        return None
+
+
+_WIPE_LABELS = {
+    "medicines": "medicines", "stock_operations": "stock ledger lines", "sales": "sales bills",
+    "purchases": "purchases", "sales_returns": "sales returns", "purchase_returns": "purchase returns",
+    "customer_payments": "customer payments", "supplier_payments": "supplier payments",
+    "customers": "customers", "suppliers": "suppliers", "doctors": "doctors",
+    "cash_days": "cash register days", "cash_expenses": "cash expenses",
+    "stock_disposals": "stock disposals", "pending_orders": "pending orders",
+    "store_settings": "shop-data settings", "settings": "shop-data settings",
+    "pharmacy_profiles": "shop profile", "pharmacy_profile": "shop profile",
+}
+_WIPE_SKIP_IN_LIST = ("sales_items", "purchase_items", "sales_return_items", "purchase_return_items",
+                      "sync_changes", "device_events", "sync_watermarks", "stock_snapshots",
+                      "sync_check_runs", "sync_inbox", "sync_outbox", "sync_outbox_v2")
+
+
+def _wipe_count_text(counts: dict) -> str:
+    parts = []
+    for table, n in sorted((counts or {}).items(), key=lambda kv: -int(kv[1] or 0)):
+        if not n or table in _WIPE_SKIP_IN_LIST or table.startswith("of_"):
+            continue
+        parts.append(f"{int(n):,} {_WIPE_LABELS.get(table, table.replace('_', ' '))}")
+    return ", ".join(parts) if parts else "nothing is stored yet"
+
+
+def _wipe_confirm_text(p: dict) -> str:
+    """The second confirmation: exactly what goes, and where."""
+    mode = p.get("mode")
+    store = (p.get("server") or {}).get("store") or {}
+    name = store.get("store_name") or p.get("store_name") or "this store"
+    lines = [f'Delete ALL data of "{name}"?', ""]
+    if mode == "offline":
+        lines += ["Where: ONLY this PC (Offline mode, no server copy).",
+                  "What goes: " + _wipe_count_text(p.get("local_counts") or {}) + "."]
+    else:
+        devices = (p.get("server") or {}).get("devices") or []
+        names = ", ".join(
+            f"{d.get('device_name') or d.get('device_id')} ({d.get('device_type') or 'device'})"
+            for d in devices[:8]
+        )
+        lines += [
+            "Where: the SERVER and EVERY device of this store, all PCs and phones"
+            + (f" ({len(devices)} paired: {names}{', ...' if len(devices) > 8 else ''})." if devices else "."),
+            "What goes from the server: " + _wipe_count_text((p.get("server") or {}).get("counts") or {}) + ".",
+        ]
+    lines += [
+        "That is every medicine, the stock ledger, sales, purchases, returns, payments, customers, "
+        "suppliers, doctors, the cash register, shelves and the shop-data settings. Bill and "
+        "purchase numbers start again at 1.",
+        "Kept: the store, its licence and expiry, device pairings and logins"
+        + ("." if p.get("also_profile") else
+           ", and the shop profile (name, address, GSTIN, bill heading, bank, pictures)."),
+    ]
+    if mode != "offline":
+        unsent = int(p.get("unsent") or 0)
+        lines += [
+            "",
+            "Unsent changes are DROPPED, they belong to the deleted data: "
+            + (f"{unsent} on this PC, and " if unsent else "")
+            + "everything a PC or phone that is offline right now has not sent yet "
+            "(including what it makes before it next connects).",
+            "A backup of everything deleted is written on the server first.",
+        ]
+    lines += ["", "This cannot be undone from the app. Continue?"]
+    return "\n".join(lines)
+
+
+def _danger_wipe_preview(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, Any]:
+    from core import store_wipe
+
+    also = bool(data.get("also_profile"))
+    mode = _wipe_mode()
+    try:
+        from core.store_manager import get_active_display_name
+
+        store_name = get_active_display_name()
+    except Exception:
+        store_name = ""
+    out: dict[str, Any] = {"ok": True, "mode": mode, "also_profile": also, "store_name": store_name}
+    if mode in ("offline", "offline_first"):
+        out["local_counts"] = store_wipe.local_counts(conn, also_profile=also)
+    if mode == "offline_first":
+        try:
+            from core.offline_first.schema import unsent_work
+
+            out["unsent"] = unsent_work(conn)
+        except Exception:
+            out["unsent"] = 0
+    if mode != "offline":
+        try:
+            from core.offline_first import client
+
+            out["server"] = client.store_wipe_preview(also)
+        except Exception as exc:
+            return {"ok": False, "error": f"Could not ask the server what this store holds: {exc}"}
+    out["confirm_text"] = _wipe_confirm_text(out)
+    return out
+
+
+def _wipe_store_everywhere(work_conn: sqlite3.Connection, *, mode: str, admin_token: str,
+                           also_profile: bool, request_id: str, progress: ProgressCb) -> dict[str, Any]:
+    """Online / offline-first: the server wipes the store (and writes its export), then this PC
+    clears its own copy or caches at once; the other devices follow on their next sync."""
+    from core import store_wipe
+    from core.offline_first import client
+
+    if progress:
+        progress("Deleting all data of the store on the server (a backup is written there first)…")
+    res = client.store_wipe(admin_token=admin_token, confirm=store_wipe.CONFIRM_WORD,
+                            also_profile=also_profile, request_id=request_id,
+                            store_id=_session_store_id())
+    info = {
+        "wipe_generation": int(res.get("wipe_generation") or 0),
+        "wipe_revision": int(res.get("wipe_revision") or 0),
+        "wipe_also_profile": also_profile,
+    }
+    if mode == "offline_first":
+        if progress:
+            progress("Clearing this PC's copy…")
+        from core.offline_first import worker as of_worker
+
+        # The worker may hold a page it fetched before the wipe: it is stopped first, so
+        # nothing it pulled from the old records lands after the copy is cleared.
+        running = of_worker.current()
+        path = running.cycle.path if running else None
+        of_worker.stop()
+        try:
+            work_conn.execute("BEGIN IMMEDIATE")
+            try:
+                store_wipe.apply_server_wipe(work_conn, info)
+                work_conn.execute("COMMIT")
+            except BaseException:
+                work_conn.execute("ROLLBACK")
+                raise
+        finally:
+            if path:
+                of_worker.start_for(path)
+        store_wipe.note_screens_reload()
+    else:
+        store_wipe.forget_online_caches()
+        store_wipe.remember_generation(info["wipe_generation"])
+    exp = (res.get("export") or {}).get("path") or ""
+    total = int(res.get("total_rows") or 0)
+    return {
+        "ok": True,
+        "mode": mode,
+        "server": {k: res.get(k) for k in ("store_name", "counts", "total_rows", "wipe_generation",
+                                            "wipe_revision", "repeated")},
+        "message": (
+            f"All data of {res.get('store_name') or 'the store'} was deleted on the server "
+            f"({total:,} rows; backup {os.path.basename(exp) or 'written'}) and on this PC. "
+            "Every other PC and phone of the store clears its copy on its next sync. "
+            "Restart the app to continue."
+        ),
+        "needs_restart": True,
+    }
+
+
 def _begin_heavy(
     conn: sqlite3.Connection,
     data: dict[str, Any],
@@ -6642,91 +6821,60 @@ def system_action(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, A
         if not path:
             return {"ok": False, "error": msg}
         return {"ok": True, "path": path, "message": msg}
+    if action == "danger_wipe_preview":
+        return _danger_wipe_preview(conn, data)
     if action == "danger_wipe":
+        # "Delete all data" (core/store_wipe.py). Offline: this PC's store file. Online and
+        # offline-first: the server's store and, through it, every PC and phone of the shop.
         from core.license_manager import _MASTER_PASSWORD
+        from core import store_wipe
 
-        if str(data.get("confirm") or "") != "DELETE ALL TABLES":
+        if str(data.get("confirm") or "") != store_wipe.CONFIRM_WORD:
             return {
                 "ok": False,
-                "error": 'Type confirm string "DELETE ALL TABLES" exactly.',
+                "error": f'Type confirm string "{store_wipe.CONFIRM_WORD}" exactly.',
             }
         password = str(data.get("password") or "")
         if password != _MASTER_PASSWORD:
             return {"ok": False, "error": "Incorrect password."}
+        mode = _wipe_mode()
+        also_profile = bool(data.get("also_profile"))
+        if mode != "offline" and data.get("all_devices_ok") is not True:
+            return {
+                "ok": False,
+                "code": "needs_second_confirm",
+                "error": "Confirm the list of what will be deleted on the server and on every "
+                         "device of this store.",
+            }
+        admin_token = None
+        if mode != "offline":
+            admin_token = _vendor_admin_token(data)
+            if isinstance(admin_token, dict):
+                return admin_token
+        import uuid as _uuid
+
+        request_id = str(data.get("request_id") or _uuid.uuid4().hex)
 
         def _wipe(work_conn: sqlite3.Connection, progress: ProgressCb) -> dict[str, Any]:
-            cloud_msg = ""
-            try:
-                from core.sync_prefs import is_online_mode
-
-                if is_online_mode():
-                    cloud_msg = (
-                        "Local wipe only. Clear this store on the server from the "
-                        "admin dashboard if needed.\n"
-                    )
-            except Exception as exc:
-                cloud_msg = f"Server note failed: {exc}\n"
-
-            if progress:
-                progress("Wiping local database…")
-            tables = [
-                "sales_items",
-                "sales",
-                "purchase_items",
-                "purchases",
-                "medicine_shelf",
-                "medicines",
-                "customers",
-                "suppliers",
-                "doctors",
-                "shelves",
-                "pharmacy_profile",
-                "settings",
-                "racks",
-                "sections",
-                "boxes",
-                "shelf_settings",
-            ]
-            for table in tables:
-                try:
-                    work_conn.execute(f"DROP TABLE IF EXISTS [{table}]")
-                except Exception:
-                    pass
-            for obj_type, name in [
-                ("TRIGGER", "trg_purchases_after_insert"),
-                ("TRIGGER", "trg_purchases_after_update"),
-                ("TRIGGER", "trg_sales_after_insert"),
-                ("TRIGGER", "trg_sales_after_update"),
-                ("VIEW", "bills_cleared"),
-                ("VIEW", "accounts_cleared"),
-                ("VIEW", "supplier_due_status"),
-            ]:
-                try:
-                    work_conn.execute(f"DROP {obj_type} IF EXISTS [{name}]")
-                except Exception:
-                    pass
-            work_conn.commit()
-
-            from core.db_setup import initialise
-
-            if progress:
-                progress("Reinitializing empty store…")
-            initialise(work_conn)
-            work_conn.commit()
-
-            message = (
-                f"{cloud_msg}All local data deleted. Restart the app to continue."
-                if cloud_msg
-                else "All local data deleted. Restart the app to continue."
+            if mode == "offline":
+                if progress:
+                    progress("Deleting all data on this PC…")
+                counts = store_wipe.empty_store_file(work_conn, also_profile=also_profile, reset_ids=True)
+                work_conn.commit()
+                return {
+                    "ok": True,
+                    "mode": mode,
+                    "deleted": counts,
+                    "message": "All data on this PC was deleted (Offline mode: there is no server "
+                               "copy). Restart the app to continue.",
+                    "needs_restart": True,
+                }
+            return _wipe_store_everywhere(
+                work_conn, mode=mode, admin_token=str(admin_token), also_profile=also_profile,
+                request_id=request_id, progress=progress,
             )
-            return {
-                "ok": True,
-                "message": message.strip(),
-                "server_message": cloud_msg.strip(),
-                "needs_restart": True,
-            }
 
-        return _begin_heavy(conn, data, action, "Wiping local data…", _wipe)
+        return _begin_heavy(conn, data, action, "Deleting all data…", _wipe)
     if action == "get_voice":
         try:
             from core.voice import voice_config as vc

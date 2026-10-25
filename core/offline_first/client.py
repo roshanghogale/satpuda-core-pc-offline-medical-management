@@ -58,8 +58,42 @@ def number_head(fy_start_year: int, ranges: dict) -> dict:
     return _call("GET", "/api/sync/v2/number-head?" + "&".join(q), timeout=30.0)
 
 
-def push(events: list[dict]) -> dict:
-    return _call("POST", "/api/sync/v2/push", {"install_id": install_id(), "events": events}, timeout=180.0)
+def push(events: list[dict], wipe_generation: Optional[int] = None) -> dict:
+    """wipe_generation: the store's "Delete all data" this copy is on; the server refuses the
+    push ("store_wiped") while the store is on a later one (core/store_wipe.py)."""
+    body = {"install_id": install_id(), "events": events}
+    if wipe_generation is not None:
+        body["wipe_generation"] = int(wipe_generation)
+    return _call("POST", "/api/sync/v2/push", body, timeout=180.0)
+
+
+def is_store_wiped(exc: BaseException) -> bool:
+    """The server refused a push because the store's data was deleted after this copy was made."""
+    return "store_wiped" in str(exc)
+
+
+def sync_status() -> dict:
+    """GET /api/sync/status: head_revision and the store's wipe generation / revision."""
+    from core import server_api as api
+
+    return api.get_sync_status(_token()) or {}
+
+
+def store_wipe_preview(also_profile: bool = False) -> dict:
+    """What "Delete all data" would remove from the server's store, and its devices (read-only)."""
+    return _call("GET", "/api/sync/v2/store-wipe/preview" + ("?also_profile=1" if also_profile else ""),
+                 timeout=60.0)
+
+
+def store_wipe(*, admin_token: str, confirm: str, also_profile: bool, request_id: str,
+               store_id: Optional[str] = None) -> dict:
+    """Delete every business row of THIS store on the server (server-live storeWipe.js). The
+    store is the one in this PC's store token; admin_token is the vendor administrator's."""
+    body = {"admin_token": admin_token, "confirm": confirm, "also_profile": bool(also_profile),
+            "request_id": request_id}
+    if store_id:
+        body["store_id"] = store_id
+    return _call("POST", "/api/sync/v2/store-wipe", body, timeout=600.0)
 
 
 def push_as(install: str, events: list[dict]) -> dict:
