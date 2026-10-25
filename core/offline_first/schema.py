@@ -348,6 +348,36 @@ def clear_bookkeeping(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+_BOOKKEEPING_TABLES = ("of_dirty", "of_stock_journal", "of_events", "of_versions", "of_id_counters",
+                       "of_number_blocks", "of_doc_counters", "of_meta")
+
+
+def forget_bookkeeping(conn: sqlite3.Connection) -> int:
+    """A backup file restored on a PC that is NOT on offline-first (the restore is refused on
+    one that is): the file's triggers, notes, events, number blocks and registration belong to
+    the PC and the moment the backup was taken, not to this PC now.
+
+    Left in place, the triggers went on noting every sale of the Offline till into notes no
+    worker would ever send, and the file stayed "registered" with the other PC's device number
+    and its unsent work -- so turning offline-first on later was refused for good ("N change(s)
+    made on this PC in offline-first have not reached the server") over work that was never
+    this PC's. The records themselves stay exactly as backed up (sync_status untouched: what
+    the other modes upload is decided by them). Returns how many notes / events were dropped."""
+    if not _table_exists(conn, "of_meta") and not conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name LIKE 'of\\_%' ESCAPE '\\' LIMIT 1"
+    ).fetchone():
+        return 0
+    dropped = unsent_work(conn)
+    drop_triggers(conn)
+    for table in _BOOKKEEPING_TABLES:
+        if _table_exists(conn, table):
+            conn.execute(f"DELETE FROM {table}")
+    if _table_exists(conn, "of_flags"):
+        conn.execute("UPDATE of_flags SET v='1' WHERE k='capture'")
+    conn.commit()
+    return dropped
+
+
 class capture_paused:
     """Context manager: write pulled changes without noting them as this PC's own."""
 

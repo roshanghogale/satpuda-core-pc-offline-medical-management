@@ -1379,6 +1379,18 @@ def _upgrade_restored_db(db_path: str) -> None:
         from core.db_setup import initialise
         initialise(conn)
         conn.commit()
+        # A backup taken on an offline-first PC carries that PC's sync bookkeeping (triggers,
+        # unsent notes, number blocks, device registration). A restore only ever lands on a
+        # PC that is not on offline-first (_offline_first_restore_refusal), where it is
+        # nobody's: left in place, it blocked turning offline-first on here for good.
+        try:
+            from core.offline_first.schema import forget_bookkeeping
+
+            dropped = forget_bookkeeping(conn)
+            if dropped:
+                _logger.info(f"Restore: {dropped} offline-first note(s) of the backed-up PC dropped")
+        except Exception as exc:
+            _logger.warning(f"Restore: offline-first bookkeeping not cleared: {exc}")
         # Stock is NOT recomputed here any more.
         #
         # A restore must reproduce the file it was given, not reinterpret it.
