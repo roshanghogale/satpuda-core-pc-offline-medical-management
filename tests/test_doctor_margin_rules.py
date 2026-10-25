@@ -514,7 +514,8 @@ class SavedLines(unittest.TestCase):
         self.assertTrue(store_kv_carry._carried(dmr.SETTING_NAME))
         schema.ensure_schema(self.conn)
         names = {r[0] for r in self.conn.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
-        self.assertIn("of_insert_settings_v7", names)
+        self.assertIn(f"of_insert_settings_{schema._SETTINGS_TRIGGER_VERSION}", names)
+        self.assertNotIn("of_insert_settings_v7", names)
         self.assertNotIn("of_insert_settings_v6", names)
         self.assertNotIn("of_insert_settings_v4", names)
         self.assertEqual(dmr.load_rules(self.conn)["rate_basis"], "purchase_free")

@@ -52,16 +52,21 @@ SHOP_WIDE_SETTING_PREFIXES = (
 )
 # doctor_margin_rules: the Doctor Margin Report's rules (core/doctor_margin_rules.py);
 # doctor_margin_rules_recalc: the periods recalculated, so the server's report follows them.
+# bill_logo_image / bill_signature_image / home_banner_image: the shop's pictures as data: URIs
+# (core/store_images.py) -- Online they travel through the same settings rows; offline-first
+# they go up and come down with every other shop-wide row (25 Oct 2026).
 SHOP_WIDE_SETTING_NAMES = ("billing_layout_prefs", "business_mode", "doctor_margin_rules",
-                           "doctor_margin_rules_recalc")
+                           "doctor_margin_rules_recalc",
+                           "bill_logo_image", "bill_signature_image", "home_banner_image")
 # The settings triggers carry the list above in their WHEN; a longer list is a new version.
-_SETTINGS_TRIGGER_VERSION = "v7"
+_SETTINGS_TRIGGER_VERSION = "v8"
 _RETIRED_SETTINGS_TRIGGERS = (
     "of_insert_settings", "of_update_settings", "of_insert_settings_v2", "of_update_settings_v2",
     "of_insert_settings_v3", "of_update_settings_v3",
     "of_insert_settings_v4", "of_update_settings_v4",
     "of_insert_settings_v5", "of_update_settings_v5",
     "of_insert_settings_v6", "of_update_settings_v6",
+    "of_insert_settings_v7", "of_update_settings_v7",
 )
 
 # Medicine columns whose change is bookkeeping or stock, not an edit of the medicine itself.

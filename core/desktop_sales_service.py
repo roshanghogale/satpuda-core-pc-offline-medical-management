@@ -1387,16 +1387,22 @@ def save_sale(conn, body: dict[str, Any]) -> dict[str, Any]:
             pass
 
         sid = int(sale_id)
-        try:
-            import threading
+        # The bill's PDF, on a thread so the counter is not kept waiting -- unless the caller
+        # is about to print this bill (print_sale with save_first): the print writes the very
+        # same Bill_<no>.pdf itself, and two renders of one file at the same moment took each
+        # other's HTML and PDF away (a blank bill, "PDF not found" -- offline-first, every
+        # time; core/bill_output._one_renderer_per_file has the whole story).
+        if not body.get("pdf_by_caller"):
+            try:
+                import threading
 
-            threading.Thread(
-                target=lambda: _try_save_sale_pdf(conn, sid),
-                daemon=True,
-                name=f"sale-pdf-{sid}",
-            ).start()
-        except Exception:
-            pass
+                threading.Thread(
+                    target=lambda: _try_save_sale_pdf(conn, sid),
+                    daemon=True,
+                    name=f"sale-pdf-{sid}",
+                ).start()
+            except Exception:
+                pass
 
         # Where the bill is being written. The PDF itself is produced on a
         # daemon thread whose return value nobody keeps, so the exact filename
@@ -2126,8 +2132,10 @@ def print_sale(conn, body: dict[str, Any], *, db_path: str | None = None) -> dic
 
     # Optional: save first then print (F7/F8) — same as Tk _print_sales_slot
     warnings: list = []
+    saved_now = False
     if body.get("save_first") or (sale_id <= 0 and body.get("items")):
-        saved = save_sale(conn, {**body, "sync_save": True})
+        # The print below writes the bill's PDF; the save must not start a second one.
+        saved = save_sale(conn, {**body, "sync_save": True, "pdf_by_caller": True})
         if saved.get("need_confirm"):
             return saved
         if not saved.get("ok"):
@@ -2135,6 +2143,7 @@ def print_sale(conn, body: dict[str, Any], *, db_path: str | None = None) -> dic
         sale_id = int(saved["sale_id"])
         bill_no = str(saved.get("bill_no") or bill_no)
         warnings = list(saved.get("warnings") or [])
+        saved_now = True
 
     if sale_id <= 0:
         return {"ok": False, "error": "No sale to print.", "code": "no_sale"}
@@ -2190,6 +2199,20 @@ def print_sale(conn, body: dict[str, Any], *, db_path: str | None = None) -> dic
             html_path, pdf_path = print_bill_with_slot(
                 conn, sale_id, slot, hwnd_owner=0, db_path=path
             )
+
+        if saved_now and not pdf_path:
+            # A dot-matrix slip leaves no file. The bill's PDF record (the one a plain save
+            # writes) is made now, after the print, so the two never overlap.
+            try:
+                import threading
+
+                threading.Thread(
+                    target=lambda: _try_save_sale_pdf(conn, int(sale_id)),
+                    daemon=True,
+                    name=f"sale-pdf-{int(sale_id)}",
+                ).start()
+            except Exception:
+                pass
 
         return {
             "ok": True,

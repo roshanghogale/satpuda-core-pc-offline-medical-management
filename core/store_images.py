@@ -418,6 +418,88 @@ def _is_online() -> bool:
         return False
 
 
+# Offline-first (core/offline_first): the pictures travel in the SAME settings rows, but
+# through this PC's own copy of the store -- the row is written here, the sync worker sends
+# it, and a row another device wrote (or the store download brought) is read back from the
+# copy. Online-only, a logo or signature set on an offline-first PC stayed on that PC and a
+# fresh offline-first install printed none (25 Oct 2026).
+def _offline_first() -> bool:
+    try:
+        from core.offline_first.runtime import is_active
+
+        return bool(is_active())
+    except Exception:
+        return False
+
+
+def _can_share() -> bool:
+    """Whether a picture saved now reaches the shop's other devices."""
+    return _is_online() or _offline_first()
+
+
+def _store_conn():
+    """A short-lived connection to this PC's copy of the store, or None."""
+    try:
+        from core.store_manager import get_active_db_path
+
+        path = str(get_active_db_path() or "").strip()
+        if not path or not os.path.isfile(path):
+            return None
+        import sqlite3
+
+        conn = sqlite3.connect(path, timeout=30.0)
+        conn.execute("PRAGMA busy_timeout=30000")
+        return conn
+    except Exception as exc:
+        log.debug("store image store connection: %s", exc)
+        return None
+
+
+def _local_kv_get(name: str) -> str | None:
+    """The settings row of this PC's copy, or None when it cannot be read."""
+    conn = _store_conn()
+    if conn is None:
+        return None
+    try:
+        row = conn.execute("SELECT value FROM settings WHERE name=?", (name,)).fetchone()
+        return str(row[0] or "") if row else ""
+    except Exception as exc:
+        log.debug("store image local read (%s): %s", name, exc)
+        return None
+    finally:
+        conn.close()
+
+
+def _local_kv_set(name: str, value: str) -> bool:
+    """Write the row into this PC's copy; the offline-first triggers note it for the worker."""
+    conn = _store_conn()
+    if conn is None:
+        return False
+    try:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "name TEXT UNIQUE, value TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO settings (name, value) VALUES (?, ?) "
+            "ON CONFLICT(name) DO UPDATE SET value=excluded.value",
+            (name, value),
+        )
+        conn.commit()
+    except Exception as exc:
+        log.warning("store image local write (%s): %s", name, exc)
+        return False
+    finally:
+        conn.close()
+    try:
+        from core.offline_first import worker
+
+        worker.kick()
+    except Exception:
+        pass
+    return True
+
+
 def _pending_path() -> str:
     return os.path.join(images_dir(), _PENDING_FILE)
 
@@ -468,7 +550,7 @@ def flush_pending(skip: str = "") -> list[str]:
     save. It is never called from a read: a bill print must not write to a live
     store, and there is a test that says so.
     """
-    if getattr(_flushing, "busy", False) or not _is_online():
+    if getattr(_flushing, "busy", False) or not _can_share():
         return []
     pending = _load_pending()
     if not pending:
@@ -507,7 +589,7 @@ def push_to_server(kind: str, ext: str, raw: bytes) -> tuple[bool, str]:
     """
     if kind not in _KV_NAMES or not raw:
         return False, ""
-    if not _is_online():
+    if not _can_share():
         _mark_pending(kind)
         return False, ""
     ext, raw = _shrink(kind, ext, raw)
@@ -532,19 +614,27 @@ def push_to_server(kind: str, ext: str, raw: bytes) -> tuple[bool, str]:
             )
         return False, note
     uri = to_data_uri(ext, raw)
-    try:
-        from core.online_guard import ensure_can_mutate
-        from core import server_live as live
+    if _offline_first():
+        if not _local_kv_set(_KV_NAMES[kind], uri):
+            _mark_pending(kind)
+            return False, (
+                "Saved on this computer. It could not be put in the store's copy yet, "
+                "so your other computers will not show it until the next save."
+            )
+    else:
+        try:
+            from core.online_guard import ensure_can_mutate
+            from core import server_live as live
 
-        ensure_can_mutate()
-        live.push_settings_kv(_KV_NAMES[kind], uri)
-    except Exception as exc:
-        log.warning("store image push (%s): %s", kind, exc)
-        _mark_pending(kind)
-        return False, (
-            "Saved on this computer. It could not be sent to the server yet, "
-            "so your other computers will not show it until the next save."
-        )
+            ensure_can_mutate()
+            live.push_settings_kv(_KV_NAMES[kind], uri)
+        except Exception as exc:
+            log.warning("store image push (%s): %s", kind, exc)
+            _mark_pending(kind)
+            return False, (
+                "Saved on this computer. It could not be sent to the server yet, "
+                "so your other computers will not show it until the next save."
+            )
     _clear_pending(kind)
     # Worked out before the lock is taken: _cache_key reads the store registry
     # off disk, and _lock is not re-entrant.
@@ -564,17 +654,21 @@ def clear_on_server(kind: str) -> bool:
     otherwise leave the old one up.
     """
     name = _KV_NAMES.get(kind)
-    if not name or not _is_online():
+    if not name or not _can_share():
         return False
-    try:
-        from core.online_guard import ensure_can_mutate
-        from core import server_live as live
+    if _offline_first():
+        if not _local_kv_set(name, ""):
+            return False
+    else:
+        try:
+            from core.online_guard import ensure_can_mutate
+            from core import server_live as live
 
-        ensure_can_mutate()
-        live.push_settings_kv(name, "")
-    except Exception as exc:
-        log.warning("store image clear (%s): %s", kind, exc)
-        return False
+            ensure_can_mutate()
+            live.push_settings_kv(name, "")
+        except Exception as exc:
+            log.warning("store image clear (%s): %s", kind, exc)
+            return False
     entry = _cache_key(name)
     with _lock:
         _server_cache[entry] = (time.time(), "")
@@ -603,7 +697,7 @@ def _kv_rows(raw) -> list[dict]:
 def fetch_from_server(kind: str) -> str:
     """The store's picture as a data: URI, or ''. Never raises."""
     name = _KV_NAMES.get(kind)
-    if not name or not _is_online():
+    if not name or not _can_share():
         return ""
     now = time.time()
     key = _cache_key(name)
@@ -611,6 +705,14 @@ def fetch_from_server(kind: str) -> str:
         hit = _server_cache.get(key)
         if hit and (now - hit[0]) < _SERVER_TTL:
             return hit[1]
+    if _offline_first():
+        # The row as the store download / the sync worker wrote it into this PC's copy.
+        value = _local_kv_get(name)
+        if value is None:
+            return ""
+        with _lock:
+            _server_cache[key] = (time.time(), value)
+        return value
     rows = _kv_rows_cached(_FETCH_GROUP.get(kind, (name,)))
     if rows is None:
         return ""
