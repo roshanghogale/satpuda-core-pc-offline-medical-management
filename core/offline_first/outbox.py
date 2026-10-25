@@ -214,6 +214,14 @@ def build_events(conn: sqlite3.Connection, install_id: str) -> int:
 _FILLER_DOC = {"settings": []}
 
 
+def mend_docless(ev: dict) -> bool:
+    """Turn an event with no document into the filler, in place. True when it was one."""
+    if not isinstance(ev, dict) or isinstance(ev.get("doc"), dict) or ev.get("op") == "stock"             or ev.get("collection") == "stock_operations":
+        return False
+    ev.update({"collection": "settings", "op": "upsert", "doc": dict(_FILLER_DOC), "base_version": None})
+    return True
+
+
 def repair_docless_events(conn: sqlite3.Connection) -> int:
     """Pending events an older build made with no document (see build_events): the server
     refuses the whole push over one of them, so this PC's sync was stuck behind it for good.
@@ -227,9 +235,8 @@ def repair_docless_events(conn: sqlite3.Connection) -> int:
             ev = json.loads(payload)
         except (TypeError, ValueError):
             continue
-        if isinstance(ev.get("doc"), dict) or ev.get("op") == "stock":
+        if not mend_docless(ev):
             continue
-        ev.update({"collection": "settings", "op": "upsert", "doc": dict(_FILLER_DOC), "base_version": None})
         conn.execute(
             "UPDATE of_events SET collection='settings', op='upsert', local_id=0, base_version=NULL, "
             "payload=? WHERE seq=?", (json.dumps(ev, default=str), seq),

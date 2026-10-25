@@ -296,6 +296,12 @@ def relay_to_cloud(conn, push=None) -> int:
         if not rows:
             continue
         events = [json.loads(p) for _r, _s, p in rows]
+        # An event a counter's older build made with no document: the server refuses the whole
+        # push over it (core/offline_first/outbox.mend_docless) -- sent as the no-op filler.
+        from core.offline_first.outbox import mend_docless
+
+        for ev in events:
+            mend_docless(ev)
         try:
             answer = push(install, events)
         except Exception as exc:

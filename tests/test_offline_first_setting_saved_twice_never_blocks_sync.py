@@ -57,3 +57,33 @@ class ASettingSavedTwice(OfBase):
         src = (Path(__file__).resolve().parents[1] / "core" / "offline_first" / "worker.py").read_text(
             encoding="utf-8")
         self.assertIn("outbox.repair_docless_events(conn)", src)
+
+
+class TheMainPcRelaysACountersOldEvent(OfBase):
+    def test_a_docless_counter_event_goes_up_as_the_filler(self):
+        from core.lan import bridge
+
+        bridge.ensure_tables(self.conn)
+        bad = {"seq": 9, "event_uuid": "pc-counter-old", "op": "upsert", "collection": "settings", "doc": None}
+        cols = [r[1] for r in self.conn.execute("PRAGMA table_info(of_lan_relay)")]
+        vals = {"install_id": "pc-counter", "seq": 9, "event_uuid": "pc-counter-old",
+                "payload": json.dumps(bad), "cloud_status": "pending"}
+        vals = {k: v for k, v in vals.items() if k in cols}
+        self.conn.execute(f"INSERT INTO of_lan_relay ({', '.join(vals)}) VALUES ({', '.join('?' * len(vals))})",
+                          tuple(vals.values()))
+        self.conn.commit()
+        sent = []
+
+        def push(install, events):
+            sent.extend(events)
+            return {"results": [{"seq": e["seq"], "outcome": "applied"} for e in events]}
+
+        from core.offline_first.worker import open_worker_connection
+
+        conn = open_worker_connection(self.path)
+        try:
+            bridge.relay_to_cloud(conn, push=push)
+        finally:
+            conn.close()
+        self.assertEqual(sent[0]["doc"], {"settings": []})
+        self.assertEqual(sent[0]["seq"], 9)
