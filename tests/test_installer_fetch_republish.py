@@ -15,6 +15,7 @@ import io
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -68,6 +69,7 @@ class FakeGitHub:
         self.range_mode = None
         self.fail_once = set()      # range starts that answer 404 the first time
         self.plain_gets = 0         # GETs of the zip without a Range header
+        self.dl_requests = 0        # every request for the zip itself
 
     def release_json(self, base):
         r = self.release
@@ -117,6 +119,7 @@ def make_handler(gh: FakeGitHub):
             if p.startswith("/dl/"):
                 aid = int(p.split("/")[2])
                 with gh.lock:
+                    gh.dl_requests += 1
                     data = gh.serve_override(aid) if gh.serve_override else None
                     if data is None and not gh.serve_override:
                         current = gh.release.get("id") if gh.release.get("zip") is not None else None
@@ -176,7 +179,7 @@ class FetchWorkerRepublish(unittest.TestCase):
         self.addCleanup(self.srv.server_close)
         self.addCleanup(self.srv.shutdown)
 
-    def run_worker(self, wait_secs=20, extra=()):
+    def run_worker(self, wait_secs=20, extra=(), api_base=None):
         app_root = os.path.join(self.tmp, "Satpuda Core")
         args = [POWERSHELL, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
                 "-File", WORKER,
@@ -184,7 +187,7 @@ class FetchWorkerRepublish(unittest.TestCase):
                 "-CacheDir", os.path.join(self.tmp, "cache"),
                 "-CancelFile", os.path.join(self.tmp, "cancel.flag"),
                 "-Repo", REPO, "-Tag", TAG, "-AssetName", ZIP,
-                "-ApiBase", f"http://127.0.0.1:{self.port}",
+                "-ApiBase", api_base or f"http://127.0.0.1:{self.port}",
                 "-UpdatePollSecs", "1", "-UpdateWaitSecs", str(wait_secs),
                 "-Segments", "4", *extra]
         p = subprocess.run(args, capture_output=True, text=True, timeout=180)
@@ -411,6 +414,139 @@ class FetchWorkerRepublish(unittest.TestCase):
         rc, out, rec = self.run_worker()
         self._assert_installed(rc, out, rec, sha)
         self.assertIn("release has NOT changed", out)
+
+    # ---- a zip downloaded in the browser (-LocalZip) ----------------------
+    # A shop PC whose antivirus breaks the worker's downloads while the
+    # browser works (Net Protector, 25 Oct 2026). The shopkeeper downloads the
+    # zip in the browser and the installer hands it to the worker.
+
+    def _browser_zip(self, data, name=ZIP):
+        downloads = os.path.join(self.tmp, "Downloads")
+        os.makedirs(downloads, exist_ok=True)
+        path = os.path.join(downloads, name)
+        with open(path, "wb") as fh:
+            fh.write(data)
+        return path
+
+    def _no_copy_left(self):
+        cache = os.path.join(self.tmp, "cache")
+        left = [f for f in os.listdir(cache) if f.endswith(".chosen")] if os.path.isdir(cache) else []
+        self.assertEqual(left, [])
+
+    def test_local_zip_matching_the_published_checksum_is_installed(self):
+        data, sha = self._steady(31)
+        path = self._browser_zip(data, ZIP[:-4] + " (1).zip")
+        rc, out, rec = self.run_worker(extra=("-LocalZip", path))
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("E|", out)
+        self.assertIn("chosen zip matches the published checksum", out)
+        self.assertNotIn("UNVERIFIED|", out)
+        self.assertIn("V|" + TAG, out)
+        # Nothing was downloaded: the zip on the release was never asked for.
+        self.assertEqual(self.gh.dl_requests, 0)
+        # Recorded exactly like a download, with where it came from.
+        self.assertEqual(rec["tag"], TAG)
+        self.assertEqual(rec["sha256"], sha)
+        self.assertTrue(rec["sha256Verified"])
+        self.assertEqual(rec["bytes"], len(data))
+        self.assertEqual(rec["assetId"], str(20 + 31))
+        self.assertEqual(rec["source"], "local zip")
+        exe = os.path.join(self.tmp, "Satpuda Core", "app", "SatpudaCore_Desktop.exe")
+        self.assertTrue(os.path.isfile(exe))
+        # The shopkeeper's own file is left alone; our copy is gone.
+        self.assertTrue(os.path.isfile(path))
+        self._no_copy_left()
+
+    def test_local_zip_with_the_wrong_checksum_is_refused(self):
+        self._steady(32)
+        other = make_zip(33)                      # same size, another build
+        path = self._browser_zip(other)
+        rc, out, rec = self.run_worker(extra=("-LocalZip", path))
+        self.assertEqual(rc, 2, out)
+        self.assertIn("E|LOCALWRONG|", out)
+        self.assertNotIn("OK|", out)
+        self.assertIsNone(rec)
+        self.assertFalse(os.path.isdir(os.path.join(self.tmp, "Satpuda Core", "app")))
+        self.assertFalse(os.path.isdir(os.path.join(self.tmp, "Satpuda Core", "app.staging")))
+        self.assertTrue(os.path.isfile(path))
+        self._no_copy_left()
+
+    def test_local_zip_without_a_sidecar_is_installed_with_a_warning(self):
+        """The release lists no .sha256: checked by its contents only, said
+        loudly (W| and UNVERIFIED|), and recorded as not verified."""
+        data = make_zip(34)
+        self.gh.release = {"zip": data, "sha": None, "id": 34,
+                           "updated": iso(datetime.now(timezone.utc) - timedelta(days=3))}
+        path = self._browser_zip(data)
+        rc, out, rec = self.run_worker(extra=("-LocalZip", path))
+        self.assertEqual(rc, 0, out)
+        self.assertIn("UNVERIFIED|", out)
+        self.assertIn("W|The published checksum could not be read", out)
+        self.assertEqual(self.gh.dl_requests, 0)
+        self.assertEqual(rec["sha256"], hashlib.sha256(data).hexdigest())
+        self.assertFalse(rec["sha256Verified"])
+        self.assertEqual(rec["source"], "local zip")
+        self._no_copy_left()
+
+    def test_local_zip_with_github_unreachable_is_installed_with_a_warning(self):
+        data = make_zip(35)
+        path = self._browser_zip(data)
+        dead = socket.socket()
+        dead.bind(("127.0.0.1", 0))
+        dead_port = dead.getsockname()[1]
+        dead.close()                              # nothing listens there now
+        rc, out, rec = self.run_worker(extra=("-LocalZip", path), api_base=f"http://127.0.0.1:{dead_port}")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("UNVERIFIED|", out)
+        self.assertEqual(rec["sha256"], hashlib.sha256(data).hexdigest())
+        self.assertFalse(rec["sha256Verified"])
+        self.assertEqual(rec["assetId"], "")
+
+    def test_local_zip_of_another_size_is_refused_without_a_sidecar(self):
+        self.gh.release = {"zip": make_zip(36), "sha": None, "id": 36,
+                           "updated": iso(datetime.now(timezone.utc) - timedelta(days=3))}
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:
+            z.writestr("SatpudaCore_Desktop_Win10/SatpudaCore_Desktop.exe", b"MZ" + os.urandom(2 * 1024 * 1024))
+        path = self._browser_zip(buf.getvalue())
+        rc, out, rec = self.run_worker(extra=("-LocalZip", path))
+        self.assertEqual(rc, 2, out)
+        self.assertIn("E|LOCALWRONG|", out)
+        self.assertIsNone(rec)
+
+    def test_local_zip_without_the_program_is_refused(self):
+        """No checksum to compare with, and the zip does not hold the sentinel
+        exe: refused before anything is swapped in."""
+        self.gh.release = {"zip": None, "sha": None, "id": 37}
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:
+            z.writestr("photos/holiday.jpg", os.urandom(2 * 1024 * 1024))
+        path = self._browser_zip(buf.getvalue())
+        rc, out, rec = self.run_worker(extra=("-LocalZip", path), wait_secs=2)
+        self.assertEqual(rc, 2, out)
+        self.assertIn("E|LAYOUT|", out)
+        self.assertIsNone(rec)
+        self.assertFalse(os.path.isdir(os.path.join(self.tmp, "Satpuda Core", "app.staging")))
+        self._no_copy_left()
+
+    def test_local_zip_that_is_not_there(self):
+        rc, out, rec = self.run_worker(extra=("-LocalZip", os.path.join(self.tmp, "nope.zip")))
+        self.assertEqual(rc, 2, out)
+        self.assertIn("E|LOCALZIP|", out)
+
+    # ---- connecting quickly ---------------------------------------------
+
+    def test_ipv6_is_passed_over_when_ipv4_answers(self):
+        """'localhost' is ::1 first, then 127.0.0.1; the fake GitHub listens
+        on 127.0.0.1 only. The fast-connect helper skips ::1 (prefer IPv4)
+        and the install goes through unchanged."""
+        data, sha = self._steady(38)
+        rc, out, rec = self.run_worker(api_base=f"http://localhost:{self.port}")
+        self._assert_installed(rc, out, rec, sha)
+        self.assertIn("fast connect:", out)
+        has_v6 = any(ai[0] == socket.AF_INET6 for ai in socket.getaddrinfo("localhost", self.port))
+        if has_v6:
+            self.assertIn(f"skipping [::1]:{self.port} for localhost", out)
 
     def test_check_only_reports_the_latest_sha(self):
         """-CheckOnly's SHA| line, read by the maintenance page."""

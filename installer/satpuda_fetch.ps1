@@ -12,6 +12,8 @@
      W|<text>           warning (install continues)
      E|<CODE>|<text>    fatal, CODE lets the installer show a nicer sentence
      D|<text>           debug, goes to the install log only
+     UNVERIFIED|        -LocalZip only: no published checksum could be read, so
+                        the chosen zip was checked by its contents alone
      OK|                finished
 
   Exit codes: 0 = success, 2 = failed, 3 = cancelled by the user.
@@ -63,6 +65,11 @@ param(
     # A run that lands in that window waits for GitHub instead of failing.
     [int]    $UpdateWaitSecs = 180,                        # how long to wait for a release that is being re-published
     [int]    $UpdatePollSecs = 15,                         # how often to look again while waiting
+    # A zip the shopkeeper downloaded in the browser, used instead of downloading
+    # (a PC whose antivirus breaks this worker's downloads while the browser works).
+    # Checked against the release's published .sha256 when it can be read, then
+    # installed by exactly the same extract / swap / record steps as a download.
+    [string] $LocalZip  = '',
     [string] $ApiBase   = 'https://api.github.com'         # only ever changed by the tests (a local fake GitHub)
 )
 
@@ -204,13 +211,23 @@ function Emit([string]$line) {
         try { $script:LogWriter.WriteLine(('{0:HH:mm:ss}  {1}' -f (Get-Date), $line)); $script:LogWriter.Flush() } catch { }
     }
 }
-function Step([string]$t)            { Emit ("S|" + $t) }
+function Step([string]$t)            { Write-ConnectNotes; Emit ("S|" + $t) }
 function Warn([string]$t)            { Emit ("W|" + $t) }
 function Dbg ([string]$t)            { Emit ("D|" + $t) }
-function Fail([string]$code,[string]$t) { Emit ("E|" + $code + "|" + $t); Exit-Clean 2 }
+function Fail([string]$code,[string]$t) { Write-ConnectNotes; Emit ("E|" + $code + "|" + $t); Exit-Clean 2 }
+
+# What the fast-connect helper (see "connecting quickly" below) noticed, into
+# the log. It runs on .NET's own threads, so it queues notes and this - on the
+# main thread - writes them out.
+$script:FastConnect = $false
+function Write-ConnectNotes {
+    if (-not $script:FastConnect) { return }
+    try { foreach ($n in [SatpudaNet.FastConnect]::TakeNotes()) { Dbg ('connect: ' + $n) } } catch { }
+}
 
 $script:LastPct = -1
 function Progress([int]$pct, [string]$t) {
+    Write-ConnectNotes
     if ($pct -lt 0) { $pct = 0 } elseif ($pct -gt 100) { $pct = 100 }
     if ($pct -ne $script:LastPct) {          # only on change: ExecAndLogOutput caps total output
         $script:LastPct = $pct
@@ -265,6 +282,8 @@ function Exit-Clean([int]$code) {
         # A staging folder is never a valid install. Leaving one behind is what
         # makes a broken install look finished, so it always goes.
         try { if ($script:Staging -and (Test-Path -LiteralPath $script:Staging)) { [void](Remove-Tree $script:Staging) } } catch { }
+        # Our copy of a chosen zip (-LocalZip). Never the shopkeeper's own file.
+        try { if ($script:LocalCopy -and (Test-Path -LiteralPath $script:LocalCopy)) { Remove-Item -LiteralPath $script:LocalCopy -Force } } catch { }
         # If we created the install folder and then failed, do not leave an
         # empty "Satpuda Core" sitting in Programs looking like a half install.
         try {
@@ -344,7 +363,270 @@ try {
 # segmented download with the old value of 8 would have run 8 at a time.
 [Net.ServicePointManager]::DefaultConnectionLimit = [Math]::Max(32, $Segments * 2)
 
+# ------------------------------------------------------ connecting quickly --
+#
+# GitHub's file host has four IPv4 addresses (185.199.108-111.133). From some
+# Indian ISPs one of them, 185.199.109.133, does not answer at all (25 Oct
+# 2026). .NET tries a host's addresses one after another and gives each one the
+# whole Windows TCP connect time - about 21 s - so every connection that drew
+# the dead address stalled for 21 s before trying the next, and the 20 s chunk
+# watchdog cut many of them off just before they would have moved on.
+#
+# HttpWebRequest has no connect timeout of its own, but every ServicePoint asks
+# its BindIPEndPointDelegate before each address it tries, and an exception
+# thrown there makes .NET skip that address and go straight to the next one.
+# So the helper below, before an address is used for the first time, knocks on
+# all of the host's addresses at once (a bare TCP connect, 3 s at most) and
+# remembers the answers for 10 minutes. Then:
+#   * an IPv6 address is skipped when an IPv4 address of the host answers
+#     (prefer IPv4: IPv6 is the other thing that is broken on some lines);
+#   * an address that did not answer is skipped when ANOTHER address answers;
+#   * otherwise .NET connects exactly as before - a slow line that answers no
+#     knock is never made worse than it was.
+# Nothing else about the requests changes: the same 16 connections, the same
+# hosts, TLS and certificate checks untouched. If the helper cannot be compiled
+# (no csc, policy), the worker carries on without it.
+$FastConnectSource = @'
+using System;
+using System.Collections.Generic;
+using System.Net;
+using System.Net.Sockets;
+
+namespace SatpudaNet
+{
+    public class SkipAddressException : Exception
+    {
+        public SkipAddressException(string m) : base(m) { }
+    }
+
+    public static class FastConnect
+    {
+        public static int ProbeMs = 3000;
+        static readonly object Gate = new object();
+        static readonly Dictionary<string, bool> Good = new Dictionary<string, bool>();
+        static readonly Dictionary<string, DateTime> When = new Dictionary<string, DateTime>();
+        static readonly Dictionary<string, object> HostGates = new Dictionary<string, object>();
+        static readonly Dictionary<string, bool> Told = new Dictionary<string, bool>();
+        // Strong references: ServicePointManager only holds ServicePoints weakly,
+        // and a recreated one would come back without the delegate.
+        static readonly List<ServicePoint> Kept = new List<ServicePoint>();
+        static readonly Queue<string> Notes = new Queue<string>();
+
+        public static void Hook(string url)
+        {
+            Uri u;
+            if (!Uri.TryCreate(url, UriKind.Absolute, out u)) return;
+            ServicePoint sp = ServicePointManager.FindServicePoint(u);
+            lock (Gate)
+            {
+                if (Kept.Contains(sp)) return;
+                Kept.Add(sp);
+            }
+            sp.BindIPEndPointDelegate = new BindIPEndPoint(Bind);
+        }
+
+        public static string[] TakeNotes()
+        {
+            lock (Gate) { string[] a = Notes.ToArray(); Notes.Clear(); return a; }
+        }
+
+        static void Note(string s)
+        {
+            lock (Gate) { if (Notes.Count < 500) Notes.Enqueue(s); }
+        }
+
+        static void NoteOnce(string s)
+        {
+            lock (Gate) { if (Told.ContainsKey(s)) return; Told[s] = true; }
+            Note(s);
+        }
+
+        static string Key(IPAddress a, int port)
+        {
+            return (a.AddressFamily == AddressFamily.InterNetworkV6 ? "[" + a + "]" : a.ToString()) + ":" + port;
+        }
+
+        // 1 = answered, 0 = did not, -1 = not knocked on in the last 10 minutes
+        static int Known(string k)
+        {
+            lock (Gate)
+            {
+                DateTime t;
+                if (When.TryGetValue(k, out t) && (DateTime.UtcNow - t).TotalMinutes < 10) return Good[k] ? 1 : 0;
+                return -1;
+            }
+        }
+
+        static void Remember(string k, bool ok)
+        {
+            lock (Gate) { Good[k] = ok; When[k] = DateTime.UtcNow; }
+        }
+
+        // Knock on every address without a fresh answer, all at once, one
+        // deadline. Stops early once the choice is clear: the address .NET is
+        // about to use answered (IPv4), or another address answered first - then
+        // the one about to be used is at best slower, and is passed over.
+        static void ProbeAll(IList<IPAddress> addrs, int port, IPAddress remote)
+        {
+            string rk = Key(remote, port);
+            bool v6 = remote.AddressFamily == AddressFamily.InterNetworkV6;
+            List<Socket> socks = new List<Socket>();
+            List<IAsyncResult> res = new List<IAsyncResult>();
+            List<string> keys = new List<string>();
+            foreach (IPAddress a in addrs)
+            {
+                string k = Key(a, port);
+                if (Known(k) >= 0 || keys.Contains(k)) continue;
+                Socket s = null;
+                try
+                {
+                    s = new Socket(a.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+                    IAsyncResult r = s.BeginConnect(new IPEndPoint(a, port), null, null);
+                    socks.Add(s); res.Add(r); keys.Add(k);
+                }
+                catch (Exception e)
+                {
+                    if (s != null) { try { s.Close(); } catch { } }
+                    Remember(k, false);
+                    Note("cannot reach " + k + " (" + e.Message + ")");
+                }
+            }
+            bool[] done = new bool[res.Count];
+            DateTime end = DateTime.UtcNow.AddMilliseconds(ProbeMs);
+            while (true)
+            {
+                bool pending = false, remoteGood = false, otherGood = false;
+                for (int i = 0; i < res.Count; i++)
+                {
+                    if (!done[i] && res[i].IsCompleted)
+                    {
+                        bool ok = false;
+                        try { socks[i].EndConnect(res[i]); ok = true; } catch { ok = false; }
+                        try { socks[i].Close(); } catch { }
+                        done[i] = true;
+                        Remember(keys[i], ok);
+                        Note((ok ? "answers: " : "refused: ") + keys[i]);
+                    }
+                    if (!done[i]) pending = true;
+                }
+                foreach (IPAddress a in addrs)
+                {
+                    if (Known(Key(a, port)) != 1) continue;
+                    if (a.Equals(remote)) remoteGood = true; else otherGood = true;
+                }
+                if (!pending || (remoteGood && !v6) || otherGood) break;
+                if (DateTime.UtcNow >= end) break;
+                System.Threading.Thread.Sleep(15);
+            }
+            bool late = DateTime.UtcNow >= end;
+            for (int i = 0; i < res.Count; i++)
+            {
+                if (done[i]) continue;
+                try { socks[i].Close(); } catch { }
+                if (late)
+                {
+                    Remember(keys[i], false);
+                    Note("no answer within " + ProbeMs + " ms: " + keys[i]);
+                }
+                else if (keys[i] == rk)
+                {
+                    Remember(keys[i], false);
+                    Note("slower than another address: " + keys[i]);
+                }
+                // any other address still knocking is simply asked again later
+            }
+        }
+
+        static IPAddress[] Resolve(string host)
+        {
+            IPAddress lit;
+            if (IPAddress.TryParse(host.Trim('[', ']'), out lit)) return new IPAddress[] { lit };
+            try { return Dns.GetHostAddresses(host); } catch { return new IPAddress[0]; }
+        }
+
+        static object HostGate(string h)
+        {
+            lock (Gate)
+            {
+                object o;
+                if (!HostGates.TryGetValue(h, out o)) { o = new object(); HostGates[h] = o; }
+                return o;
+            }
+        }
+
+        static IPEndPoint Bind(ServicePoint sp, IPEndPoint remote, int retryCount)
+        {
+            if (retryCount > 0) return null;
+            try { Decide(sp, remote); }
+            catch (SkipAddressException) { throw; }
+            catch { }   // anything unexpected: connect the normal way
+            return null;
+        }
+
+        static void Decide(ServicePoint sp, IPEndPoint remote)
+        {
+            string host = sp.Address.Host;
+            int port = remote.Port;
+            string rk = Key(remote.Address, port);
+            bool v6 = remote.AddressFamily == AddressFamily.InterNetworkV6;
+            // An IPv4 address that answered recently: nothing to decide.
+            if (!v6 && Known(rk) == 1) return;
+
+            lock (HostGate(host))
+            {
+                List<IPAddress> all = new List<IPAddress>(Resolve(host));
+                bool listed = false;
+                foreach (IPAddress a in all) if (a.Equals(remote.Address)) listed = true;
+                if (!listed) all.Add(remote.Address);
+                ProbeAll(all, port, remote.Address);
+
+                bool otherGood = false, v4Good = false;
+                foreach (IPAddress a in all)
+                {
+                    if (Known(Key(a, port)) != 1) continue;
+                    if (a.AddressFamily == AddressFamily.InterNetwork) v4Good = true;
+                    if (!a.Equals(remote.Address)) otherGood = true;
+                }
+                if (v6 && v4Good)
+                {
+                    NoteOnce("prefer IPv4: skipping " + rk + " for " + host);
+                    throw new SkipAddressException("prefer IPv4");
+                }
+                if (Known(rk) == 1) return;
+                if (otherGood)
+                {
+                    NoteOnce("skipping " + rk + " for " + host + ": it does not answer, another address does");
+                    throw new SkipAddressException("no answer");
+                }
+            }
+        }
+    }
+}
+'@
+
+function Enable-FastConnect {
+    try {
+        Add-Type -TypeDefinition $FastConnectSource -Language CSharp -ErrorAction Stop
+        $script:FastConnect = $true
+    } catch {
+        Dbg ('fast connect helper not available, connecting the normal way: ' + $_.Exception.Message)
+        return
+    }
+    foreach ($u in @('https://github.com/', 'https://api.github.com/',
+                     'https://release-assets.githubusercontent.com/', 'https://objects.githubusercontent.com/',
+                     $ApiBase, $DirectUrl)) {
+        Use-FastConnect $u
+    }
+    Dbg 'fast connect: addresses that do not answer within 3 s are skipped; IPv4 preferred'
+}
+
+function Use-FastConnect([string]$u) {
+    if ((-not $script:FastConnect) -or (-not $u)) { return }
+    try { [SatpudaNet.FastConnect]::Hook($u) } catch { }
+}
+
 Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
+Enable-FastConnect
 
 $script:Staging = Join-Path $AppRoot 'app.staging'
 $LiveDir        = Join-Path $AppRoot 'app'
@@ -615,6 +897,8 @@ function Get-RangeSupport([string]$u) {
         $req.AddRange([int64]0, [int64]0)
         $resp = $req.GetResponse()
         $info.Status = [int]$resp.StatusCode
+        # The host the link redirected to is the one the 16 connections use.
+        try { Use-FastConnect $resp.ResponseUri.AbsoluteUri } catch { }
         if ([int]$resp.StatusCode -eq 206) {
             $cr = $resp.Headers['Content-Range']         # "bytes 0-0/127827033"
             if ($cr -and ($cr -match '/(\d+)\s*$')) {
@@ -1235,6 +1519,96 @@ function Resolve-RangeTrouble([bool]$lastRound, [string]$what) {
 $MaxRounds = 2
 $script:InstalledHash = ''
 $script:HashVerified  = $false
+$script:LocalCopy     = ''
+
+# ------------------------------------------- 2b. or: a zip from the browser --
+#
+# -LocalZip: a shop PC whose antivirus breaks every download this worker makes
+# (Net Protector, 25 Oct 2026) while its browser downloads the same file fine.
+# The shopkeeper downloads the zip in the browser and the installer hands it
+# here. It is COPIED into the cache first, so the checksum and the extraction
+# read the same bytes, and nothing that goes wrong later can delete the
+# shopkeeper's own file. Then it goes through exactly the steps a download does
+# (open, extract to staging, sentinel check, marker, swap).
+#
+# Verified against the release's published .sha256 when GitHub answers; a zip
+# that does not match is refused. When no checksum can be read it is checked by
+# its contents only (it must open as a zip and hold the sentinel exe - the same
+# checks as below), and UNVERIFIED| tells the installer to say so.
+function Copy-LocalZip([string]$src, [string]$dst, [int64]$total) {
+    if (Test-Path -LiteralPath $dst) { Remove-Item -LiteralPath $dst -Force }
+    $in  = New-Object System.IO.FileStream((Get-LongPath $src), [System.IO.FileMode]::Open,
+               [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read, 1048576)
+    try {
+        $out = New-Object System.IO.FileStream((Get-LongPath $dst), [System.IO.FileMode]::Create,
+                   [System.IO.FileAccess]::Write, [System.IO.FileShare]::None, 1048576)
+        try {
+            $buf  = New-Object byte[] 1048576
+            $done = [int64]0
+            while (($n = $in.Read($buf, 0, $buf.Length)) -gt 0) {
+                $out.Write($buf, 0, $n)
+                $done += $n
+                if (Test-Cancel) { $out.Dispose(); $in.Dispose(); Exit-Clean 3 }
+                Progress (5 + [int](($done / [double]$total) * 50)) ('Copying the chosen zip (' + [math]::Round($done / 1MB) + ' of ' + [math]::Round($total / 1MB) + ' MB)')
+            }
+            $out.Flush()
+        } finally { try { $out.Dispose() } catch { } }
+    } finally { try { $in.Dispose() } catch { } }
+}
+
+function Use-LocalZip {
+    Step 'Checking the chosen zip'
+    Progress 0 'Checking the chosen zip'
+    $src = $LocalZip
+    try { $src = [System.IO.Path]::GetFullPath($LocalZip) } catch { }
+    if (-not [System.IO.File]::Exists((Get-LongPath $src))) {
+        Fail 'LOCALZIP' ('The chosen file was not found: ' + $src)
+    }
+    $len = Get-FileLength $src
+    Dbg ('installing from a chosen zip: ' + $src + ' (' + $len + ' bytes) as release ' + $Tag)
+    if ($len -lt 1048576) { Fail 'LOCALZIP' ('The chosen file is far too small to be Satpuda Core (' + $len + ' bytes).') }
+
+    # The published checksum: one look at the release, no waiting for a
+    # re-publish. A PC that cannot download the zip can often still read this.
+    Step 'Reading the published checksum'
+    Progress 2 'Reading the published checksum from GitHub'
+    $r = Read-Release
+    Assert-NotCancelled
+
+    $script:LocalCopy = Join-Path $CacheDir ($AssetName + '.chosen')
+    $script:DoneFile  = $script:LocalCopy
+    Step 'Copying the chosen zip'
+    try { Copy-LocalZip $src $script:LocalCopy $len }
+    catch { Fail 'LOCALZIP' ('The chosen file could not be read: ' + $_.Exception.Message) }
+
+    Step 'Checking the chosen zip'
+    Progress 56 'Working out the checksum of the chosen zip'
+    $h = Get-Sha256 $script:LocalCopy
+    Assert-NotCancelled
+    $script:InstalledHash = $h
+
+    if ($r.Hash) {
+        if ($h -ne $r.Hash) {
+            Dbg ('chosen zip sha256 ' + $h + ' is not the published ' + $r.Hash)
+            Fail 'LOCALWRONG' ('The chosen zip is not the published build of ' + $Tag + ' (checksum did not match).')
+        }
+        Dbg 'chosen zip matches the published checksum'
+        $script:HashVerified = $true
+        $script:Used         = $r
+        return
+    }
+    # No checksum to compare with. A size the release DID list still has to match.
+    if ($r.ApiOk -and $r.Url -and ($r.Size -gt 0) -and ($r.Size -ne $len)) {
+        Fail 'LOCALWRONG' ('The chosen zip is not the published build of ' + $Tag + ' (' + $len + ' bytes, the release has ' + $r.Size + ').')
+    }
+    Warn 'The published checksum could not be read from GitHub; the chosen zip is checked by its contents only (it must open and contain the program).'
+    Emit 'UNVERIFIED|'
+}
+
+if ($LocalZip) {
+    Use-LocalZip
+    $MaxRounds = 0      # no download rounds; straight on to opening the package
+}
 
 for ($round = 1; $round -le $MaxRounds; $round++) {
     $script:Replaced = $false
@@ -1563,7 +1937,7 @@ if (-not (Test-Path -LiteralPath $engine)) { Warn 'The data engine was not found
 # otherwise the hash of the zip as downloaded. Because the record lives INSIDE
 # the payload folder it is swapped in with it: it can never describe a payload
 # that is not there.
-$marker = @{
+$markerInfo = @{
     tag            = $Tag
     asset          = $AssetName
     bytes          = (Get-FileLength $DoneFile)
@@ -1572,7 +1946,10 @@ $marker = @{
     assetId        = $(if ($script:Used) { [string]$script:Used.Id } else { '' })
     assetUpdatedAt = $(if ($script:Used) { [string]$script:Used.Updated } else { '' })
     installedAt    = (Get-Date).ToString('s')
-} | ConvertTo-Json
+}
+# A zip chosen in the browser says so; a downloaded one keeps the record as it was.
+if ($LocalZip) { $markerInfo.source = 'local zip' }
+$marker = $markerInfo | ConvertTo-Json
 [System.IO.File]::WriteAllText((Get-LongPath (Join-Path $script:Staging '.satpuda-install.json')), $marker)
 
 # ------------------------------------------------------------ 7. the swap --

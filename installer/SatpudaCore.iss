@@ -270,6 +270,13 @@ var
   GStopButton     : TNewButton;
   GPayloadTag     : String;    { V| line: the release tag that actually landed }
 
+  { "Use a zip downloaded in the browser" - for a PC whose antivirus breaks the
+    worker's downloads while the browser works (Net Protector, 25 Oct 2026). }
+  GLocalZip       : String;    { the zip the current worker run installs, '' = download }
+  GUnverified     : Boolean;   { UNVERIFIED| line: no published checksum could be read }
+  GLastErrText    : String;    { the last failure sentence, without the log line }
+  GZipFound       : String;    { a matching zip seen in Downloads, '' when none }
+
   GDesktopLnk     : String;    { where the desktop shortcut actually landed, '' if none }
   GStartMenuLnk   : String;
   GDesktopProblem : String;    { why the desktop shortcut could not be made }
@@ -2015,7 +2022,23 @@ end;
 
 function FriendlyError(const Code, Raw: String): String;
 begin
-  if Code = 'NET' then
+  { A zip chosen in the browser (GLocalZip) gets its own wording: nothing was
+    downloaded, and the cure is a fresh browser download, not a retry. }
+  if Code = 'LOCALWRONG' then
+    Result :=
+      'The chosen zip is not the published Satpuda Core ' + TargetTag + ', so nothing was installed.' + #13#10#13#10 +
+      'Its checksum does not match the one on the release page. An older copy, or a browser download ' +
+      'that stopped early, both look like this. Download it again with "Open download link" and choose the new file.' + #13#10#13#10 +
+      'Details: ' + Raw
+  else if Code = 'LOCALZIP' then
+    Result :=
+      'The chosen file could not be used, so nothing was installed.' + #13#10#13#10 + Raw
+  else if (GLocalZip <> '') and ((Code = 'SIZE') or (Code = 'HASH') or (Code = 'ZIP') or (Code = 'LAYOUT')) then
+    Result :=
+      'The chosen file is not a Satpuda Core package, or it is damaged. Nothing on this computer was changed.' + #13#10#13#10 +
+      'Download {#MyAssetName} again in the browser and choose that file.' + #13#10#13#10 +
+      'Details: ' + Raw
+  else if Code = 'NET' then
     Result :=
       'Satpuda Core could not be downloaded.' + #13#10#13#10 +
       'Check that this computer is connected to the internet, then run this installer again. ' +
@@ -2139,6 +2162,8 @@ begin
     else
       GErrMsg := Rest;
   end
+  else if Copy(S, 1, 11) = 'UNVERIFIED|' then
+    GUnverified := True
   else if Copy(S, 1, 3) = 'OK|' then
     GWorkerOK := True;
 end;
@@ -3269,14 +3294,23 @@ end;
   Runs from PrepareToInstall, whose documented contract is exactly that:
   a non-empty result aborts the install cleanly and displays the text. That
   avoids relying on Abort/exceptions to unwind a half-started install. }
-function DoFetch: String;
+{ Where the worker writes its own log (-LogFile). Shown with every failure so
+  the shop can send the file. }
+function InstallLogPath: String;
+begin
+  Result := ExpandConstant('{localappdata}\SatpudaCore\install.log');
+end;
+
+{ Runs satpuda_fetch.ps1 once, with the progress page up. Zip = '' downloads
+  from GitHub; otherwise the worker installs that file (-LocalZip) through the
+  same extract / swap / record steps. Returns the worker's exit code, or -1
+  when Windows would not start PowerShell. }
+function RunWorker(const Zip: String): Integer;
 var
-  Params, Staging: String;
+  Params: String;
   RC: Integer;
 begin
-  Result := '';
-  ExtractTemporaryFile('satpuda_fetch.ps1');
-
+  Result := -1;
   GCancelFile := ExpandConstant('{tmp}\satpuda_cancel.flag');
   DeleteFile(GCancelFile);
   ForceDirectories(CacheDir);
@@ -3290,13 +3324,13 @@ begin
   GNoCancel := False;
   GWorkerPid := 0;
   GPayloadTag := '';
+  GLocalZip   := Zip;
+  GUnverified := False;
 
-  GStatusText := 'Getting Satpuda Core ready...';
-
-  { Normally already decided on the maintenance page; a run that skipped it
-    (silent install) decides here. }
-  ResolveTargetTag;
-  ShowResolvedVersionInTitle;
+  if Zip = '' then
+    GStatusText := 'Getting Satpuda Core ready...'
+  else
+    GStatusText := 'Installing from the chosen zip...';
 
   Params :=
     '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' +
@@ -3319,6 +3353,8 @@ begin
     told not to trust a cached zip it cannot prove is good. }
   if GMaintAction = 'repair' then
     Params := Params + ' -Repair';
+  if Zip <> '' then
+    Params := Params + ' -LocalZip ' + Q(Zip);
 
   GWorkerRunning := True;
   GProgressPage.SetText(GStatusText, '');
@@ -3341,13 +3377,9 @@ begin
       each line arrives, and Inno pumps the message queue every 50 ms while it
       waits (HandleProcessWait in Setup.InstFunc.pas), so the bar moves and the
       Stop button stays live while all the heavy lifting happens elsewhere. }
-    if not ExecAndLogOutput(PSExePath, Params, ExpandConstant('{tmp}'),
-                            SW_HIDE_, ewWaitUntilTerminated, RC, @WorkerLog) then
-    begin
-      Result := 'Windows would not start PowerShell, so Satpuda Core could not be downloaded.' + #13#10#13#10 +
-                'Please tell Roshan and mention this message.';
-      Exit;
-    end;
+    if ExecAndLogOutput(PSExePath, Params, ExpandConstant('{tmp}'),
+                        SW_HIDE_, ewWaitUntilTerminated, RC, @WorkerLog) then
+      Result := RC;
   finally
     { Inno warns that a progress page which is never hidden leaves the wizard
       stuck forever, so this must happen on every path out. }
@@ -3355,6 +3387,25 @@ begin
     GProgressPage.Hide;
     GWorkerRunning := False;
     DeleteFile(GCancelFile);
+  end;
+end;
+
+{ One worker run, judged: '' when it installed, otherwise the sentence to show.
+  Every failure sentence ends with where the worker's log is. }
+function RunAndJudge(const Zip: String): String;
+var
+  Staging: String;
+  RC: Integer;
+begin
+  Result := '';
+  GLastErrText := '';
+  RC := RunWorker(Zip);
+
+  if RC = -1 then
+  begin
+    Result := 'Windows would not start PowerShell, so Satpuda Core could not be downloaded.' + #13#10#13#10 +
+              'Please tell Roshan and mention this message.';
+    Exit;
   end;
 
   if (RC = 3) or GCancelRequested then
@@ -3379,12 +3430,336 @@ begin
 
   if (RC <> 0) or (not GWorkerOK) then
   begin
-    Result := FriendlyError(GErrCode, GErrMsg);
+    GLastErrText := FriendlyError(GErrCode, GErrMsg);
+    Result := GLastErrText + #13#10#13#10 +
+              'Install log (send this file to Roshan if it keeps failing):' + #13#10 + InstallLogPath;
     Exit;
   end;
 
   if GWarnings <> '' then
     Log('[fetch warnings] ' + GWarnings);
+
+  if (Zip <> '') and GUnverified then
+  begin
+    Log('installed from a chosen zip WITHOUT a published checksum (checked by its contents only)');
+    if not WizardSilent then
+      MsgBox('Satpuda Core was installed from the chosen zip.' + #13#10#13#10 +
+             'The checksum published on GitHub could not be read from this computer, so the zip was ' +
+             'checked only by its contents: it opens, and {#MyAppExeName} is in it. It was NOT compared ' +
+             'byte for byte with the published build.' + #13#10#13#10 +
+             'If Satpuda Core does not start properly, download the zip again in the browser and run this installer again.',
+             mbInformation, MB_OK);
+  end;
+end;
+
+{ The failures a zip downloaded in the browser can get round: the download
+  itself did not work, or arrived damaged. }
+function IsDownloadFailure(const Code: String): Boolean;
+begin
+  Result := (Code = 'NET') or (Code = 'SIZE') or (Code = 'HASH') or (Code = 'ZIP') or
+            (Code = 'GONE') or (Code = 'CHANGED');
+end;
+
+{ The shopkeeper's Downloads folder (it can be moved, so the shell's own record
+  is asked first). '' when there is none. }
+function DownloadsDir: String;
+var
+  S: String;
+begin
+  Result := '';
+  if RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders',
+                         '{374DE290-123F-4565-9164-39C4925E467B}', S) then
+    if (S <> '') and DirExists(S) then
+    begin
+      Result := RemoveBackslashUnlessRoot(S);
+      Exit;
+    end;
+  if RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders',
+                         '{374DE290-123F-4565-9164-39C4925E467B}', S) then
+  begin
+    StringChangeEx(S, '%USERPROFILE%', GetEnv('USERPROFILE'), True);
+    if (S <> '') and DirExists(S) then
+    begin
+      Result := RemoveBackslashUnlessRoot(S);
+      Exit;
+    end;
+  end;
+  S := AddBackslash(GetEnv('USERPROFILE')) + 'Downloads';
+  if DirExists(S) then
+    Result := S;
+end;
+
+{ What the browser saves: the asset's own name, or "<name> (1).zip" when it is
+  downloaded again. }
+function ZipPattern: String;
+begin
+  Result := ChangeFileExt('{#MyAssetName}', '') + '*.zip';
+end;
+
+{ The newest SatpudaCore_Desktop_Win10*.zip already in Downloads, '' when there
+  is none. A browser download still in progress is a .crdownload / .part, so a
+  .zip here is a finished one. }
+function FindZipInDownloads: String;
+var
+  Dir: String;
+  FR: TFindRec;
+  BestHi, BestLo: Cardinal;
+begin
+  Result := '';
+  BestHi := 0;
+  BestLo := 0;
+  Dir := DownloadsDir;
+  if Dir = '' then Exit;
+  if FindFirst(AddBackslash(Dir) + ZipPattern, FR) then
+  try
+    repeat
+      if ((FR.Attributes and FILE_ATTRIBUTE_DIRECTORY) = 0) and
+         ((FR.SizeHigh > 0) or (FR.SizeLow >= 1048576)) then
+        if (Result = '') or (FR.LastWriteTime.dwHighDateTime > BestHi) or
+           ((FR.LastWriteTime.dwHighDateTime = BestHi) and (FR.LastWriteTime.dwLowDateTime > BestLo)) then
+        begin
+          Result := AddBackslash(Dir) + FR.Name;
+          BestHi := FR.LastWriteTime.dwHighDateTime;
+          BestLo := FR.LastWriteTime.dwLowDateTime;
+        end;
+    until not FindNext(FR);
+  finally
+    FindClose(FR);
+  end;
+end;
+
+procedure OpenDownloadLinkClick(Sender: TObject);
+var
+  ErrorCode: Integer;
+begin
+  Log('opening the download link in the browser: ' + TargetDirectUrl);
+  if not ShellExec('open', TargetDirectUrl, '', '', SW_SHOWNORMAL, ewNoWait, ErrorCode) then
+    MsgBox('The browser could not be opened from here. Open it yourself and type in this address:' + #13#10#13#10 +
+           TargetDirectUrl, mbError, MB_OK);
+end;
+
+{ A wrapped label on the zip dialog, measured. }
+function ZipDlgLabel(Form: TSetupForm; const S: String; X, Y, W: Integer; Bold: Boolean): TNewStaticText;
+begin
+  Result := TNewStaticText.Create(Form);
+  Result.Parent   := Form;
+  Result.Left     := X;
+  Result.Top      := Y;
+  Result.Width    := W;
+  Result.AutoSize := False;
+  Result.WordWrap := True;
+  if Bold then
+    Result.Font.Style := [fsBold];
+  Result.Caption  := S;
+  Result.AdjustHeight;
+end;
+
+{ A read-only box the shopkeeper can copy from (the link, the log path). }
+function ZipDlgBox(Form: TSetupForm; const S: String; X, Y, W: Integer): TNewEdit;
+begin
+  Result := TNewEdit.Create(Form);
+  Result.Parent   := Form;
+  Result.Left     := X;
+  Result.Top      := Y;
+  Result.Width    := W;
+  Result.Height   := ScaleY(23);
+  Result.ReadOnly := True;
+  Result.Text     := S;
+end;
+
+function ZipDlgButton(Form: TSetupForm; const Caption: String; MR: Integer): TNewButton;
+begin
+  Result := TNewButton.Create(Form);
+  Result.Parent      := Form;
+  Result.Caption     := Caption;
+  Result.Width       := Form.CalculateButtonWidth([Caption]);
+  Result.Height      := ScaleY(23);
+  Result.ModalResult := MR;
+end;
+
+{ The download failed: offer a zip downloaded in the browser instead. Returns
+  the file chosen, or '' when the shopkeeper closed the dialog. As on the
+  Administrator dialog, a click handler cannot close the form, so the picker
+  runs between two ShowModal calls. }
+function ShowZipDialog(const ErrText: String): String;
+var
+  Form: TSetupForm;
+  Lbl, FoundLbl: TNewStaticText;
+  Bev: TBevel;
+  OpenBtn, PickBtn, FoundBtn, CloseBtn: TNewButton;
+  M, W, Y, MR, Sz: Integer;
+  FileName, InitialDir: String;
+begin
+  Result := '';
+  Form := CreateCustomForm(ScaleX(540), ScaleY(440), False, True);
+  try
+    Form.Caption := 'Satpuda Core could not be downloaded';
+    M := ScaleX(14);
+    W := Form.ClientWidth - 2 * M;
+    Y := ScaleY(14);
+
+    Lbl := ZipDlgLabel(Form, ErrText, M, Y, W, False);
+    Y := Y + Lbl.Height + ScaleY(10);
+
+    Bev := TBevel.Create(Form);
+    Bev.Parent := Form;
+    Bev.Shape  := bsTopLine;
+    Bev.Left   := M;
+    Bev.Top    := Y;
+    Bev.Width  := W;
+    Bev.Height := ScaleY(2);
+    Y := Y + ScaleY(10);
+
+    Lbl := ZipDlgLabel(Form, 'The browser on this computer can usually still download it:', M, Y, W, True);
+    Y := Y + Lbl.Height + ScaleY(6);
+    Lbl := ZipDlgLabel(Form,
+      '1.  Click "Open download link". The browser saves {#MyAssetName} (about 130 MB) in Downloads.' + #13#10 +
+      '2.  When the download has finished, click "Use a zip downloaded in the browser..." and choose that file.' + #13#10#13#10 +
+      'The zip is checked against the checksum published on GitHub before anything is installed.',
+      M, Y, W, False);
+    Y := Y + Lbl.Height + ScaleY(10);
+
+    Lbl := ZipDlgLabel(Form, 'Download link:', M, Y, W, False);
+    Y := Y + Lbl.Height + ScaleY(3);
+    ZipDlgBox(Form, TargetDirectUrl, M, Y, W);
+    Y := Y + ScaleY(23) + ScaleY(10);
+
+    FoundBtn := ZipDlgButton(Form, 'Install this zip', mrRetry);
+    FoundBtn.Left := M + W - FoundBtn.Width;
+    FoundBtn.Top  := Y;
+    FoundLbl := ZipDlgLabel(Form, ' ' + #13#10 + ' ', M, Y + ScaleY(2), W - FoundBtn.Width - ScaleX(8), False);
+    Y := Y + FoundLbl.Height + ScaleY(10);
+
+    Lbl := ZipDlgLabel(Form, 'Install log (send this file to Roshan if it keeps failing):', M, Y, W, False);
+    Y := Y + Lbl.Height + ScaleY(3);
+    ZipDlgBox(Form, InstallLogPath, M, Y, W);
+    Y := Y + ScaleY(23) + ScaleY(16);
+
+    OpenBtn := ZipDlgButton(Form, 'Open download link', mrNone);
+    OpenBtn.OnClick := @OpenDownloadLinkClick;
+    OpenBtn.Left := M;
+    OpenBtn.Top  := Y;
+
+    PickBtn := ZipDlgButton(Form, 'Use a zip downloaded in the browser...', mrYes);
+    PickBtn.Left    := OpenBtn.Left + OpenBtn.Width + ScaleX(6);
+    PickBtn.Top     := Y;
+    PickBtn.Default := True;
+
+    CloseBtn := ZipDlgButton(Form, 'Close', mrCancel);
+    CloseBtn.Left   := M + W - CloseBtn.Width;
+    CloseBtn.Top    := Y;
+    CloseBtn.Cancel := True;
+
+    Form.ClientHeight := Y + ScaleY(23) + ScaleY(12);
+    Form.ActiveControl := PickBtn;
+    Form.FlipAndCenterIfNeeded(True, WizardForm, False);
+
+    while True do
+    begin
+      { Looked for every time the dialog comes up: the browser may have
+        finished the download while the dialog was open. }
+      GZipFound := FindZipInDownloads;
+      if GZipFound <> '' then
+      begin
+        Sz := 0;
+        if not FileSize(GZipFound, Sz) then Sz := 0;
+        FoundLbl.Caption := 'Found in Downloads: ' + ExtractFileName(GZipFound) +
+                            ' (' + IntToStr(Sz div 1048576) + ' MB)';
+        FoundBtn.Visible := True;
+      end
+      else
+      begin
+        FoundLbl.Caption := 'No {#MyAssetName} in Downloads yet.';
+        FoundBtn.Visible := False;
+      end;
+
+      MR := Form.ShowModal;
+      if (MR = mrRetry) and (GZipFound <> '') then
+      begin
+        Result := GZipFound;
+        Break;
+      end
+      else if MR = mrYes then
+      begin
+        GZipFound := FindZipInDownloads;
+        FileName := GZipFound;
+        if GZipFound <> '' then
+          InitialDir := ExtractFileDir(GZipFound)
+        else
+          InitialDir := DownloadsDir;
+        if GetOpenFileName('Choose the Satpuda Core zip downloaded in the browser', FileName, InitialDir,
+                           'Satpuda Core zip (' + ZipPattern + ')|' + ZipPattern + '|All zip files (*.zip)|*.zip',
+                           'zip') then
+        begin
+          Result := FileName;
+          Break;
+        end;
+        { The picker was cancelled: back to the dialog. }
+      end
+      else if MR <> mrRetry then
+        Break;
+    end;
+  finally
+    Form.Free;
+  end;
+  if Result <> '' then
+    Log('installing from a zip chosen in the dialog: ' + Result);
+end;
+
+{ After a download failure: keep offering the browser zip until one installs
+  or the shopkeeper closes the dialog. Returns '' once installed, otherwise
+  the last failure sentence. }
+function OfferLocalZip(const FirstFailure: String): String;
+var
+  Zip, Shown: String;
+begin
+  Result := FirstFailure;
+  Shown  := GLastErrText;
+  while True do
+  begin
+    Zip := ShowZipDialog(Shown);
+    if Zip = '' then Exit;
+    Result := RunAndJudge(Zip);
+    if Result = '' then Exit;
+    { Stopped, or PowerShell would not start: nothing more to offer. }
+    if GCancelRequested or (GLastErrText = '') then Exit;
+    Shown := GLastErrText;
+  end;
+end;
+
+function DoFetch: String;
+var
+  CmdZip: String;
+begin
+  Result := '';
+  ExtractTemporaryFile('satpuda_fetch.ps1');
+
+  { Normally already decided on the maintenance page; a run that skipped it
+    (silent install) decides here. }
+  ResolveTargetTag;
+  ShowResolvedVersionInTitle;
+
+  { /ZIP="path" - support installs a zip that was fetched some other way,
+    with no download attempt at all. Works silent too. }
+  CmdZip := Trim(RemoveQuotes(Trim(ExpandConstant('{param:ZIP|}'))));
+  if CmdZip <> '' then
+  begin
+    Log('/ZIP given: installing from ' + CmdZip);
+    Result := RunAndJudge(CmdZip);
+    Exit;
+  end;
+
+  Result := RunAndJudge('');
+  if (Result <> '') and (not GCancelRequested) and IsDownloadFailure(GErrCode) then
+  begin
+    if WizardSilent then
+      Log('download failed (' + GErrCode + '); a silent install does not offer the browser zip (use /ZIP=)')
+    else
+    begin
+      Log('download failed (' + GErrCode + '); offering a zip downloaded in the browser');
+      Result := OfferLocalZip(Result);
+    end;
+  end;
 end;
 
 { Everything that can stop the install happens here: Inno's contract is that a
