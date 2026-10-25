@@ -720,29 +720,35 @@ export function InventoryPage({
       {showSummary ? (
         <SummaryStrip
           title="Inventory Summary"
+          page="inventory"
           items={[
-            { label: 'Total Medicines', value: summary.total_medicines ?? 0, tone: 'accent' },
+            { key: 'total_medicines', label: 'Total Medicines', value: summary.total_medicines ?? 0, tone: 'accent' },
             {
+              key: 'low_stock',
               label: 'Low Stock',
               value: summary.low_stock ?? 0,
               tone: Number(summary.low_stock) > 0 ? 'warning' : undefined,
             },
             {
+              key: 'out_of_stock',
               label: 'Out of Stock',
               value: summary.out_of_stock ?? 0,
               tone: Number(summary.out_of_stock) > 0 ? 'danger' : undefined,
             },
             {
+              key: 'near_expiry',
               label: 'Near Expiry',
               value: summary.near_expiry ?? 0,
               tone: Number(summary.near_expiry) > 0 ? 'warning' : undefined,
             },
             {
+              key: 'expired',
               label: 'Expired',
               value: summary.expired ?? 0,
               tone: Number(summary.expired) > 0 ? 'danger' : undefined,
             },
             {
+              key: 'total_value',
               label: 'Total Value (MRP)',
               value: `₹${Number(summary.total_value || 0).toLocaleString('en-IN', {
                 minimumFractionDigits: 2,

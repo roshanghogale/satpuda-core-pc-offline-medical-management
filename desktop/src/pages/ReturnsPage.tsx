@@ -1741,10 +1741,11 @@ export function ReturnsPage({
           />
         </div>
         <SummaryStrip
+          page="returns"
           items={[
-            { label: 'Sales returns', value: salesCount },
-            { label: 'Purchase returns', value: purchaseCount },
-            { label: 'Write-offs', value: writeCount },
+            { key: 'sales_returns', label: 'Sales returns', value: salesCount },
+            { key: 'purchase_returns', label: 'Purchase returns', value: purchaseCount },
+            { key: 'write_offs', label: 'Write-offs', value: writeCount },
           ]}
         />
       </div>

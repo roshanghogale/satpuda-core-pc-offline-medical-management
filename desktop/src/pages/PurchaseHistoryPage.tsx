@@ -671,17 +671,20 @@ export function PurchaseHistoryPage({
       {showSummary ? (
         <SummaryStrip
           title="Purchase Summary"
+          page="purchase_history"
           items={[
-            { label: 'Bills', value: summary.bills ?? 0, tone: 'accent' },
-            { label: 'Final Amount', value: money(summary.total) },
-            { label: 'Paid at Entry', value: money(summary.paid) },
-            { label: 'Entry Due', value: money(summary.due), tone: toneIf(summary.due, 'danger') },
+            { key: 'bills', label: 'Bills', value: summary.bills ?? 0, tone: 'accent' },
+            { key: 'final_amount', label: 'Final Amount', value: money(summary.total) },
+            { key: 'paid_at_entry', label: 'Paid at Entry', value: money(summary.paid) },
+            { key: 'entry_due', label: 'Entry Due', value: money(summary.due), tone: toneIf(summary.due, 'danger') },
             {
+              key: 'supplier_due',
               label: 'Supplier Due',
               value: money(summary.supplier_due),
               tone: toneIf(summary.supplier_due, 'danger'),
             },
             {
+              key: 'supplier_credit',
               label: 'Supplier Credit',
               value: money(summary.supplier_credit),
               tone: toneIf(summary.supplier_credit, 'success'),

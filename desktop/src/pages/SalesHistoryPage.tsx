@@ -1005,23 +1005,25 @@ export function SalesHistoryPage({
       {showSummary ? (
         <SummaryStrip
           title="Sales Summary"
+          page="sales_history"
           items={[
-            { label: 'Bills', value: summary.bills ?? 0, tone: 'accent' },
-            { label: 'Total Sales', value: money(summary.total) },
-            { label: 'Discount', value: money(summary.discount) },
-            { label: 'Amount Paid', value: money(summary.paid) },
-            { label: 'Bill Due', value: money(summary.due), tone: toneIf(summary.due, 'danger') },
+            { key: 'bills', label: 'Bills', value: summary.bills ?? 0, tone: 'accent' },
+            { key: 'total_sales', label: 'Total Sales', value: money(summary.total) },
+            { key: 'discount', label: 'Discount', value: money(summary.discount) },
+            { key: 'amount_paid', label: 'Amount Paid', value: money(summary.paid) },
+            { key: 'bill_due', label: 'Bill Due', value: money(summary.due), tone: toneIf(summary.due, 'danger') },
             {
+              key: 'customer_due',
               label: 'Customer Due',
               value: money(summary.customer_due),
               tone: toneIf(summary.customer_due, 'danger'),
             },
-            { label: 'Profit', value: money(summary.profit), tone: toneIf(summary.profit, 'success') },
-            { label: 'Returns', value: money(summary.returns) },
-            { label: 'Today Revenue', value: money(summary.today_revenue) },
-            { label: 'Today Cash', value: money(summary.today_cash) },
-            { label: 'Today Online', value: money(summary.today_online) },
-            { label: 'Month Revenue', value: money(summary.month_revenue) },
+            { key: 'profit', label: 'Profit', value: money(summary.profit), tone: toneIf(summary.profit, 'success') },
+            { key: 'returns', label: 'Returns', value: money(summary.returns) },
+            { key: 'today_revenue', label: 'Today Revenue', value: money(summary.today_revenue) },
+            { key: 'today_cash', label: 'Today Cash', value: money(summary.today_cash) },
+            { key: 'today_online', label: 'Today Online', value: money(summary.today_online) },
+            { key: 'month_revenue', label: 'Month Revenue', value: money(summary.month_revenue) },
           ]}
         />
       ) : null}

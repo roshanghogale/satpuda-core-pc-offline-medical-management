@@ -62,7 +62,7 @@ class TheLists(unittest.TestCase):
             self.assertFalse(pull._shop_wide(name), name)
 
     def test_trigger_version(self):
-        self.assertEqual(schema._SETTINGS_TRIGGER_VERSION, "v10")
+        self.assertIn(schema._SETTINGS_TRIGGER_VERSION, ("v10", "v11"))   # v11: page summaries
         self.assertIn("of_insert_settings_v9", schema._RETIRED_SETTINGS_TRIGGERS)
         self.assertIn("of_update_settings_v9", schema._RETIRED_SETTINGS_TRIGGERS)
 
@@ -126,7 +126,7 @@ class OfflineFirst(Base):
 
         # The store as a v9 build left it: v9 triggers, and this PC's own thresholds (never sent).
         for ev in ("insert", "update"):
-            self.conn.execute(f"DROP TRIGGER IF EXISTS of_{ev}_settings_v10")
+            self.conn.execute(f"DROP TRIGGER IF EXISTS of_{ev}_settings_{schema._SETTINGS_TRIGGER_VERSION}")
         with mock.patch.object(schema, "_SETTINGS_TRIGGER_VERSION", "v9"), \
                 mock.patch.object(schema, "SHOP_WIDE_SETTING_PREFIXES",
                                   tuple(p for p in schema.SHOP_WIDE_SETTING_PREFIXES
@@ -146,8 +146,8 @@ class OfflineFirst(Base):
         schema.ensure_schema(self.conn)                         # the next start
 
         names = {n for (n,) in self.conn.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
-        self.assertIn("of_insert_settings_v10", names)
-        self.assertIn("of_update_settings_v10", names)
+        self.assertIn(f"of_insert_settings_{schema._SETTINGS_TRIGGER_VERSION}", names)
+        self.assertIn(f"of_update_settings_{schema._SETTINGS_TRIGGER_VERSION}", names)
         self.assertNotIn("of_insert_settings_v9", names)
         self.assertNotIn("of_update_settings_v9", names)
         self.assertEqual(self.dirty(), ["regular_meds:9"])      # nothing noted again

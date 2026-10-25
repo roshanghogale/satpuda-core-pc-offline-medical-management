@@ -23,10 +23,11 @@ log = logging.getLogger(__name__)
 # app_login: the store's App Login, a salted hash (core/login_prefs.py).
 # low_stock_* / near_expiry_* / customer_due_min_* / reorder_default_qty: the alert thresholds and
 # the reorder default (core/shop_alert_settings.py).
+# page_summary_prefs: what each page's summary shows (core/page_summary_prefs.py).
 PREFIXES = ("regular_meds:", "customer_gst:", "gst_filed:", "business_mode", "ws_margin_",
             "profile_bank_", "profile_bill_", "doctor_margin_rules", "app_login",
             "low_stock_", "near_expiry_", "customer_due_min_amount", "customer_due_min_days",
-            "reorder_default_qty")
+            "reorder_default_qty", "page_summary_prefs")
 
 
 def _carried(name: str) -> bool:

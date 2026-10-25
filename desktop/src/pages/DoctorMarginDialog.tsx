@@ -12,6 +12,8 @@ import { getApiBase, savePrefs } from '../api'
 import { todayLocal } from '../localDate'
 import { saveFileAndShow, showSavedFile } from '../savedFiles'
 import '../styles/doctor-margin.css'
+import { SummaryCustomize } from '../components/SummaryCustomize'
+import { usePageSummary } from '../pageSummaries'
 import { DoctorMarginRulesReport } from './DoctorMarginRulesReport'
 
 type Mode = 'rules' | 'regular' | 'injection'
@@ -262,6 +264,7 @@ export function TypePicker({
 
 export function DoctorMarginDialog({ open, onClose, onBack, from = '', to = '' }: Props) {
   const today = todayLocal()
+  const dmSummary = usePageSummary('doctor_margin')
   const [dFrom, setDFrom] = useState(from || today)
   const [dTo, setDTo] = useState(to || today)
   const [doctor, setDoctor] = useState('')
@@ -604,29 +607,42 @@ export function DoctorMarginDialog({ open, onClose, onBack, from = '', to = '' }
 
             {report && t ? (
               <>
-                <div className="dm-cards">
+                {/* The shop's choice of figures (Settings → Layout & Lists → Page Summaries);
+                    on screen only, the saved file keeps every figure. */}
+                <div className={`dm-cards${dmSummary.show ? '' : ' dm-cards-off'}`}>
+                  {dmSummary.show && dmSummary.field('sale') ? (
                   <div className="dm-stat">
                     <span>Sale</span>
                     <b>₹{money(t.amount)}</b>
                   </div>
+                  ) : null}
+                  {dmSummary.show && dmSummary.field('purchase_cost') ? (
                   <div className="dm-stat">
                     <span>Purchase cost</span>
                     <b>₹{money(t.cost)}</b>
                   </div>
+                  ) : null}
+                  {dmSummary.show && dmSummary.field('profit') ? (
                   <div className="dm-stat">
                     <span>{inj ? 'Injection profit' : 'Profit'}</span>
                     <b>₹{money(t.profit)}</b>
                   </div>
+                  ) : null}
+                  {dmSummary.show && dmSummary.field('commission') ? (
                   <div className="dm-stat dm-stat-main">
                     <span>
                       {inj ? 'Doctor margin' : `Commission ${report.pct}%`}
                     </span>
                     <b>₹{money(t.commission)}</b>
                   </div>
+                  ) : null}
+                  {dmSummary.show && dmSummary.field('store_remaining') ? (
                   <div className="dm-stat">
                     <span>Store remaining</span>
                     <b>₹{money(t.remaining)}</b>
                   </div>
+                  ) : null}
+                  <SummaryCustomize page="doctor_margin" />
                 </div>
                 {counts && (counts.estimated || counts.unavailable || counts.loss) ? (
                   <ul className="dm-flag-notes">

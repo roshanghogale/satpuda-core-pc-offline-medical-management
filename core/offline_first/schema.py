@@ -64,17 +64,20 @@ SHOP_WIDE_SETTING_PREFIXES = (
 # the same username and password on every PC of the store, checked with no internet (25 Oct 2026).
 # customer_due_min_amount / customer_due_min_days / reorder_default_qty: the Alerts screen's due
 # filter and the reorder default -- the same on every PC and the phone (core/shop_alert_settings.py).
+# page_summary_prefs: what each page's summary shows, one row for the shop (core/page_summary_prefs.py).
 # Villages are NOT here: they already travel shop-wide in the dropdowns singleton.
 SHOP_WIDE_SETTING_NAMES = ("billing_layout_prefs", "business_mode", "doctor_margin_rules",
                            "doctor_margin_rules_recalc",
                            "bill_logo_image", "bill_signature_image", "home_banner_image",
                            "app_login",
-                           "customer_due_min_amount", "customer_due_min_days", "reorder_default_qty")
+                           "customer_due_min_amount", "customer_due_min_days", "reorder_default_qty",
+                           "page_summary_prefs")
 # The settings triggers carry the list above in their WHEN; a longer list is a new version.
 # v10 (25 Oct 2026): the alert thresholds and the reorder default. A PC on v9 drops its v9
 # triggers and makes the v10 ones when the store opens; nothing already there is noted again --
 # the rows go up the next time they are saved on any device.
-_SETTINGS_TRIGGER_VERSION = "v10"
+# v11 (25 Oct 2026): page_summary_prefs, what each page's summary shows. Same upgrade as v10.
+_SETTINGS_TRIGGER_VERSION = "v11"
 _RETIRED_SETTINGS_TRIGGERS = (
     "of_insert_settings", "of_update_settings", "of_insert_settings_v2", "of_update_settings_v2",
     "of_insert_settings_v3", "of_update_settings_v3",
@@ -84,6 +87,7 @@ _RETIRED_SETTINGS_TRIGGERS = (
     "of_insert_settings_v7", "of_update_settings_v7",
     "of_insert_settings_v8", "of_update_settings_v8",
     "of_insert_settings_v9", "of_update_settings_v9",
+    "of_insert_settings_v10", "of_update_settings_v10",
 )
 
 # Medicine columns whose change is bookkeeping or stock, not an edit of the medicine itself.

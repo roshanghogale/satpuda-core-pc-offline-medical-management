@@ -25,6 +25,7 @@ import { ListEditor } from './ListEditor'
 import { ModernCombo } from '../ModernCombo'
 import { FolderInput } from './FolderInput'
 import '../../styles/prefs-settings.css'
+import { PageSummariesPanel } from './PageSummariesPanel'
 
 type Opts = SettingsBundle['options']
 
@@ -537,6 +538,10 @@ export function AppearancePanel({
     return (
       <>
         <PanelTitle>Dashboard Sections</PanelTitle>
+        <Note>
+          These are for this computer only. To choose which figures each page's summary shows for the
+          whole shop, use Settings → Layout &amp; Lists → Page Summaries.
+        </Note>
         <Frame title="Home dashboard sections">
           <div className="settings-check-grid-3">
             {opts.dashboard_sections.map((d) => (
@@ -610,6 +615,10 @@ export function LayoutListsPanel({
         if (typeof cv === 'boolean' && !(ck in exportPageVis)) exportPageVis[ck] = cv
       }
     }
+  }
+
+  if (sectionId === 'page_summaries') {
+    return <PageSummariesPanel />
   }
 
   if (sectionId === 'thresholds') {
