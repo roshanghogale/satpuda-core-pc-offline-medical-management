@@ -1,8 +1,10 @@
 """Save bill HTML/PDF to the bill folder; silent or dialog printing on Windows."""
 from __future__ import annotations
 
+import contextlib
 import os
 import subprocess
+import threading
 import time
 import sys
 import webbrowser
@@ -447,6 +449,26 @@ def _carry_forward_contexts(ctx, per_items: int):
     return out
 
 
+# One bill file is made by one renderer at a time. Two renders of the same Bill_<no>.pdf
+# at the same moment -- the save's background PDF and the Print Sales that followed it, or a
+# save and an F9 reprint a moment later -- each wrote the same HTML, made the same PDF and
+# deleted the HTML: whichever finished first took away the page the other's browser was about
+# to load (a blank bill printed) or replaced the PDF the other was handing to the printer
+# ("PDF not found"). Offline-first met it every time (both read the local copy within a
+# millisecond); Online the two were a server round-trip apart (owner, 25 Oct 2026).
+_RENDER_LOCKS: dict[str, threading.Lock] = {}
+_RENDER_LOCKS_GUARD = threading.Lock()
+
+
+@contextlib.contextmanager
+def _one_renderer_per_file(pdf_path: str):
+    key = os.path.normcase(os.path.abspath(pdf_path)) if pdf_path else ""
+    with _RENDER_LOCKS_GUARD:
+        lock = _RENDER_LOCKS.setdefault(key, threading.Lock())
+    with lock:
+        yield
+
+
 def discard_html_after_pdf(html_path: str, pdf_path: str | None) -> str:
     """Delete the HTML a PDF was made from (owner, 19 Oct 2026: "after printing the HTML
     files are not needed, only PDF -- reduce the number of files"). Returns "" once it is
@@ -497,22 +519,23 @@ def _render_bill_files(bill_no, ctx, html_settings, save_dir: str | None = None,
         stem = f"{stem}_p{page_index + 1}"
     html_path = os.path.join(save_dir, f"{stem}.html")
     pdf_path = os.path.join(save_dir, f"{stem}.pdf")
-    with open(html_path, "w", encoding="utf-8") as f:
-        f.write(html)
     paper = None
     try:
         from core.bill_page_config import pdf_paper_mm_from_settings
         paper = pdf_paper_mm_from_settings(html_settings)
     except Exception:
         paper = None
-    if paper:
-        w_mm, h_mm = paper
-        pdf_saved = pdf_path if _try_pdf_via_browser(
-            html_path, pdf_path, paper_width_mm=w_mm, paper_height_mm=h_mm,
-        ) else None
-    else:
-        pdf_saved = pdf_path if _try_pdf_via_browser(html_path, pdf_path) else None
-    return discard_html_after_pdf(html_path, pdf_saved), pdf_saved
+    with _one_renderer_per_file(pdf_path):
+        with open(html_path, "w", encoding="utf-8") as f:
+            f.write(html)
+        if paper:
+            w_mm, h_mm = paper
+            pdf_saved = pdf_path if _try_pdf_via_browser(
+                html_path, pdf_path, paper_width_mm=w_mm, paper_height_mm=h_mm,
+            ) else None
+        else:
+            pdf_saved = pdf_path if _try_pdf_via_browser(html_path, pdf_path) else None
+        return discard_html_after_pdf(html_path, pdf_saved), pdf_saved
 
 
 def _wholesale_invoice_ctx(conn, sale_id, db_path: str | None = None):
@@ -570,12 +593,13 @@ def wholesale_invoice_files(conn, sale_id, settings: dict | None = None, *,
     stem = _safe_bill_stem(inv.get("bill_no") or sale_id)
     html_path = os.path.join(save_dir, f"{stem}.html")
     pdf_path = os.path.join(save_dir, f"{stem}.pdf")
-    with open(html_path, "w", encoding="utf-8") as f:
-        f.write(html)
     w_mm, h_mm = paper_mm(paper)
-    ok = _try_pdf_via_browser(html_path, pdf_path, paper_width_mm=w_mm, paper_height_mm=h_mm)
-    pdf_saved = pdf_path if ok else None
-    return discard_html_after_pdf(html_path, pdf_saved), pdf_saved
+    with _one_renderer_per_file(pdf_path):
+        with open(html_path, "w", encoding="utf-8") as f:
+            f.write(html)
+        ok = _try_pdf_via_browser(html_path, pdf_path, paper_width_mm=w_mm, paper_height_mm=h_mm)
+        pdf_saved = pdf_path if ok else None
+        return discard_html_after_pdf(html_path, pdf_saved), pdf_saved
 
 
 def wholesale_invoices_pdf(conn, sale_ids, settings: dict | None = None, *,
