@@ -780,12 +780,30 @@ def _after_write() -> None:
         pass
 
 
+ONLINE_REFUSAL = ("Cash & Expenses is kept on this PC's own copy, and Online mode has none -- "
+                  "the line would be lost on restart. Switch to Offline-first to use it.")
+
+
+def _online_shell() -> bool:
+    try:
+        from core.sync_prefs import is_online_mode
+
+        return bool(is_online_mode())
+    except Exception:
+        return False
+
+
 def handle_post(path: str, body: dict, conn) -> Optional[tuple]:
     if not path.startswith("/api/cash/"):
         return None
     if conn is None:
         return 503, {"ok": False, "error": "Database not open"}
     body = body if isinstance(body, dict) else {}
+    if path != "/api/cash/export" and _online_shell():
+        # Online the engine's connection is a throwaway :memory: database (desktop_api
+        # _open_memory_shell): an opening, an expense or a close typed there "saved",
+        # vanished on the next restart and never reached the other PCs.
+        return 409, {"ok": False, "error": ONLINE_REFUSAL}
     try:
         if path == "/api/cash/opening":
             set_opening(conn, body.get("date"), body.get("opening_cash"))
