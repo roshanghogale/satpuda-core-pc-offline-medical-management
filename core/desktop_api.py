@@ -694,6 +694,45 @@ def _lan_brief() -> dict:
         return {"role": "off"}
 
 
+def _of_changes() -> int:
+    """The store connection's write count before a request (offline-first only)."""
+    try:
+        conn = _db.get("conn")
+        return int(conn.total_changes) if conn is not None and _of_worker_running() else -1
+    except Exception:
+        return -1
+
+
+def _of_worker_running() -> bool:
+    try:
+        from core.offline_first import worker as of_worker
+
+        w = of_worker.current()
+        return bool(w and w.thread and w.thread.is_alive())
+    except Exception:
+        return False
+
+
+def _of_kick_after_write(raw_path: str, before: int) -> None:
+    """A save on this PC goes to the server NOW, not at the worker's next tick (up to 6 s):
+    when a POST wrote to the store, wake the offline-first worker. Only writes: a POST that
+    changed nothing (a search, a preview, the sync-now call itself) leaves the loop asleep."""
+    if before < 0:
+        return
+    try:
+        path = urlparse(raw_path).path.rstrip("/")
+        if path.startswith("/api/offline-first/") or path.startswith("/api/sync/"):
+            return
+        conn = _db.get("conn")
+        if conn is None or int(conn.total_changes) == before:
+            return
+        from core.offline_first import worker as of_worker
+
+        of_worker.kick()
+    except Exception:
+        pass
+
+
 def _lan_post(handler: BaseHTTPRequestHandler, method: str, before: int) -> None:
     try:
         from core.lan import service as lan
@@ -735,8 +774,10 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
             return
         with _lan_guard("POST", self.path):
             before = _lan_changes()
+            wrote = _of_changes()
             self._do_POST()
         _lan_post(self, "POST", before)
+        _of_kick_after_write(self.path, wrote)
 
     def _do_GET(self) -> None:
         path = urlparse(self.path).path.rstrip("/") or "/"
