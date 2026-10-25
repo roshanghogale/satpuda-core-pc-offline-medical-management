@@ -836,6 +836,13 @@ def repair_purchased_medicines_online(*, limit_purchases: int = 5000) -> dict:
     Stock = sum(purchase tablet/qty increases) - sum(sales qty) for each medicine_id.
     Fixes bills that appear in Purchase History but not Inventory.
     """
+    from core.sync_prefs import is_online_mode
+
+    if not is_online_mode():
+        # It writes the SERVER's medicines with an absolute stock from server bills only.
+        # Offline-first / Offline that bypasses this PC's copy and its stock journal (and
+        # ignores returns), so the next pull leaves every device with a wrong stock.
+        return {"ok": False, "error": "Repair from purchases works in Online mode only."}
     from collections import defaultdict
 
     from core.layout_config import is_strip_count_type, parse_tablets_per_stripe

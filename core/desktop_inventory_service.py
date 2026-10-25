@@ -611,6 +611,21 @@ def update_medicine(conn, body: dict[str, Any]) -> dict[str, Any]:
         manufacturer,
         schedule,
     ]
+    # Offline / offline-first: the same rule the Online branch above keeps -- an edit
+    # that does not send stock (or expiry) leaves it alone. Writing the default 0 here
+    # zeroed the batch and the stock journal sent that minus to every other device.
+    if not has_stock:
+        i = sets.index("stock_qty=?")
+        del sets[i]
+        del params[i]
+        row = cur.execute(
+            "SELECT COALESCE(stock_qty, 0) FROM medicines WHERE id=?", (medicine_id,)
+        ).fetchone()
+        stock_saved = _safe_int(row[0]) if row else 0
+    if not has_expiry:
+        i = sets.index("expiry_date=?")
+        del sets[i]
+        del params[i]
     if "supplier_name" in cols:
         # Reference only: the Inventory editor never creates a supplier record
         # and never moves a due.
