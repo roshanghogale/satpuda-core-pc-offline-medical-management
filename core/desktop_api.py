@@ -1109,7 +1109,8 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
             if path == "/api/login/status":
                 from core.desktop_login_service import get_app_login_status
 
-                _json_response(self, 200, get_app_login_status())
+                # The store's login (core/login_prefs.py): read from the open store.
+                _json_response(self, 200, get_app_login_status(_db.get("conn")))
                 return
             if path == "/api/settings/bundle":
                 from core.desktop_settings_service import get_settings_bundle
@@ -2601,7 +2602,7 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 from core.desktop_login_service import verify_app_login
 
                 body = _read_json_body(self)
-                result = verify_app_login(body)
+                result = verify_app_login(body, _db.get("conn"))
                 status = 200 if result.get("ok") else 401
                 _json_response(self, status, result)
                 return

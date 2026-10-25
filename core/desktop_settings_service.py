@@ -1070,7 +1070,8 @@ def get_pharmacy(conn: sqlite3.Connection) -> dict[str, Any]:
     from core.pharmacy_profile_io import load_pharmacy_profile
 
     profile = load_pharmacy_profile(conn)
-    login = load_login_prefs()
+    # The store's login (core/login_prefs.py), not only this PC's file.
+    login = load_login_prefs(conn)
     printers = []
     spooler_running = True
     try:
@@ -1191,6 +1192,7 @@ def save_pharmacy(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, A
             username=str(lg.get("username") or ""),
             password=pwd,
             keep_existing_password=not bool(pwd),
+            conn=conn,
         )
 
     if "printer" in data and isinstance(data["printer"], dict):
