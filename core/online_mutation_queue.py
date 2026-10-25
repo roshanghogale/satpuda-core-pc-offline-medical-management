@@ -1729,15 +1729,98 @@ def _flush_return_delete(collection: str, payload: dict[str, Any], lid: int) -> 
     goods on the shelf forever, and a cancelled purchase return kept them off
     it. Offline has always reversed this; the server side simply had no path.
     """
-    from core.online_catalog import medicine_by_id, patch_docs
-    from core.server_crud import (
-        delete_entity, get_doc, upsert_docs, bump_meta, _device_id,
-    )
+    from core.online_catalog import patch_docs
+    from core.server_crud import delete_entity, get_doc, upsert_docs
 
     rid = int(payload.get("id") or lid)
     if rid <= 0:
         return
+    kept = payload.get("_delete_reversal")
+    if isinstance(kept, list):
+        # The return was deleted on the store already (delete_return_now, the strict delete
+        # the Returns screen runs); only the stock movement it owed is still to be sent. The
+        # store applies each op key once, so a retry never moves the shelf twice.
+        _push_delete_reversal(kept, hide_empty=False)
+        return
     doc = get_doc(collection, rid) or {}
+    med_docs = _return_delete_med_docs(collection, doc, rid, payload)
+    # Delete first, reverse stock after -- see the note on the sale delete.
+    delete_entity(collection, rid)
+    if med_docs:
+        upsert_docs("medicines", med_docs)
+        try:
+            patch_docs("medicines", med_docs)
+        except Exception:
+            pass
+
+
+def delete_return_now(collection: str, rid: int) -> dict[str, Any]:
+    """Online: delete one sales / purchase return on the store NOW, before the PC lets go of it.
+
+    The Returns screen used to queue the delete and answer "deleted" at once: a refusal or a
+    failure reached nobody, and the return stayed on the store while this PC had dropped it.
+    Now the store is asked first and its "no" raises with nothing changed (as delete_payment
+    does with delete_entity). Then, and only then, the return's stock is given back on the
+    store -- a push that fails is queued with the exact ops, so it is never lost and never sent
+    twice.
+
+    Returns {"store_had": bool, "warning": str}. store_had False: the store never had the
+    return (it is still in this PC's upload queue) or it was deleted there already -- its queued
+    upload is dropped, so neither the return nor its own stock movement ever lands, and nothing
+    is reversed on the store for it. A store that cannot be read raises.
+    """
+    from core import server_api as api
+    from core.online_catalog import patch_docs
+    from core.server_crud import _token, delete_entity, upsert_docs
+
+    col = str(collection).strip().lower()
+    rid = int(rid or 0)
+    if rid <= 0:
+        raise ValueError("Select a return to delete.")
+    # pull_doc, not get_doc: get_doc answers None for a network failure too, and "the store
+    # does not have it" must never be guessed from a read that did not happen.
+    doc = api.pull_doc(_token(), col, rid)
+    if not isinstance(doc, dict) or doc.get("deleted"):
+        cancel_matching(collection=col, local_id=rid)
+        return {"store_had": False, "warning": ""}
+    med_docs = _return_delete_med_docs(col, doc, rid, {"id": rid})
+    delete_entity(col, rid)
+    # It is on the store and now deleted there: an upload of it still waiting here (one that
+    # landed while its queue row was not yet marked done) must not bring it back.
+    cancel_matching(collection=col, local_id=rid)
+    if not med_docs:
+        return {"store_had": True, "warning": ""}
+    try:
+        upsert_docs("medicines", med_docs)
+    except Exception as exc:
+        ops = [op for m in med_docs for op in (m.get("stock_ops") or [])]
+        enqueue(
+            collection=col,
+            op="delete",
+            payload={"id": rid, "_delete_reversal": ops},
+            local_id=rid,
+        )
+        return {
+            "store_had": True,
+            "warning": (
+                "Return deleted, but its stock has not been put right on the server yet "
+                f"({exc}). It will be sent automatically."
+            ),
+        }
+    try:
+        patch_docs("medicines", med_docs)
+    except Exception:
+        pass
+    return {"store_had": True, "warning": ""}
+
+
+def _return_delete_med_docs(
+    collection: str, doc: dict[str, Any], rid: int, payload: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """The medicine documents (each with its stock op) that take one return's movement back."""
+    from core.online_catalog import medicine_by_id
+    from core.server_crud import get_doc, bump_meta, _device_id
+
     cu = str(doc.get("client_uuid") or payload.get("client_uuid") or rid)
     is_sale_return = collection == "sales_returns"
     # One movement per MEDICINE: the key below names the medicine, not the line, and the store
@@ -1793,14 +1876,7 @@ def _flush_return_delete(collection: str, payload: dict[str, Any], lid: int) -> 
             "device_id": _device_id(),
         }]
         med_docs.append(mp)
-    # Delete first, reverse stock after -- see the note on the sale delete.
-    delete_entity(collection, rid)
-    if med_docs:
-        upsert_docs("medicines", med_docs)
-        try:
-            patch_docs("medicines", med_docs)
-        except Exception:
-            pass
+    return med_docs
 
 
 def _purchase_line_units_from_its_own_fields(it: dict[str, Any]) -> float:

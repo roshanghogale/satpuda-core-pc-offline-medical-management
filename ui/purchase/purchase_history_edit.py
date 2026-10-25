@@ -629,6 +629,16 @@ def delete_purchase(conn, purchase_id, bill_label, refresh_callback):
         showerror("Error", f"Failed to delete purchase: {exc}")
         return
 
+    # A purchase with a purchase return: its returned units came off the shelf twice.
+    from core.desktop_purchase_service import (
+        purchase_return_blocks_delete,
+        purchase_return_on_purchase,
+    )
+    held_by = purchase_return_on_purchase(conn, purchase_id)
+    if held_by is not None:
+        showwarning("Cannot Delete", purchase_return_blocks_delete(held_by))
+        return
+
     from core.purchase_service import _reverse_stock_for_purchase, recalculate_supplier_due
     cur = conn.cursor()
     try:

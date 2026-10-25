@@ -640,11 +640,15 @@ export function ReturnsPage({
         })
         return false
       }
-      setNote(
-        res.queued
-          ? `Return ${label} deleted. It will reach the server when the internet is back.`
-          : `Return ${label} deleted.`,
-      )
+      if (res.warning) {
+        setAlert({ title: 'Return deleted', message: res.warning, kind: 'warning' })
+      } else {
+        setNote(
+          res.queued
+            ? `Return ${label} deleted. It will reach the server when the internet is back.`
+            : `Return ${label} deleted.`,
+        )
+      }
       setPurchaseHistSel(null)
       await refreshSummary()
       return true
