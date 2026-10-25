@@ -486,6 +486,7 @@ def handover_batch(path: str, limit: int = HANDOVER_PAGE) -> tuple[str, list[dic
                 "SELECT 1 FROM of_stock_journal WHERE event_seq IS NULL LIMIT 1").fetchone():
             with write_batch(conn):
                 outbox.build_events(conn, install)
+                outbox.repair_docless_events(conn)
         rows = conn.execute(
             "SELECT payload FROM of_events WHERE status='pending' AND event_uuid NOT IN "
             "(SELECT event_uuid FROM of_lan_handed) ORDER BY seq LIMIT ?", (int(limit),),

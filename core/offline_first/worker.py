@@ -156,6 +156,7 @@ class SyncCycle:
         install = meta_get(conn, "install_id") or client.install_id()
         with write_batch(conn):
             outbox.build_events(conn, install)
+            outbox.repair_docless_events(conn)
         sent = 0
         for _ in range(20):                      # up to 2,000 events a cycle
             events = outbox.pending_events(conn, 100)

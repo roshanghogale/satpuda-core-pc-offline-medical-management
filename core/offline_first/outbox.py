@@ -124,6 +124,13 @@ def build_events(conn: sqlite3.Connection, install_id: str) -> int:
             doc = build_doc(conn, collection, int(local_id))
             if doc is None and collection not in SINGLETONS:
                 op = "delete"
+            elif doc is None:
+                # A settings row saved twice before this ran: INSERT OR REPLACE gave the second
+                # save a new row id (noted on its own), and the first id names nothing now.
+                # Sent as an event with no document, the server refused the WHOLE push ("doc
+                # required") -- every later save of this PC stuck behind it for good.
+                conn.execute("DELETE FROM of_dirty WHERE collection=? AND local_id=?", (collection, local_id))
+                continue
         if op == "delete":
             if collection in SINGLETONS or _never_left_this_pc(conn, collection, int(local_id)):
                 # Made and deleted here before a sync (a bill saved and deleted at once): the
@@ -199,6 +206,36 @@ def build_events(conn: sqlite3.Connection, install_id: str) -> int:
         )
         made += 1
     return made
+
+
+# Stands in for an event that carries nothing the server can apply: the server keeps the number
+# (an event can never just be dropped -- the numbers after it are already given out) and applies
+# an empty settings bundle, i.e. nothing.
+_FILLER_DOC = {"settings": []}
+
+
+def repair_docless_events(conn: sqlite3.Connection) -> int:
+    """Pending events an older build made with no document (see build_events): the server
+    refuses the whole push over one of them, so this PC's sync was stuck behind it for good.
+    Each becomes the no-op filler under its own number. Call inside the write transaction."""
+    fixed = 0
+    rows = conn.execute(
+        "SELECT seq, payload FROM of_events WHERE status='pending' AND collection <> 'stock_operations'"
+    ).fetchall()
+    for seq, payload in rows:
+        try:
+            ev = json.loads(payload)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(ev.get("doc"), dict) or ev.get("op") == "stock":
+            continue
+        ev.update({"collection": "settings", "op": "upsert", "doc": dict(_FILLER_DOC), "base_version": None})
+        conn.execute(
+            "UPDATE of_events SET collection='settings', op='upsert', local_id=0, base_version=NULL, "
+            "payload=? WHERE seq=?", (json.dumps(ev, default=str), seq),
+        )
+        fixed += 1
+    return fixed
 
 
 def pending_events(conn: sqlite3.Connection, limit: int = 100) -> list[dict]:
