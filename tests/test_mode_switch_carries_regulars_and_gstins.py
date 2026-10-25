@@ -16,7 +16,8 @@ from core import store_kv_carry as carry  # noqa: E402
 SERVER_ROWS = [
     {"name": "regular_meds:7", "value": '{"customer": "RAMESH PATIL", "items": [{"name": "DOLO 650", "qty": 1}]}'},
     {"name": "customer_gst:7", "value": '{"gstin": "27AAPFU0939F1ZV", "since": "2026-09-01"}'},
-    {"name": "low_stock_tablet", "value": "10"},                        # not ours to carry
+    {"name": "low_stock_tablet", "value": "10"},                        # the shop's too (25 Oct 2026)
+    {"name": "show_location", "value": "1"},                            # not ours to carry
     {"name": "regular_meds:9", "value": ""},                            # a removed list
 ]
 
@@ -33,9 +34,9 @@ class GoingOffline(unittest.TestCase):
         with mock.patch("core.server_api._request", return_value={"ok": True, "data": SERVER_ROWS}), \
                 mock.patch("core.server_live._token", return_value="t"):
             res = carry.try_pull(c)
-        self.assertEqual({"ok": True, "rows": 2}, res)
+        self.assertEqual({"ok": True, "rows": 3}, res)
         names = {n for (n,) in c.execute("SELECT name FROM settings")}
-        self.assertEqual({"regular_meds:7", "customer_gst:7"}, names)
+        self.assertEqual({"regular_meds:7", "customer_gst:7", "low_stock_tablet"}, names)
 
     def test_no_internet_is_reported_not_raised(self):
         c = _conn()

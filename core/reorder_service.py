@@ -107,6 +107,13 @@ def min_stock_level(conn, med_type: str) -> float:
 def reorder_default_qty(conn) -> float:
     default = 10.0
     try:
+        # Online: the shop's value from the server (core/shop_alert_settings.py).
+        from core.shop_alert_settings import refresh_from_server
+
+        refresh_from_server(conn)
+    except Exception:
+        pass
+    try:
         cur = conn.cursor()
         cur.execute("SELECT value FROM settings WHERE name='reorder_default_qty'")
         row = cur.fetchone()

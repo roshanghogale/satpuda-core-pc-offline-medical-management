@@ -28,9 +28,21 @@ def parse_expiry(raw: Any):
     return None
 
 
+def _shop_values(conn) -> None:
+    """Online: the shop's thresholds from the server first (core/shop_alert_settings.py;
+    remembered for a minute, nothing in the other modes)."""
+    try:
+        from core.shop_alert_settings import refresh_from_server
+
+        refresh_from_server(conn)
+    except Exception:
+        pass
+
+
 def load_thresholds(conn) -> Tuple[Dict[str, float], Dict[str, float]]:
     low_defaults: Dict[str, float] = {}
     near_defaults: Dict[str, float] = {}
+    _shop_values(conn)
     cur = conn.cursor()
     try:
         cur.execute("SELECT name, value FROM settings")
@@ -65,6 +77,7 @@ def _read_setting(conn, name: str, default: float) -> float:
 
 
 def load_due_alert_settings(conn) -> Dict[str, float]:
+    _shop_values(conn)
     return {
         "min_amount": max(0.0, _read_setting(conn, "customer_due_min_amount", 0.0)),
         "min_days": max(0.0, _read_setting(conn, "customer_due_min_days", 0.0)),

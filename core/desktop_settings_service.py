@@ -1722,6 +1722,8 @@ def get_thresholds(conn: sqlite3.Connection) -> dict[str, Any]:
     from core.layout_config import get_med_types
 
     med_types = list(get_med_types())
+    # Online: the shop's values from the server, not this PC's own (core/shop_alert_settings.py).
+    _refresh_shop_alert_settings(conn)
     low_stock: dict[str, str] = {}
     near_expiry: dict[str, str] = {}
     for mt in med_types:
@@ -1741,28 +1743,40 @@ def get_thresholds(conn: sqlite3.Connection) -> dict[str, Any]:
 def save_thresholds(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, Any]:
     from core.layout_config import get_med_types
 
+    rows: dict[str, str] = {}
     for mt in get_med_types():
         key = mt.lower()
         low = (data.get("low_stock") or {}).get(key)
         near = (data.get("near_expiry") or {}).get(key)
         if low is not None:
-            _setting_set(conn, f"low_stock_{key}", str(low or "10"))
+            rows[f"low_stock_{key}"] = str(low or "10")
         if near is not None:
-            _setting_set(conn, f"near_expiry_{key}", str(near or "3"))
+            rows[f"near_expiry_{key}"] = str(near or "3")
     if "customer_due_min_amount" in data:
-        _setting_set(
-            conn, "customer_due_min_amount", str(data.get("customer_due_min_amount") or "0")
-        )
+        rows["customer_due_min_amount"] = str(data.get("customer_due_min_amount") or "0")
     if "customer_due_min_days" in data:
-        _setting_set(
-            conn, "customer_due_min_days", str(data.get("customer_due_min_days") or "0")
-        )
+        rows["customer_due_min_days"] = str(data.get("customer_due_min_days") or "0")
     if "reorder_default_qty" in data:
-        _setting_set(
-            conn, "reorder_default_qty", str(data.get("reorder_default_qty") or "10")
-        )
+        rows["reorder_default_qty"] = str(data.get("reorder_default_qty") or "10")
+    # Shop-wide (25 Oct 2026): Online the server first -- a refused save leaves nothing changed
+    # here, rather than this PC on values the other PCs and the phone never got. Offline-first
+    # sends them through its settings triggers; Offline keeps them on this PC.
+    from core.shop_alert_settings import push_to_server
+
+    push_to_server(rows)
+    for name, value in rows.items():
+        _setting_set(conn, name, value)
     conn.commit()
     return get_thresholds(conn)
+
+
+def _refresh_shop_alert_settings(conn) -> None:
+    try:
+        from core.shop_alert_settings import refresh_from_server
+
+        refresh_from_server(conn)
+    except Exception:
+        pass
 
 
 def get_alerts(conn: sqlite3.Connection) -> dict[str, Any]:
@@ -4968,6 +4982,7 @@ def get_reorder(conn: sqlite3.Connection) -> dict[str, Any]:
         suppliers = fetch_supplier_choices(conn)
     except Exception:
         suppliers = []
+    _refresh_shop_alert_settings(conn)
     return {
         "groups": groups,
         "suppliers": suppliers,

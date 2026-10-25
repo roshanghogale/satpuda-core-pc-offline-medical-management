@@ -190,8 +190,8 @@ class OfflineFirst(Base):
         a = _Pc(self)
         names = {n for (n,) in a.conn.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
         self.assertIn(f"of_insert_settings_{schema._SETTINGS_TRIGGER_VERSION}", names)
-        self.assertEqual(schema._SETTINGS_TRIGGER_VERSION, "v9")
-        self.assertNotIn("of_insert_settings_v8", names)
+        self.assertEqual(schema._SETTINGS_TRIGGER_VERSION, "v10")
+        self.assertNotIn("of_insert_settings_v9", names)
 
 
 class Online(Base):

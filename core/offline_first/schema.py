@@ -50,9 +50,10 @@ LINE_TABLES = {
 # profile_bank_*: the shop's bank details (core/pharmacy_profile_io.BANK_KV) -- the server's
 # profile has no columns for them, so they travel as settings rows.
 # profile_bill_*: the bill heading, Tax Invoice or Bill of Supply (core/bill_heading.py).
+# low_stock_* / near_expiry_*: the alert thresholds, one per medicine type (core/shop_alert_settings.py).
 SHOP_WIDE_SETTING_PREFIXES = (
     "regular_meds:", "customer_gst:", "gst_filed:", "ws_margin_", "profile_bank_",
-    "profile_bill_",
+    "profile_bill_", "low_stock_", "near_expiry_",
 )
 # doctor_margin_rules: the Doctor Margin Report's rules (core/doctor_margin_rules.py);
 # doctor_margin_rules_recalc: the periods recalculated, so the server's report follows them.
@@ -61,12 +62,19 @@ SHOP_WIDE_SETTING_PREFIXES = (
 # they go up and come down with every other shop-wide row (25 Oct 2026).
 # app_login: the store's App Login, a salted hash, never the password (core/login_prefs.py) --
 # the same username and password on every PC of the store, checked with no internet (25 Oct 2026).
+# customer_due_min_amount / customer_due_min_days / reorder_default_qty: the Alerts screen's due
+# filter and the reorder default -- the same on every PC and the phone (core/shop_alert_settings.py).
+# Villages are NOT here: they already travel shop-wide in the dropdowns singleton.
 SHOP_WIDE_SETTING_NAMES = ("billing_layout_prefs", "business_mode", "doctor_margin_rules",
                            "doctor_margin_rules_recalc",
                            "bill_logo_image", "bill_signature_image", "home_banner_image",
-                           "app_login")
+                           "app_login",
+                           "customer_due_min_amount", "customer_due_min_days", "reorder_default_qty")
 # The settings triggers carry the list above in their WHEN; a longer list is a new version.
-_SETTINGS_TRIGGER_VERSION = "v9"
+# v10 (25 Oct 2026): the alert thresholds and the reorder default. A PC on v9 drops its v9
+# triggers and makes the v10 ones when the store opens; nothing already there is noted again --
+# the rows go up the next time they are saved on any device.
+_SETTINGS_TRIGGER_VERSION = "v10"
 _RETIRED_SETTINGS_TRIGGERS = (
     "of_insert_settings", "of_update_settings", "of_insert_settings_v2", "of_update_settings_v2",
     "of_insert_settings_v3", "of_update_settings_v3",
@@ -75,6 +83,7 @@ _RETIRED_SETTINGS_TRIGGERS = (
     "of_insert_settings_v6", "of_update_settings_v6",
     "of_insert_settings_v7", "of_update_settings_v7",
     "of_insert_settings_v8", "of_update_settings_v8",
+    "of_insert_settings_v9", "of_update_settings_v9",
 )
 
 # Medicine columns whose change is bookkeeping or stock, not an edit of the medicine itself.

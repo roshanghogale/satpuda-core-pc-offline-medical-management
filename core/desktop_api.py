@@ -340,6 +340,15 @@ def _hydrate_online_memory(conn) -> None:
             print(f"[online] settings restored: {n}", flush=True)
     except Exception as exc:
         print(f"[online] settings hydrate failed: {exc}", flush=True)
+    # The alert thresholds and reorder default are the shop's: the server's rows win over
+    # this PC's mirror (core/shop_alert_settings.py).
+    try:
+        from core.shop_alert_settings import forget, refresh_from_server
+
+        forget()
+        refresh_from_server(conn, force=True)
+    except Exception as exc:
+        print(f"[online] shop alert settings: {exc}", flush=True)
 
 
 def _adopt_online_runtime() -> sqlite3.Connection:
