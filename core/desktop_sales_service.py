@@ -1190,6 +1190,28 @@ def save_sale(conn, body: dict[str, Any]) -> dict[str, Any]:
             if editing_id > 0 and not autosave_id:
                 from core.billing_service import update_existing_bill
 
+                # Offline-first / Offline: the bill may have been deleted (here in another
+                # tab, or on another PC and pulled in as deleted=1) while this edit was open.
+                # Saving it brought it back (deleted=0) and put its old lines' stock back a
+                # second time -- the delete had already done that.
+                try:
+                    from core.sync_prefs import is_online_mode as _online_gone
+
+                    _check_gone = not _online_gone()
+                except Exception:
+                    _check_gone = True
+                if _check_gone:
+                    _gone = conn.execute(
+                        "SELECT COALESCE(deleted,0) FROM sales WHERE id=?", (editing_id,)
+                    ).fetchone()
+                    if not _gone or int(_gone[0] or 0):
+                        return {
+                            "ok": False,
+                            "code": "bill_deleted",
+                            "error": "This bill was deleted (here or on another computer). "
+                                     "It was not saved; start a new bill instead.",
+                        }
+
                 snap_due = body.get("edit_previous_due")
                 prev_for_edit = (
                     _safe_float(snap_due)
