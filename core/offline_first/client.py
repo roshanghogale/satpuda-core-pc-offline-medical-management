@@ -1,13 +1,42 @@
 """Server calls for offline-first sync (server-live/src/routes/syncV2.js)."""
 from __future__ import annotations
 
+import contextlib
+import threading
 from typing import Optional
+
+# The store a worker thread syncs, held for the whole of its cycle (Worker._loop). Read from
+# "the active store" at every call, a cycle still running when the shop switched stores sent
+# the old store file's events with the NEW store's key -- into the other store on the server
+# -- and wrote the new store's changes into the old file (audit, 25 Oct 2026).
+_bound = threading.local()
 
 
 def _token() -> str:
+    tok = getattr(_bound, "token", None)
+    if tok:
+        return tok
     from core import server_api as api
 
     return api.store_token_for_active()
+
+
+def active_token() -> str:
+    """The active store's key now (not a thread's bound one)."""
+    from core import server_api as api
+
+    return api.store_token_for_active()
+
+
+@contextlib.contextmanager
+def bound_token(token: Optional[str]):
+    """Every call on this thread inside the block uses ``token`` (None: the active store's)."""
+    prev = getattr(_bound, "token", None)
+    _bound.token = token or None
+    try:
+        yield
+    finally:
+        _bound.token = prev
 
 
 def _call(method: str, path: str, body=None, *, timeout: float = 60.0) -> dict:

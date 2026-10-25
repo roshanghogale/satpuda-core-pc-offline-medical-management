@@ -298,8 +298,17 @@ class Worker:
     bill made on the phone took up to 6 s to be pulled and the PC's own bill waited up to
     6 s before it was sent; the socket brings that to about one second each way."""
 
-    def __init__(self, path: str):
+    def __init__(self, path: str, token: Optional[str] = None):
         self.cycle = SyncCycle(path)
+        # The key of the store this file belongs to, taken when the worker starts (the store
+        # was just opened, so it is the active one). A store switch starts another worker; this
+        # one may still be in the middle of a cycle and must finish it for ITS store.
+        if token is None:
+            try:
+                token = client.active_token() or None
+            except Exception:
+                token = None
+        self.token = token
         self._stop = threading.Event()
         self._kick = threading.Event()
         self.thread: Optional[threading.Thread] = None
@@ -338,7 +347,8 @@ class Worker:
             if self.ws is None:
                 self.ws = SyncWebSocket()
             # on_connect: the socket was down for a while -- pull whatever happened meanwhile.
-            self.ws.start(token_fn=client._token, on_hint=self._on_hint, on_connect=self.kick)
+            self.ws.start(token_fn=lambda: self.token or client.active_token(), on_hint=self._on_hint,
+                          on_connect=self.kick)
         except Exception as exc:                 # no websocket module: polling alone
             log.warning("offline-first hints: %s", exc)
             self.ws = None
@@ -355,11 +365,14 @@ class Worker:
         while not self._stop.is_set():
             wait = INTERVAL_IDLE
             try:
-                self.last = self.cycle.run_once()
+                with client.bound_token(self.token):
+                    self.last = self.cycle.run_once()
                 if self.last.get("sent") or self.last.get("pulled"):
                     wait = INTERVAL_BUSY
             except Exception as exc:
                 self.last = {"error": str(exc)}
+                if self._stop.is_set():
+                    break                        # stopped (store switch): nothing more on this file
                 try:
                     conn = self.cycle._c()
                     with write_batch(conn):
