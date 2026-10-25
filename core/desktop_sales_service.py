@@ -1211,6 +1211,19 @@ def save_sale(conn, body: dict[str, Any]) -> dict[str, Any]:
                             "error": "This bill was deleted (here or on another computer). "
                                      "It was not saved; start a new bill instead.",
                         }
+                    # Changed since this edit was opened: another PC's edit pulled in, a
+                    # walk-in merged into the day's counter bill, another tab's save. The
+                    # stale form replaced that change without a word (the stock followed the
+                    # form, so only the other change was lost -- and nobody was told).
+                    _stamp = str(body.get("edit_stamp") or "").strip()
+                    if _stamp and _stamp != edit_stamp(conn, editing_id):
+                        return {
+                            "ok": False,
+                            "code": "bill_changed",
+                            "error": "This bill was changed (on another computer or in another tab) "
+                                     "after you opened it. It was not saved -- open it again from "
+                                     "Sales History and make your change on the bill as it is now.",
+                        }
 
                 snap_due = body.get("edit_previous_due")
                 prev_for_edit = (
@@ -1535,6 +1548,38 @@ def _returns_in_sale(conn, sale_id: int) -> list:
         return []
 
 
+def edit_stamp(conn, sale_id: int) -> str:
+    """A short fingerprint of what an edit can change on a saved bill: its lines and its money
+    (not the dues a payment or another bill moves). Handed out with the bill opened for edit and
+    checked when the edit is saved (save_sale, code bill_changed). '' when the bill is not here."""
+    import hashlib
+
+    try:
+        head = conn.execute(
+            "SELECT bill_date, customer_id, COALESCE(doctor_name,''), COALESCE(total_amount,0), "
+            "COALESCE(cash_paid,0), COALESCE(online_paid,0), COALESCE(discount,0), COALESCE(rounding,0) "
+            "FROM sales WHERE id=?",
+            (int(sale_id),),
+        ).fetchone()
+        if not head:
+            return ""
+        lines = conn.execute(
+            "SELECT medicine_id, COALESCE(qty,0), COALESCE(rate,0), COALESCE(amount,0), "
+            "COALESCE(item_discount,0) FROM sales_items WHERE sale_id=? AND COALESCE(deleted,0)=0",
+            (int(sale_id),),
+        ).fetchall()
+    except Exception:
+        return ""
+
+    def _n(v) -> str:
+        return f"{round(_safe_float(v), 2):.2f}"
+
+    parts = [str(head[0] or "")[:10], str(int(head[1] or 0)), str(head[2] or "").strip().upper()]
+    parts += [_n(v) for v in head[3:]]
+    parts += sorted("|".join([str(int(l[0] or 0))] + [_n(v) for v in l[1:]]) for l in lines)
+    return hashlib.sha1("\n".join(parts).encode("utf-8")).hexdigest()[:16]
+
+
 def load_sale(conn, sale_id: int) -> dict[str, Any]:
     """JSON form of load_sale_into_billing_page for Tauri edit/F10/F11."""
     from core.billing_service import load_sale_medicines
@@ -1631,6 +1676,8 @@ def load_sale(conn, sale_id: int) -> dict[str, Any]:
         "is_autosave": bool(is_autosave),
         "editing_sale_id": None if is_autosave else int(sid),
         "autosave_sale_id": int(sid) if is_autosave else None,
+        # Checked when the edit is saved: a bill changed meanwhile is not overwritten.
+        "edit_stamp": "" if is_autosave else edit_stamp(conn, int(sid)),
         **({} if is_autosave else _returns_on_edit(conn, int(sid), medicines)),
         # Returns settled in this bill: shown as Return rows while it is open (read only).
         "returns_in_bill": [] if is_autosave else _returns_in_sale(conn, int(sid)),

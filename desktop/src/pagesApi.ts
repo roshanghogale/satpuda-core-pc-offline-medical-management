@@ -985,6 +985,8 @@ export type LoadedSale = {
   is_autosave?: boolean
   editing_sale_id?: number | null
   autosave_sale_id?: number | null
+  /** Fingerprint of the bill as opened; sent back as edit_stamp when the edit is saved. */
+  edit_stamp?: string
   /** Qty already returned against the bill, per medicine id. */
   returned_by_medicine?: Record<string, number>
   returns_note?: string
