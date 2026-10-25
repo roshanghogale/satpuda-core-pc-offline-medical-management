@@ -119,6 +119,8 @@ type SaleTab = {
   autosaveSaleId: number | null
   autosaveToken: string | null
   editPrevDue: number | null
+  /** The bill as it was when opened for edit (engine's edit_stamp): a bill changed meanwhile is not overwritten. */
+  editStamp?: string
   dirty: boolean
   billNoHint: string
   /** A saved bill opened for edit: qty already returned per medicine id. */
@@ -310,6 +312,7 @@ function newTab(
     autosaveSaleId: null,
     autosaveToken: null,
     editPrevDue: null,
+    editStamp: '',
     dirty: false,
     billNoHint: hint,
   }
@@ -353,6 +356,7 @@ function tabPayload(tab: SaleTab) {
     autosave_sale_id: tab.autosaveSaleId || undefined,
     autosave_token: tab.autosaveToken || undefined,
     edit_previous_due: tab.editPrevDue ?? tab.prevDue,
+    edit_stamp: tab.editingSaleId ? tab.editStamp || undefined : undefined,
     apply_returns: tabReturnIds(tab).length ? tabReturnIds(tab) : undefined,
     items: tab.items.map((it) => ({
       id: it.id || null,
@@ -1571,6 +1575,7 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
       returnsNote: loaded.returns_note || '',
       billReturns: loaded.returns_in_bill || [],
       editPrevDue: loaded.edit_payment_snapshot?.previous_due ?? f.previous_due,
+      editStamp: loaded.edit_stamp || '',
       billNoHint: loaded.bill_no || '',
       title: loaded.bill_no || tab.title,
       dirty: false,

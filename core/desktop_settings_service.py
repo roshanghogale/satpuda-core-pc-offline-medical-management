@@ -4232,18 +4232,20 @@ def _save_payment(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, A
         except (TypeError, ValueError):
             editing_id = 0
         if editing_id > 0:
+            # A receipt deleted meanwhile (another tab, or another PC's delete pulled in as
+            # deleted=1) is not edited back: the stale form "saved" a row nobody sees.
             owned = conn.execute(
-                "SELECT id FROM customer_payments WHERE id=? AND customer_id=?",
+                "SELECT id FROM customer_payments WHERE id=? AND customer_id=? AND COALESCE(deleted,0)=0",
                 (editing_id, customer_id),
             ).fetchone()
             if not owned:
                 # Allow edit if payment exists even if party renamed to another customer.
                 owned = conn.execute(
-                    "SELECT id, customer_id FROM customer_payments WHERE id=?",
+                    "SELECT id, customer_id FROM customer_payments WHERE id=? AND COALESCE(deleted,0)=0",
                     (editing_id,),
                 ).fetchone()
                 if not owned:
-                    raise ValueError("Payment not found for edit.")
+                    raise ValueError("Payment not found for edit (deleted here or on another computer).")
                 customer_id = int(owned[1])
         # The bills this receipt pays (Choose bills); none = oldest bills first. A request
         # without the key (voice, an older screen) leaves an edited receipt's choice as saved.
@@ -4325,9 +4327,9 @@ def _save_payment(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, A
     pdate = str(data.get("date") or today)
     reference = str(data.get("reference") or "")
     if editing_id > 0 and not conn.execute(
-        "SELECT 1 FROM supplier_payments WHERE id=?", (editing_id,)
+        "SELECT 1 FROM supplier_payments WHERE id=? AND COALESCE(deleted,0)=0", (editing_id,)
     ).fetchone():
-        raise ValueError("Payment not found for edit.")
+        raise ValueError("Payment not found for edit (deleted here or on another computer).")
     # The purchases this payment pays (Choose bills); none = oldest first. No key in the
     # request leaves an edited payment's choice as saved.
     alloc_sql, alloc_val = _payment_allocations(

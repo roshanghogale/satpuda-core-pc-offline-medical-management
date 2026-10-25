@@ -169,9 +169,51 @@ class SyncCycle:
             store_wipe.note_screens_reload()
         return done
 
+    def settle_deleted_ahead(self) -> list[dict]:
+        """Before a push: a sales bill (or a payment, a cash line) this PC is about to send again
+        that another device has deleted on the server meanwhile would come back from the dead
+        (the server applies the upsert). Look at the changes not pulled yet; such a bill stays deleted and this PC's
+        own change is settled (core/offline_first/deleted_ahead.py). A failed look stops the
+        push for this cycle -- the server is out of reach then anyway."""
+        from core.offline_first import deleted_ahead
+
+        conn = self._c()
+        wanted = deleted_ahead.watch_list(conn)
+        if not wanted:
+            return []
+        after = int(meta_get(conn, "pull_cursor", 0) or 0)
+        changes: list[dict] = []
+        for _ in range(50):
+            page = client.changes(after, PULL_PAGE)
+            rows = page.get("changes") or []
+            changes += rows
+            nxt = int(page.get("to_revision") or after)
+            if not rows or not page.get("has_more") or nxt <= after:
+                break
+            after = nxt
+        gone = deleted_ahead.deleted_in(changes, wanted)
+        if not gone:
+            return []
+        done = []
+        with write_batch(conn):
+            for col, lid in sorted(gone):
+                if col == deleted_ahead.COLLECTION:
+                    done.append(deleted_ahead.settle(conn, lid))
+                else:
+                    done.append(deleted_ahead.settle_plain(conn, col, lid))
+        try:
+            from core.sync_status import note_collection_change
+
+            for col in {c for c, _i in gone} | ({"medicines"} if any(c == "sales" for c, _i in gone) else set()):
+                note_collection_change(col)
+        except Exception:
+            pass
+        return done
+
     def push(self) -> int:
         conn = self._c()
         install = meta_get(conn, "install_id") or client.install_id()
+        self.settle_deleted_ahead()
         with write_batch(conn):
             outbox.build_events(conn, install)
             outbox.repair_docless_events(conn)
@@ -293,8 +335,17 @@ class Worker:
     bill made on the phone took up to 6 s to be pulled and the PC's own bill waited up to
     6 s before it was sent; the socket brings that to about one second each way."""
 
-    def __init__(self, path: str, store_key: Optional[str] = None):
+    def __init__(self, path: str, store_key: Optional[str] = None, token: Optional[str] = None):
         self.cycle = SyncCycle(path)
+        # The key of the store this file belongs to, taken when the worker starts (the store
+        # was just opened, so it is the active one). A store switch starts another worker; this
+        # one may still be in the middle of a cycle and must finish it for ITS store.
+        if token is None:
+            try:
+                token = client.active_token() or None
+            except Exception:
+                token = None
+        self.token = token
         self._stop = threading.Event()
         self._kick = threading.Event()
         self.thread: Optional[threading.Thread] = None
@@ -361,7 +412,8 @@ class Worker:
                     return client._token()
 
             # on_connect: the socket was down for a while -- pull whatever happened meanwhile.
-            self.ws.start(token_fn=token, on_hint=self._on_hint, on_connect=self.kick)
+            self.ws.start(token_fn=lambda: self.token or token(), on_hint=self._on_hint,
+                          on_connect=self.kick)
         except Exception as exc:                 # no websocket module: polling alone
             log.warning("offline-first hints: %s", exc)
             self.ws = None
@@ -388,11 +440,14 @@ class Worker:
         while not self._stop.is_set():
             wait = INTERVAL_IDLE
             try:
-                self.last = self.cycle.run_once()
+                with client.bound_token(self.token):
+                    self.last = self.cycle.run_once()
                 if self.last.get("sent") or self.last.get("pulled"):
                     wait = INTERVAL_BUSY
             except Exception as exc:
                 self.last = {"error": str(exc)}
+                if self._stop.is_set():
+                    break                        # stopped (store switch): nothing more on this file
                 try:
                     conn = self.cycle._c()
                     with write_batch(conn):

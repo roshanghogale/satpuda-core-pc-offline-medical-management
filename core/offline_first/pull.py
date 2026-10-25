@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from core.offline_first import plain_docs
+from core.offline_first import deleted_ahead, plain_docs
 from core.offline_first.outbox import pending_stock_by_medicine
 from core.offline_first.schema import meta_set
 
@@ -164,6 +164,7 @@ def apply_page(conn: sqlite3.Connection, changes: list[dict], *, to_revision: in
                     fb._soft_delete_local(conn, col, str(lid), {"deleted": True})
                 except Exception:
                     pass
+                deleted_ahead.note_base(conn, col, lid, {"id": lid, "deleted": True})
                 applied += 1
                 continue
             before = None
@@ -172,6 +173,7 @@ def apply_page(conn: sqlite3.Connection, changes: list[dict], *, to_revision: in
 
                 before = medicine_lines.snapshot(conn, lid)
             status = sl.apply_server_doc(conn, col, doc)
+            deleted_ahead.note_base(conn, col, lid, doc)   # the server's copy, for a later settle
             if col == "medicines" and before:
                 # Edited on another device: this PC's purchase lines follow it too.
                 medicine_lines.after_pulled_medicine(conn, before, doc)

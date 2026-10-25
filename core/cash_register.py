@@ -171,8 +171,18 @@ def day_row(conn: sqlite3.Connection, day: str) -> Optional[dict]:
     two rows; the closed one, else the lowest id, is the one every device shows."""
     ensure_tables(conn)
     rows = _rows(conn, "SELECT * FROM cash_days WHERE day=? AND COALESCE(deleted,0)=0 "
-                       "ORDER BY (counted_cash IS NULL), id LIMIT 1", (day,))
-    return rows[0] if rows else None
+                       "ORDER BY (counted_cash IS NULL), id", (day,))
+    if not rows:
+        return None
+    row = rows[0]
+    if row.get("opening_cash") is None:
+        # The opening typed on the other device's row (one PC opened the day, the other closed
+        # it before they synced): shown, not lost -- the closed row alone read as opening 0 and
+        # the day's difference was off by the whole opening (audit, 25 Oct 2026).
+        typed = next((r for r in rows[1:] if r.get("opening_cash") is not None), None)
+        if typed is not None:
+            row = dict(row, opening_cash=typed["opening_cash"])
+    return row
 
 
 def _stamp_update(conn: sqlite3.Connection, table: str, row_id: int, sets: dict) -> None:
@@ -183,12 +193,31 @@ def _stamp_update(conn: sqlite3.Connection, table: str, row_id: int, sets: dict)
                  (*sets.values(), int(row_id)))
 
 
+class DayClosed(ValueError):
+    """A write to a day whose cash was already counted."""
+
+
+def refuse_if_closed(conn: sqlite3.Connection, day: str) -> None:
+    """A closed day is a counted drawer: an expense, a cash-added line or a new opening typed
+    into it afterwards changed the expected cash under a count already taken, so the day's
+    difference no longer said what the shop counted (audit, 25 Oct 2026). The day is opened
+    again first (Reopen), then changed, then closed with a fresh count."""
+    row = day_row(conn, day)
+    if row and row.get("closed_at"):
+        raise DayClosed(f"{_dmy(day)} is closed (cash counted at {_local_hm(row.get('closed_at')) or 'close'}). "
+                        "Open the day again to change it, then close it with a fresh count.")
+
+
 def set_opening(conn: sqlite3.Connection, day: str, opening) -> dict:
     day = clean_day(day)
     opening = r2(opening)
     if opening < 0:
         raise ValueError("Opening cash cannot be negative")
     row = day_row(conn, day)
+    if row and row.get("opening_cash") is not None:
+        # A day closed with no opening typed still asks for it (shown as 0); one already
+        # typed is part of the count.
+        refuse_if_closed(conn, day)
     if row:
         _stamp_update(conn, "cash_days", row["id"], {"opening_cash": opening})
     else:
@@ -249,9 +278,13 @@ def save_expense(conn: sqlite3.Connection, body: dict) -> dict:
     if not re.match(r"^\d{2}:\d{2}$", at):
         at = datetime.now().strftime("%H:%M")
     row_id = int(body.get("id") or 0)
+    refuse_if_closed(conn, day)
     if row_id:
-        if not conn.execute("SELECT 1 FROM cash_expenses WHERE id=?", (row_id,)).fetchone():
+        was = conn.execute("SELECT day FROM cash_expenses WHERE id=?", (row_id,)).fetchone()
+        if not was:
             raise ValueError("That line was removed already")
+        if str(was[0] or "")[:10] != day:
+            refuse_if_closed(conn, str(was[0] or "")[:10])   # moved out of a closed day
         _stamp_update(conn, "cash_expenses", row_id,
                       {"day": day, "at": at, "kind": kind, "category": category, "description": desc,
                        "amount": amount})
@@ -269,6 +302,9 @@ def save_expense(conn: sqlite3.Connection, body: dict) -> dict:
 
 def delete_expense(conn: sqlite3.Connection, row_id) -> bool:
     ensure_tables(conn)
+    was = conn.execute("SELECT day FROM cash_expenses WHERE id=?", (int(row_id or 0),)).fetchone()
+    if was:
+        refuse_if_closed(conn, str(was[0] or "")[:10])
     cur = conn.execute("DELETE FROM cash_expenses WHERE id=?", (int(row_id or 0),))
     conn.commit()
     return bool(cur.rowcount)

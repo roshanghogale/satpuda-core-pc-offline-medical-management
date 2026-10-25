@@ -245,6 +245,24 @@ def repair_docless_events(conn: sqlite3.Connection) -> int:
     return fixed
 
 
+def _note_server_copy(conn: sqlite3.Connection, seq: int) -> None:
+    """The server took this event: a bill's copy is now the server's last copy of it
+    (core/offline_first/deleted_ahead.py)."""
+    row = conn.execute(
+        "SELECT collection, op, local_id, payload FROM of_events WHERE seq=?", (int(seq),)
+    ).fetchone()
+    if not row or row[1] != "upsert":
+        return
+    from core.offline_first import deleted_ahead
+
+    if row[0] != deleted_ahead.COLLECTION:
+        return
+    try:
+        deleted_ahead.note_base(conn, row[0], row[2], (json.loads(row[3]) or {}).get("doc"))
+    except (TypeError, ValueError, sqlite3.Error):
+        pass
+
+
 def pending_events(conn: sqlite3.Connection, limit: int = 100) -> list[dict]:
     rows = conn.execute(
         "SELECT payload FROM of_events WHERE status='pending' ORDER BY seq LIMIT ?", (limit,),
@@ -290,6 +308,8 @@ def apply_push_answer(conn: sqlite3.Connection, answer: dict) -> dict:
             "UPDATE of_events SET status='sent', outcome=?, flag_code=?, flag_detail=?, acked_at=? WHERE seq=?",
             (stored or outcome, r.get("flag_code"), r.get("flag_detail"), _now(), seq),
         )
+        if (stored or outcome) in ("applied", "flagged", "duplicate_uuid"):
+            _note_server_copy(conn, seq)
         if outcome in ("duplicate", "duplicate_uuid"):
             for (mid,) in conn.execute(
                 "SELECT DISTINCT medicine_id FROM of_stock_journal WHERE event_seq=?", (seq,)
