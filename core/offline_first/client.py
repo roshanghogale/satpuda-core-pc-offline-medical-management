@@ -46,6 +46,18 @@ def number_block(kind: str, fy_start_year: int, size: int) -> dict:
     })
 
 
+def number_head(fy_start_year: int, ranges: dict) -> dict:
+    """Which of the numbers this device has left are already held on the server (read-only):
+    ranges = {"sales": [(51, 200)], "purchases": [(11, 50)]} -> per kind {"head": N,
+    "ranges": [{"from", "to", "taken"}]}, taken 0 when the range is free."""
+    q = [f"fy={int(fy_start_year)}"]
+    for kind in ("sales", "purchases"):
+        spans = [f"{int(lo)}-{int(hi)}" for lo, hi in (ranges.get(kind) or [])][:10]
+        if spans:
+            q.append(f"{kind}={','.join(spans)}")
+    return _call("GET", "/api/sync/v2/number-head?" + "&".join(q), timeout=30.0)
+
+
 def push(events: list[dict]) -> dict:
     return _call("POST", "/api/sync/v2/push", {"install_id": install_id(), "events": events}, timeout=180.0)
 

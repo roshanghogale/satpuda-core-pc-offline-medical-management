@@ -97,13 +97,73 @@ class FakeV2Server:
 
     ``bind(install_id)`` patches core.offline_first.client so a worker.SyncCycle talks to this
     object; no socket, never port 8765.
+
+    ``numbering=True`` adds the server's bill-number rules (services/syncV2.js + syncService.js):
+    a number block starts after every bill number held and every block promised, number-head
+    answers which numbers of a range are held, and a sale / purchase whose number another live
+    bill already holds is quarantined (kept in ``quarantined``, not stored). Without it every
+    block is 1..size and number-head finds nothing taken, as before.
     """
 
-    def __init__(self):
+    def __init__(self, *, numbering: bool = False):
         self.docs: dict = {}            # (collection, id) -> doc
         self.feed: list = []            # changes, revision = index + 1
         self.last_seq: dict = {}        # install_id -> last seq taken
         self.pushed: list = []          # every event taken, in order
+        self.numbering = numbering
+        self.blocks: list = []          # (install_id, kind, fy, from, to)
+        self.quarantined: list = []     # events refused for a number already held
+
+    # -- bill numbers (numbering=True) ---------------------------------------------------
+    _CODE = {"sales": "bill_no", "purchases": "purchase_no"}
+
+    def _serial(self, kind: str, doc: dict, fy: int):
+        import re
+
+        code = str(doc.get(self._CODE[kind]) or "").upper()
+        if f"/FY{fy}-" not in code and int(doc.get("fy_start_year") or 0) != int(fy):
+            return None
+        m = re.match(r"^(?:SCB|APU)?(\d{1,9})$", code.split("/FY")[0])
+        return int(m.group(1)) if m else None
+
+    def held(self, kind: str, fy: int) -> list[int]:
+        return [n for (col, _), d in self.docs.items() if col == kind and not d.get("deleted")
+                for n in [self._serial(kind, d, fy)] if n is not None]
+
+    def import_bills(self, kind: str, fy: int, first: int, last: int) -> None:
+        """Bills the server got some other way (a data import): numbers first..last, held on the
+        server, not in the changes feed."""
+        from core.fy_serial import encode_purchase_no, encode_sales_bill_no
+
+        for n in range(int(first), int(last) + 1):
+            code = encode_sales_bill_no(n, fy) if kind == "sales" else encode_purchase_no(n, fy)
+            self.docs[(kind, 8_000_000 + n)] = {"id": 8_000_000 + n, self._CODE[kind]: code,
+                                                "fy_start_year": fy, "version": 1}
+
+    def number_block(self, install_id: str, kind: str, fy: int, size: int) -> dict:
+        if not self.numbering:
+            return {"from_serial": 1, "to_serial": int(size)}
+        top = max([0, *self.held(kind, fy), *[b[4] for b in self.blocks if b[1] == kind and b[2] == fy]])
+        blk = (install_id, kind, int(fy), top + 1, top + int(size))
+        self.blocks.append(blk)
+        return {"kind": kind, "fy_start_year": int(fy), "from_serial": blk[3], "to_serial": blk[4]}
+
+    def number_head(self, fy: int, ranges: dict) -> dict:
+        out = {"fy_start_year": int(fy)}
+        for kind in ("sales", "purchases"):
+            nums = self.held(kind, fy) if self.numbering else []
+            out[kind] = {"head": max([0, *nums]), "ranges": [
+                {"from": lo, "to": hi, "taken": max([0, *[n for n in nums if lo <= n <= hi]])}
+                for lo, hi in (ranges.get(kind) or [])]}
+        return out
+
+    def _number_clash(self, col: str, doc: dict) -> bool:
+        if not self.numbering or col not in self._CODE or doc.get("deleted"):
+            return False
+        code = str(doc.get(self._CODE[col]) or "")
+        lid = int(doc.get("id") or 0)
+        return bool(code) and any(c == col and i != lid and not d.get("deleted") and d.get(self._CODE[col]) == code
+                                  for (c, i), d in self.docs.items())
 
     def _note(self, collection: str, local_id: int, operation: str, doc: dict) -> None:
         self.feed.append({"revision": len(self.feed) + 1, "collection": collection, "local_id": int(local_id),
@@ -121,6 +181,11 @@ class FakeV2Server:
                 return {"results": results, "last_seq": last, "missing_from": last + 1}
             op = ev.get("op")
             col = ev.get("collection")
+            if op == "upsert" and self._number_clash(col, dict(ev.get("doc") or {})):
+                self.quarantined.append(ev)
+                last = seq
+                results.append({"seq": seq, "outcome": "quarantined", "flag_code": "number_taken"})
+                continue
             if op == "stock":
                 pass
             else:
@@ -163,17 +228,18 @@ class FakeV2Server:
         @contextlib.contextmanager
         def _bound():
             saved = (client.push, client.changes, client.stock, client.install_id, client.number_block,
-                     client.head_revision)
+                     client.head_revision, client.number_head)
             client.push = lambda events: server.push(install_id, events)
             client.changes = lambda after, limit=200: server.changes(after, limit)
             client.stock = lambda ids=None: server.stock(ids)
             client.install_id = lambda: install_id
-            client.number_block = lambda kind, fy, size: {"from_serial": 1, "to_serial": int(size)}
+            client.number_block = lambda kind, fy, size: server.number_block(install_id, kind, fy, size)
             client.head_revision = lambda: len(server.feed)
+            client.number_head = lambda fy, ranges: server.number_head(fy, ranges)
             try:
                 yield server
             finally:
                 (client.push, client.changes, client.stock, client.install_id, client.number_block,
-                 client.head_revision) = saved
+                 client.head_revision, client.number_head) = saved
 
         return _bound()
