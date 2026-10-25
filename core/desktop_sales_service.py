@@ -2267,6 +2267,17 @@ def delete_saved_sale(conn, body: dict[str, Any]) -> dict[str, Any]:
     sale_id = _safe_int(body.get("sale_id"))
     if sale_id == 0:
         return {"ok": False, "error": "Invalid sale id."}
+    # A bill with a sales return: deleting it gave every line's stock back, the returned
+    # units a second time (owner audit, 25 Oct 2026). The return goes first.
+    try:
+        _ret = conn.execute(
+            "SELECT return_no FROM sales_returns WHERE sale_id=? AND COALESCE(deleted,0)=0 LIMIT 1",
+            (sale_id,),
+        ).fetchone()
+    except Exception:
+        _ret = None
+    if _ret:
+        return {"ok": False, "error": f"This bill has sales return {_ret[0] or ''}. Delete the return first, then the bill.".replace("return  ", "return ")}
     _forget_autosave_session_for(sale_id)
 
     try:
