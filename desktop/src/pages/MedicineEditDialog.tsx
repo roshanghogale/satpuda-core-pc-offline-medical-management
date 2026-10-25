@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   deleteInventoryMedicine,
   fetchInventoryMedicine,
@@ -65,6 +65,13 @@ export function MedicineEditDialog({
   const [purchaseSummary, setPurchaseSummary] = useState('')
   const [salesSummary, setSalesSummary] = useState('')
   const [qtyColumnLabel, setQtyColumnLabel] = useState('Qty')
+  // The stock fields as the dialog opened with them (see save()).
+  const loadedStock = useRef<{
+    stock_strips: string
+    extra_tablets: string
+    type: string
+    unit: string
+  } | null>(null)
   const [form, setForm] = useState({
     name: '',
     type: '',
@@ -166,6 +173,12 @@ export function MedicineEditDialog({
 
   const applyMedicine = (m: InventoryMedicine) => {
     const strip = Boolean(m.is_strip)
+    loadedStock.current = {
+      stock_strips: String(strip ? m.stock_strips : m.stock_qty ?? 0),
+      extra_tablets: String(m.extra_tablets ?? 0),
+      type: m.type || '',
+      unit: m.unit || '',
+    }
     setForm({
       name: m.name || '',
       type: m.type || '',
@@ -238,15 +251,30 @@ export function MedicineEditDialog({
     setSaving(true)
     setError('')
     try {
+      // Stock goes only when this edit changed it (or the pack it is counted in). Sending
+      // the figure read when the dialog opened put back stock a sale on another device (or
+      // a sync pull) had taken off meanwhile -- an HSN fix undid that sale's stock.
+      const was = loadedStock.current
+      const stockTouched =
+        !was ||
+        form.stock_strips !== was.stock_strips ||
+        form.extra_tablets !== was.extra_tablets ||
+        form.type !== was.type ||
+        form.unit !== was.unit
+      const stockFields = stockTouched
+        ? {
+            stock_strips: Number(form.stock_strips) || 0,
+            stock_qty: Number(form.stock_strips) || 0,
+            extra_tablets: Number(form.extra_tablets) || 0,
+          }
+        : {}
       const res = await updateInventoryMedicine({
         id: medicineId,
         name: form.name.trim(),
         type: form.type,
         batch: form.batch,
         expiry: form.expiry,
-        stock_strips: Number(form.stock_strips) || 0,
-        stock_qty: Number(form.stock_strips) || 0,
-        extra_tablets: Number(form.extra_tablets) || 0,
+        ...stockFields,
         unit: form.unit,
         mrp: Number(form.mrp) || 0,
         rate: Number(form.rate) || 0,
