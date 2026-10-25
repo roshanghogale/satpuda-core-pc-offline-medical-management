@@ -2284,6 +2284,33 @@ def _forget_autosave_session_for(sale_id: int) -> None:
         print(f"[autosave] session cleanup after delete: {exc}")
 
 
+def _payments_naming_bill(conn, sale_id: int) -> list[str]:
+    """Live customer payments whose allocations name this bill: 'receipt R12 of 25-10-2026 ₹50'.
+    Read from this PC's copy (Offline / offline-first); Online payments carry no allocations."""
+    try:
+        from core.bill_clearing import clean_allocations
+
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(customer_payments)").fetchall()}
+        if "allocations" not in cols:
+            return []
+        rno = "COALESCE(receipt_no,'')" if "receipt_no" in cols else "''"
+        rows = conn.execute(
+            f"SELECT id, payment_date, amount, {rno}, allocations FROM customer_payments "
+            "WHERE COALESCE(deleted,0)=0 AND allocations IS NOT NULL AND allocations LIKE ?",
+            (f"%{int(sale_id)}%",),
+        ).fetchall()
+    except Exception:
+        return []
+    out = []
+    for pid, pdate, amount, receipt, alloc in rows:
+        if any(int(a.get("bill_id") or 0) == int(sale_id) for a in clean_allocations(alloc)):
+            d = str(pdate or "")[:10]
+            dmy = f"{d[8:10]}-{d[5:7]}-{d[0:4]}" if len(d) == 10 else d
+            name = f"receipt {receipt}" if str(receipt or "").strip() else "payment"
+            out.append(f"{name} of {dmy} ₹{float(amount or 0):.2f}")
+    return out
+
+
 def delete_saved_sale(conn, body: dict[str, Any]) -> dict[str, Any]:
     """Permanently delete a saved sales bill and restore stock."""
     sale_id = _safe_int(body.get("sale_id"))
@@ -2300,6 +2327,21 @@ def delete_saved_sale(conn, body: dict[str, Any]) -> dict[str, Any]:
         _ret = None
     if _ret:
         return {"ok": False, "error": f"This bill has sales return {_ret[0] or ''}. Delete the return first, then the bill.".replace("return  ", "return ")}
+    # A payment taken against this bill (Sales History "pay", or bills ticked in Payments)
+    # names it in its allocations. Deleting the bill left that receipt behind as the
+    # customer's credit -- the dues of the party changed with no bill to show why (audit,
+    # 25 Oct 2026). As with a return: the payment goes first (or is kept on purpose).
+    held = _payments_naming_bill(conn, sale_id)
+    if held:
+        return {
+            "ok": False,
+            "code": "bill_has_payments",
+            "error": (
+                f"A payment was taken against this bill ({', '.join(held[:3])}"
+                f"{' …' if len(held) > 3 else ''}). Delete that payment in Payments first, "
+                "then the bill."
+            ),
+        }
     _forget_autosave_session_for(sale_id)
 
     try:
