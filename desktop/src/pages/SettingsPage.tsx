@@ -290,38 +290,77 @@ export function SettingsPage({
   // bill saved on the Sales page used to reload the Payments lists here unseen --
   // party dues included -- on the shop's mobile data (17 Oct 2026). A change that
   // happens while hidden is picked up the moment the page is opened again.
-  const paymentsSeenNonce = useRef(0)
+  //
+  // The Payments party list (and dues) is read again every time the tab is shown --
+  // page opened, Payments tab picked, Supplier/Customer switched -- and on every
+  // refresh nonce while it is on screen. It used to be read once per kind, and a
+  // change was then refetched only for the kind on screen (or not at all when it
+  // arrived while another Settings tab was open), so a supplier made on the Purchase
+  // page, a customer added in Contacts or one synced from the phone was missing from
+  // the dropdown until the app restarted (25 Oct 2026).
+  const bundleReady = Boolean(bundle)
   useEffect(() => {
-    if (!syncRefreshNonce || !active) return
-    if (paymentsSeenNonce.current === syncRefreshNonce) return
-    paymentsSeenNonce.current = syncRefreshNonce
+    if (!active || !bundleReady || tabId !== 'payment') return
+    const kind = toggleId === 'customer' ? 'customer' : 'supplier'
     let cancelled = false
     void (async () => {
       try {
-        const kind = toggleId === 'customer' ? 'customer' : 'supplier'
-        if (tabId === 'payment') {
-          const p = await fetchPayments(kind)
-          if (!cancelled) {
-            setBundle((b) =>
-              b
-                ? {
-                    ...b,
-                    ...(kind === 'customer'
-                      ? { payments_customer: p }
-                      : { payments_supplier: p }),
-                  }
-                : b,
-            )
-          }
+        const p = await fetchPayments(kind)
+        if (!cancelled) {
+          setBundle((b) =>
+            b
+              ? {
+                  ...b,
+                  ...(kind === 'customer'
+                    ? { payments_customer: p }
+                    : { payments_supplier: p }),
+                }
+              : b,
+          )
         }
-      } catch {
-        /* payment refresh best-effort */
+      } catch (e) {
+        // Nothing on screen yet: say why. A list already shown stays as it was.
+        if (!cancelled && !paymentsShownRef.current[kind]) {
+          setError(e instanceof Error ? e.message : String(e))
+        }
       }
     })()
     return () => {
       cancelled = true
     }
-  }, [syncRefreshNonce, tabId, toggleId, active])
+  }, [syncRefreshNonce, tabId, toggleId, active, bundleReady])
+  // Reorder: its supplier list is read again on each visit / refresh while on screen.
+  // Only the suppliers are taken from the new read -- the groups may hold the shop's
+  // unsaved edits.
+  const reorderLoaded = Boolean(bundle?.reorder)
+  const reorderWasLoaded = useRef(false)
+  useEffect(() => {
+    const fresh = !reorderWasLoaded.current // the lazy read above has just run
+    reorderWasLoaded.current = reorderLoaded
+    if (fresh || !active || !reorderLoaded || tabId !== 'reorder') return
+    let cancelled = false
+    fetchReorder()
+      .then((r) => {
+        if (cancelled || !Array.isArray(r?.suppliers)) return
+        setBundle((b) =>
+          b && b.reorder ? { ...b, reorder: { ...b.reorder, suppliers: r.suppliers } } : b,
+        )
+      })
+      .catch(() => {
+        /* the list already shown stays */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [syncRefreshNonce, tabId, active, reorderLoaded])
+  const paymentsShownRef = useRef<{ customer: boolean; supplier: boolean }>({
+    customer: false,
+    supplier: false,
+  })
+  paymentsShownRef.current = {
+    customer: Boolean(bundle?.payments_customer),
+    supplier: Boolean(bundle?.payments_supplier),
+  }
 
   // Lazy-load heavy Settings tabs (contacts / payments / alerts / shelf / reorder).
   useEffect(() => {
@@ -346,28 +385,7 @@ export function SettingsPage({
             setBundle((b) => (b ? { ...b, alerts: a } : b))
           }
         }
-        if (tabId === 'payment') {
-          const kind = toggleId === 'customer' ? 'customer' : 'supplier'
-          const has =
-            kind === 'customer'
-              ? bundle.payments_customer
-              : bundle.payments_supplier
-          if (!has) {
-            const p = await fetchPayments(kind)
-            if (!cancelled) {
-              setBundle((b) =>
-                b
-                  ? {
-                      ...b,
-                      ...(kind === 'customer'
-                        ? { payments_customer: p }
-                        : { payments_supplier: p }),
-                    }
-                  : b,
-              )
-            }
-          }
-        }
+        // Payments are read by the effect above, every time the tab is shown.
         if (tabId === 'shelf' && !bundle.shelf) {
           const s = await fetchShelf()
           if (!cancelled) {

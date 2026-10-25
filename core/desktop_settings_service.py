@@ -1299,6 +1299,12 @@ def _ensure_contact_village(conn: sqlite3.Connection, address: str) -> None:
     ensure_village_from_address(conn, address)
 
 
+# Contacts listed the first 500 customers by name: a customer made today whose name
+# sorts past them ("Z...", or any on a shop with 1,700+) was never in the list to edit.
+# Same ceiling as the Sales customer list (core/desktop_pages_service._CUSTOMER_LIST_LIMIT).
+_CONTACT_LIST_LIMIT = 20000
+
+
 def get_contacts(conn: sqlite3.Connection) -> dict[str, Any]:
     from core.village_service import get_default_village, load_villages
     from core.sync_prefs import is_online_mode
@@ -1319,7 +1325,7 @@ def get_contacts(conn: sqlite3.Connection) -> dict[str, Any]:
             except (TypeError, ValueError):
                 return float(stored or 0)
 
-        cust_rows = [c for c in customers() if isinstance(c, dict)][:500]
+        cust_rows = [c for c in customers() if isinstance(c, dict)][:_CONTACT_LIST_LIMIT]
         sup_rows = [s for s in suppliers() if isinstance(s, dict)]
         live_c = _live_party_due_map("customer") if cust_rows else None
         live_s = _live_party_due_map("supplier") if sup_rows else None
@@ -1373,7 +1379,7 @@ def get_contacts(conn: sqlite3.Connection) -> dict[str, Any]:
     ).fetchall()
     customers = conn.execute(
         "SELECT id, name, COALESCE(phone,''), COALESCE(address,''), "
-        "COALESCE(total_due,0) FROM customers ORDER BY name COLLATE NOCASE LIMIT 500"
+        f"COALESCE(total_due,0) FROM customers ORDER BY name COLLATE NOCASE LIMIT {_CONTACT_LIST_LIMIT}"
     ).fetchall()
     suppliers = conn.execute(
         "SELECT id, name, COALESCE(phone,''), COALESCE(gstin,''), "

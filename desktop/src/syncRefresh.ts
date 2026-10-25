@@ -33,6 +33,9 @@ const PAGE_COLLECTIONS: Partial<Record<PageId, Set<string>>> = {
     'stock_disposals',
     'customers',
     'customer_payments',
+    // A supplier made or renamed elsewhere: the "Purchase No / Supplier" list.
+    'suppliers',
+    'supplier_payments',
   ]),
   home: new Set([
     'medicines',

@@ -40,7 +40,11 @@ import {
 import { focusTableSection, usePageHotkeys } from '../../hooks/usePageHotkeys'
 import { SHORTCUT_SECTIONS } from './shortcutSections'
 import { presetRange, RANGE_WORDS, registerVoicePage, type VoiceHandler } from '../../voice/voiceBus'
-import { dispatchPaymentsChanged, dispatchVillagesChanged } from '../../syncRefresh'
+import {
+  dispatchDataChanged,
+  dispatchPaymentsChanged,
+  dispatchVillagesChanged,
+} from '../../syncRefresh'
 import { useLayoutRowCount } from '../../layoutRows'
 import { resolveParty } from '../../partyNamePick'
 import { ModernCombo } from '../ModernCombo'
@@ -308,6 +312,12 @@ export function ContactsPanel({
       if (next) onChange(next)
       const kind = String(body.kind || '')
       const action = String(body.action || '')
+      // A customer / supplier added or renamed here has to reach every party
+      // dropdown already open -- Payments, Sales, Purchase, Returns -- not only
+      // the next time the app starts.
+      if (kind === 'customer' || kind === 'supplier') {
+        dispatchDataChanged([kind === 'customer' ? 'customers' : 'suppliers'])
+      }
       if (
         kind === 'village' ||
         (kind === 'customer' && action !== 'delete' && action !== 'recalculate')
