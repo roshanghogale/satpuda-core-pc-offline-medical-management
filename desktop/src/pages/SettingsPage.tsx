@@ -646,6 +646,13 @@ export function SettingsPage({
         window.dispatchEvent(
           new CustomEvent('satpuda:layout-config-changed', { detail: next }),
         )
+        // Medicine types / schedules saved here but not sent to the server (Online, no internet).
+        const warn = (next as { sync_warning?: string }).sync_warning
+        if (warn) {
+          setMsg(String(warn))
+          await reload()
+          return
+        }
       }
       if (section === 'sales_billing') {
         setSalesBilling(next)
