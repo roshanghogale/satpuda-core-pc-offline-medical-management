@@ -72,6 +72,8 @@ def make_store(*, offline_first: bool) -> str:
             continue
         if _fill(conn, t, 7):
             filled.append(t)
+    # Opening the store may already have given it a default profile row: the shop has one profile.
+    conn.execute("DELETE FROM pharmacy_profile WHERE id <> 7")
     for name, value in (("regular_meds:7", "[1,2]"), ("customer_gst:7", "27AAA"), ("doctor_margin_rules", "{}"),
                         ("profile_bank_name", "SBI"), ("printer_name", "HP"), ("bill_dues_follow_payments_v1", "1")):
         conn.execute("INSERT OR REPLACE INTO settings (name, value) VALUES (?, ?)", (name, value))
