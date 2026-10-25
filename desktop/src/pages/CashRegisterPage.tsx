@@ -396,8 +396,11 @@ export function CashRegisterPage({ active, refreshNonce = 0 }: { active: boolean
             <section className="cr-card">
               <div className="cr-card-head">
                 <h3>Expenses &amp; cash added</h3>
-                <span className="vl-dim">Type a line and press Enter. Esc cancels an edit.</span>
+                <span className="vl-dim">
+                  {closed ? 'This day is closed. Click Open again to add or change a line.' : 'Type a line and press Enter. Esc cancels an edit.'}
+                </span>
               </div>
+              {closed ? null : (
               <div className="cr-form" onKeyDown={onEnter(() => void saveLine())}>
                 <select className="settings-input cr-kind" value={kind} aria-label="Kind" onChange={(e) => setKind(e.target.value as 'out' | 'in')}>
                   <option value="out">Expense (cash out)</option>
@@ -420,6 +423,7 @@ export function CashRegisterPage({ active, refreshNonce = 0 }: { active: boolean
                   <button type="button" className="btn btn-neutral" onClick={clearForm}>Cancel</button>
                 ) : null}
               </div>
+              )}
               {manual.length ? (
                 <table className="sat-table cr-table">
                   <thead>
@@ -441,8 +445,12 @@ export function CashRegisterPage({ active, refreshNonce = 0 }: { active: boolean
                         <td className="num cr-in">{m.kind === 'in' ? money(m.amount) : ''}</td>
                         <td className="num cr-out">{m.kind === 'out' ? money(m.amount) : ''}</td>
                         <td className="cr-act">
-                          <button type="button" className="cr-link" onClick={() => startEdit(m)}>Edit</button>
-                          <button type="button" className="cr-link cr-link-danger" onClick={() => void removeLine(m)}>Delete</button>
+                          {closed ? null : (
+                            <>
+                              <button type="button" className="cr-link" onClick={() => startEdit(m)}>Edit</button>
+                              <button type="button" className="cr-link cr-link-danger" onClick={() => void removeLine(m)}>Delete</button>
+                            </>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -488,7 +496,9 @@ export function CashRegisterPage({ active, refreshNonce = 0 }: { active: boolean
               ) : (
                 <div className="cr-row cr-open-shown">
                   <span className="cr-big num">{money(rep.opening.value)}</span>
-                  <button type="button" className="cr-link" onClick={() => setEditOpening(true)}>Edit</button>
+                  {closed && rep.opening.set ? null : (
+                    <button type="button" className="cr-link" onClick={() => setEditOpening(true)}>Edit</button>
+                  )}
                 </div>
               )}
             </section>
