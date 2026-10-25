@@ -184,6 +184,28 @@ was raised from 8 (which would have silently queued half the segments) to
 it falls back to the original single-stream loop. `/Segments=4` on the command
 line for a shop whose router cannot hold many connections.
 
+**A dead GitHub address (25 Oct 2026).** One of the file host's IPv4 addresses,
+185.199.109.133, does not answer from some Indian ISPs, and .NET gives each
+address the full ~21 s Windows connect time before trying the next. The worker
+now hooks each GitHub ServicePoint's `BindIPEndPointDelegate`: before an address
+is first used it knocks on all of the host's addresses at once (TCP connect,
+3 s at most, remembered 10 minutes) and skips one that does not answer when
+another does, and skips IPv6 when IPv4 answers. The 16 connections, hosts and
+TLS are unchanged; if the helper cannot be compiled the worker connects as before.
+
+**A zip downloaded in the browser.** When the download fails (NET, SIZE, HASH,
+ZIP, GONE, CHANGED - after the worker's own retries), the installer opens a
+dialog: *Open download link* (the release asset in the default browser), *Use a
+zip downloaded in the browser...* (a file picker in Downloads, with a matching
+`SatpudaCore_Desktop_Win10*.zip` already there found and pre-selected), and the
+worker log's path. The chosen zip goes to the worker as `-LocalZip`: copied
+into the cache, compared with the release's published `.sha256` (refused when
+it differs), and installed through the same extract / swap / marker steps (the
+marker gets `"source": "local zip"`). When no checksum can be read it is checked
+by its contents only (it must open and hold `SatpudaCore_Desktop.exe`) and the
+installer says so. For support: `SatpudaCoreInstaller.exe /ZIP="C:\path\SatpudaCore_Desktop_Win10.zip"`
+skips the download altogether (works with `/VERYSILENT` too).
+
 **Before and after, both against the real 121.9 MB zip on the owner's PC:**
 
 | | Throughput | Time for 121.9 MB |
