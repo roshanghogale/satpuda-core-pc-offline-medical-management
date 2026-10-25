@@ -15,6 +15,8 @@ import { QuickActionIcon } from '../quickActionIcons'
 import { useBusinessMode } from '../wholesale/mode'
 import { WholesaleReportsDialog } from '../wholesale/WholesaleReportsDialog'
 import { Panel } from './pageChrome'
+import { SummaryCustomize } from '../components/SummaryCustomize'
+import { usePageSummary } from '../pageSummaries'
 import { fetchStartupAlerts } from '../pagesApi'
 import {
   BANNER_PREVIEW_EVENT,
@@ -136,6 +138,14 @@ function handleQuickAction(key: string, onNavigate: AppNavigate) {
   }
 }
 
+const HOME_TODAY_LABELS = ['Today Sales', 'Today Collected', 'Today Bills', 'Customer Due', 'Supplier Due', 'Stock Value']
+const HOME_PERIOD_LABELS = ['Month Sales', 'Month Collected', 'Month Bills', 'Year Sales', 'Year Collected', 'Year Bills']
+
+/** "Year Sales (2026-27)" -> year_sales: the card's name in the shop's summary choice. */
+function homeCardKey(label: string): string {
+  return label.replace(/\(.*\)/g, '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+}
+
 function StatCell({ card }: { card: DashboardCard }) {
   return (
     <div className="dash-cell">
@@ -148,6 +158,7 @@ function StatCell({ card }: { card: DashboardCard }) {
 export function HomePage({ onNavigate, syncRefreshNonce = 0, active, storeName = '' }: Props) {
   const [todayCards, setTodayCards] = useState<DashboardCard[]>([])
   const [periodCards, setPeriodCards] = useState<DashboardCard[]>([])
+  const homeSummary = usePageSummary('home')
   const [quickActions, setQuickActions] = useState<HomeQuickAction[]>(
     FALLBACK_QUICK_ACTIONS,
   )
@@ -309,6 +320,16 @@ export function HomePage({ onNavigate, syncRefreshNonce = 0, active, storeName =
   }
   useEffect(() => registerVoicePage('home', () => voiceHandlerRef.current), [])
 
+  // Settings → Layout & Lists → Page Summaries, or the button beside the cards (25 Oct 2026):
+  // the shop picks which figures show; the figures themselves never change.
+  const todayAll = todayCards.length
+    ? todayCards
+    : HOME_TODAY_LABELS.map((label) => ({ label, value: '…' }))
+  const periodAll = periodCards.length
+    ? periodCards
+    : HOME_PERIOD_LABELS.map((label) => ({ label, value: '…' }))
+  const todayShown = todayAll.filter((c) => homeSummary.field(homeCardKey(c.label)))
+  const periodShown = periodAll.filter((c) => homeSummary.field(homeCardKey(c.label)))
   return (
     <div className="home-page">
       {/* Never in the demo: there is no local engine there, and this told a
@@ -419,44 +440,31 @@ export function HomePage({ onNavigate, syncRefreshNonce = 0, active, storeName =
       </div>
 
       {sections.home_dashboard !== false ? (
-      <Panel title="Dashboard">
+      <Panel
+        title="Dashboard"
+        className={homeSummary.show ? '' : 'dash-off'}
+        headRight={<SummaryCustomize page="home" />}
+        bare={!homeSummary.show}
+      >
+        {homeSummary.show ? (
+        <>
+        {todayShown.length ? (
         <div className="dash-row">
-          {(todayCards.length
-            ? todayCards
-            : Array.from({ length: 6 }, (_, i) => ({
-                label: [
-                  'Today Sales',
-                  'Today Collected',
-                  'Today Bills',
-                  'Customer Due',
-                  'Supplier Due',
-                  'Stock Value',
-                ][i],
-                value: '…',
-              }))
-          ).map((c) => (
+          {todayShown.map((c) => (
             <StatCell key={c.label} card={c} />
           ))}
         </div>
-        <hr className="dash-sep" />
+        ) : null}
+        {todayShown.length && periodShown.length ? <hr className="dash-sep" /> : null}
+        {periodShown.length ? (
         <div className="dash-row dash-row-period">
-          {(periodCards.length
-            ? periodCards
-            : Array.from({ length: 6 }, (_, i) => ({
-                label: [
-                  'Month Sales',
-                  'Month Collected',
-                  'Month Bills',
-                  'Year Sales',
-                  'Year Collected',
-                  'Year Bills',
-                ][i],
-                value: '…',
-              }))
-          ).map((c) => (
+          {periodShown.map((c) => (
             <StatCell key={c.label} card={c} />
           ))}
         </div>
+        ) : null}
+        </>
+        ) : null}
       </Panel>
       ) : null}
       <HomeExportDialog open={exportOpen} onClose={() => setExportOpen(false)} />

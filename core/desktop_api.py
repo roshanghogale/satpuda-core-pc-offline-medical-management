@@ -349,6 +349,14 @@ def _hydrate_online_memory(conn) -> None:
         refresh_from_server(conn, force=True)
     except Exception as exc:
         print(f"[online] shop alert settings: {exc}", flush=True)
+    # What each page's summary shows is the shop's too (core/page_summary_prefs.py).
+    try:
+        from core import page_summary_prefs
+
+        page_summary_prefs.forget()
+        page_summary_prefs.refresh_from_server(conn, force=True)
+    except Exception as exc:
+        print(f"[online] page summaries: {exc}", flush=True)
 
 
 def _adopt_online_runtime() -> sqlite3.Connection:
@@ -1588,6 +1596,12 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                         recheck=(_q.get("recheck") or [""])[0] == "1",
                     ),
                 )
+                return
+
+            if path == "/api/settings/page_summaries":
+                from core import page_summary_prefs
+
+                _json_response(self, 200, page_summary_prefs.load(_db.get("conn")))
                 return
 
             if path == "/api/settings/alert_prefs":
@@ -2986,6 +3000,19 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 from core.desktop_startup_service import save_alert_prefs
 
                 _json_response(self, 200, save_alert_prefs(conn, body))
+                return
+            if path == "/api/settings/page_summaries":
+                if conn is None:
+                    _json_response(self, 503, {"error": "Database not open"})
+                    return
+                from core import page_summary_prefs
+
+                try:
+                    _json_response(self, 200, page_summary_prefs.save(conn, body))
+                except Exception as exc:
+                    # Online and the server refused: nothing was changed on this PC.
+                    _json_response(self, 502, {"error": "Could not save. Check the internet and try again.",
+                                               "detail": str(exc)[:200]})
                 return
             if path in ("/api/settings/thresholds", "/api/settings/save/thresholds"):
                 if conn is None:

@@ -4,6 +4,8 @@ import { useLayoutEffect, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode, Ref } from 'react'
 import { useDesktopUiPrefs } from '../desktopUiPrefsContext'
 import { StatusGlyph, statusIconUrl } from '../statusIcons'
+import { SummaryCustomize } from '../components/SummaryCustomize'
+import { usePageSummary } from '../pageSummaries'
 // SummaryStrip / EmptyState / DataTable row actions are styled here; every
 // rule in it is scoped to the list pages' own lp- classes.
 import '../styles/list-pages.css'
@@ -102,6 +104,8 @@ export function FilterBar({
 }
 
 export type SummaryCard = {
+  /** The figure's name in the shop's summary choice (pageSummaries.ts SUMMARY_PAGES). */
+  key?: string
   label: string
   value: string | number
   /** Colours the figure (a due in red, a profit in green); theme variables only. */
@@ -113,13 +117,26 @@ export type SummaryCard = {
  *  as the strip's label so the owner still finds "Sales Summary" where it was. */
 export function SummaryStrip({
   title,
-  items,
+  items: allItems,
   className = '',
+  page,
 }: {
   title?: string
   items: SummaryCard[]
   className?: string
+  /** The page's name in the shop's summary choice: gives the strip its
+   *  "Customize summary" button and hides what the shop turned off (25 Oct 2026). */
+  page?: string
 }) {
+  const choice = usePageSummary(page || '')
+  if (page && !choice.show) {
+    return (
+      <section className={`lp-summary lp-summary-off ${className}`.trim()} aria-label={title}>
+        <SummaryCustomize page={page} />
+      </section>
+    )
+  }
+  const items = page ? allItems.filter((it) => !it.key || choice.field(it.key)) : allItems
   // Up to 8 cards share one row; more split into two even rows (12 -> 6 + 6),
   // never one full row and a stray few. Narrow windows wrap further by CSS.
   const perRow = items.length <= 8 ? items.length : Math.ceil(items.length / 2)
@@ -140,6 +157,7 @@ export function SummaryStrip({
           </div>
         ))}
       </div>
+      {page ? <SummaryCustomize page={page} /> : null}
     </section>
   )
 }

@@ -20,6 +20,8 @@ import { TypePicker } from './DoctorMarginDialog'
 import { DoctorMarginRulesEditor } from './DoctorMarginRulesEditor'
 import '../styles/doctor-margin.css'
 import '../styles/doctor-margin-rules.css'
+import { SummaryCustomize } from '../components/SummaryCustomize'
+import { usePageSummary } from '../pageSummaries'
 
 type Flag = 'estimated' | 'no_rate' | 'rate_over_mrp'
 type RateBasis = '' | 'purchase' | 'purchase_free'
@@ -186,6 +188,7 @@ type Props = {
 }
 
 export function DoctorMarginRulesReport({ modeSwitch, doctors, online, from, to, onDates, onClose, onBack }: Props) {
+  const dmrSummary = usePageSummary('doctor_margin_rules')
   const [picked, setPicked] = useState<string[]>(doctors)
   const [rateBasis, setRateBasis] = useState<RateBasis>('')
   const [view, setView] = useState<View>('doctor')
@@ -449,27 +452,40 @@ export function DoctorMarginRulesReport({ modeSwitch, doctors, online, from, to,
                     the doctor a margin.
                   </p>
                 ) : null}
-                <div className="dm-cards">
+                {/* The shop's choice of figures (Settings → Layout & Lists → Page Summaries);
+                    on screen only, the saved file keeps every figure. */}
+                <div className={`dm-cards${dmrSummary.show ? '' : ' dm-cards-off'}`}>
+                  {dmrSummary.show && dmrSummary.field('doctors') ? (
                   <div className="dm-stat">
                     <span>Doctors</span>
                     <b>{report.grand.doctors.length}</b>
                   </div>
+                  ) : null}
+                  {dmrSummary.show && dmrSummary.field('on_profit') ? (
                   <div className="dm-stat">
                     <span>On profit</span>
                     <b>₹{money(report.grand.totals.profit)}</b>
                   </div>
+                  ) : null}
+                  {dmrSummary.show && dmrSummary.field('total_sales') ? (
                   <div className="dm-stat">
                     <span>Total sales</span>
                     <b>₹{money(report.grand.totals.sales_value)}</b>
                   </div>
+                  ) : null}
+                  {dmrSummary.show && dmrSummary.field('commission') ? (
                   <div className="dm-stat">
                     <span>Commission on sales</span>
                     <b>₹{money(report.grand.totals.commission)}</b>
                   </div>
+                  ) : null}
+                  {dmrSummary.show && dmrSummary.field('doctors_margin') ? (
                   <div className="dm-stat dm-stat-main">
                     <span>Doctors' margin</span>
                     <b>₹{money(report.grand.totals.total)}</b>
                   </div>
+                  ) : null}
+                  <SummaryCustomize page="doctor_margin_rules" />
                 </div>
                 {counts && (counts.estimated || counts.no_rate || counts.rate_over_mrp) ? (
                   <ul className="dm-flag-notes">

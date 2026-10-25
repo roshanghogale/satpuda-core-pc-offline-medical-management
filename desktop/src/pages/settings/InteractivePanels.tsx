@@ -65,6 +65,8 @@ import {
   SaveBtn,
 } from './SettingsChrome'
 import { CappedTableWrap } from '../pageChrome'
+import { SummaryCustomize } from '../../components/SummaryCustomize'
+import { usePageSummary } from '../../pageSummaries'
 import '../../styles/interactive-settings.css'
 import '../../styles/payments-ledger.css'
 import '../../styles/alerts.css'
@@ -1473,6 +1475,7 @@ export function AlertsPanel({
   onAlertsChange?: (alerts: Alerts) => void
   onNavigate?: AppNavigate
 }) {
+  const alertSummary = usePageSummary('alerts')
   const [search, setSearch] = useState('')
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
@@ -1686,19 +1689,21 @@ export function AlertsPanel({
       : ALERT_EMPTY[nestedId] || 'Nothing to show.'
   const hasBulkRemove = Boolean(spec.dismissAllExpired || spec.dismissAllOos)
 
-  const stats: { label: string; value: string; tone?: string }[] = [
-    { label: spec.periodOf === 'expiry' ? 'Batches' : spec.key === 'customer_due' ? 'Bills' : 'Rows', value: String(display.length) },
+  const allStats: { key: string; label: string; value: string; tone?: string }[] = [
+    { key: 'count', label: spec.periodOf === 'expiry' ? 'Batches' : spec.key === 'customer_due' ? 'Bills' : 'Rows', value: String(display.length) },
   ]
-  if (canGroup) stats.push({ label: groupKind === 'area' ? 'Areas' : 'Suppliers', value: String(groups.length) })
+  if (canGroup) allStats.push({ key: 'groups', label: groupKind === 'area' ? 'Areas' : 'Suppliers', value: String(groups.length) })
   if (spec.periodOf === 'expiry') {
-    stats.push(
-      { label: 'At purchase rate', value: rupees(sumColumn(headers, display, VALUE_RATE)), tone: nestedId === 'expired' ? 'bad' : 'warn' },
-      { label: 'At MRP', value: rupees(sumColumn(headers, display, VALUE_MRP)) },
+    allStats.push(
+      { key: 'value_rate', label: 'At purchase rate', value: rupees(sumColumn(headers, display, VALUE_RATE)), tone: nestedId === 'expired' ? 'bad' : 'warn' },
+      { key: 'value_mrp', label: 'At MRP', value: rupees(sumColumn(headers, display, VALUE_MRP)) },
     )
   }
   if (spec.key === 'customer_due') {
-    stats.push({ label: 'Due', value: rupees(sumColumn(headers, display, 'Due Amount')), tone: 'bad' })
+    allStats.push({ key: 'due', label: 'Due', value: rupees(sumColumn(headers, display, 'Due Amount')), tone: 'bad' })
   }
+  // The shop's choice of figures (Settings → Layout & Lists → Page Summaries); on screen only.
+  const stats = alertSummary.show ? allStats.filter((s) => alertSummary.field(s.key)) : []
 
   const scope = `${spec.title}${period ? ` — ${periodLabel(period)}` : ''} (${display.length})`
   const byHint = grouped ? `by ${groupNoun}` : ''
@@ -1752,6 +1757,7 @@ export function AlertsPanel({
               <span>{s.label}</span>
             </div>
           ))}
+          <SummaryCustomize page="alerts" />
         </div>
         <div className="alx-head-help" ref={helpRef}>
           {spec.periodOf ? (
@@ -3231,6 +3237,7 @@ export function LedgerPanel({
   kind: 'supplier' | 'customer'
   refreshNonce?: number
 }) {
+  const ledgerSummary = usePageSummary('ledger')
   const [party, setParty] = useState('')
   const [from, setFrom] = useState('')
   const [to, setTo] = useState(todayLocal())
@@ -3431,27 +3438,38 @@ export function LedgerPanel({
               summary threw while React was rendering, which unmounts the whole
               tree -- nav bar included -- and leaves a white window that only a
               restart recovers. A ledger with no totals should show zeroes. */}
-          <div className="iset-summary">
+          <div className={`iset-summary${ledgerSummary.show ? '' : ' iset-summary-off'}`}>
+            {ledgerSummary.show && ledgerSummary.field('opening') ? (
             <div className="iset-stat">
               <span>Opening</span>
               <strong>₹{money(data.summary?.opening)}</strong>
             </div>
+            ) : null}
+            {ledgerSummary.show && ledgerSummary.field('debits') ? (
             <div className="iset-stat">
               <span>Debits</span>
               <strong>₹{money(data.summary?.debits)}</strong>
             </div>
+            ) : null}
+            {ledgerSummary.show && ledgerSummary.field('credits') ? (
             <div className="iset-stat">
               <span>Credits</span>
               <strong>₹{money(data.summary?.credits)}</strong>
             </div>
+            ) : null}
+            {ledgerSummary.show && ledgerSummary.field('closing') ? (
             <div className={`iset-stat${Number(data.summary?.closing || 0) > 0.009 ? ' due' : ''}`}>
               <span>Closing</span>
               <strong>₹{money(data.summary?.closing)}</strong>
             </div>
+            ) : null}
+            {ledgerSummary.show && ledgerSummary.field('entries') ? (
             <div className="iset-stat">
               <span>Entries</span>
               <strong>{data.rows.length}</strong>
             </div>
+            ) : null}
+            <SummaryCustomize page="ledger" />
           </div>
           <div
             ref={ledgerTableRef}
