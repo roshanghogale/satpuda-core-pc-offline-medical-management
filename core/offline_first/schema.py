@@ -151,6 +151,13 @@ CREATE TABLE IF NOT EXISTS of_number_blocks (
     PRIMARY KEY (kind, fy_start_year, from_serial)
 );
 CREATE TABLE IF NOT EXISTS of_doc_counters (prefix TEXT PRIMARY KEY, next_no INTEGER NOT NULL);
+-- The server's last copy of a bill as this PC knows it (core/offline_first/deleted_ahead.py).
+CREATE TABLE IF NOT EXISTS of_doc_base (
+    collection TEXT NOT NULL,
+    local_id   INTEGER NOT NULL,
+    body       TEXT NOT NULL,
+    PRIMARY KEY (collection, local_id)
+);
 INSERT OR IGNORE INTO of_flags (k, v) VALUES ('capture', '1');
 """
 
@@ -335,7 +342,7 @@ def clear_bookkeeping(conn: sqlite3.Connection) -> None:
         raise RuntimeError(f"{left} change(s) on this PC have not reached the server yet")
     drop_triggers(conn)
     for table in ("of_dirty", "of_stock_journal", "of_events", "of_versions", "of_id_counters",
-                  "of_number_blocks", "of_doc_counters", "of_meta"):
+                  "of_number_blocks", "of_doc_counters", "of_doc_base", "of_meta"):
         if _table_exists(conn, table):
             conn.execute(f"DELETE FROM {table}")
     if _table_exists(conn, "of_flags"):

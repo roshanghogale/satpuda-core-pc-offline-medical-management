@@ -151,9 +151,48 @@ class SyncCycle:
                 with write_batch(conn):
                     numbers.add_block(conn, kind, fy, int(blk["from_serial"]), int(blk["to_serial"]))
 
+    def settle_deleted_ahead(self) -> list[dict]:
+        """Before a push: a sales bill this PC is about to send again that another device has
+        deleted on the server meanwhile would come back from the dead (the server applies the
+        upsert). Look at the changes not pulled yet; such a bill stays deleted and this PC's
+        own change is settled (core/offline_first/deleted_ahead.py). A failed look stops the
+        push for this cycle -- the server is out of reach then anyway."""
+        from core.offline_first import deleted_ahead
+
+        conn = self._c()
+        wanted = deleted_ahead.watch_list(conn)
+        if not wanted:
+            return []
+        after = int(meta_get(conn, "pull_cursor", 0) or 0)
+        changes: list[dict] = []
+        for _ in range(50):
+            page = client.changes(after, PULL_PAGE)
+            rows = page.get("changes") or []
+            changes += rows
+            nxt = int(page.get("to_revision") or after)
+            if not rows or not page.get("has_more") or nxt <= after:
+                break
+            after = nxt
+        gone = deleted_ahead.deleted_in(changes, wanted)
+        if not gone:
+            return []
+        done = []
+        with write_batch(conn):
+            for sid in sorted(gone):
+                done.append(deleted_ahead.settle(conn, sid))
+        try:
+            from core.sync_status import note_collection_change
+
+            note_collection_change("sales")
+            note_collection_change("medicines")
+        except Exception:
+            pass
+        return done
+
     def push(self) -> int:
         conn = self._c()
         install = meta_get(conn, "install_id") or client.install_id()
+        self.settle_deleted_ahead()
         with write_batch(conn):
             outbox.build_events(conn, install)
         sent = 0
