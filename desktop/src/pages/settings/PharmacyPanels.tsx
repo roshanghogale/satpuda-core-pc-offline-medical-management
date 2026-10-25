@@ -944,7 +944,7 @@ export function PharmacyPanel(props: Props) {
         <Frame title="App Login">
           <Note>
             When enabled, the app asks for this username and password every time
-            it opens.
+            it opens, on every PC of this store (it works without internet too).
           </Note>
           <Check
             label="Require login when the app opens"
