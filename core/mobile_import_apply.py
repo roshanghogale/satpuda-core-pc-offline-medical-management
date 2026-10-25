@@ -537,6 +537,20 @@ def _apply_purchases(conn, data: dict[str, Any]) -> dict[str, Any]:
             supplier_name = str(supplier_name or "").strip()
             if not supplier_name:
                 raise ValueError("Missing supplier name")
+            # The Purchase page refuses a supplier bill number already saved; the phone used
+            # to save it again, so the same export sent twice put its stock on the shelf twice.
+            bill_no = str(purchase.get("bill_number") or "").strip()
+            if bill_no:
+                from core.save_warnings import find_saved_supplier_bill
+
+                already = find_saved_supplier_bill(
+                    conn, supplier_name=supplier_name, bill_number=bill_no
+                )
+                if already:
+                    raise ValueError(
+                        f"already saved as purchase {already.get('purchase_no') or ''}".strip()
+                        + "; not saved again"
+                    )
             sup_data = supplier_lookup.get(supplier_name, {})
             if not sup_data and isinstance(purchase.get("supplier"), dict):
                 sup_data = purchase["supplier"]
