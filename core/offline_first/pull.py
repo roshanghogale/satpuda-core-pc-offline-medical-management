@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import sqlite3
 
+from core.offline_first import plain_docs
 from core.offline_first.outbox import pending_stock_by_medicine
 from core.offline_first.schema import meta_set
 
@@ -88,6 +89,19 @@ def _apply_settings_bundle(conn: sqlite3.Connection, rows: list, pending: set) -
     return n
 
 
+def _note_version(conn: sqlite3.Connection, col: str, lid: int, doc, ch: dict) -> None:
+    try:
+        ver = int((doc or {}).get("version") or ch.get("entity_version") or 0)
+    except (TypeError, ValueError, AttributeError):
+        ver = 0
+    if ver > 0:
+        conn.execute(
+            "INSERT INTO of_versions (collection, local_id, version) VALUES (?,?,?) "
+            "ON CONFLICT(collection, local_id) DO UPDATE SET version=MAX(version, excluded.version)",
+            (col, lid, ver),
+        )
+
+
 def apply_page(conn: sqlite3.Connection, changes: list[dict], *, to_revision: int) -> dict:
     """Write one page of changes. Call inside the worker's write transaction with capture paused."""
     from core import server_entity_sync as fb
@@ -112,6 +126,14 @@ def apply_page(conn: sqlite3.Connection, changes: list[dict], *, to_revision: in
                 continue
             if (col, lid) in pending:
                 skipped += 1                  # this PC's own change goes up first
+                continue
+            if col in plain_docs.PLAIN:
+                # Reorders, write-offs, general products: sync_down_doc has no branch for them
+                # and wrote nothing (core/offline_first/plain_docs.py).
+                plain_docs.apply_doc(conn, col, lid, doc if isinstance(doc, dict) else None,
+                                     delete=ch.get("operation") == "delete")
+                applied += 1
+                _note_version(conn, col, lid, doc, ch)
                 continue
             if col in ("cash_days", "cash_expenses"):
                 # The cash register's own tables (core/cash_register.py): no stock, no dues.

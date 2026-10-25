@@ -644,11 +644,16 @@ def save_purchase_bill(conn, body: dict[str, Any]) -> dict[str, Any]:
             purchase_no = maybe_save_purchase(
                 conn, supplier_id, purchase_date, bill_number, calc, items
             )
-            # save may return display serial; resolve latest real row id.
+            # save may return display serial; resolve latest real row id -- of THIS PC's
+            # range on offline-first, where another device's purchase can have a higher id.
+            from core.offline_first.ids import newest_own_clause
+
+            own_sql, own_args = newest_own_clause(conn)
             row = conn.execute(
                 "SELECT id, purchase_no FROM purchases "
-                "WHERE COALESCE(deleted,0)=0 AND COALESCE(is_autosave,0)=0 "
-                "ORDER BY id DESC LIMIT 1"
+                "WHERE COALESCE(deleted,0)=0 AND COALESCE(is_autosave,0)=0"
+                f"{own_sql} ORDER BY id DESC LIMIT 1",
+                own_args,
             ).fetchone()
             purchase_id = int(row[0]) if row else 0
             if row and row[1]:
@@ -672,7 +677,7 @@ def save_purchase_bill(conn, body: dict[str, Any]) -> dict[str, Any]:
             try:
                 from core.reorder_service import complete_pending_order_from_purchase
 
-                complete_pending_order_from_purchase(conn, reorder_order_id)
+                complete_pending_order_from_purchase(conn, reorder_order_id, items)
             except Exception:
                 pass
 

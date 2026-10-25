@@ -15,7 +15,7 @@ import time
 from datetime import datetime, timezone
 from typing import Optional
 
-from core.offline_first import client, numbers, outbox, pull, schema
+from core.offline_first import client, numbers, outbox, plain_docs, pull, schema
 from core.offline_first.schema import meta_get, meta_set
 
 log = logging.getLogger(__name__)
@@ -25,6 +25,7 @@ INTERVAL_BUSY = 1.0
 FULL_STOCK_EVERY = 30 * 60
 NUMBER_CHECK_EVERY = 5 * 60   # are the numbers left in the blocks still free on the server?
 PULL_PAGE = 200
+PLAIN_BACKFILL_KEY = "plain_backfill_v1"   # reorders / write-offs / general products fetched once
 
 
 class HoldConnection(sqlite3.Connection):
@@ -224,9 +225,31 @@ class SyncCycle:
         except Exception as exc:
             log.debug("lan relay: %s", exc)
         got = self.pull()
+        try:
+            got += self.backfill_plain()
+        except Exception as exc:                 # offline / older server: asked again next cycle
+            log.debug("plain records backfill: %s", exc)
         with write_batch(conn):
             meta_set(conn, "last_error", None)
         return {"sent": sent, "pulled": got}
+
+    def backfill_plain(self) -> int:
+        """Once per store file: every reorder, write-off and general product the server holds.
+
+        The pull and the switch's copy never wrote them (core/offline_first/plain_docs.py), so a
+        PC already on offline-first lacks every one made before this version -- on the phone,
+        on the other PCs, or Online before the switch. The pull keeps them in step after this.
+        A record this PC changed and has not sent yet is left alone."""
+        conn = self._c()
+        if meta_get(conn, PLAIN_BACKFILL_KEY):
+            return 0
+        fetched = plain_docs.fetch_from_server(client._token(), include_deleted=True)
+        with write_batch(conn, capture_paused=True):
+            n = plain_docs.apply_fetched(conn, fetched, pull._locally_pending(conn))
+            meta_set(conn, PLAIN_BACKFILL_KEY, _now())
+        if n:
+            _note_pulled([{"collection": c} for c in plain_docs.PLAIN if fetched.get(c)])
+        return n
 
 
 class Worker:

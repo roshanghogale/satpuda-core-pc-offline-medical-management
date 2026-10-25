@@ -531,9 +531,38 @@ def after_profile_saved(conn) -> None:
         pass
 
 
+def note_offline_first_singleton(conn, collection: str) -> bool:
+    """Offline-first: note a store-wide singleton (dropdowns, shelf_settings) for the worker to
+    send, as the triggers note every table row. No table trigger can: villages live in settings
+    rows of this PC, the medicine types in a file. True when noted."""
+    try:
+        from core.offline_first.runtime import is_active, registered
+
+        if conn is None or not is_active() or not registered(conn):
+            return False
+        conn.execute(
+            "INSERT INTO of_dirty (collection, local_id, op, at) "
+            "VALUES (?, 0, 'upsert', strftime('%Y-%m-%dT%H:%M:%fZ','now')) "
+            "ON CONFLICT(collection, local_id) DO UPDATE SET op=excluded.op, at=excluded.at",
+            (str(collection),),
+        )
+        conn.commit()
+    except Exception as exc:
+        log.warning("offline-first: %s not noted for sending: %s", collection, exc)
+        return False
+    try:
+        from core.offline_first import worker
+
+        worker.kick()
+    except Exception:
+        pass
+    return True
+
+
 def after_shelf_settings_saved(conn) -> None:
     """Push shelf_settings singleton when Online (content-equal skip on server)."""
     if not is_online_mode():
+        note_offline_first_singleton(conn, 'shelf_settings')
         return
     from core import server_live as live
     from core.online_guard import CloudSaveError, ensure_can_mutate
@@ -876,7 +905,8 @@ def _offline_first_push_dropdowns(conn) -> None:
 
 def after_villages_saved(conn) -> None:
     if not is_online_mode():
-        _offline_first_push_dropdowns(conn)
+        if not note_offline_first_singleton(conn, 'dropdowns'):
+            _offline_first_push_dropdowns(conn)
         return
     from core import server_live as live
     from core.online_guard import CloudSaveError, ensure_can_mutate

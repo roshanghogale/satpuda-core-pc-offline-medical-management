@@ -111,6 +111,54 @@ def next_id(conn: sqlite3.Connection, table: str) -> int:
     return nid
 
 
+def peek_next_id(conn: sqlite3.Connection, table: str):
+    """The id the next INSERT into ``table`` on this connection will get, without reserving it;
+    None when ids are SQLite's own (no device range). A name made from it (a reorder group,
+    "ROG20261025-3000000007") is unique across devices, as the id is."""
+    try:
+        if not isinstance(conn, OfConnection):
+            return None                  # its INSERTs do not take ids from the range
+        rng = device_range(conn)
+    except Exception:
+        return None
+    if not rng:
+        return None
+    base, top = rng
+    try:
+        if base == 0:
+            used = conn.execute(
+                f"SELECT MAX(id) FROM {table} WHERE id BETWEEN 1 AND ?", (LEGACY_ID_LIMIT - 1,)
+            ).fetchone()[0]
+            return max((int(used) + 1) if used else 1, _legacy_next.get(
+                (conn.execute("PRAGMA database_list").fetchone()[2], table), 0))
+        row = conn.execute("SELECT next_id FROM of_id_counters WHERE tbl=?", (table,)).fetchone()
+        have = int(row[0]) if row else base + 1
+        used = conn.execute(
+            f"SELECT MAX(id) FROM {table} WHERE id BETWEEN ? AND ?", (base, top)
+        ).fetchone()[0]
+        return max(have, (int(used) + 1) if used else base + 1)
+    except sqlite3.Error:
+        return None
+
+
+def newest_own_clause(conn: sqlite3.Connection, column: str = "id") -> tuple[str, tuple]:
+    """(" AND id > ? AND id <= ?", (base, top)) on a connection that makes ids in a range of its
+    own (offline-first, or Offline on a copy holding device ids), else ("", ()).
+
+    "The record just saved" read as ``ORDER BY id DESC LIMIT 1`` is another device's record as
+    soon as the copy holds one from a higher range (device 7's purchase on device 3's PC): the
+    save then put its wholesale rates and settled its returns on that other bill."""
+    try:
+        if not isinstance(conn, OfConnection):
+            return "", ()
+        rng = device_range(conn)
+    except Exception:
+        return "", ()
+    if not rng:
+        return "", ()
+    return f" AND {column} > ? AND {column} <= ?", (int(rng[0]), int(rng[1]))
+
+
 def rewrite_insert(conn: sqlite3.Connection, sql: str, params):
     """(sql, params) with this device's next id added when an INSERT into a synced table
     names no id. Anything else is returned unchanged."""
