@@ -112,43 +112,95 @@ def _base(conn: sqlite3.Connection, sale_id: int) -> Optional[dict]:
 
 # ── which bills to look for ───────────────────────────────────────────────────
 
-def watch_list(conn: sqlite3.Connection) -> set[int]:
-    """Sales this PC is about to send again that the server already holds (only those can have
-    been deleted there)."""
+# Records with no stock of their own: a receipt, a supplier payment or a typed cash line
+# deleted on another device and edited here came back the same way. The delete wins; this
+# PC's edit of it is dropped (there is nothing else to settle) and the party's due follows.
+PLAIN = ("customer_payments", "supplier_payments", "cash_expenses")
+WATCHED = (COLLECTION,) + PLAIN
+
+
+def watch_list(conn: sqlite3.Connection) -> set[tuple[str, int]]:
+    """(collection, id) of the records this PC is about to send again that the server already
+    holds (only those can have been deleted there)."""
+    marks = ",".join("?" * len(WATCHED))
     rows = conn.execute(
-        "SELECT local_id FROM of_dirty WHERE collection=? AND op='upsert' "
-        "UNION SELECT local_id FROM of_events WHERE collection=? AND op='upsert' AND status='pending' "
-        "AND local_id IS NOT NULL",
-        (COLLECTION, COLLECTION),
+        f"SELECT collection, local_id FROM of_dirty WHERE collection IN ({marks}) AND op='upsert' "
+        f"UNION SELECT collection, local_id FROM of_events WHERE collection IN ({marks}) AND op='upsert' "
+        "AND status='pending' AND local_id IS NOT NULL",
+        (*WATCHED, *WATCHED),
     ).fetchall()
     out = set()
-    for (lid,) in rows:
+    for col, lid in rows:
         lid = int(lid)
         known = conn.execute(
             "SELECT 1 FROM of_versions WHERE collection=? AND local_id=? "
             "UNION SELECT 1 FROM of_events WHERE collection=? AND local_id=? AND status='sent' LIMIT 1",
-            (COLLECTION, lid, COLLECTION, lid),
+            (col, lid, col, lid),
         ).fetchone()
         if known:
-            out.add(lid)
+            out.add((str(col), lid))
     return out
 
 
-def deleted_in(changes: Iterable[dict], wanted: set[int]) -> set[int]:
-    """Of ``wanted``, the sales whose latest entry in these changes is a delete."""
-    last: dict[int, str] = {}
+def deleted_in(changes: Iterable[dict], wanted: set) -> set:
+    """Of ``wanted`` ((collection, id) pairs, or bare sale ids), those whose latest entry in these
+    changes is a delete."""
+    pairs = {w if isinstance(w, tuple) else (COLLECTION, int(w)) for w in wanted}
+    last: dict[tuple[str, int], str] = {}
     for ch in changes or []:
-        if str(ch.get("collection") or "") != COLLECTION:
-            continue
+        col = str(ch.get("collection") or "")
         try:
             lid = int(ch.get("local_id") or 0)
         except (TypeError, ValueError):
             continue
-        if lid in wanted:
+        if (col, lid) in pairs:
             doc = ch.get("doc") if isinstance(ch.get("doc"), dict) else {}
             gone = ch.get("operation") == "delete" or doc.get("deleted") in (True, 1, "1", "true")
-            last[lid] = "delete" if gone else "upsert"
-    return {lid for lid, op in last.items() if op == "delete"}
+            last[(col, lid)] = "delete" if gone else "upsert"
+    gone = {k for k, op in last.items() if op == "delete"}
+    if all(not isinstance(w, tuple) for w in wanted):
+        return {lid for _c, lid in gone}
+    return gone
+
+
+def settle_plain(conn: sqlite3.Connection, collection: str, local_id: int) -> dict:
+    """A payment / cash line deleted on the server with an unsent change here: deleted here as
+    the pull would delete it, the change dropped, the party's due worked out again. Call inside
+    the worker's write transaction."""
+    lid = int(local_id)
+    party = None
+    if collection in ("customer_payments", "supplier_payments"):
+        col = "customer_id" if collection == "customer_payments" else "supplier_id"
+        row = conn.execute(f"SELECT {col} FROM {collection} WHERE id=?", (lid,)).fetchone()
+        party = int(row[0]) if row and row[0] else None
+    conn.execute("UPDATE of_flags SET v='0' WHERE k='capture'")
+    try:
+        if collection == "cash_expenses":
+            from core import cash_register
+
+            cash_register.apply_pulled(conn, collection, lid, None, delete=True)
+        else:
+            from core import server_entity_sync as fb
+
+            fb._soft_delete_local(conn, collection, str(lid), {"deleted": True})
+    finally:
+        conn.execute("UPDATE of_flags SET v='1' WHERE k='capture'")
+    _drop_unsent(conn, lid, collection)
+    if party:
+        try:
+            if collection == "customer_payments":
+                from core.customer_service import recalculate_customer_due
+
+                recalculate_customer_due(conn, party, commit=False, sync=False)
+            else:
+                from core.purchase_service import recalculate_supplier_due
+
+                recalculate_supplier_due(conn, party)
+        except Exception as exc:
+            log.debug("party due after a deleted %s: %s", collection, exc)
+    log.warning("offline-first: %s %s was deleted on another device; this PC's change of it is dropped",
+                collection, lid)
+    return {"collection": collection, "id": lid, "action": "delete_kept"}
 
 
 # ── settling one bill ─────────────────────────────────────────────────────────
@@ -184,13 +236,13 @@ def _is_counter(conn: sqlite3.Connection, sale: dict) -> bool:
     return bool(row and is_counter_sale_name(str(row[0] or "")))
 
 
-def _drop_unsent(conn: sqlite3.Connection, sale_id: int) -> None:
-    """This PC's unsent change of the bill goes: noted, or already an event."""
-    conn.execute("DELETE FROM of_dirty WHERE collection=? AND local_id=?", (COLLECTION, int(sale_id)))
+def _drop_unsent(conn: sqlite3.Connection, local_id: int, collection: str = COLLECTION) -> None:
+    """This PC's unsent change of the record goes: noted, or already an event."""
+    conn.execute("DELETE FROM of_dirty WHERE collection=? AND local_id=?", (collection, int(local_id)))
     first = conn.execute("SELECT MIN(seq) FROM of_events WHERE status='pending'").fetchone()[0]
     gone = conn.execute(
         "DELETE FROM of_events WHERE status='pending' AND collection=? AND local_id=?",
-        (COLLECTION, int(sale_id)),
+        (collection, int(local_id)),
     ).rowcount
     if gone and first is not None:
         from core.offline_first.outbox import renumber_pending

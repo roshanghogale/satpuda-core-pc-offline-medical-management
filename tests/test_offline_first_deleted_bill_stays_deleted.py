@@ -189,6 +189,39 @@ class DeletedOnTheOtherPc(unittest.TestCase):
         alive = [d for (c, _i), d in self.server.docs.items() if c == "sales" and not d.get("deleted")]
         self.assertEqual([[float(it["qty"]) for it in d["items"]] for d in alive], [[1.0]])
 
+    def test_a_receipt_edited_after_the_other_pc_deleted_it_stays_deleted(self):
+        from core.desktop_settings_service import delete_payment, save_payment
+
+        x = self.sell(self.a, self.ram, "RAM", 5)                  # 100, paid in full
+        self.a.execute("UPDATE sales SET cash_paid=0, amount_paid=0 WHERE id=?", (x,))
+        self.a.commit()
+        save_payment(self.a, {"kind": "customer", "party": "RAM", "cash": 40, "online": 0, "date": DAY})
+        pid = int(self.a.execute("SELECT id FROM customer_payments").fetchone()[0])
+        self.sync("a")
+        self.sync("b")
+        delete_payment(self.b, {"kind": "customer", "id": pid})
+        self.sync("b")
+        save_payment(self.a, {"kind": "customer", "id": pid, "party": "RAM", "cash": 60, "online": 0, "date": DAY})
+        self.sync("a")
+        self.assertTrue(self.server.docs[("customer_payments", pid)].get("deleted"))
+        self.assertEqual(self.a.execute(
+            "SELECT COUNT(*) FROM customer_payments WHERE COALESCE(deleted,0)=0").fetchone()[0], 0)
+        self.assertEqual(float(self.a.execute("SELECT total_due FROM customers WHERE id=?", (self.ram,)).fetchone()[0]),
+                         100.0)
+
+    def test_a_cash_line_edited_after_the_other_pc_deleted_it_stays_deleted(self):
+        from core import cash_register as cr
+
+        eid = cr.save_expense(self.a, {"date": DAY, "description": "Tea", "amount": 20})["id"]
+        self.sync("a")
+        self.sync("b")
+        cr.delete_expense(self.b, eid)
+        self.sync("b")
+        cr.save_expense(self.a, {"date": DAY, "id": eid, "description": "Tea", "amount": 25})
+        self.sync("a")
+        self.assertTrue(self.server.docs[("cash_expenses", eid)].get("deleted"))
+        self.assertEqual(cr.manual_lines(self.a, DAY), [])
+
     def test_a_bill_nobody_deleted_is_sent_as_before(self):
         from core.billing_service import append_counter_sale_today
 

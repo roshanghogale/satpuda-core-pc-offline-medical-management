@@ -152,9 +152,9 @@ class SyncCycle:
                     numbers.add_block(conn, kind, fy, int(blk["from_serial"]), int(blk["to_serial"]))
 
     def settle_deleted_ahead(self) -> list[dict]:
-        """Before a push: a sales bill this PC is about to send again that another device has
-        deleted on the server meanwhile would come back from the dead (the server applies the
-        upsert). Look at the changes not pulled yet; such a bill stays deleted and this PC's
+        """Before a push: a sales bill (or a payment, a cash line) this PC is about to send again
+        that another device has deleted on the server meanwhile would come back from the dead
+        (the server applies the upsert). Look at the changes not pulled yet; such a bill stays deleted and this PC's
         own change is settled (core/offline_first/deleted_ahead.py). A failed look stops the
         push for this cycle -- the server is out of reach then anyway."""
         from core.offline_first import deleted_ahead
@@ -178,13 +178,16 @@ class SyncCycle:
             return []
         done = []
         with write_batch(conn):
-            for sid in sorted(gone):
-                done.append(deleted_ahead.settle(conn, sid))
+            for col, lid in sorted(gone):
+                if col == deleted_ahead.COLLECTION:
+                    done.append(deleted_ahead.settle(conn, lid))
+                else:
+                    done.append(deleted_ahead.settle_plain(conn, col, lid))
         try:
             from core.sync_status import note_collection_change
 
-            note_collection_change("sales")
-            note_collection_change("medicines")
+            for col in {c for c, _i in gone} | ({"medicines"} if any(c == "sales" for c, _i in gone) else set()):
+                note_collection_change(col)
         except Exception:
             pass
         return done
