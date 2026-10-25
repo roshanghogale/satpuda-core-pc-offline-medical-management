@@ -10,6 +10,14 @@ import {
 const POLL_MS = 10000
 /** A Main PC or Counter PC on the LAN (core/lan): a sale on the other PC shows within ~1.5 s. */
 const LAN_POLL_MS = 1500
+/**
+ * Offline-first: the background sync (core/offline_first/worker.py) has a phone's bill in
+ * this PC's copy about a second after it was saved there (server hint -> pull); the page
+ * then has to notice. The status call is answered from memory by the engine on this PC
+ * (no server call), so asking every 2 s costs nothing and Sales History / Inventory /
+ * Payments show the change within ~2 s instead of ~10 s.
+ */
+const OFFLINE_FIRST_POLL_MS = 2000
 const DEBOUNCE_MS = 400
 
 /** Poll sync status (fed by DataChangeBus → note_collection_change) and bump refresh nonce. */
@@ -121,7 +129,7 @@ export function useSyncRefreshPoller(opts: {
     window.addEventListener(PAYMENTS_CHANGED_EVENT, onPaymentsChanged)
     window.addEventListener(DATA_CHANGED_EVENT, onDataChanged)
 
-    const intervalMs = online || offlineFirst ? POLL_MS : 15000
+    const intervalMs = offlineFirst ? OFFLINE_FIRST_POLL_MS : online ? POLL_MS : 15000
     let timer: number | null = null
     const loop = async () => {
       await poll()

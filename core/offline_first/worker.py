@@ -200,12 +200,20 @@ class SyncCycle:
 
 
 class Worker:
+    """The loop, plus the two things that make it run NOW instead of at the next tick:
+    ``kick()`` after this PC's own save (core/desktop_api.py), and the server's ``sync_hint``
+    over /ws/sync when another device's change landed (core/sync_ws.py). Without them a
+    bill made on the phone took up to 6 s to be pulled and the PC's own bill waited up to
+    6 s before it was sent; the socket brings that to about one second each way."""
+
     def __init__(self, path: str):
         self.cycle = SyncCycle(path)
         self._stop = threading.Event()
         self._kick = threading.Event()
         self.thread: Optional[threading.Thread] = None
         self.last: dict = {}
+        self.ws = None
+        self.hints = 0
 
     def start(self) -> None:
         if self.thread and self.thread.is_alive():
@@ -213,16 +221,43 @@ class Worker:
         self._stop.clear()
         self.thread = threading.Thread(target=self._loop, name="offline-first-sync", daemon=True)
         self.thread.start()
+        self._start_hints()
 
     def stop(self, timeout: float = 10.0) -> None:
         self._stop.set()
         self._kick.set()
+        self._stop_hints()
         if self.thread:
             self.thread.join(timeout)
         self.cycle.close()
 
     def kick(self) -> None:
         self._kick.set()
+
+    # -- the server's hints ------------------------------------------------------------
+    def _on_hint(self, *_args, **_kwargs) -> None:
+        self.hints += 1
+        self.kick()
+
+    def _start_hints(self) -> None:
+        try:
+            from core.sync_ws import SyncWebSocket
+
+            if self.ws is None:
+                self.ws = SyncWebSocket()
+            # on_connect: the socket was down for a while -- pull whatever happened meanwhile.
+            self.ws.start(token_fn=client._token, on_hint=self._on_hint, on_connect=self.kick)
+        except Exception as exc:                 # no websocket module: polling alone
+            log.warning("offline-first hints: %s", exc)
+            self.ws = None
+
+    def _stop_hints(self) -> None:
+        ws, self.ws = self.ws, None
+        if ws is not None:
+            try:
+                ws.stop()
+            except Exception:
+                pass
 
     def _loop(self) -> None:
         while not self._stop.is_set():
@@ -273,6 +308,12 @@ def stop() -> None:
 def kick() -> None:
     if _worker:
         _worker.kick()
+
+
+def hints_connected() -> bool:
+    """Is the server's hint socket up (so other devices' changes arrive within a second)?"""
+    w = _worker
+    return bool(w and w.ws is not None and w.ws.connected)
 
 
 def current() -> Optional[Worker]:
