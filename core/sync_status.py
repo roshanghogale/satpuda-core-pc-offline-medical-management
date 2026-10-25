@@ -134,6 +134,10 @@ def format_status_line() -> str:
     try:
         from core.sync_prefs import is_offline_mode, is_online_mode
 
+        from core.sync_prefs import is_offline_first
+
+        if is_offline_first():
+            return "Offline-first — synced with the server"
         if is_offline_mode():
             return "Offline — Google Drive backup"
         if is_online_mode():
