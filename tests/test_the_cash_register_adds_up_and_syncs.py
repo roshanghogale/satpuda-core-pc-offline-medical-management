@@ -231,6 +231,9 @@ class Register(unittest.TestCase):
         edited = cr.save_expense(c, {"id": row["id"], "date": D, "description": "Tea x2", "amount": 40, "at": "10:30"})
         self.assertEqual((edited["description"], edited["amount"], edited["at"], edited["version"]), ("Tea x2", 40.0, "10:30", 2))
         self.assertEqual(cr.day_report(c, D)["totals"]["expenses"], 40.0)
+        # A month nobody counted has no total difference (not "tallies", not 0).
+        self.assertIsNone(cr.range_report(c, D, D2)["totals"]["difference"])
+        self.assertEqual(cr._range_sections(cr.range_report(c, D, D2))[0]["rows"][-1][7], "")
         self.assertTrue(cr.delete_expense(c, row["id"]))
         self.assertEqual(cr.day_report(c, D)["expenses"], [])
         # Every write was noted for the server; the delete is a delete.

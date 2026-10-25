@@ -546,7 +546,10 @@ def range_report(conn: sqlite3.Connection, start: str, end: str) -> dict:
         "cash_in": r2(sum(x["cash_in"] for x in days)),
         "cash_out": r2(sum(x["cash_out"] for x in days)),
         "expenses": r2(sum(x["expenses"] for x in days)),
-        "difference": r2(sum(x["difference"] or 0 for x in days)),
+        # Only the days that were counted; None when no day was (the screen shows a dash, not
+        # "Tallies").
+        "difference": (r2(sum(x["difference"] for x in days if x["difference"] is not None))
+                       if any(x["difference"] is not None for x in days) else None),
         "days_closed": sum(1 for x in days if x["closed"]),
     }
     return {"ok": True, "from": start, "to": end, "from_dmy": _dmy(start), "to_dmy": _dmy(end), "days": days,
@@ -590,7 +593,8 @@ def _range_sections(rep: dict) -> list:
              d["counted"] if d["counted"] is not None else "", d["difference"] if d["difference"] is not None else "",
              "Closed" if d["closed"] else "Open"] for d in rep["days"]]
     t = rep["totals"]
-    rows.append(["Total", t["opening"], t["cash_in"], t["cash_out"], t["expenses"], "", "", t["difference"], ""])
+    rows.append(["Total", t["opening"], t["cash_in"], t["cash_out"], t["expenses"], "", "",
+                 t["difference"] if t["difference"] is not None else "", ""])
     out = [{"title": "Day by day", "columns": ["Date", "Opening", "Cash in", "Cash out", "Expenses", "Expected",
                                               "Counted", "Difference", "Status"], "rows": rows}]
     cats = [[c["category"], c["amount"]] for c in rep["categories"]]

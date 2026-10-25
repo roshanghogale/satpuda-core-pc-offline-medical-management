@@ -359,9 +359,9 @@ export function CashRegisterPage({ active, refreshNonce = 0 }: { active: boolean
         </div>
         {view === 'day' ? (
           <>
-            <button type="button" className="btn btn-neutral btn-sm" title="Previous day" onClick={() => setDay((d) => shiftDay(d, -1))}>◂</button>
+            <button type="button" className="btn btn-neutral btn-sm" title="Previous day" onClick={() => setDay((d) => shiftDay(d, -1))}>‹ Prev</button>
             <input className="settings-input" type="date" value={day} aria-label="Date" onChange={(e) => e.target.value && setDay(e.target.value)} />
-            <button type="button" className="btn btn-neutral btn-sm" title="Next day" disabled={day >= todayIso()} onClick={() => setDay((d) => shiftDay(d, 1))}>▸</button>
+            <button type="button" className="btn btn-neutral btn-sm" title="Next day" disabled={day >= todayIso()} onClick={() => setDay((d) => shiftDay(d, 1))}>Next ›</button>
             {day !== todayIso() ? (
               <button type="button" className="cr-link" onClick={() => setDay(todayIso())}>Today</button>
             ) : null}
