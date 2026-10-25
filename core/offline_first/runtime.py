@@ -96,6 +96,12 @@ def register_and_prepare(conn: sqlite3.Connection, *, head_revision: int, app_ve
         except (KeyError, TypeError, ValueError):
             continue
     fy = current_fy()
+    try:
+        # Bills the server got some other way (a data import) may sit inside a block this
+        # device held: drop such a block before the first bill, so the top-up below replaces it.
+        numbers.check_with_server(conn, fy, client.number_head)
+    except Exception:
+        pass                                     # an older server: the worker asks again
     for kind, size in numbers.BLOCK_SIZE.items():
         if numbers.remaining(conn, kind, fy) < size // 2:
             _progress(progress_cb, f"Reserving {kind} numbers…")

@@ -23,6 +23,7 @@ log = logging.getLogger(__name__)
 INTERVAL_IDLE = 6.0
 INTERVAL_BUSY = 1.0
 FULL_STOCK_EVERY = 30 * 60
+NUMBER_CHECK_EVERY = 5 * 60   # are the numbers left in the blocks still free on the server?
 PULL_PAGE = 200
 
 
@@ -99,6 +100,7 @@ class SyncCycle:
         self.conn: Optional[HoldConnection] = None
         self.refresh: set[int] = set()
         self.last_full_stock = 0.0
+        self.last_number_check = 0.0          # 0: the first cycle asks
 
     def _c(self) -> HoldConnection:
         if self.conn is None:
@@ -112,6 +114,30 @@ class SyncCycle:
             except sqlite3.Error:
                 pass
             self.conn = None
+
+    def check_numbers(self, *, force: bool = False) -> list[dict]:
+        """Drop blocks the server has overtaken (numbers.drop_taken): on the first cycle, then
+        every few minutes. A failed question (offline, or a server without the route) is asked
+        again a minute later; the blocks are used as they are meanwhile."""
+        from core.offline_first.runtime import current_fy
+
+        if not force and time.time() - self.last_number_check < NUMBER_CHECK_EVERY:
+            return []
+        conn = self._c()
+        fy = current_fy()
+        left = numbers.ranges_left(conn, fy)
+        try:
+            answer = client.number_head(fy, left) if left else {}
+        except Exception:
+            self.last_number_check = time.time() - NUMBER_CHECK_EVERY + 60
+            raise
+        with write_batch(conn):
+            dropped = numbers.drop_taken(conn, fy, answer)
+        self.last_number_check = time.time()
+        for d in dropped:
+            log.warning("offline-first: %s numbers %s-%s are already used on the server (up to %s); "
+                        "a fresh block is reserved", d["kind"], d["next_serial"], d["to_serial"], d["taken"])
+        return dropped
 
     def top_up_numbers(self) -> None:
         from core.offline_first.runtime import current_fy
@@ -180,6 +206,10 @@ class SyncCycle:
         conn = self._c()
         schema.ensure_schema(conn) if conn.execute(
             "SELECT 1 FROM sqlite_master WHERE name='of_meta'").fetchone() is None else None
+        try:
+            self.check_numbers()
+        except Exception as exc:                 # offline: the blocks are used as they are
+            log.debug("number check: %s", exc)
         try:
             self.top_up_numbers()
         except Exception as exc:                 # offline: blocks are topped up later
