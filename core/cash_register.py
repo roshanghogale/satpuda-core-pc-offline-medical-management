@@ -171,8 +171,18 @@ def day_row(conn: sqlite3.Connection, day: str) -> Optional[dict]:
     two rows; the closed one, else the lowest id, is the one every device shows."""
     ensure_tables(conn)
     rows = _rows(conn, "SELECT * FROM cash_days WHERE day=? AND COALESCE(deleted,0)=0 "
-                       "ORDER BY (counted_cash IS NULL), id LIMIT 1", (day,))
-    return rows[0] if rows else None
+                       "ORDER BY (counted_cash IS NULL), id", (day,))
+    if not rows:
+        return None
+    row = rows[0]
+    if row.get("opening_cash") is None:
+        # The opening typed on the other device's row (one PC opened the day, the other closed
+        # it before they synced): shown, not lost -- the closed row alone read as opening 0 and
+        # the day's difference was off by the whole opening (audit, 25 Oct 2026).
+        typed = next((r for r in rows[1:] if r.get("opening_cash") is not None), None)
+        if typed is not None:
+            row = dict(row, opening_cash=typed["opening_cash"])
+    return row
 
 
 def _stamp_update(conn: sqlite3.Connection, table: str, row_id: int, sets: dict) -> None:

@@ -64,6 +64,19 @@ class ClosedDay(unittest.TestCase):
         cr.delete_expense(self.c, self.tea)
         self.assertEqual(self.expenses(D), [("Snacks", 15.0)])
 
+    def test_an_opening_typed_on_the_other_pcs_row_is_kept_when_this_one_closed(self):
+        # PC A opened the day (its row), PC B closed it on its own row before they synced.
+        D3 = "2026-10-26"
+        self.c.execute("INSERT INTO cash_days (id, day, opening_cash, version, deleted) VALUES (3000000001, ?, 700, 1, 0)",
+                       (D3,))
+        self.c.execute("INSERT INTO cash_days (id, day, opening_cash, counted_cash, closed_at, version, deleted) "
+                       "VALUES (4000000001, ?, NULL, 650, '2026-10-26T14:00:00Z', 1, 0)", (D3,))
+        self.c.commit()
+        rep = cr.day_report(self.c, D3)
+        self.assertEqual(rep["opening"]["value"], 700.0)
+        self.assertTrue(rep["closed_at"])
+        self.assertEqual(rep["difference"], -50.0)
+
     def test_the_route_says_why(self):
         with mock.patch("core.sync_prefs.is_online_mode", return_value=False):
             code, body = cr.handle_post("/api/cash/expense", {"date": D, "description": "Snacks", "amount": 15},
