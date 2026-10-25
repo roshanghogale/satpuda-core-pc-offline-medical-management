@@ -199,12 +199,15 @@ class SyncCycle:
             for col, lid in sorted(gone):
                 if col == deleted_ahead.COLLECTION:
                     done.append(deleted_ahead.settle(conn, lid))
+                elif col in deleted_ahead.RETURNS:
+                    done.append(deleted_ahead.settle_return(conn, col, lid))
                 else:
                     done.append(deleted_ahead.settle_plain(conn, col, lid))
         try:
             from core.sync_status import note_collection_change
 
-            for col in {c for c, _i in gone} | ({"medicines"} if any(c == "sales" for c, _i in gone) else set()):
+            stock_moved = any(c == "sales" or c in deleted_ahead.RETURNS for c, _i in gone)
+            for col in {c for c, _i in gone} | ({"medicines"} if stock_moved else set()):
                 note_collection_change(col)
         except Exception:
             pass

@@ -164,6 +164,15 @@ def build_events(conn: sqlite3.Connection, install_id: str) -> int:
             "base_version": ver,
             "device_time": _now(),
         }
+        if ver:
+            # The lines this change started from: lets the server put stock straight when another
+            # device's copy of the bill / return was replaced meanwhile (server clashRules.js).
+            # Older servers ignore it.
+            from core.offline_first import deleted_ahead
+
+            base = deleted_ahead.base_lines(conn, collection, int(local_id))
+            if base is not None:
+                event["base_lines"] = base
         conn.execute(
             "INSERT INTO of_events (seq, event_uuid, collection, op, local_id, base_version, payload, created_at) "
             "VALUES (?,?,?,?,?,?,?,?)",
@@ -255,12 +264,58 @@ def _note_server_copy(conn: sqlite3.Connection, seq: int) -> None:
         return
     from core.offline_first import deleted_ahead
 
-    if row[0] != deleted_ahead.COLLECTION:
+    if row[0] not in deleted_ahead.BASED:
         return
     try:
         deleted_ahead.note_base(conn, row[0], row[2], (json.loads(row[3]) or {}).get("doc"))
     except (TypeError, ValueError, sqlite3.Error):
         pass
+
+
+_RETURN_PARTY = {"sales_returns": ("sales_return_items", "customer_id"),
+                 "purchase_returns": ("purchase_return_items", "supplier_id")}
+
+
+def _keep_deleted(conn: sqlite3.Connection, seq: int, refresh: set) -> Optional[dict]:
+    """The server took this return but holds it DELETED (its bill was deleted on another
+    device, or the return itself was): marked deleted here too, as a pulled delete would, with
+    capture off (the server has it already). Its stock is set from the server's figure (it put
+    the return's stock back), so the medicines go to ``refresh``."""
+    row = conn.execute("SELECT collection, local_id FROM of_events WHERE seq=?", (int(seq),)).fetchone()
+    if not row or row[0] not in _RETURN_PARTY or row[1] is None:
+        return None
+    collection, lid = str(row[0]), int(row[1])
+    lines_table, party_col = _RETURN_PARTY[collection]
+    for (mid,) in conn.execute(f"SELECT DISTINCT medicine_id FROM {lines_table} WHERE return_id=?", (lid,)).fetchall():
+        if mid:
+            refresh.add(int(mid))
+    party = conn.execute(f"SELECT {party_col} FROM {collection} WHERE id=?", (lid,)).fetchone()
+    conn.execute("DELETE FROM of_doc_base WHERE collection=? AND local_id=?", (collection, lid))
+    conn.execute("UPDATE of_flags SET v='0' WHERE k='capture'")
+    try:
+        conn.execute(f"UPDATE {collection} SET deleted=1 WHERE id=?", (lid,))
+    finally:
+        conn.execute("UPDATE of_flags SET v='1' WHERE k='capture'")
+    if party and party[0]:
+        try:
+            if collection == "sales_returns":
+                from core.customer_service import recalculate_customer_due
+
+                recalculate_customer_due(conn, int(party[0]), commit=False, sync=False)
+            else:
+                from core.purchase_service import recalculate_supplier_due
+
+                recalculate_supplier_due(conn, int(party[0]))
+        except Exception:
+            pass
+    try:
+        from core.sync_status import note_collection_change
+
+        note_collection_change(collection)
+        note_collection_change("medicines")
+    except Exception:
+        pass
+    return {"collection": collection, "id": lid, "action": "kept_deleted"}
 
 
 def pending_events(conn: sqlite3.Connection, limit: int = 100) -> list[dict]:
@@ -294,7 +349,7 @@ def renumber_pending(conn: sqlite3.Connection, start: int) -> None:
 
 def apply_push_answer(conn: sqlite3.Connection, answer: dict) -> dict:
     """Record the server's answer to a push. Returns {'refresh_medicines': set, 'renumber_from': n|None}."""
-    out = {"refresh_medicines": set(), "renumber_from": None, "seq_conflict": False}
+    out = {"refresh_medicines": set(), "renumber_from": None, "seq_conflict": False, "kept_deleted": []}
     for r in answer.get("results") or []:
         seq = int(r.get("seq") or 0)
         outcome = str(r.get("outcome") or "")
@@ -310,6 +365,16 @@ def apply_push_answer(conn: sqlite3.Connection, answer: dict) -> dict:
         )
         if (stored or outcome) in ("applied", "flagged", "duplicate_uuid"):
             _note_server_copy(conn, seq)
+        # The server put stock straight for a clash (another device's copy replaced, a return of
+        # a deleted bill): this PC's figure for those medicines is taken from the server again.
+        for fix in r.get("stock_fix") or []:
+            try:
+                out["refresh_medicines"].add(int(fix.get("medicine_id") or 0))
+            except (TypeError, ValueError, AttributeError):
+                pass
+        out["refresh_medicines"].discard(0)
+        if r.get("kept_deleted"):
+            out["kept_deleted"].append(_keep_deleted(conn, seq, out["refresh_medicines"]))
         if outcome in ("duplicate", "duplicate_uuid"):
             for (mid,) in conn.execute(
                 "SELECT DISTINCT medicine_id FROM of_stock_journal WHERE event_seq=?", (seq,)
