@@ -738,7 +738,10 @@ export default function App() {
               minHeight: 0,
             }}
           >
-            <GeneralProductsPage />
+            <GeneralProductsPage
+              syncRefreshNonce={syncRefreshNonce}
+              active={page === 'general_products'}
+            />
           </div>
         )}
         {(visited.has('sales_history') || page === 'sales_history') && (
