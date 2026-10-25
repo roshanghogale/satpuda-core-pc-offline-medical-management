@@ -124,6 +124,8 @@ class OfflineTheShopsOwnRecordsDecide(unittest.TestCase):
     def test_an_edit_of_an_existing_bill_is_left_as_it_was_sold(self):
         body = {"items": [_line(3)], "bill_date": BILL_DATE, "customer_name": "RAM",
                 "payment_mode": "Cash", "cash_paid": 100.0, "editing_sale_id": 99}
+        self.conn.execute("INSERT INTO sales (id, bill_no, customer_id, bill_date) "
+                          "VALUES (99, 'SCB99', 1, ?)", (BILL_DATE,))
         with mock.patch.object(desktop_sales_service, "_has_pharmacy_profile", return_value=True), \
                 mock.patch("core.desktop_returns_service.edit_below_returned_error", return_value=None), \
                 mock.patch("core.billing_service.update_existing_bill") as update:
