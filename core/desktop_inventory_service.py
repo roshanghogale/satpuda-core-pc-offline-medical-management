@@ -521,6 +521,15 @@ def update_medicine(conn, body: dict[str, Any]) -> dict[str, Any]:
     has_stock = ("stock_strips" in body) or ("stock_qty" in body)
     strips_or_qty = _safe_int(body.get("stock_strips", body.get("stock_qty")))
     extra = _safe_int(body.get("extra_tablets"))
+    # A minus typed into Stock / Extra Tablets was quietly saved as 0 -- the batch's whole
+    # stock wiped by a typo, and offline-first sent that minus to every device. Refused now,
+    # before anything is written.
+    if has_stock and (strips_or_qty < 0 or extra < 0):
+        return {
+            "ok": False,
+            "error": "Stock cannot be less than 0. Type the stock on the shelf (0 or more).",
+            "code": "negative_stock",
+        }
     try:
         stock_saved = inventory_save_stock_qty(
             med_type, unit, strips_or_qty, extra

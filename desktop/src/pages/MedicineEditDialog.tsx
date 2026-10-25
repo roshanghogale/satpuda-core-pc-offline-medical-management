@@ -268,6 +268,15 @@ export function MedicineEditDialog({
             extra_tablets: Number(form.extra_tablets) || 0,
           }
         : {}
+      // A minus was quietly saved as 0 by the engine (the batch's stock wiped by a typo).
+      if (stockTouched && (Number(form.stock_strips) < 0 || Number(form.extra_tablets) < 0)) {
+        setAlert({
+          title: 'Stock',
+          message: 'Stock cannot be less than 0. Type the stock on the shelf (0 or more).',
+          kind: 'warning',
+        })
+        return
+      }
       const res = await updateInventoryMedicine({
         id: medicineId,
         name: form.name.trim(),
@@ -425,6 +434,7 @@ export function MedicineEditDialog({
                   <input
                     className="settings-input"
                     type="number"
+                    min={0}
                     value={form.stock_strips}
                     disabled={readOnly}
                     onChange={(e) => patch({ stock_strips: e.target.value })}
@@ -454,6 +464,7 @@ export function MedicineEditDialog({
                     <input
                       className="settings-input"
                       type="number"
+                      min={0}
                       value={form.extra_tablets}
                       disabled={readOnly}
                       onChange={(e) => patch({ extra_tablets: e.target.value })}
