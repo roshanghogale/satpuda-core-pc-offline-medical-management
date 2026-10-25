@@ -3082,6 +3082,78 @@ def _online_refund_payment_ids(
         return [], True
 
 
+def _delete_return_on_store_first(
+    collection: str, return_id: int, body: dict[str, Any]
+) -> dict[str, Any]:
+    """Online: ask the store to delete one return before this PC changes anything.
+
+    The delete used to be queued and answered "deleted" at once (with the row hidden here
+    straight away): a store that refused or could not be reached told nobody, and the return
+    stayed on the store. Now the store is asked first and its answer read
+    (online_mutation_queue.delete_return_now, the way delete_payment uses delete_entity).
+
+    A return the store never had -- still waiting in this PC's upload queue -- has that upload
+    dropped, so it never lands and its own stock movement never runs; nothing is reversed on
+    the store for it. For a sales return, a refund payout queued with it is dropped too.
+
+    Returns {"ok": True, "store_had", "warning", "body"} (body with the return's number /
+    customer / date filled from the queued upload when the screen did not send them), or
+    {"ok": False, "error"} with nothing changed.
+    """
+    from core.online_mutation_queue import (
+        cancel_matching,
+        delete_return_now,
+        pending_rows,
+    )
+
+    body = dict(body or {})
+    queued_payload: dict[str, Any] = {}
+    try:
+        for row in pending_rows(collection=collection) or []:
+            if int(row.get("local_id") or 0) != int(return_id):
+                continue
+            if str(row.get("op") or "").lower() == "upsert" and isinstance(row.get("payload"), dict):
+                queued_payload = dict(row["payload"])
+    except Exception:
+        queued_payload = {}
+    for key in ("return_no", "customer_id", "return_date"):
+        if not body.get(key) and queued_payload.get(key):
+            body[key] = queued_payload[key]
+    try:
+        answer = delete_return_now(collection, int(return_id))
+    except Exception as exc:
+        return {
+            "ok": False,
+            "code": "online_unavailable",
+            "error": (
+                f"Return was NOT deleted ({exc or 'server unreachable'}). It is still on this "
+                "PC and on the server; nothing was changed."
+            ),
+        }
+    if collection == "sales_returns":
+        # Its refund payout, if it is still queued here, must not land after the return is gone.
+        return_no = str(body.get("return_no") or "").strip()
+        if return_no:
+            try:
+                for row in pending_rows(collection="customer_payments") or []:
+                    p = row.get("payload") or {}
+                    if str(row.get("op") or "").lower() != "upsert" or not isinstance(p, dict):
+                        continue
+                    if str(p.get("reference_no") or "").strip() != return_no:
+                        continue
+                    if _safe_float(p.get("amount")) >= 0:
+                        continue
+                    cancel_matching(client_uuid=str(row.get("client_uuid") or ""))
+            except Exception:
+                pass
+    return {
+        "ok": True,
+        "store_had": bool(answer.get("store_had")),
+        "warning": str(answer.get("warning") or ""),
+        "body": body,
+    }
+
+
 def delete_sales_return(conn, body: dict[str, Any]) -> dict[str, Any]:
     """Delete a sales return (soft-delete + reverse stock restore). Matches Classic."""
     blocked = _guard_mutate()
@@ -3101,6 +3173,12 @@ def delete_sales_return(conn, body: dict[str, Any]) -> dict[str, Any]:
         if is_online_mode():
             from core.online_mutation_queue import enqueue
 
+            # The store first (strict): its "no" is read, and nothing here changes
+            # before its yes -- see _delete_return_on_store_first.
+            asked = _delete_return_on_store_first("sales_returns", return_id, body)
+            if not asked.get("ok"):
+                return asked
+            body = asked["body"]
             # A cash-settled return also wrote a customer_payments row of
             # -payout. The server's softDeleteDoc removes ONLY the row it was
             # asked for and then recomputes the balance from what is left, so
@@ -3109,15 +3187,9 @@ def delete_sales_return(conn, body: dict[str, Any]) -> dict[str, Any]:
             # had already handed over. The offline branch below has taken the
             # payout row out with the return for a while; online never did.
             # Nothing local can find it -- in online mode the connection is an
-            # empty :memory: shell -- so ask the server.
+            # empty :memory: shell -- so ask the server. (The payout row of a
+            # return that was still queued may have reached the store on its own.)
             refund_ids, lookup_failed = _online_refund_payment_ids(body, return_id)
-
-            enqueue(
-                collection="sales_returns",
-                op="delete",
-                payload={"id": int(return_id)},
-                local_id=int(return_id),
-            )
             for pay_id in refund_ids:
                 enqueue(
                     collection="customer_payments",
@@ -3136,14 +3208,17 @@ def delete_sales_return(conn, body: dict[str, Any]) -> dict[str, Any]:
                     conn.rollback()
                 except Exception:
                     pass
-            out = {"ok": True, "queued": True, "id": return_id}
+            out = {"ok": True, "id": return_id, "store_had": asked["store_had"]}
+            warnings = [asked["warning"]] if asked.get("warning") else []
             if lookup_failed:
                 # Do not report a clean delete when the refund row may still be
                 # sitting on the customer's account.
-                out["warning"] = (
+                warnings.append(
                     "Return deleted, but the refund entry could not be checked "
                     "on the server. Open the customer's ledger and confirm."
                 )
+            if warnings:
+                out["warning"] = " ".join(warnings)
             return out
     except Exception as exc:
         return {"ok": False, "error": f"Failed to delete return: {exc}"}
@@ -3246,14 +3321,10 @@ def delete_purchase_return(conn, body: dict[str, Any]) -> dict[str, Any]:
         from core.sync_prefs import is_online_mode
 
         if is_online_mode():
-            from core.online_mutation_queue import enqueue
-
-            enqueue(
-                collection="purchase_returns",
-                op="delete",
-                payload={"id": int(return_id)},
-                local_id=int(return_id),
-            )
+            # The store first (strict) -- see _delete_return_on_store_first.
+            asked = _delete_return_on_store_first("purchase_returns", return_id, body)
+            if not asked.get("ok"):
+                return asked
             try:
                 _soft_delete_return_row(conn, "purchase_returns", return_id)
                 conn.commit()
@@ -3262,7 +3333,10 @@ def delete_purchase_return(conn, body: dict[str, Any]) -> dict[str, Any]:
                     conn.rollback()
                 except Exception:
                     pass
-            return {"ok": True, "queued": True, "id": return_id}
+            out = {"ok": True, "id": return_id, "store_had": asked["store_had"]}
+            if asked.get("warning"):
+                out["warning"] = asked["warning"]
+            return out
     except Exception as exc:
         return {"ok": False, "error": f"Failed to delete return: {exc}"}
 

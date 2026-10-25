@@ -589,7 +589,8 @@ export function savePurchaseReturn(body: Record<string, unknown>) {
 }
 
 export function deletePurchaseReturn(id: number) {
-  return postJson<{ ok: boolean; error?: string; queued?: boolean }>(
+  // warning: deleted on the server, but its stock movement is still being sent.
+  return postJson<{ ok: boolean; error?: string; queued?: boolean; warning?: string }>(
     '/api/returns/purchase/delete',
     { id },
   )

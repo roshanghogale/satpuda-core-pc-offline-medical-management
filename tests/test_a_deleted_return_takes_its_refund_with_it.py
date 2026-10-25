@@ -68,6 +68,16 @@ class _Base(unittest.TestCase):
                 "core.online_mutation_queue.enqueue",
                 side_effect=lambda **kw: self.queued.append(kw) or {"local_id": kw.get("local_id")},
             ),
+            # The return itself is now deleted on the store first, strictly
+            # (test_online_return_delete_asks_the_store_first); recorded here
+            # the way the queued delete used to be.
+            mock.patch(
+                "core.online_mutation_queue.delete_return_now",
+                side_effect=lambda col, rid: self.queued.append(
+                    {"collection": col, "op": "delete", "payload": {"id": rid}}
+                ) or {"store_had": True, "warning": ""},
+            ),
+            mock.patch("core.online_mutation_queue.pending_rows", return_value=[]),
         ]
         for p in self._patches:
             p.start()

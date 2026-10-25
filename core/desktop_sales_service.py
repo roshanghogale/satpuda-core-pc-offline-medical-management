@@ -2358,27 +2358,165 @@ def _payments_naming_bill(conn, sale_id: int) -> list[str]:
     return out
 
 
+def _payment_label(pdate: Any, amount: Any, receipt: Any) -> str:
+    d = str(pdate or "")[:10]
+    dmy = f"{d[8:10]}-{d[5:7]}-{d[0:4]}" if len(d) == 10 else d
+    name = f"receipt {receipt}" if str(receipt or "").strip() else "payment"
+    return f"{name} of {dmy} ₹{float(amount or 0):.2f}"
+
+
+_PAYMENTS_PAGE = 5000  # storeQuery.js caps a page at 5000
+_PAYMENTS_MAX_PAGES = 200
+
+
+def _store_customer_payments_since(floor: str) -> list[dict]:
+    """Every live customer payment on the store dated on or after `floor` ("" = all).
+
+    Keyset on the date, as desktop_returns_service._list_returns_complete walks returns: a
+    FULL page proves only the days after its oldest one, so the next page asks again `to`
+    that day. Raises when the list cannot be read to the end."""
+    from core import store_query_client as sq
+
+    out: dict[Any, dict] = {}
+    to = ""
+    for _ in range(_PAYMENTS_MAX_PAGES):
+        data = sq.list_customer_payments(limit=_PAYMENTS_PAGE, from_date=floor, to_date=to)
+        if not isinstance(data, dict) or not isinstance(data.get("rows"), list):
+            raise RuntimeError("the store's payment list could not be read")
+        rows = [r for r in data["rows"] if isinstance(r, dict)]
+        for r in rows:
+            out.setdefault(_safe_int(r.get("id") or r.get("local_id")) or f"row{len(out)}", r)
+        if len(rows) < _PAYMENTS_PAGE:
+            return list(out.values())
+        days = sorted(str(r.get("payment_date") or "")[:10] for r in rows)
+        oldest = days[0] if days else ""
+        if len(oldest) != 10 or (to and oldest >= to):
+            raise RuntimeError("more store payments on one day than one page holds")
+        to = oldest
+    raise RuntimeError("the store's payment list did not come to an end")
+
+
+def _sale_blockers_online(sale_id: int) -> tuple[str | None, list[str]]:
+    """Online: (number of a live sales return on this bill or None, payments naming it).
+
+    Read from the store -- returns to the bill's date (_list_returns_complete), customer
+    payments whose `allocations` name the bill -- plus this PC's own returns and payments still
+    waiting in the upload queue. Raises when the store cannot be read to the end.
+
+    A payment this PC takes Online carries no allocations (Sales History "pay" sends only the
+    bill number as its reference and the store clears bills oldest-first), so only payments
+    written with allocations -- by the phone or an offline-first PC -- can name a bill here.
+    """
+    from core.bill_clearing import clean_allocations
+    from core.online_mutation_queue import bill_row_sale_id, pending_rows, queued_bill_row
+
+    ids = {int(sale_id)}
+    # A bill whose own row has not landed (a temporary id, or its bill row still queued) is
+    # not on the store yet: no device but this PC has seen it, so nothing there can name it.
+    on_store_bill = sale_id > 0 and queued_bill_row(sale_id) is None
+    if sale_id < 0:
+        try:
+            server_id = int(bill_row_sale_id(sale_id) or 0)
+        except Exception:
+            server_id = 0
+        if server_id > 0:
+            ids.add(server_id)
+
+    def names_bill(alloc: Any) -> bool:
+        return any(int(a.get("bill_id") or 0) in ids for a in clean_allocations(alloc))
+
+    ret_no: str | None = None
+    held: list[str] = []
+    for r in pending_rows(collection="sales_returns") or []:
+        p = r.get("payload") or {}
+        if str(r.get("op") or "").lower() == "delete" or not isinstance(p, dict):
+            continue
+        if _safe_int(p.get("sale_id")) in ids:
+            lid = _safe_int(r.get("local_id"))
+            ret_no = str(p.get("return_no") or "") or (f"SR{abs(lid)}" if lid else "(queued)")
+            break
+    for r in pending_rows(collection="customer_payments") or []:
+        p = r.get("payload") or {}
+        if str(r.get("op") or "").lower() == "delete" or not isinstance(p, dict):
+            continue
+        if names_bill(p.get("allocations")):
+            held.append(_payment_label(p.get("payment_date"), p.get("amount"), p.get("receipt_no")))
+
+    if not on_store_bill:
+        return ret_no, held  # never reached the store: nothing there can name it
+    on_store = [int(sale_id)]
+
+    from core.desktop_returns_service import _list_returns_complete, _returns_floor
+    from core.server_crud import get_doc
+
+    dates: list[Any] = []
+    for i in on_store:
+        doc = get_doc("sales", i) or {}
+        dates += [doc.get("bill_date"), doc.get("created_at")]
+    floor = _returns_floor(*dates)
+    if ret_no is None:
+        for row in _list_returns_complete("sales_returns", floor):
+            if _safe_int(row.get("sale_id")) not in ids:
+                continue
+            if row.get("deleted") not in (None, False, 0, "0", "false", "False", ""):
+                continue
+            ret_no = str(row.get("return_no") or "") or f"#{_safe_int(row.get('id'))}"
+            break
+    for row in _store_customer_payments_since(floor):
+        if row.get("deleted") not in (None, False, 0, "0", "false", "False", ""):
+            continue
+        if names_bill(row.get("allocations")):
+            held.append(_payment_label(row.get("payment_date"), row.get("amount"), row.get("receipt_no")))
+    return ret_no, held
+
+
 def delete_saved_sale(conn, body: dict[str, Any]) -> dict[str, Any]:
     """Permanently delete a saved sales bill and restore stock."""
     sale_id = _safe_int(body.get("sale_id"))
     if sale_id == 0:
         return {"ok": False, "error": "Invalid sale id."}
+    try:
+        from core.sync_prefs import is_online_mode as _is_online
+
+        _online = bool(_is_online())
+    except Exception:
+        _online = False
+    # Online the sqlite here is an empty shell: the two checks below read the store (and this
+    # PC's upload queue) instead. A store that cannot be read refuses, nothing changed.
+    _store_returns: str | None = None
+    held: list[str] = []
+    if _online:
+        try:
+            _store_returns, held = _sale_blockers_online(sale_id)
+        except Exception as exc:
+            return {
+                "ok": False,
+                "code": "online_unavailable",
+                "error": (
+                    "Bill was NOT deleted: its sales returns and payments could not be read from "
+                    f"the server ({exc or 'server unreachable'}). Nothing was changed."
+                ),
+            }
     # A bill with a sales return: deleting it gave every line's stock back, the returned
     # units a second time (owner audit, 25 Oct 2026). The return goes first.
-    try:
-        _ret = conn.execute(
-            "SELECT return_no FROM sales_returns WHERE sale_id=? AND COALESCE(deleted,0)=0 LIMIT 1",
-            (sale_id,),
-        ).fetchone()
-    except Exception:
-        _ret = None
+    if _online:
+        _ret = (_store_returns,) if _store_returns is not None else None
+    else:
+        try:
+            _ret = conn.execute(
+                "SELECT return_no FROM sales_returns WHERE sale_id=? AND COALESCE(deleted,0)=0 LIMIT 1",
+                (sale_id,),
+            ).fetchone()
+        except Exception:
+            _ret = None
     if _ret:
         return {"ok": False, "error": f"This bill has sales return {_ret[0] or ''}. Delete the return first, then the bill.".replace("return  ", "return ")}
     # A payment taken against this bill (Sales History "pay", or bills ticked in Payments)
     # names it in its allocations. Deleting the bill left that receipt behind as the
     # customer's credit -- the dues of the party changed with no bill to show why (audit,
     # 25 Oct 2026). As with a return: the payment goes first (or is kept on purpose).
-    held = _payments_naming_bill(conn, sale_id)
+    if not _online:
+        held = _payments_naming_bill(conn, sale_id)
     if held:
         return {
             "ok": False,

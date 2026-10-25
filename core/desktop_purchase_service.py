@@ -2630,6 +2630,74 @@ def cancel_purchase_import(body: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "cancelled": bool(sess)}
 
 
+def purchase_return_blocks_delete(return_no: str) -> str:
+    """The sentence a purchase with a live purchase return is refused with (phone: the same)."""
+    return (
+        f"This purchase has purchase return {str(return_no or '').strip()}. "
+        "Delete the return first, then the purchase."
+    ).replace("return  ", "return ")
+
+
+def purchase_return_on_purchase(conn, purchase_id: int) -> str | None:
+    """Offline / offline-first: the number of a live purchase return on this purchase, or None."""
+    try:
+        row = conn.execute(
+            "SELECT COALESCE(return_no,''), id FROM purchase_returns "
+            "WHERE purchase_id=? AND COALESCE(deleted,0)=0 ORDER BY id LIMIT 1",
+            (int(purchase_id),),
+        ).fetchone()
+    except Exception:
+        return None  # no returns table yet: no returns
+    if not row:
+        return None
+    return str(row[0] or "") or f"#{row[1]}"
+
+
+def purchase_return_on_purchase_online(purchase_id: int) -> str | None:
+    """Online: the number of a live purchase return on this purchase, or None.
+
+    The store is the book (the sqlite here is an empty shell), plus this PC's own returns still
+    waiting in the upload queue. The store's list is read to the purchase's date
+    (desktop_returns_service._list_returns_complete); a list that cannot be read RAISES -- the
+    caller refuses the delete with nothing changed. Only a purchase with a temporary id (never
+    on the store) skips the store.
+    """
+    from core.online_mutation_queue import pending_rows
+
+    pid = int(purchase_id)
+    for r in pending_rows(collection="purchase_returns") or []:
+        if str(r.get("op") or "").lower() == "delete":
+            continue
+        p = r.get("payload") or {}
+        if not isinstance(p, dict) or _safe_int(p.get("purchase_id")) != pid:
+            continue
+        lid = _safe_int(r.get("local_id"))
+        return str(p.get("return_no") or "") or (f"PR{abs(lid)}" if lid else "(queued)")
+    if pid <= 0:
+        return None  # still in the upload queue: the store has no return against it
+
+    from core.desktop_returns_service import _list_returns_complete, _returns_floor
+
+    dates: list[Any] = []
+    try:
+        from core.server_crud import get_doc
+
+        doc = get_doc("purchases", pid) or {}
+        dates = [doc.get("purchase_date"), doc.get("created_at")]
+    except Exception:
+        dates = []
+    rows = _list_returns_complete("purchase_returns", _returns_floor(*dates))
+    for row in rows:
+        if _safe_int(row.get("purchase_id")) != pid:
+            continue
+        gone = row.get("deleted")
+        if gone not in (None, False, 0, "0", "false", "False", ""):
+            continue
+        rid = _safe_int(row.get("id") or row.get("local_id"))
+        return str(row.get("return_no") or "") or f"#{rid}"
+    return None
+
+
 def delete_saved_purchase(conn, body: dict[str, Any]) -> dict[str, Any]:
     """Permanently delete a purchase if none of its items were sold; reverse stock."""
     import re as _re
@@ -2643,7 +2711,37 @@ def delete_saved_purchase(conn, body: dict[str, Any]) -> dict[str, Any]:
     try:
         from core.sync_prefs import is_online_mode
 
-        if is_online_mode():
+        online = bool(is_online_mode())
+    except Exception:
+        online = False
+    # A purchase with a purchase return: deleting it took every line's stock off the shelf,
+    # the returned units a second time (they had already gone back to the supplier; owner
+    # audit, 25 Oct 2026). As with a sales bill: the return goes first. Online the store's
+    # returns are read (and this PC's queued ones); a list that cannot be read refuses.
+    try:
+        held_by = (
+            purchase_return_on_purchase_online(purchase_id)
+            if online
+            else purchase_return_on_purchase(conn, purchase_id)
+        )
+    except Exception as exc:
+        return {
+            "ok": False,
+            "code": "online_unavailable",
+            "error": (
+                "Purchase was NOT deleted: its purchase returns could not be read from the "
+                f"server ({exc or 'server unreachable'}). Nothing was changed."
+            ),
+        }
+    if held_by is not None:
+        return {
+            "ok": False,
+            "code": "purchase_has_return",
+            "error": purchase_return_blocks_delete(held_by),
+        }
+
+    try:
+        if online:
             from core.online_mutation_queue import enqueue, cancel_matching
 
             if purchase_id < 0:
