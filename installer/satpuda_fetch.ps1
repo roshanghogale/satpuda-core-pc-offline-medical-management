@@ -118,10 +118,12 @@ if ($CheckOnly) {
             }
         }
         if ($shaUrl) {
+            # The checksum sits behind a redirect to GitHub's file host, which can take
+            # ~21 s when an ISP cannot reach one of GitHub's addresses (25 Oct 2026), so it gets room to fail over.
             $r = [System.Net.HttpWebRequest]::Create($shaUrl)
             $r.UserAgent        = 'SatpudaCoreInstaller'
-            $r.Timeout          = 4000
-            $r.ReadWriteTimeout = 4000
+            $r.Timeout          = 25000
+            $r.ReadWriteTimeout = 25000
             $resp = $r.GetResponse()
             try {
                 $sr = New-Object System.IO.StreamReader($resp.GetResponseStream())
