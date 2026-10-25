@@ -375,7 +375,7 @@ def cash_sales_returns(conn: sqlite3.Connection, day: str) -> list:
         for r in _rows(conn, f"""
                 SELECT r.id, r.return_no, r.created_at, r.refund_amount, r.customer_id
                 FROM sales_returns r
-                WHERE r.return_date=? AND LOWER(COALESCE(r.settle_mode,''))='cash' AND r.customer_id IS NULL
+                WHERE r.return_date=? AND LOWER(COALESCE(r.settle_mode,''))='cash' AND COALESCE(r.customer_id, 0) = 0
                   AND {_alive(cols, 'r', 'deleted')} ORDER BY r.created_at, r.id""", (day,)):
             if str(r.get("return_no") or "") in seen_refs:
                 continue
