@@ -30,6 +30,10 @@ COLLECTIONS = (
     "racks",
     "sections",
     "boxes",
+    # The cash register (core/cash_register.py): the opening / counted cash of a day and the
+    # typed expense lines. The bills' own cash is never stored twice.
+    "cash_days",
+    "cash_expenses",
 )
 
 # line table -> (parent collection, parent id column)
@@ -252,6 +256,13 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         from core.wholesale_schema import ensure_wholesale_columns
 
         ensure_wholesale_columns(conn)
+    except Exception:
+        pass
+    # The cash register's tables exist before the triggers name them (an older store file).
+    try:
+        from core.cash_register import ensure_tables as ensure_cash_tables
+
+        ensure_cash_tables(conn)
     except Exception:
         pass
     # Retired triggers (replaced by a narrower / wider version).

@@ -287,6 +287,37 @@ _TABLES = [
         FOREIGN KEY (supplier_id) REFERENCES suppliers (id),
         FOREIGN KEY (purchase_id) REFERENCES purchases (id)
     )""",
+    # Cash & Expenses (core/cash_register.py): the day's opening / counted cash and the typed
+    # expense lines. Synced offline-first; the bills' own cash is read from the bills.
+    """CREATE TABLE IF NOT EXISTS cash_days (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        day DATE NOT NULL,
+        opening_cash REAL DEFAULT 0,
+        counted_cash REAL,
+        closed_at TEXT,
+        note TEXT,
+        created_at TEXT,
+        updated_at TEXT,
+        version INTEGER DEFAULT 1,
+        device_id TEXT,
+        deleted INTEGER DEFAULT 0
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_cash_days_day ON cash_days (day)",
+    """CREATE TABLE IF NOT EXISTS cash_expenses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        day DATE NOT NULL,
+        at TEXT,
+        kind TEXT DEFAULT 'out',
+        category TEXT,
+        description TEXT,
+        amount REAL DEFAULT 0,
+        created_at TEXT,
+        updated_at TEXT,
+        version INTEGER DEFAULT 1,
+        device_id TEXT,
+        deleted INTEGER DEFAULT 0
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_cash_expenses_day ON cash_expenses (day)",
 ]
 
 

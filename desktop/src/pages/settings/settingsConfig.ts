@@ -14,6 +14,7 @@ export type SettingsTabId =
   | 'ledger'
   | 'reorder'
   | 'gst_reports'
+  | 'cash_register'
   | 'shortcuts'
 
 export type SectionDef = {
@@ -199,6 +200,14 @@ export const SETTINGS_TABS: TabDef[] = [
     // (pages/GstReportsPage.tsx); the screen gets the full width.
     id: 'gst_reports',
     label: 'GST Reports',
+    ctrlDigit: null,
+    layout: 'scroll',
+  },
+  {
+    // Owner, 25 Oct 2026: the day's cash register -- opening cash, the bills' cash, the
+    // expenses typed, counted cash at close (pages/CashRegisterPage.tsx). Full width.
+    id: 'cash_register',
+    label: 'Cash & Expenses',
     ctrlDigit: null,
     layout: 'scroll',
   },

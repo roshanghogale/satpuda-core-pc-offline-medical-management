@@ -107,6 +107,15 @@ export function QuickActionIcon({
           <path d="M6 7h4M6 9h4M6 11h2.5" {...stroke} />
         </IconBase>
       )
+    case 'cash_register':
+      // A banknote with a coin: the drawer's cash.
+      return (
+        <IconBase size={size}>
+          <rect x="2.5" y="4.5" width="11" height="7" rx="1" {...stroke} />
+          <circle cx="8" cy="8" r="1.8" {...stroke} />
+          <path d="M4.5 6.5v3M11.5 6.5v3" {...stroke} />
+        </IconBase>
+      )
     case 'general_products':
       return (
         <IconBase size={size}>
