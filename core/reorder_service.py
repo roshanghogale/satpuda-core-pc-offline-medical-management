@@ -203,9 +203,19 @@ def _next_order_no(cur) -> str:
 
 
 def _next_group_id(cur) -> str:
-    cur.execute("SELECT COALESCE(MAX(id),0)+1 FROM pending_orders")
-    n = int(cur.fetchone()[0] or 1)
-    return f"ROG{datetime.now().strftime('%Y%m%d')}-{n:04d}"
+    """ROG<date>-<n>, n the id the group's first line gets (the phone's way, ReorderPlanning).
+
+    It was MAX(id)+1 of the whole table: two offline-first devices on an empty table both
+    made ROG<date>-0001, the pulled lines then joined one group, and editing it on one device
+    deleted the other's lines (save_supplier_pending_orders drops the lines it was not sent).
+    The next id of this device's own range is unique across devices."""
+    from core.offline_first.ids import peek_next_id
+
+    n = peek_next_id(cur.connection, "pending_orders")
+    if not n:
+        cur.execute("SELECT COALESCE(MAX(id),0)+1 FROM pending_orders")
+        n = int(cur.fetchone()[0] or 1)
+    return f"ROG{datetime.now().strftime('%Y%m%d')}-{int(n):04d}"
 
 
 def _group_key(order_group_id, order_id: int) -> str:
@@ -511,12 +521,37 @@ def mark_order_received(conn, order_id: int) -> None:
     conn.commit()
 
 
-def complete_pending_order_from_purchase(conn, order_id: int) -> None:
-    """Mark pending order received after Purchase saved stock."""
+def complete_pending_order_from_purchase(conn, order_id: int, items: Optional[list] = None) -> None:
+    """Mark pending order received after Purchase saved stock.
+
+    "Open Purchase" on a supplier's order opens its first line; the shop adds the rest of the
+    order to the same bill. The other open lines of that order whose medicine is on the saved
+    bill are received too -- only the first one was, so the order stayed "ordered" in Pending
+    Orders after its whole bill was entered."""
     try:
         mark_order_received(conn, int(order_id))
     except ValueError:
         pass
+    names = {
+        _as_str(it.get("medicine_name") or it.get("name")).upper()
+        for it in (items or []) if isinstance(it, dict)
+    } - {""}
+    if not names:
+        return
+    order = fetch_pending_order(conn, int(order_id))
+    group_id = _as_str((order or {}).get("order_group_id"))
+    if not group_id:
+        return
+    for line in fetch_pending_orders_by_group(conn, group_id):
+        if int(line["id"]) == int(order_id):
+            continue
+        if (line.get("status") or "").lower() not in ("draft", "ordered"):
+            continue
+        if _as_str(line.get("medicine_name")).upper() in names:
+            try:
+                mark_order_received(conn, int(line["id"]))
+            except ValueError:
+                pass
 
 
 def build_purchase_prefill(conn, order_id: int) -> dict:

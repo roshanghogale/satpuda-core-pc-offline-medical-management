@@ -686,11 +686,15 @@ def _save_line_rates(conn, supplier_id, items: list) -> None:
 
         if is_online_mode():
             return
+        from core.offline_first.ids import newest_own_clause
         from core.wholesale_rates import apply_purchase_rates
 
+        # This PC's own range on offline-first: the phone's or the other PC's purchase from
+        # the same supplier can have a higher id than the one just saved here.
+        own_sql, own_args = newest_own_clause(conn)
         row = conn.execute(
-            "SELECT id FROM purchases WHERE supplier_id=? ORDER BY id DESC LIMIT 1",
-            (int(supplier_id),),
+            f"SELECT id FROM purchases WHERE supplier_id=?{own_sql} ORDER BY id DESC LIMIT 1",
+            (int(supplier_id), *own_args),
         ).fetchone()
         if row:
             apply_purchase_rates(conn, int(row[0]), items)

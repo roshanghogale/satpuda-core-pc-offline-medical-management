@@ -26,8 +26,14 @@ ORDER = (
     "sales", "purchases", "customer_payments", "supplier_payments",
     "sales_returns", "purchase_returns", "stock_disposals", "pending_orders",
     "cash_days", "cash_expenses",
-    "pharmacy_profile", "settings",
+    "pharmacy_profile", "settings", "dropdowns", "shelf_settings",
 )
+# One document per store, no id of its own (noted under local_id 0).
+# dropdowns (villages, medicine types, schedules) and shelf_settings ("Show shelf location"):
+# Online pushes them on save (sync_coordinator.after_villages_saved / after_shelf_settings_saved)
+# and offline-first pulls them, but offline-first never SENT them -- a village added on one PC
+# reached neither the phone nor the other PCs (25 Oct 2026). The hooks now note them here.
+SINGLETONS = ("pharmacy_profile", "settings", "dropdowns", "shelf_settings")
 _ORDER_SQL = "CASE collection " + " ".join(
     f"WHEN '{c}' THEN {i}" for i, c in enumerate(ORDER)
 ) + f" ELSE {len(ORDER)} END"
@@ -56,6 +62,14 @@ def build_doc(conn: sqlite3.Connection, collection: str, local_id: int) -> Optio
     if collection == "settings":
         row = conn.execute("SELECT name, value FROM settings WHERE id=?", (int(local_id),)).fetchone()
         return {"name": row[0], "value": row[1]} if row else None
+    if collection == "dropdowns":
+        from core.server_live import dropdowns_doc
+
+        return dropdowns_doc(conn)
+    if collection == "shelf_settings":
+        from core.server_live import shelf_settings_doc
+
+        return shelf_settings_doc(conn)
     if collection in ("racks", "sections", "boxes"):
         build = {"racks": fb.build_rack_payload, "sections": fb.build_section_payload,
                  "boxes": fb.build_box_payload}[collection]
@@ -108,17 +122,17 @@ def build_events(conn: sqlite3.Connection, install_id: str) -> int:
         doc = None
         if op != "delete":
             doc = build_doc(conn, collection, int(local_id))
-            if doc is None and collection not in ("pharmacy_profile", "settings"):
+            if doc is None and collection not in SINGLETONS:
                 op = "delete"
         if op == "delete":
-            if collection in ("pharmacy_profile", "settings") or _never_left_this_pc(conn, collection, int(local_id)):
+            if collection in SINGLETONS or _never_left_this_pc(conn, collection, int(local_id)):
                 # Made and deleted here before a sync (a bill saved and deleted at once): the
                 # server never had it, and a delete event only came back flagged
                 # "delete_missing" -- a warning for nothing in the sync status.
                 conn.execute("DELETE FROM of_dirty WHERE collection=? AND local_id=?", (collection, local_id))
                 continue
             doc = {"id": int(local_id)}
-        if collection in ("pharmacy_profile", "settings"):
+        if collection in SINGLETONS:
             ver = None
         else:
             v = conn.execute(

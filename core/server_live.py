@@ -1342,6 +1342,12 @@ def push_pharmacy_profile(conn) -> bool:
 def push_dropdowns(conn) -> bool:
     from core import server_api as api
 
+    api.push_settings_dropdowns(_token(), dropdowns_doc(conn))
+    return True
+
+
+def dropdowns_doc(conn) -> dict:
+    """The store's dropdowns singleton as the server keeps it (Online push, offline-first event)."""
     villages = []
     default_village = None
     try:
@@ -1364,16 +1370,12 @@ def push_dropdowns(conn) -> bool:
     except Exception:
         med_types = ["TAB", "SYRUP", "INJ", "CAP", "OINT"]
         schedules = ["H", "H1", "X"]
-    api.push_settings_dropdowns(
-        _token(),
-        {
-            "villages": villages,
-            "default_village": default_village,
-            "med_types": med_types,
-            "schedules": schedules,
-        },
-    )
-    return True
+    return {
+        "villages": villages,
+        "default_village": default_village,
+        "med_types": med_types,
+        "schedules": schedules,
+    }
 
 
 def push_settings_kv(name: str, value) -> bool:
@@ -1392,6 +1394,12 @@ def push_settings_kv(name: str, value) -> bool:
 def push_shelf_settings(conn) -> bool:
     from core import server_api as api
 
+    api.push_settings_shelf(_token(), shelf_settings_doc(conn))
+    return True
+
+
+def shelf_settings_doc(conn) -> dict:
+    """The "Show shelf location" singleton as the server keeps it."""
     show_location = False
     try:
         cur = conn.cursor()
@@ -1401,8 +1409,7 @@ def push_shelf_settings(conn) -> bool:
             show_location = bool(int(row[0] or 0))
     except Exception:
         pass
-    api.push_settings_shelf(_token(), {"show_location": show_location})
-    return True
+    return {"show_location": show_location}
 
 
 def push_stock_disposal(conn, disposal_id: int) -> bool:

@@ -691,6 +691,19 @@ def download_store_for_offline(
             if tracker is not None:
                 _check_copy_complete(conn, tracker.totals)
 
+            # Reorders, write-offs and general products: sync_down_all wipes these three
+            # tables and lists only bills and masters, so every copy came without them -- the
+            # Reorder screen was empty after Go Offline / offline-first (25 Oct 2026). Not
+            # fatal: offline-first's worker fetches them again once (worker.backfill_plain).
+            _stage(progress_cb, tracker, "Reorders and write-offs…", 0.92)
+            try:
+                from core.offline_first.plain_docs import copy_from_server
+
+                rows += copy_from_server(conn)
+                conn.commit()
+            except Exception as exc:
+                print(f"[online_migrate] reorders / write-offs copy: {exc}")
+
             # sync_down_all replays purchases, sales and returns into local
             # stock ON TOP of the absolute stock_qty it already wrote from the
             # medicine doc, so every quantity came out double-counted: a
