@@ -194,8 +194,11 @@ class TwoPCsOneShop(unittest.TestCase):
         tb = b.q("SELECT total_amount FROM sales WHERE id=?", sid)[0][0]
         self.assertEqual(ta, tb, "the two PCs ended with different copies of the bill")
         self.assertEqual(self.stock(a, mid), self.stock(b, mid))
-        # Both movements are facts: 50 - 2 - 1 + 1 = 48
-        self.assertEqual(self.stock(a, mid), 48)
+        # B's later edit wins (qty 1), and the server puts back the stock A's replaced copy moved
+        # (B sends the lines it edited from): stock ends on the winning bill, 50 - 1 = 49. Before,
+        # both movements stayed: 50 - 2 - 1 + 1 = 48 with a bill of 1 (server clashRules.js).
+        self.assertEqual(self.stock(a, mid), 49)
+        self.assertEqual(a.q("SELECT qty FROM sales_items WHERE sale_id=?", sid), [(1,)])
         flagged = b.q("SELECT outcome, flag_code FROM of_events WHERE collection='sales' AND outcome='flagged'")
         self.assertTrue(flagged and "concurrent_edit" in (flagged[0][1] or ""), flagged)
 

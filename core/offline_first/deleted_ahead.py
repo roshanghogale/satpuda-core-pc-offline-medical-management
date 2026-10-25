@@ -21,6 +21,14 @@ copy (``of_doc_base``) is settled here:
 The bill is then removed here without a delete event (the server has deleted it already).
 A bill whose server copy this PC never noted (made elsewhere, edited here before this
 version) is left as before.
+
+Sales and purchase RETURNS follow the same rule (``settle_return``): a return another device
+deleted, edited here before the delete arrived, stays deleted; this PC's edit's own stock
+movement is put back and the return is marked deleted here without a delete event.
+
+The same copies give the server ``base_lines`` (``base_lines``): the lines this PC's change
+started from, sent with every sales / sales-return event so the server can put stock straight
+when another device's copy was replaced meanwhile (server services/clashRules.js).
 """
 from __future__ import annotations
 
@@ -34,6 +42,12 @@ from typing import Iterable, Optional
 log = logging.getLogger(__name__)
 
 COLLECTION = "sales"
+RETURNS = ("sales_returns", "purchase_returns")
+# Records whose server copy is kept here (of_doc_base).
+BASED = (COLLECTION,) + RETURNS
+# Events that carry base_lines (the server reads them for these two).
+BASE_LINES_FOR = ("sales", "sales_returns")
+_RETURN_LINES = {"sales_returns": "sales_return_items", "purchase_returns": "purchase_return_items"}
 _MONEY = ("total_amount", "discount", "rounding", "cash_paid", "online_paid", "amount_paid")
 _EPS = 1e-6
 
@@ -64,13 +78,16 @@ def base_from_doc(doc: dict) -> dict:
         if mid:
             items.append({"medicine_id": mid, "qty": _f(it.get("qty")), "amount": _f(it.get("amount")),
                           "item_discount": _f(it.get("item_discount") or it.get("medicine_discount"))})
-    return {"items": items, **{k: _f((doc or {}).get(k)) for k in _MONEY}}
+    out = {"items": items, **{k: _f((doc or {}).get(k)) for k in _MONEY}}
+    if (doc or {}).get("is_autosave") in (True, 1, "1", "true"):
+        out["autosave"] = True                    # a draft: its lines moved no stock
+    return out
 
 
 def note_base(conn: sqlite3.Connection, collection: str, local_id, doc) -> None:
-    """The server now holds ``doc`` for this sale (this PC's event was taken, or a pull wrote
-    it). Anything else is ignored."""
-    if collection != COLLECTION or not isinstance(doc, dict):
+    """The server now holds ``doc`` for this sale / return (this PC's event was taken, or a pull
+    wrote it). Anything else is ignored."""
+    if collection not in BASED or not isinstance(doc, dict):
         return
     try:
         lid = int(local_id or doc.get("id") or 0)
@@ -88,9 +105,9 @@ def note_base(conn: sqlite3.Connection, collection: str, local_id, doc) -> None:
     )
 
 
-def _base(conn: sqlite3.Connection, sale_id: int) -> Optional[dict]:
+def _base(conn: sqlite3.Connection, sale_id: int, collection: str = COLLECTION) -> Optional[dict]:
     row = conn.execute("SELECT body FROM of_doc_base WHERE collection=? AND local_id=?",
-                       (COLLECTION, int(sale_id))).fetchone()
+                       (collection, int(sale_id))).fetchone()
     if row:
         try:
             return json.loads(row[0])
@@ -100,7 +117,7 @@ def _base(conn: sqlite3.Connection, sale_id: int) -> Optional[dict]:
     row = conn.execute(
         "SELECT payload FROM of_events WHERE collection=? AND local_id=? AND op='upsert' "
         "AND status='sent' AND COALESCE(outcome,'') IN ('applied','flagged') ORDER BY seq DESC LIMIT 1",
-        (COLLECTION, int(sale_id)),
+        (collection, int(sale_id)),
     ).fetchone()
     if not row:
         return None
@@ -110,13 +127,47 @@ def _base(conn: sqlite3.Connection, sale_id: int) -> Optional[dict]:
         return None
 
 
+def base_lines(conn: sqlite3.Connection, collection: str, local_id) -> Optional[list]:
+    """The lines this PC's next change of the record starts from, as the server reads them:
+    [[medicine_id, qty], ...] ([] for a draft, which moved no stock). Its own earlier change
+    still waiting to go up when there is one, else the server's last copy known here. None
+    when not known (the event then goes without, as from an older PC)."""
+    if collection not in BASE_LINES_FOR:
+        return None
+    try:
+        lid = int(local_id)
+    except (TypeError, ValueError):
+        return None
+    base = None
+    row = conn.execute(
+        "SELECT payload FROM of_events WHERE status='pending' AND collection=? AND local_id=? "
+        "AND op='upsert' ORDER BY seq DESC LIMIT 1", (collection, lid),
+    ).fetchone()
+    if row:
+        try:
+            base = base_from_doc((json.loads(row[0]) or {}).get("doc") or {})
+        except (TypeError, ValueError):
+            base = None
+    if base is None:
+        base = _base(conn, lid, collection)
+    if base is None:
+        return None
+    if base.get("autosave"):
+        return []
+    out = []
+    for mid, acc in sorted(_per_medicine(base.get("items") or []).items()):
+        qty = acc["qty"]
+        out.append([mid, int(qty) if float(qty).is_integer() else round(qty, 4)])
+    return out
+
+
 # ── which bills to look for ───────────────────────────────────────────────────
 
 # Records with no stock of their own: a receipt, a supplier payment or a typed cash line
 # deleted on another device and edited here came back the same way. The delete wins; this
 # PC's edit of it is dropped (there is nothing else to settle) and the party's due follows.
 PLAIN = ("customer_payments", "supplier_payments", "cash_expenses")
-WATCHED = (COLLECTION,) + PLAIN
+WATCHED = (COLLECTION,) + RETURNS + PLAIN
 
 
 def watch_list(conn: sqlite3.Connection) -> set[tuple[str, int]]:
@@ -200,6 +251,84 @@ def settle_plain(conn: sqlite3.Connection, collection: str, local_id: int) -> di
             log.debug("party due after a deleted %s: %s", collection, exc)
     log.warning("offline-first: %s %s was deleted on another device; this PC's change of it is dropped",
                 collection, lid)
+    return {"collection": collection, "id": lid, "action": "delete_kept"}
+
+
+# ── settling one return ───────────────────────────────────────────────────────
+
+def _pr_units(conn: sqlite3.Connection, mid: int, qty: float, stock_units=None) -> float:
+    """Stock units a purchase-return quantity moves (strips of tablets -> tablets)."""
+    try:
+        from core.desktop_returns_service import purchase_return_stock_units
+
+        row = conn.execute("SELECT type, unit FROM medicines WHERE id=?", (int(mid),)).fetchone()
+        med = {"type": row[0], "unit": row[1]} if row else None
+        return float(purchase_return_stock_units({"qty": qty, "stock_units": stock_units}, medicine=med))
+    except Exception:
+        return float(stock_units) if stock_units not in (None, "") else _f(qty)
+
+
+def settle_return(conn: sqlite3.Connection, collection: str, local_id: int) -> dict:
+    """The server holds this sales / purchase return as deleted and this PC has an unsent
+    change of it. The delete wins: this PC's change's own stock movement goes back (the
+    deleting device put back the server's copy), and the return is marked deleted here
+    without a delete event. Call inside the worker's write transaction, capture ON."""
+    lid = int(local_id)
+    table, lines_table = collection, _RETURN_LINES[collection]
+    party_col = "customer_id" if collection == "sales_returns" else "supplier_id"
+    row = conn.execute(f"SELECT COALESCE(deleted,0), {party_col} FROM {table} WHERE id=?", (lid,)).fetchone()
+    if row is None or int(row[0] or 0):
+        _drop_unsent(conn, lid, collection)
+        return {"collection": collection, "id": lid, "action": "gone"}
+    base = _base(conn, lid, collection)
+    if base is None:
+        log.warning("offline-first: %s %s was deleted on another device; its server copy is not "
+                    "known here, so this PC's change is sent as it is", collection, lid)
+        return {"collection": collection, "id": lid, "action": "unknown"}
+    cols = {r[1] for r in conn.execute(f"PRAGMA table_info({lines_table})").fetchall()}
+    su = "stock_units" if "stock_units" in cols else "NULL"
+    now = conn.execute(f"SELECT medicine_id, qty, {su} FROM {lines_table} WHERE return_id=?", (lid,)).fetchall()
+    base_by = _per_medicine(base.get("items") or [])
+    move: dict[int, float] = {}
+    if collection == "sales_returns":
+        # A sales return put its quantity ON the shelf: the change added (now - base).
+        for mid, qty, _u in now:
+            if mid:
+                move[int(mid)] = move.get(int(mid), 0.0) - _f(qty)
+        for mid, acc in base_by.items():
+            move[mid] = move.get(mid, 0.0) + acc["qty"]
+    else:
+        # A purchase return took stock units OFF the shelf: the change took (now - base).
+        for mid, qty, units in now:
+            if mid:
+                move[int(mid)] = move.get(int(mid), 0.0) + _pr_units(conn, int(mid), _f(qty), units)
+        for mid, acc in base_by.items():
+            move[mid] = move.get(mid, 0.0) - _pr_units(conn, mid, acc["qty"])
+    for mid, d in move.items():
+        if abs(d) > _EPS:                         # capture ON: the movement goes up as well
+            conn.execute("UPDATE medicines SET stock_qty = COALESCE(stock_qty,0) + ? WHERE id=?", (d, mid))
+    conn.execute("UPDATE of_flags SET v='0' WHERE k='capture'")
+    try:
+        conn.execute(f"UPDATE {table} SET deleted=1 WHERE id=?", (lid,))
+    finally:
+        conn.execute("UPDATE of_flags SET v='1' WHERE k='capture'")
+    _drop_unsent(conn, lid, collection)
+    conn.execute("DELETE FROM of_doc_base WHERE collection=? AND local_id=?", (collection, lid))
+    party = int(row[1] or 0)
+    if party:
+        try:
+            if collection == "sales_returns":
+                from core.customer_service import recalculate_customer_due
+
+                recalculate_customer_due(conn, party, commit=False, sync=False)
+            else:
+                from core.purchase_service import recalculate_supplier_due
+
+                recalculate_supplier_due(conn, party)
+        except Exception as exc:
+            log.debug("party due after a deleted %s: %s", collection, exc)
+    log.warning("offline-first: %s %s was deleted on another device; it stays deleted and this "
+                "PC's change of it is put back", collection, lid)
     return {"collection": collection, "id": lid, "action": "delete_kept"}
 
 
