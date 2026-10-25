@@ -21,7 +21,14 @@ import {
 } from './pageChrome'
 import '../styles/list-pages.css'
 
-export function GeneralProductsPage() {
+export function GeneralProductsPage({
+  syncRefreshNonce = 0,
+  active = true,
+}: {
+  /** Bumped by the shell's sync poller when another device's products arrived (syncRefresh.ts). */
+  syncRefreshNonce?: number
+  active?: boolean
+} = {}) {
   const [q, setQ] = useState('')
   const [products, setProducts] = useState<GeneralProduct[]>([])
   const [loading, setLoading] = useState(false)
@@ -55,6 +62,23 @@ export function GeneralProductsPage() {
   useEffect(() => {
     void load()
   }, [load])
+
+  // A product added or changed on another PC or the phone: the background sync brings it into
+  // this PC's copy and the shell bumps the nonce; reload while the page is open, and once on
+  // coming back to it when the change arrived while it was hidden. The list used to wait for
+  // the Refresh button.
+  const seenSyncNonce = useRef(syncRefreshNonce)   // the first load is the mount's own
+  const wasActiveRef = useRef(active)
+  useEffect(() => {
+    const justShown = active && !wasActiveRef.current
+    wasActiveRef.current = active
+    if (!active) return
+    if (justShown || (syncRefreshNonce && seenSyncNonce.current !== syncRefreshNonce)) {
+      seenSyncNonce.current = syncRefreshNonce
+      void load()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncRefreshNonce, active])
 
   const resetForm = () => {
     setEditId(null)

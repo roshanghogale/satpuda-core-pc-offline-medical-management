@@ -3,6 +3,7 @@ import type { PageId } from './keyboard'
 /** Collections that should refresh each desktop page (matches classic Tk). */
 const PAGE_COLLECTIONS: Partial<Record<PageId, Set<string>>> = {
   inventory: new Set(['medicines']),
+  general_products: new Set(['general_products']),
   sales_history: new Set(['sales', 'customer_payments', 'sales_returns']),
   purchase_history: new Set(['purchases', 'supplier_payments', 'purchase_returns', 'suppliers']),
   sales: new Set(['medicines', 'customers', 'customer_payments', 'sales']),
