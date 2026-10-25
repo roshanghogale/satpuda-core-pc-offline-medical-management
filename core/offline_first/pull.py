@@ -113,6 +113,23 @@ def apply_page(conn: sqlite3.Connection, changes: list[dict], *, to_revision: in
             if (col, lid) in pending:
                 skipped += 1                  # this PC's own change goes up first
                 continue
+            if col in ("cash_days", "cash_expenses"):
+                # The cash register's own tables (core/cash_register.py): no stock, no dues.
+                from core import cash_register
+
+                cash_register.apply_pulled(conn, col, lid, doc, delete=ch.get("operation") == "delete")
+                applied += 1
+                try:
+                    ver = int((doc or {}).get("version") or ch.get("entity_version") or 0)
+                except (TypeError, ValueError, AttributeError):
+                    ver = 0
+                if ver > 0:
+                    conn.execute(
+                        "INSERT INTO of_versions (collection, local_id, version) VALUES (?,?,?) "
+                        "ON CONFLICT(collection, local_id) DO UPDATE SET version=MAX(version, excluded.version)",
+                        (col, lid, ver),
+                    )
+                continue
             if ch.get("operation") == "delete" or not isinstance(doc, dict):
                 try:
                     fb._soft_delete_local(conn, col, str(lid), {"deleted": True})

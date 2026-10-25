@@ -25,6 +25,7 @@ ORDER = (
     "racks", "sections", "boxes",
     "sales", "purchases", "customer_payments", "supplier_payments",
     "sales_returns", "purchase_returns", "stock_disposals", "pending_orders",
+    "cash_days", "cash_expenses",
     "pharmacy_profile", "settings",
 )
 _ORDER_SQL = "CASE collection " + " ".join(
@@ -63,6 +64,10 @@ def build_doc(conn: sqlite3.Connection, collection: str, local_id: int) -> Optio
             doc = dict(doc)
             doc["id"] = int(local_id)
         return doc
+    if collection in ("cash_days", "cash_expenses"):
+        from core import cash_register
+
+        return cash_register.build_doc(conn, collection, int(local_id))
     docs = ss._build_docs(conn, collection, ids=[int(local_id)])
     return docs[0] if docs else None
 

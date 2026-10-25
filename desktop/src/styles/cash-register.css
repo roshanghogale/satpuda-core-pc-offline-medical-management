@@ -1,0 +1,298 @@
+/* Settings > Cash & Expenses, 25 Oct 2026 (pages/CashRegisterPage.tsx). Left: the typed
+ * expenses and the lines from the books; right: opening cash, the expected / counted cash and
+ * Close day. Theme variables only; .sat-table, .btn and .settings-input are reused as they are. */
+
+.cr-page {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  height: calc(100vh - 150px);
+  gap: 8px;
+}
+
+.cr-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-alt);
+}
+.cr-top .settings-input {
+  height: 28px;
+  width: auto;
+  min-width: 0;
+  flex: 0 0 auto;
+}
+.cr-view {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.cr-tab {
+  border: 0;
+  background: var(--surface);
+  color: inherit;
+  padding: 4px 12px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.cr-tab.active {
+  background: var(--primary);
+  color: var(--on-primary, #fff);
+  font-weight: 700;
+}
+.cr-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+.cr-link {
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font-size: 12px;
+  padding: 0 4px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.cr-link:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.cr-link-danger {
+  color: var(--danger);
+}
+.cr-msg {
+  margin: 0 2px;
+}
+
+.cr-main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 8px;
+}
+.cr-left {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cr-right {
+  width: 320px;
+  flex: 0 0 320px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cr-month .cr-right {
+  width: 300px;
+  flex-basis: 300px;
+}
+
+.cr-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: 8px 10px 10px;
+}
+.cr-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.cr-card-head h3 {
+  font-size: 14px;
+  margin: 0;
+}
+
+/* The expense form: one row, Enter adds. */
+.cr-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.cr-form .settings-input {
+  height: 30px;
+  min-width: 0;
+}
+.cr-kind { width: 170px; }
+.cr-time { width: 92px; }
+.cr-desc { flex: 1 1 220px; }
+.cr-cat { width: 160px; }
+.cr-amt { width: 120px; text-align: right; }
+.cr-note { width: 100%; height: 28px; }
+
+.cr-table {
+  margin: 0;
+  width: 100%;
+}
+.cr-table th.num,
+.cr-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.cr-table tfoot th {
+  background: var(--surface-2);
+  font-weight: 700;
+  text-align: left;
+}
+.cr-table tfoot th.num {
+  text-align: right;
+}
+.cr-w-time { width: 64px; }
+.cr-w-ref { width: 110px; }
+.cr-w-act { width: 96px; }
+.cr-act {
+  white-space: nowrap;
+  text-align: right;
+}
+.cr-detail {
+  color: var(--text-secondary);
+}
+tr.cr-editing td {
+  background: var(--accent-soft);
+}
+.cr-in { color: var(--success); }
+.cr-out { color: var(--danger); }
+.cr-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 6px 0;
+}
+
+/* From the books: one fold per source. */
+.cr-section {
+  border-top: 1px solid var(--border);
+}
+.cr-section:first-of-type {
+  border-top: 0;
+}
+.cr-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  padding: 6px 2px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.cr-section-head:hover {
+  background: var(--accent-soft);
+}
+.cr-caret {
+  width: 12px;
+  color: var(--text-muted);
+}
+.cr-section-title {
+  font-weight: 600;
+}
+.cr-section-count {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.cr-section-total {
+  margin-left: auto;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.cr-section .cr-table {
+  margin: 0 0 8px;
+}
+
+/* Right column */
+.cr-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.cr-ask {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+.cr-open-shown .cr-big {
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.cr-sum {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.cr-sum td {
+  padding: 3px 2px;
+}
+.cr-sum td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.cr-sum tr.cr-expected td {
+  border-top: 1px solid var(--border);
+  font-weight: 700;
+  font-size: 14px;
+  padding-top: 6px;
+}
+.cr-count {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+.cr-count .cr-amt {
+  width: 100%;
+  height: 32px;
+  font-size: 15px;
+}
+.cr-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.cr-diff-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+}
+.cr-diff {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+}
+.cr-ok {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 14%, var(--surface));
+}
+.cr-more {
+  color: var(--warning);
+  background: var(--warning-soft, color-mix(in srgb, var(--warning) 16%, var(--surface)));
+}
+.cr-less {
+  color: var(--danger);
+  background: var(--danger-soft, color-mix(in srgb, var(--danger) 14%, var(--surface)));
+}
+.cr-close-btn {
+  width: 100%;
+  height: 34px;
+  font-size: 14px;
+}

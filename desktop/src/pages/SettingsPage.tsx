@@ -43,6 +43,7 @@ import { AlertPrefsPanel } from './settings/AlertPrefsPanel'
 import { VoiceCommandsPanel } from '../voice/VoiceCommandsPanel'
 import { useVoiceEnabled } from '../voice/voiceEnabled'
 import { GstReportsPage } from './GstReportsPage'
+import { CashRegisterPage } from './CashRegisterPage'
 import { registerVoicePage, sendToPage, setVoicePlace, type VoiceHandler } from '../voice/voiceBus'
 import {
   RestartAppDialog,
@@ -151,6 +152,7 @@ export function SettingsPage({
     const onTab = (e: Event) => {
       const t = (e as CustomEvent).detail?.tab
       if (t === 'gst_reports') setTabId('gst_reports')
+      if (t === 'cash_register') setTabId('cash_register')
     }
     window.addEventListener('satpuda:settings-tab', onTab)
     return () => window.removeEventListener('satpuda:settings-tab', onTab)
@@ -984,6 +986,10 @@ export function SettingsPage({
 
     if (tabId === 'gst_reports') {
       return <GstReportsPage active={active && tabId === 'gst_reports'} />
+    }
+
+    if (tabId === 'cash_register') {
+      return <CashRegisterPage active={active && tabId === 'cash_register'} refreshNonce={syncRefreshNonce} />
     }
 
     if (tabId === 'ledger') {
