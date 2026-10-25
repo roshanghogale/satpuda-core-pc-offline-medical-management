@@ -703,6 +703,43 @@ class Audit(unittest.TestCase):
         self.assertEqual(self.stock(self.a, self.m1), 97)
         self.assertEqual(self.stock(self.a, self.m2), 97)
 
+    def test_walk_in_after_the_counter_bill_was_deleted_on_the_other_pc(self):
+        """B deletes A's day counter bill; A (not pulled yet) adds the next walk-in to it. The
+        deleted bill stays deleted; the new walk-in is a counter bill of its own."""
+        from core import desktop_sales_service as sales_svc
+
+        first = self.sell(self.a, [_item(self.m1, "S", 2, 10.0)], customer_name="")
+        self.settle()
+        with self.b.acting():
+            out = sales_svc.delete_saved_sale(self.b.till, {"sale_id": first["sale_id"]})
+        self.assertTrue(out.get("ok"), out)
+        self.b.sync()
+        again = self.sell(self.a, [_item(self.m1, "S", 3, 10.0)], customer_name="")
+        self.assertEqual(again["sale_id"], first["sale_id"])          # merged into the day bill
+        self.check_both("walk-in merged into a bill deleted on B")
+        live = self.a.q("SELECT id, total_amount FROM sales WHERE COALESCE(deleted,0)=0")
+        self.assertEqual(len(live), 1, live)
+        self.assertNotEqual(live[0][0], first["sale_id"])
+        self.assertEqual(live[0][1], 30.0)
+        self.assertEqual(self.stock(self.a, self.m1), 97)
+        self.assertEqual(self.stock(self.b, self.m1), 97)
+
+    def test_edit_of_a_bill_deleted_on_the_other_pc(self):
+        from core import desktop_sales_service as sales_svc
+
+        res = self.sell(self.a, [_item(self.m1, "S", 2, 10.0)], payment_mode="Due", pay_full=False)
+        self.settle()
+        with self.b.acting():
+            out = sales_svc.delete_saved_sale(self.b.till, {"sale_id": res["sale_id"]})
+        self.assertTrue(out.get("ok"), out)
+        self.b.sync()
+        self.sell(self.a, [_item(self.m1, "S", 6, 10.0)], editing_sale_id=res["sale_id"],
+                  payment_mode="Due", pay_full=False)
+        self.check_both("edit on A of a bill deleted on B")
+        self.assertEqual(self.a.q("SELECT id FROM sales WHERE COALESCE(deleted,0)=0"), [])
+        self.assertEqual(self.stock(self.a, self.m1), 100)
+        self.assertEqual(self.party(self.a), (0.0, 0.0))
+
     def test_concurrent_payment_and_bill_edit(self):
         res = self.sell(self.a, [_item(self.m1, "S", 5, 10.0)], payment_mode="Due", pay_full=False)
         self.settle()
