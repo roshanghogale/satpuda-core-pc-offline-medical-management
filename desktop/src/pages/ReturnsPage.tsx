@@ -996,6 +996,29 @@ export function ReturnsPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab])
 
+  // The bill dropdown ("Bill No / Customer", "Purchase No / Supplier") was read only
+  // when a tab was opened, so a bill saved since -- for a customer / supplier made on
+  // it, here or on the phone -- was missing until the shop switched tabs (25 Oct 2026).
+  // Read it again when the page comes back on screen and on every refresh nonce, as
+  // long as no bill is loaded (a loaded bill is the shop's work; it stays).
+  const billListSeen = useRef<{ nonce: number; active: boolean } | null>(null)
+  useEffect(() => {
+    const prev = billListSeen.current
+    billListSeen.current = { nonce: syncRefreshNonce, active }
+    if (!prev || !active) return // first run: the [tab] effect above reads it
+    if (prev.active && prev.nonce === syncRefreshNonce) return
+    if (tab === 'sales' && !salesBill && !salesBills.some((b) => b.label === salesQuery)) {
+      void searchSales()
+    } else if (
+      tab === 'purchase' &&
+      !purchaseBill &&
+      !purchaseBills.some((b) => b.label === purchaseQuery)
+    ) {
+      void searchPurchase()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncRefreshNonce, active])
+
   const loadPurchase = async (purchaseId: number) => {
     setError('')
     if (

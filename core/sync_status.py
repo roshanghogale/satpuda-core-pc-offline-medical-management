@@ -66,6 +66,32 @@ def note_collection_change(collection: str) -> None:
         hints.note((col,), origin="pull")
     except Exception:
         pass
+    _forget_party_lists(col)
+
+
+# Collections whose Online-mode list (core/online_catalog) feeds a party dropdown.
+_PARTY_COLLECTIONS = ("customers", "suppliers")
+
+
+def _forget_party_lists(col: str) -> None:
+    """Online: a customer / supplier made on another device (the server's hint lands here)
+    has to be in Payments, Sales, Purchase and Returns at the screen's next read. The
+    catalogue held its copy for up to two minutes regardless (_TTL_SEC), so the page
+    refreshed on the hint and read the old list back (25 Oct 2026). Marking it stale only
+    asks the server for what changed (online_catalog._refresh_incrementally)."""
+    if col not in _PARTY_COLLECTIONS and col != "all":
+        return
+    try:
+        from core.sync_prefs import is_online_mode
+
+        if not is_online_mode():
+            return
+        from core import online_catalog
+
+        for c in _PARTY_COLLECTIONS if col == "all" else (col,):
+            online_catalog.invalidate(c)
+    except Exception:
+        pass
 
 
 def note_screen_change(collections, origin: str = "") -> None:
