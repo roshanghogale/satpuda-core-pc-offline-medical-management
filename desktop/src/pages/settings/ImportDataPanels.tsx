@@ -1402,6 +1402,7 @@ export function DataSystemPanel({
   >([])
   const [confirmWipe, setConfirmWipe] = useState('')
   const [wipePassword, setWipePassword] = useState('')
+  const [wipeAlsoProfile, setWipeAlsoProfile] = useState(false)
   const [adminUser, setAdminUser] = useState('')
   const [adminPass, setAdminPass] = useState('')
   const [adminLoggedIn, setAdminLoggedIn] = useState(false)
@@ -3183,9 +3184,14 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
         <div className="iset-danger-zone">
           <Frame title="Delete all data">
             <p className="iset-callout warn">
-              This will permanently delete <strong>all local data</strong> for this
-              store. Server cloud data is not wiped here (use the admin dashboard).
-              This action cannot be undone.
+              Deletes <strong>all data of this store</strong>: medicines, stock, sales,
+              purchases, returns, payments, parties, doctors and the cash register. In
+              Online and Offline-first mode it is deleted on the <strong>server and on
+              every PC and phone of the store</strong> (a backup is written on the server
+              first); unsent changes on any device are dropped. In Offline mode only this
+              PC is emptied. The store, its licence and device pairings stay. Needs the
+              administrator password here and, with a server, the Satpuda administrator
+              sign-in (Administrator Tools).
             </p>
             <Field label="Administrator password">
               <input
@@ -3204,6 +3210,15 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
                 placeholder="DELETE ALL TABLES"
               />
             </Field>
+            <label className="iset-row">
+              <input
+                type="checkbox"
+                checked={wipeAlsoProfile}
+                onChange={(e) => setWipeAlsoProfile(e.target.checked)}
+              />{' '}
+              Also delete the shop profile (name, address, GSTIN, bill heading, bank,
+              pictures)
+            </label>
             <div className="iset-row">
               <button
                 type="button"
@@ -3214,17 +3229,38 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
                   !wipePassword.trim()
                 }
                 onClick={() => {
-                  if (
-                    !window.confirm(
-                      'This will permanently delete ALL local data for this store. Are you sure?',
-                    )
-                  ) {
-                    return
-                  }
-                  void run('danger_wipe', {
-                    confirm: 'DELETE ALL TABLES',
-                    password: wipePassword,
-                  })
+                  void (async () => {
+                    setErr('')
+                    setMsg('Checking what will be deleted…')
+                    let preview: Record<string, unknown>
+                    try {
+                      preview = await systemAction({
+                        action: 'danger_wipe_preview',
+                        also_profile: wipeAlsoProfile,
+                      })
+                    } catch (e) {
+                      setMsg('')
+                      setErr(e instanceof Error ? e.message : String(e))
+                      return
+                    }
+                    setMsg('')
+                    if (preview.ok === false) {
+                      setErr(String(preview.error || 'Could not check what will be deleted.'))
+                      return
+                    }
+                    // Second confirmation: exactly what goes, and that it reaches every
+                    // device of the store.
+                    if (!window.confirm(String(preview.confirm_text || 'Delete ALL data?'))) {
+                      setMsg('Cancelled. Nothing was deleted.')
+                      return
+                    }
+                    await run('danger_wipe', {
+                      confirm: 'DELETE ALL TABLES',
+                      password: wipePassword,
+                      also_profile: wipeAlsoProfile,
+                      all_devices_ok: true,
+                    })
+                  })()
                 }}
               >
                 DELETE ALL TABLES

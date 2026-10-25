@@ -72,6 +72,10 @@ def register_and_prepare(conn: sqlite3.Connection, *, head_revision: int, app_ve
     meta_set(conn, "id_max", int(reg["id_max"]))
     prev = int(meta_get(conn, "server_last_seq", 0) or 0)
     meta_set(conn, "server_last_seq", max(prev, int(reg.get("last_seq") or 0)))
+    # The store's "Delete all data" this copy starts on (core/store_wipe.py): it was made after it.
+    if reg.get("wipe_generation") is not None:
+        prev_wipe = int(meta_get(conn, "wipe_generation", 0) or 0)
+        meta_set(conn, "wipe_generation", max(prev_wipe, int(reg.get("wipe_generation") or 0)))
     if meta_get(conn, "pull_cursor") is None:
         meta_set(conn, "pull_cursor", int(head_revision))
     # Carry on after what this device already made (a reinstalled PC must not start at 1).

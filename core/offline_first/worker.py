@@ -151,6 +151,24 @@ class SyncCycle:
                 with write_batch(conn):
                     numbers.add_block(conn, kind, fy, int(blk["from_serial"]), int(blk["to_serial"]))
 
+    def apply_wipe(self, info: dict) -> bool:
+        """The server's store was emptied ("Delete all data", core/store_wipe.py) after this copy
+        was made: clear the copy -- unsent changes too, they were made on the deleted records --
+        and pull again from the wipe. True when the copy was cleared."""
+        from core import store_wipe
+
+        conn = self._c()
+        with write_batch(conn, capture_paused=True):
+            done = store_wipe.apply_server_wipe(conn, info)
+        if done:
+            log.warning("offline-first: the store's data was deleted on the server (wipe %s); "
+                        "this PC's copy was cleared", info.get("wipe_generation"))
+            self.refresh.clear()
+            self.last_full_stock = 0.0
+            self.last_number_check = 0.0
+            store_wipe.note_screens_reload()
+        return done
+
     def push(self) -> int:
         conn = self._c()
         install = meta_get(conn, "install_id") or client.install_id()
@@ -161,7 +179,17 @@ class SyncCycle:
             events = outbox.pending_events(conn, 100)
             if not events:
                 break
-            answer = client.push(events)
+            try:
+                gen = meta_get(conn, "wipe_generation")
+                # No generation recorded = never told of a wipe = 0 on the server.
+                answer = client.push(events) if gen is None else client.push(events, int(gen))
+            except Exception as exc:
+                if not client.is_store_wiped(exc):
+                    raise
+                from core.store_wipe import server_wipe_info
+
+                self.apply_wipe(server_wipe_info(client.sync_status()))
+                return sent
             with write_batch(conn):
                 res = outbox.apply_push_answer(conn, answer)
                 if res["renumber_from"] is not None:
@@ -179,6 +207,11 @@ class SyncCycle:
         for _ in range(50):                      # up to 10,000 changes a cycle
             cursor = int(meta_get(conn, "pull_cursor", 0) or 0)
             page = client.changes(cursor, PULL_PAGE)
+            if int(page.get("wipe_generation") or 0) > int(meta_get(conn, "wipe_generation", 0) or 0):
+                from core.store_wipe import server_wipe_info
+
+                if self.apply_wipe(server_wipe_info(page)):
+                    continue                     # pull again, from the wipe
             changes = page.get("changes") or []
             if not changes:
                 break

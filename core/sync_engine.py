@@ -93,6 +93,18 @@ def ensure_sync_inbox(conn) -> None:
     )
 
 
+def _check_store_wipe(status) -> bool:
+    """Online PC: the store's data was deleted on the server ("Delete all data") since this PC
+    last looked -- drop its caches (core/store_wipe.check_online_wipe). Never raises."""
+    try:
+        from core.store_wipe import check_online_wipe
+
+        return bool(check_online_wipe(status))
+    except Exception as exc:
+        log.debug("store wipe check: %s", exc)
+        return False
+
+
 class SyncEngine:
     def __init__(self) -> None:
         self._stop = threading.Event()
@@ -172,6 +184,7 @@ class SyncEngine:
                 status = api.get_sync_status(self._token(), timeout=20.0)
                 self._last_ui_head = int(status.get("head_revision") or 0)
                 log.info("sync_engine hints_only baseline head=%s", self._last_ui_head)
+                _check_store_wipe(status)
             except Exception as exc:
                 log.debug("sync_engine hints_only baseline head: %s", exc)
                 self._last_ui_head = 0
@@ -370,6 +383,15 @@ class SyncEngine:
         # only when collections actually changed (or explicit full_refresh).
         if self._hints_only:
             full = bool(full_refresh)
+            if full:
+                # "Delete all data" on another device announces itself as a full refresh:
+                # this PC's lists in memory and its catalogue snapshot go (core/store_wipe.py).
+                try:
+                    from core import server_api as api
+
+                    _check_store_wipe(api.get_sync_status(self._token(), timeout=15.0))
+                except Exception as exc:
+                    log.debug("[SYNC][HINT] wipe check: %s", exc)
             prev_head = int(self._last_ui_head or 0)
             if head <= prev_head and not change_list and not full:
                 try:
@@ -536,6 +558,9 @@ class SyncEngine:
                 server_head = int(status.get("head_revision") or 0)
 
                 if self._hints_only:
+                    if _check_store_wipe(status):
+                        self._last_ui_head = server_head
+                        continue
                     # Only refresh UI when another device advanced the store head.
                     if server_head <= int(self._last_ui_head or 0):
                         continue
