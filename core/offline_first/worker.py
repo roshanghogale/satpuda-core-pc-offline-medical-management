@@ -259,7 +259,7 @@ class Worker:
     bill made on the phone took up to 6 s to be pulled and the PC's own bill waited up to
     6 s before it was sent; the socket brings that to about one second each way."""
 
-    def __init__(self, path: str):
+    def __init__(self, path: str, store_key: Optional[str] = None):
         self.cycle = SyncCycle(path)
         self._stop = threading.Event()
         self._kick = threading.Event()
@@ -267,6 +267,30 @@ class Worker:
         self.last: dict = {}
         self.ws = None
         self.hints = 0
+        # The store this file belongs to, fixed when the worker is made (the store being
+        # opened). Its thread works FOR that store whatever the registry says later.
+        #
+        # The token, the store key file and every other "active store" lookup used to follow
+        # the registry. Settings > Stores > Switch points the registry at the other store and
+        # asks for a restart; until the app closed, this worker kept cycling on the OLD file
+        # with the NEW store's token: the old store's unsent bills were pushed into the other
+        # store's account and the other store's changes were written into the old file with
+        # capture off (night audit, 25 Oct 2026).
+        self.store_key = store_key if store_key is not None else _active_store_key()
+
+    def _acting(self):
+        """This worker's store for the code run in the calling thread (a no-op without one)."""
+        key = str(self.store_key or "").strip()
+        if not key:
+            return contextlib.nullcontext()
+        try:
+            from core.store_manager import _find_store_by_key, acting_for_store
+
+            if _find_store_by_key(key):
+                return acting_for_store(key)
+        except Exception as exc:
+            log.warning("offline-first: store %s: %s", key, exc)
+        return contextlib.nullcontext()          # removed from this PC meanwhile
 
     def start(self) -> None:
         if self.thread and self.thread.is_alive():
@@ -298,8 +322,12 @@ class Worker:
 
             if self.ws is None:
                 self.ws = SyncWebSocket()
+            def token() -> str:
+                with self._acting():             # this worker's store, not the registry's
+                    return client._token()
+
             # on_connect: the socket was down for a while -- pull whatever happened meanwhile.
-            self.ws.start(token_fn=client._token, on_hint=self._on_hint, on_connect=self.kick)
+            self.ws.start(token_fn=token, on_hint=self._on_hint, on_connect=self.kick)
         except Exception as exc:                 # no websocket module: polling alone
             log.warning("offline-first hints: %s", exc)
             self.ws = None
@@ -313,6 +341,16 @@ class Worker:
                 pass
 
     def _loop(self) -> None:
+        with self._acting():
+            try:
+                self._run()
+            finally:
+                # A cycle that outlived stop()'s wait reopened the file to note its error:
+                # nothing of this thread stays open on it.
+                if self._stop.is_set():
+                    self.cycle.close()
+
+    def _run(self) -> None:
         while not self._stop.is_set():
             wait = INTERVAL_IDLE
             try:
@@ -331,6 +369,15 @@ class Worker:
                 wait = 15.0
             self._kick.wait(wait)
             self._kick.clear()
+
+
+def _active_store_key() -> str:
+    try:
+        from core.store_manager import get_active_store_key
+
+        return str(get_active_store_key() or "")
+    except Exception:
+        return ""
 
 
 _worker: Optional[Worker] = None
