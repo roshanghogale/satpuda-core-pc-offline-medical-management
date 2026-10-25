@@ -212,7 +212,7 @@ class Register(unittest.TestCase):
         out = cr.export(c, {"from": "2026-10-01", "to": "2026-10-31", "format": "xlsx"})
         self.assertEqual(out["filename"], "Cash_Register_01-10-2026_31-10-2026.xlsx")
         sections = cr._day_sections(cr.day_report(c, D))
-        self.assertEqual(sections[0]["rows"][0][1], 1500.0)
+        self.assertEqual(sections[1]["rows"][0][1], 1500.0)
         self.assertEqual(sections[-1]["rows"][4], ["= Expected cash in drawer", 665.0])
 
     def test_typed_lines_are_edited_deleted_and_refused_when_empty(self):
@@ -233,7 +233,7 @@ class Register(unittest.TestCase):
         self.assertEqual(cr.day_report(c, D)["totals"]["expenses"], 40.0)
         # A month nobody counted has no total difference (not "tallies", not 0).
         self.assertIsNone(cr.range_report(c, D, D2)["totals"]["difference"])
-        self.assertEqual(cr._range_sections(cr.range_report(c, D, D2))[0]["rows"][-1][7], "")
+        self.assertEqual(cr._range_sections(cr.range_report(c, D, D2))[1]["rows"][-1][7], "")
         self.assertTrue(cr.delete_expense(c, row["id"]))
         self.assertEqual(cr.day_report(c, D)["expenses"], [])
         # Every write was noted for the server; the delete is a delete.

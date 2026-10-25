@@ -524,7 +524,7 @@ def day_report(conn: sqlite3.Connection, day: str) -> dict:
                              cash_sales_returns=by["sales_returns"], cash_purchases=by["purchases"],
                              cash_supplier_payments=by["supplier_payments"], expenses=exp_total)
     counted = r2(row["counted_cash"]) if row and row.get("counted_cash") is not None else None
-    return {
+    rep = {
         "ok": True,
         "date": day,
         "date_dmy": _dmy(day),
@@ -547,6 +547,109 @@ def day_report(conn: sqlite3.Connection, day: str) -> dict:
         "difference": r2(counted - expected) if counted is not None else None,
         "categories": list(CATEGORIES),
     }
+    rep["book"] = day_book(rep)
+    return rep
+
+
+# ── the cash book: every cash movement of the day in one numbered list ─────────
+#
+# Owner, 25 Oct 2026: "1. Opening balance 2. Sale 1 3. Sale 2 ... 6. tea 7. nashta 8. mama la
+# dile 250 9. Sale 5 10. purchase payment ..." -- one plain list in the order things happened,
+# Sr | Time | Entry | In | Out | Balance, the totals at the end. Built only from the day's
+# sections and typed lines above (nothing read twice, nothing summed another way), so its
+# totals are the register's and a deleted / edited bill changes it the same way.
+
+_BOOK_TYPES = {
+    # section key -> (type, flow)
+    "sales": ("Sale", "in"),
+    "receipts": ("Due received", "in"),
+    "sales_returns": ("Refund", "out"),
+    "purchases": ("Purchase", "out"),
+    "supplier_payments": ("Supplier payment", "out"),
+    "purchase_returns": ("Purchase return", "in"),
+}
+_BOOK_ORDER = ("sales", "receipts", "sales_returns", "purchases", "supplier_payments", "purchase_returns",
+               "expenses", "cash_added")
+
+
+def _book_entry(kind: str, line: dict) -> str:
+    """The one plain line the shop reads."""
+    ref, party = str(line.get("ref") or "").strip(), str(line.get("party") or "").strip()
+    if kind == "sales":
+        walk_in = not party or party.lower() in ("walk-in", "walk in", "walkin", "cash")
+        head = f"Sale {ref}".strip()
+        return head if walk_in else f"{head} – {party}"
+    if kind == "receipts":
+        return f"Received {party or ref}".strip()
+    if kind == "sales_returns":
+        return f"Refund {ref or party}".strip()
+    if kind in ("purchases", "supplier_payments"):
+        return f"Purchase payment {party or ref}".strip()
+    if kind == "purchase_returns":
+        return f"Purchase return {party or ref}".strip()
+    return ref or party
+
+
+def _book_lines(rep: dict) -> list:
+    """The day's movements, unnumbered, in time order. A line with no time goes last; lines of
+    the same minute keep the order they were made in, the bills before the typed lines."""
+    lines = []
+    for s in rep["sections"]:
+        typ, flow = _BOOK_TYPES.get(s["key"], (s.get("title") or "", s.get("flow") or "in"))
+        for l in s["lines"]:
+            lines.append({"time": l.get("time") or "", "type": typ, "entry": _book_entry(s["key"], l),
+                          "ref": str(l.get("ref") or ""), "flow": flow, "amount": r2(l.get("amount")),
+                          "source": s["key"], "id": l.get("id")})
+    for key, typ, flow in (("expenses", "Expense", "out"), ("cash_added", "Cash added", "in")):
+        for m in rep[key]:
+            # The words the shop typed; the category only when nothing was typed.
+            words = str(m.get("description") or "").strip() or str(m.get("category") or "").strip() or typ
+            lines.append({"time": m.get("time") or "", "type": typ, "entry": words, "ref": "", "flow": flow,
+                          "amount": r2(m.get("amount")), "source": key, "id": m.get("id")})
+    typed = {"expenses", "cash_added"}
+    keyed = [((l["time"] or "99:99"), l["source"] in typed, n, l) for n, l in enumerate(lines)]
+    keyed.sort(key=lambda t: t[:3])
+    return [t[3] for t in keyed]
+
+
+def day_book(rep: dict, start_sr: int = 1) -> dict:
+    """{rows: [{sr, time, type, entry, ref, cash_in, cash_out, balance}], total_in, total_out,
+    expected, counted, difference}. Row 1 is the opening balance."""
+    opening = r2(rep["opening"]["value"])
+    sr = start_sr
+    rows = [{"sr": sr, "time": "", "type": "Opening", "entry": "Opening balance", "ref": "",
+             "cash_in": None, "cash_out": None, "balance": opening}]
+    bal = opening
+    for l in _book_lines(rep):
+        sr += 1
+        cin = l["amount"] if l["flow"] == "in" else None
+        cout = l["amount"] if l["flow"] == "out" else None
+        bal = r2(bal + (cin or 0) - (cout or 0))
+        rows.append({"sr": sr, "time": l["time"], "type": l["type"], "entry": l["entry"], "ref": l["ref"],
+                     "cash_in": cin, "cash_out": cout, "balance": bal})
+    t = rep["totals"]
+    return {"date": rep["date"], "date_dmy": rep["date_dmy"], "opening": opening, "rows": rows,
+            # The register's own sums: the lines above add up to them (the tests pin it).
+            "total_in": t["cash_in"], "total_out": r2(t["cash_out"] + t["expenses"]),
+            "expected": t["expected"], "counted": rep["counted"], "difference": rep["difference"],
+            "note": rep.get("note") or "", "closed": bool(rep.get("closed_at"))}
+
+
+def range_book(day_reps: list) -> dict:
+    """The days' books one after the other, numbered across the range; each day starts with its
+    own opening balance and ends with its sub-total (that day's In, Out, expected closing)."""
+    days, sr = [], 1
+    for rep in day_reps:
+        b = day_book(rep, start_sr=sr)
+        sr = b["rows"][-1]["sr"] + 1
+        days.append(b)
+    counted = [d for d in days if d["difference"] is not None]
+    return {"days": days,
+            "total_in": r2(sum(d["total_in"] for d in days)),
+            "total_out": r2(sum(d["total_out"] for d in days)),
+            "expected": days[-1]["expected"] if days else 0.0,
+            "difference": r2(sum(d["difference"] for d in counted)) if counted else None,
+            "entries": sum(len(d["rows"]) for d in days)}
 
 
 def _days_between(start: str, end: str) -> list:
@@ -561,7 +664,7 @@ def _days_between(start: str, end: str) -> list:
 def range_report(conn: sqlite3.Connection, start: str, end: str) -> dict:
     """One line per day (days with nothing are left out), expenses by category, every expense."""
     start, end = clean_day(start), clean_day(end)
-    days, cats, lines = [], {}, []
+    days, cats, lines, reps = [], {}, [], []
     for d in _days_between(start, end):
         rep = day_report(conn, d)
         t = rep["totals"]
@@ -569,6 +672,7 @@ def range_report(conn: sqlite3.Connection, start: str, end: str) -> dict:
             or rep["counted"] is not None
         if not has:
             continue
+        reps.append(rep)
         days.append({"date": d, "date_dmy": rep["date_dmy"], "opening": rep["opening"]["value"],
                      "cash_in": t["cash_in"], "cash_out": t["cash_out"], "expenses": t["expenses"],
                      "expected": t["expected"], "counted": rep["counted"], "difference": rep["difference"],
@@ -590,14 +694,69 @@ def range_report(conn: sqlite3.Connection, start: str, end: str) -> dict:
     }
     return {"ok": True, "from": start, "to": end, "from_dmy": _dmy(start), "to_dmy": _dmy(end), "days": days,
             "categories": [{"category": k, "amount": v} for k, v in sorted(cats.items(), key=lambda kv: -kv[1])],
-            "expenses": lines, "totals": tot}
+            "expenses": lines, "totals": tot, "book": range_book(reps)}
 
 
 # ── export: Excel / PDF / Print ───────────────────────────────────────────────
 
+BOOK_COLUMNS = ["Sr", "Time", "Entry", "In", "Out", "Balance"]
+
+
+def _money_or_blank(v):
+    return "" if v is None else v
+
+
+def _book_day_rows(b: dict, *, with_date: bool = False) -> tuple:
+    """The rows of one day's book for a file, and which of them are totals (bold)."""
+    lead = (lambda: [b["date_dmy"]]) if with_date else (lambda: [])
+    rows, bold = [], []
+    for r in b["rows"]:
+        rows.append([r["sr"], *lead(), r["time"], r["entry"], _money_or_blank(r["cash_in"]),
+                     _money_or_blank(r["cash_out"]), r["balance"]])
+
+    def total(label, cin="", cout="", bal=""):
+        bold.append(len(rows))
+        rows.append(["", *lead(), "", label, cin, cout, bal])
+
+    total(f"Total {b['date_dmy']}" if with_date else "Total", b["total_in"], b["total_out"])
+    total("Expected closing cash", bal=b["expected"])
+    if b["counted"] is not None:
+        total("Counted cash", bal=b["counted"])
+        total("Difference (counted - expected)", bal=b["difference"])
+        if b.get("note"):
+            total(f"Note: {b['note']}")
+    elif not with_date:
+        total("Counted cash", bal="not counted yet")
+    return rows, bold
+
+
+def _book_section(rep: dict) -> dict:
+    rows, bold = _book_day_rows(rep["book"])
+    return {"title": f"Cash book {rep['date_dmy']}", "columns": list(BOOK_COLUMNS), "rows": rows, "bold": bold,
+            "sheet": "Cash book"}
+
+
+def _range_book_section(rep: dict) -> dict:
+    book = rep["book"]
+    rows, bold = [], []
+    for b in book["days"]:
+        r, bo = _book_day_rows(b, with_date=True)
+        bold += [len(rows) + i for i in bo]
+        rows += r
+    blank = ["", "", ""]
+    bold.append(len(rows))
+    rows.append(["", *blank[:2], "Total of all days", book["total_in"], book["total_out"], ""])
+    if book["difference"] is not None:
+        bold.append(len(rows))
+        rows.append(["", *blank[:2], "Difference of the counted days", "", "", book["difference"]])
+    cols = ["Sr", "Date", "Time", "Entry", "In", "Out", "Balance"]
+    return {"title": f"Cash book {rep['from_dmy']} - {rep['to_dmy']}", "columns": cols, "rows": rows,
+            "bold": bold, "sheet": "Cash book"}
+
+
 def _day_sections(rep: dict) -> list:
     cols = ["Time", "Bill / Ref", "Party", "Detail", "Amount"]
-    out = [{"title": "Opening cash", "columns": ["What", "Amount"],
+    out = [_book_section(rep), {"title": "Opening cash", "columns": ["What", "Amount"],
             "rows": [["Cash in the drawer when the shop opened", rep["opening"]["value"]]]}]
     for s in rep["sections"]:
         rows = [[l["time"], l["ref"], l["party"], l["detail"], l["amount"]] for l in s["lines"]]
@@ -631,7 +790,8 @@ def _range_sections(rep: dict) -> list:
     t = rep["totals"]
     rows.append(["Total", t["opening"], t["cash_in"], t["cash_out"], t["expenses"], "", "",
                  t["difference"] if t["difference"] is not None else "", ""])
-    out = [{"title": "Day by day", "columns": ["Date", "Opening", "Cash in", "Cash out", "Expenses", "Expected",
+    out = [_range_book_section(rep),
+           {"title": "Day by day", "columns": ["Date", "Opening", "Cash in", "Cash out", "Expenses", "Expected",
                                               "Counted", "Difference", "Status"], "rows": rows}]
     cats = [[c["category"], c["amount"]] for c in rep["categories"]]
     if cats:
@@ -652,9 +812,20 @@ def _xlsx_bytes(title: str, sections: list) -> bytes:
     from openpyxl.utils import get_column_letter
 
     wb = Workbook()
-    ws = wb.active
-    ws.title = "Cash"
+    wb.remove(wb.active)
     bold = Font(bold=True)
+    # The cash book is the first sheet; the sections by kind follow on "Details".
+    sheets: dict = {}
+    for s in sections:
+        sheets.setdefault(s.get("sheet") or "Details", []).append(s)
+    for name, group in sheets.items():
+        _xlsx_sheet(wb.create_sheet(title=name[:31]), title, group, bold, Font, get_column_letter)
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue()
+
+
+def _xlsx_sheet(ws, title: str, sections: list, bold, Font, get_column_letter) -> None:
     widths: dict = {}
     n = 1
     ws.cell(row=n, column=1, value=title).font = Font(bold=True, size=13)
@@ -666,8 +837,9 @@ def _xlsx_bytes(title: str, sections: list) -> bytes:
             ws.cell(row=n, column=j, value=c).font = bold
             widths[j] = max(widths.get(j, 8), len(str(c)) + 2)
         n += 1
-        for r in s["rows"]:
-            is_total = str(r[0]) == "Total" or (len(r) > 1 and str(r[-2]) == "Total")
+        bold_rows = set(s.get("bold") or ())
+        for i, r in enumerate(s["rows"]):
+            is_total = i in bold_rows or str(r[0]) == "Total" or (len(r) > 1 and str(r[-2]) == "Total")
             for j, v in enumerate(r, start=1):
                 cell = ws.cell(row=n, column=j, value=None if v == "" else v)
                 if isinstance(v, (int, float)) and not isinstance(v, bool):
@@ -680,9 +852,6 @@ def _xlsx_bytes(title: str, sections: list) -> bytes:
         n += 1
     for col, w in widths.items():
         ws.column_dimensions[get_column_letter(col)].width = w
-    out = io.BytesIO()
-    wb.save(out)
-    return out.getvalue()
 
 
 def _shop_name(conn: sqlite3.Connection) -> str:
@@ -797,10 +966,16 @@ def handle_get(path: str, qs: dict, conn) -> Optional[tuple]:
     if conn is None:
         return 503, {"ok": False, "error": "Database not open"}
     try:
+        out = None
         if path == "/api/cash/day":
-            return 200, day_report(conn, _q(qs, "date"))
-        if path == "/api/cash/range":
-            return 200, range_report(conn, _q(qs, "from"), _q(qs, "to"))
+            out = day_report(conn, _q(qs, "date"))
+        elif path == "/api/cash/range":
+            out = range_report(conn, _q(qs, "from"), _q(qs, "to"))
+        if out is not None:
+            # Online the engine holds an empty throwaway copy, so the book would read as a day
+            # with no bills: the screen says so instead of showing a blank book as if true.
+            out["online_mode"] = _online_shell()
+            return 200, out
     except Exception as exc:
         return 400, {"ok": False, "error": str(exc)}
     return None

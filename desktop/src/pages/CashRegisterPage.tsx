@@ -5,10 +5,10 @@
  *  at entry and supplier payments appear by themselves from the books (core/cash_register.py
  *  reads them; nothing is stored twice), and the shop types its expenses -- tea, medicines bought
  *  from another store -- or cash it added (Enter adds a line). At close: Expected cash, the
- *  counted cash, the difference in green / red, "Close day" keeps the count. A month view lists
+ *  counted cash, the difference in green / red, "Close day" keeps the count. A From - To view lists
  *  every day's difference and the expenses by category. Excel / PDF / Print for both.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { getApiBase } from '../api'
 import { saveFileAndShow } from '../savedFiles'
 import '../styles/cash-register.css'
@@ -16,9 +16,22 @@ import '../styles/cash-register.css'
 type Line = { id: number; time: string; ref: string; party: string; detail: string; amount: number }
 type Section = { key: string; title: string; flow: 'in' | 'out'; lines: Line[]; total: number }
 type Manual = { id: number; time: string; kind: 'in' | 'out'; category: string; description: string; amount: number }
+/** One line of the cash book: Sr | Time | Entry | In | Out | Balance (core/cash_register.py day_book). */
+type BookRow = {
+  sr: number; time: string; type: string; entry: string; ref: string
+  cash_in: number | null; cash_out: number | null; balance: number
+}
+type DayBook = {
+  date: string; date_dmy: string; opening: number; rows: BookRow[]
+  total_in: number; total_out: number; expected: number
+  counted: number | null; difference: number | null; note: string; closed: boolean
+}
+type RangeBook = { days: DayBook[]; total_in: number; total_out: number; expected: number; difference: number | null; entries: number }
 type DayReport = {
   ok?: boolean
   error?: string
+  online_mode?: boolean
+  book: DayBook
   date: string
   date_dmy: string
   opening: { value: number; set: boolean; row_id: number | null }
@@ -45,12 +58,13 @@ type RangeReport = {
   categories: { category: string; amount: number }[]
   expenses: (Manual & { date: string; date_dmy: string })[]
   totals: { opening: number; cash_in: number; cash_out: number; expenses: number; difference: number; days_closed: number }
+  book: RangeBook
+  online_mode?: boolean
 }
 
 const pad = (n: number) => String(n).padStart(2, '0')
 const iso = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 const todayIso = () => iso(new Date())
-const thisMonth = () => todayIso().slice(0, 7)
 const nowHm = () => {
   const d = new Date()
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`
@@ -62,10 +76,7 @@ const shiftDay = (day: string, n: number) => {
   d.setDate(d.getDate() + n)
   return iso(d)
 }
-function monthBounds(ym: string) {
-  const [y, m] = ym.split('-').map(Number)
-  return { from: iso(new Date(y, m - 1, 1)), to: iso(new Date(y, m, 0)) }
-}
+const monthStart = () => `${todayIso().slice(0, 8)}01`
 const dmy = (s: string) => (s && s.length >= 10 ? `${s.slice(8, 10)}-${s.slice(5, 7)}-${s.slice(0, 4)}` : s)
 const hm = (ts: string | null) => {
   if (!ts) return ''
@@ -135,10 +146,106 @@ function BookSection({ s }: { s: Section }) {
   )
 }
 
+function BookLine({ r, withDate, dateDmy }: { r: BookRow; withDate: boolean; dateDmy: string }) {
+  return (
+    <tr className={r.type === 'Opening' ? 'cb-opening' : ''}>
+      <td className="num cb-sr">{r.sr}</td>
+      {withDate ? <td className="cb-date">{dateDmy}</td> : null}
+      <td className="cb-time">{r.time}</td>
+      <td>{r.entry}</td>
+      <td className="num cr-in">{r.cash_in !== null ? money(r.cash_in) : ''}</td>
+      <td className="num cr-out">{r.cash_out !== null ? money(r.cash_out) : ''}</td>
+      <td className="num cb-bal">{money(r.balance)}</td>
+    </tr>
+  )
+}
+
+/** The totals under a day's lines: In / Out, the expected closing cash, and Counted / Difference
+ *  once the day is closed. In a range it is the day's sub-total. */
+function BookTotals({ b, withDate }: { b: DayBook; withDate: boolean }) {
+  const lead = withDate ? 3 : 2
+  const line = (label: string, cin: ReactNode, cout: ReactNode, bal: ReactNode) => (
+    <tr className="cb-total">
+      <td colSpan={lead} />
+      <td>{label}</td>
+      <td className="num cr-in">{cin}</td>
+      <td className="num cr-out">{cout}</td>
+      <td className="num cb-bal">{bal}</td>
+    </tr>
+  )
+  return (
+    <>
+      {line(withDate ? `Total ${b.date_dmy}` : 'Total', money(b.total_in), money(b.total_out), '')}
+      {line('Expected closing cash', '', '', money(b.expected))}
+      {b.counted !== null ? (
+        <>
+          {line(`Counted cash${b.note ? ` (${b.note})` : ''}`, '', '', money(b.counted))}
+          {line('Difference', '', '', <Diff value={b.difference} />)}
+        </>
+      ) : withDate ? null : (
+        line('Counted cash', '', '', <span className="vl-dim">not counted yet</span>)
+      )}
+    </>
+  )
+}
+
+function BookDay({ b, withDate }: { b: DayBook; withDate: boolean }) {
+  return (
+    <>
+      {b.rows.map((r) => <BookLine key={r.sr} r={r} withDate={withDate} dateDmy={b.date_dmy} />)}
+      <BookTotals b={b} withDate={withDate} />
+    </>
+  )
+}
+
+/** The cash book: every cash movement in one numbered list, in the order it happened. */
+function CashBook({ days, range }: { days: DayBook[]; range?: RangeBook }) {
+  const withDate = Boolean(range)
+  return (
+    <table className="sat-table cr-table cb-table">
+      <thead>
+        <tr>
+          <th className="num cb-sr">Sr</th>
+          {withDate ? <th className="cb-date">Date</th> : null}
+          <th className="cb-time">Time</th>
+          <th>Entry</th>
+          <th className="num">In</th>
+          <th className="num">Out</th>
+          <th className="num">Balance</th>
+        </tr>
+      </thead>
+      <tbody>
+        {days.map((b) => <BookDay key={b.date} b={b} withDate={withDate} />)}
+      </tbody>
+      {range ? (
+        <tfoot>
+          <tr>
+            <th colSpan={3} />
+            <th>Total of all days</th>
+            <th className="num cr-in">{money(range.total_in)}</th>
+            <th className="num cr-out">{money(range.total_out)}</th>
+            <th />
+          </tr>
+          {range.difference !== null ? (
+            <tr>
+              <th colSpan={3} />
+              <th>Difference of the counted days</th>
+              <th />
+              <th />
+              <th className="num"><Diff value={range.difference} /></th>
+            </tr>
+          ) : null}
+        </tfoot>
+      ) : null}
+    </table>
+  )
+}
+
 export function CashRegisterPage({ active, refreshNonce = 0 }: { active: boolean; refreshNonce?: number }) {
   const [view, setView] = useState<'day' | 'month'>('day')
   const [day, setDay] = useState(todayIso())
-  const [month, setMonth] = useState(thisMonth())
+  const [rangeFrom, setRangeFrom] = useState(monthStart())
+  const [rangeTo, setRangeTo] = useState(todayIso())
   const [rep, setRep] = useState<DayReport | null>(null)
   const [range, setRange] = useState<RangeReport | null>(null)
   const [busy, setBusy] = useState(false)
@@ -164,7 +271,10 @@ export function CashRegisterPage({ active, refreshNonce = 0 }: { active: boolean
   const [countedText, setCountedText] = useState('')
   const [note, setNote] = useState('')
 
-  const bounds = useMemo(() => monthBounds(month), [month])
+  const bounds = useMemo(
+    () => (rangeFrom <= rangeTo ? { from: rangeFrom, to: rangeTo } : { from: rangeTo, to: rangeFrom }),
+    [rangeFrom, rangeTo],
+  )
 
   const load = useCallback(async () => {
     setBusy(true)
@@ -306,7 +416,7 @@ export function CashRegisterPage({ active, refreshNonce = 0 }: { active: boolean
     }
   }
 
-  async function exportAs(format: 'xlsx' | 'pdf' | 'print') {
+  async function exportAs(format: 'xlsx' | 'pdf' | 'csv' | 'print') {
     setBusy(true)
     setErr('')
     setMsg('')
@@ -355,7 +465,7 @@ export function CashRegisterPage({ active, refreshNonce = 0 }: { active: boolean
       <div className="cr-top">
         <div className="cr-view">
           <button type="button" className={`cr-tab${view === 'day' ? ' active' : ''}`} onClick={() => setView('day')}>Day</button>
-          <button type="button" className={`cr-tab${view === 'month' ? ' active' : ''}`} onClick={() => setView('month')}>Month</button>
+          <button type="button" className={`cr-tab${view === 'month' ? ' active' : ''}`} onClick={() => setView('month')}>From – To</button>
         </div>
         {view === 'day' ? (
           <>
@@ -374,8 +484,12 @@ export function CashRegisterPage({ active, refreshNonce = 0 }: { active: boolean
           </>
         ) : (
           <>
-            <input className="settings-input" type="month" value={month} aria-label="Month" onChange={(e) => e.target.value && setMonth(e.target.value)} />
-            <span className="vl-dim">{dmy(bounds.from)} – {dmy(bounds.to)}</span>
+            <span className="vl-dim">From</span>
+            <input className="settings-input" type="date" value={rangeFrom} aria-label="From" onChange={(e) => e.target.value && setRangeFrom(e.target.value)} />
+            <span className="vl-dim">To</span>
+            <input className="settings-input" type="date" value={rangeTo} aria-label="To" onChange={(e) => e.target.value && setRangeTo(e.target.value)} />
+            <button type="button" className="cr-link" onClick={() => { setRangeFrom(monthStart()); setRangeTo(todayIso()) }}>This month</button>
+            <span className="vl-dim">up to 3 months</span>
           </>
         )}
         <button type="button" className="btn btn-neutral btn-sm" disabled={busy} onClick={() => setNonce((n) => n + 1)}>
@@ -384,15 +498,29 @@ export function CashRegisterPage({ active, refreshNonce = 0 }: { active: boolean
         <div className="cr-actions">
           <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void exportAs('xlsx')}>Excel</button>
           <button type="button" className="btn btn-neutral" disabled={busy} onClick={() => void exportAs('pdf')}>PDF</button>
+          <button type="button" className="btn btn-neutral" disabled={busy} onClick={() => void exportAs('csv')}>CSV</button>
           <button type="button" className="btn btn-neutral" disabled={busy} onClick={() => void exportAs('print')}>Print</button>
         </div>
       </div>
       {err ? <div className="vb-warn cr-msg">{err}</div> : null}
       {msg ? <div className="settings-hint cr-msg">{msg}</div> : null}
+      {(view === 'day' ? rep?.online_mode : range?.online_mode) ? (
+        <div className="vb-warn cr-msg">
+          This PC is in Online mode and keeps no copy of the bills, so the cash book is empty here. Switch to Offline-first to use Cash &amp; Expenses.
+        </div>
+      ) : null}
 
       {view === 'day' && rep ? (
         <div className="cr-main">
           <div className="cr-left">
+            <section className="cr-card cb-card">
+              <div className="cr-card-head">
+                <h3>Cash book</h3>
+                <span className="vl-dim">Every cash entry of the day, in the order it happened.</span>
+              </div>
+              <CashBook days={[rep.book]} />
+            </section>
+
             <section className="cr-card">
               <div className="cr-card-head">
                 <h3>Expenses &amp; cash added</h3>
@@ -543,6 +671,18 @@ export function CashRegisterPage({ active, refreshNonce = 0 }: { active: boolean
       {view === 'month' && range ? (
         <div className="cr-main cr-month">
           <div className="cr-left">
+            <section className="cr-card cb-card">
+              <div className="cr-card-head">
+                <h3>Cash book</h3>
+                <span className="vl-dim">{dmy(range.from)} – {dmy(range.to)}, day after day, in the order it happened.</span>
+              </div>
+              {range.book.days.length ? (
+                <CashBook days={range.book.days} range={range.book} />
+              ) : (
+                <div className="cr-empty">No cash movement in these days.</div>
+              )}
+            </section>
+
             <section className="cr-card">
               <div className="cr-card-head">
                 <h3>Day by day</h3>
@@ -595,7 +735,7 @@ export function CashRegisterPage({ active, refreshNonce = 0 }: { active: boolean
                   </tfoot>
                 </table>
               ) : (
-                <div className="cr-empty">No cash movement in this month.</div>
+                <div className="cr-empty">No cash movement in these days.</div>
               )}
             </section>
           </div>
@@ -620,7 +760,7 @@ export function CashRegisterPage({ active, refreshNonce = 0 }: { active: boolean
                   </tfoot>
                 </table>
               ) : (
-                <div className="cr-empty">No expenses this month.</div>
+                <div className="cr-empty">No expenses in these days.</div>
               )}
             </section>
           </aside>

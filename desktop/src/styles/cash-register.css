@@ -299,3 +299,21 @@ tr.cr-editing td {
   height: 34px;
   font-size: 14px;
 }
+/* The cash book (owner, 25 Oct 2026): one numbered list, Sr | Time | Entry | In | Out | Balance. */
+.cb-card .cr-card-head h3 {
+  font-size: 15px;
+}
+.cb-table .cb-sr { width: 44px; }
+.cb-table .cb-time { width: 60px; }
+.cb-table .cb-date { width: 96px; }
+.cb-table td.cb-bal {
+  font-weight: 600;
+}
+.cb-table tr.cb-opening td {
+  font-weight: 700;
+  background: var(--surface-alt);
+}
+.cb-table tr.cb-total td {
+  font-weight: 700;
+  background: var(--surface-2);
+}
