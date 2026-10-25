@@ -87,5 +87,30 @@ class BillWithPayment(unittest.TestCase):
         self.assertTrue(out["ok"], out)
 
 
+class EditingADeletedPayment(unittest.TestCase):
+    """A receipt deleted meanwhile (another tab, or another PC's delete pulled in as deleted=1)
+    is not edited back by the stale form."""
+
+    setUp = BillWithPayment.setUp
+
+    def test_customer_and_supplier(self):
+        from core.desktop_settings_service import save_payment
+
+        save_payment(self.c, {"kind": "customer", "party": "RAM", "cash": 40, "online": 0, "date": "2026-10-25"})
+        pid = int(self.c.execute("SELECT id FROM customer_payments").fetchone()[0])
+        self.c.execute("UPDATE customer_payments SET deleted=1 WHERE id=?", (pid,))
+        sid = self.c.execute("INSERT INTO suppliers (name) VALUES ('AGENCY')").lastrowid
+        spid = self.c.execute("INSERT INTO supplier_payments (supplier_id, payment_date, amount, mode, deleted) "
+                              "VALUES (?, '2026-10-25', 70, 'Cash', 1)", (sid,)).lastrowid
+        self.c.commit()
+        with self.assertRaises(ValueError):
+            save_payment(self.c, {"kind": "customer", "id": pid, "party": "RAM", "cash": 60, "online": 0,
+                                  "date": "2026-10-25"})
+        with self.assertRaises(ValueError):
+            save_payment(self.c, {"kind": "supplier", "id": spid, "party": "AGENCY", "amount": 90, "mode": "Cash",
+                                  "date": "2026-10-25"})
+        self.assertEqual(float(self.c.execute("SELECT amount FROM customer_payments WHERE id=?", (pid,)).fetchone()[0]), 40.0)
+
+
 if __name__ == "__main__":
     unittest.main()
