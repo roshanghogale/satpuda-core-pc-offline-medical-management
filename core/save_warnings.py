@@ -198,6 +198,7 @@ def _supplier_bill_rows(
     supplier_name: str = "",
     bill_number: str = "",
     exclude_purchase_id: Any = 0,
+    ask_server: bool = False,
 ) -> list[dict]:
     """Live purchases (not deleted, not an autosave) already holding this supplier's bill number.
 
@@ -228,6 +229,30 @@ def _supplier_bill_rows(
             pass
         return bool(sname) and str(row_name or "").strip().upper() == sname
 
+    def take_server_rows(rows: list) -> None:
+        for row in rows:
+            if not isinstance(row, dict) or row.get("deleted") or row.get("is_autosave"):
+                continue
+            if str(row.get("bill_number") or "").strip().upper() != key:
+                continue
+            rid = int(row.get("id") or row.get("local_id") or 0)
+            if exclude and rid == exclude:
+                continue
+            if not same_supplier(row.get("supplier_id"), row.get("supplier_name")):
+                continue
+            items = row.get("items")
+            found.append({
+                "purchase_id": rid,
+                "purchase_no": str(row.get("purchase_no") or rid),
+                "purchase_date": str(row.get("purchase_date") or "").split(" ")[0],
+                "total": _f(row.get("total_amount", row.get("total"))),
+                "item_count": (
+                    len(items) if isinstance(items, list)
+                    else int(_f(row.get("item_count")))
+                ),
+                "bill_number": bill,
+            })
+
     try:
         from core.sync_prefs import is_online_mode
 
@@ -238,28 +263,7 @@ def _supplier_bill_rows(
                 q=bill, from_date="2000-01-01", to_date="2099-12-31", limit=200,
                 include_total=False,
             ) or {}
-            for row in got.get("rows") or []:
-                if not isinstance(row, dict) or row.get("deleted") or row.get("is_autosave"):
-                    continue
-                if str(row.get("bill_number") or "").strip().upper() != key:
-                    continue
-                rid = int(row.get("id") or row.get("local_id") or 0)
-                if exclude and rid == exclude:
-                    continue
-                if not same_supplier(row.get("supplier_id"), row.get("supplier_name")):
-                    continue
-                items = row.get("items")
-                found.append({
-                    "purchase_id": rid,
-                    "purchase_no": str(row.get("purchase_no") or rid),
-                    "purchase_date": str(row.get("purchase_date") or "").split(" ")[0],
-                    "total": _f(row.get("total_amount", row.get("total"))),
-                    "item_count": (
-                        len(items) if isinstance(items, list)
-                        else int(_f(row.get("item_count")))
-                    ),
-                    "bill_number": bill,
-                })
+            take_server_rows(got.get("rows") or [])
         elif conn is not None:
             rows = conn.execute(
                 "SELECT p.id, COALESCE(p.purchase_no,''), p.supplier_id, COALESCE(s.name,''), "
@@ -283,6 +287,16 @@ def _supplier_bill_rows(
                     "item_count": int(count or 0),
                     "bill_number": bill,
                 })
+            if not found and ask_server:
+                # Offline-first: this PC's copy lags the other devices by what it has not
+                # pulled yet -- the other PC or the phone may have saved this very bill a
+                # moment ago. Asked of the server when the sync is working (one short try;
+                # no internet: the local answer stands).
+                from core.offline_first.server_check import purchases_with_bill
+
+                take_server_rows(purchases_with_bill(conn, bill) or [])
+                for row in found:
+                    row["on_another_device"] = True
     except Exception:
         return []
     return found
@@ -300,6 +314,9 @@ def find_saved_supplier_bill(
 
     None also means "could not be asked": the save goes ahead rather than refuse a bill on a
     lookup that never ran.
+
+    Offline-first also asks the server for another device's purchase not pulled yet (the
+    answer then carries ``on_another_device``).
     """
     rows = _supplier_bill_rows(
         conn,
@@ -307,6 +324,7 @@ def find_saved_supplier_bill(
         supplier_name=supplier_name,
         bill_number=bill_number,
         exclude_purchase_id=exclude_purchase_id,
+        ask_server=True,
     )
     return rows[0] if rows else None
 

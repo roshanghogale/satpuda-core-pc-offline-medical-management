@@ -457,8 +457,10 @@ def save_purchase_bill(conn, body: dict[str, Any]) -> dict[str, Any]:
             "need_confirm": True,
             "code": "duplicate_bill",
             "message": (
-                f"Bill {bill_number} from {supplier_name} is already saved as purchase "
-                f"{already.get('purchase_no')}"
+                f"Bill {bill_number} from {supplier_name} is already saved "
+                + ("on another device (it reaches this PC in a moment) "
+                   if already.get("on_another_device") else "")
+                + f"as purchase {already.get('purchase_no')}"
                 + (f" on {already.get('purchase_date')}" if already.get("purchase_date") else "")
                 + f" with {int(already.get('item_count') or 0)} item(s), "
                 f"₹{_safe_float(already.get('total')):.2f}.\n\n"

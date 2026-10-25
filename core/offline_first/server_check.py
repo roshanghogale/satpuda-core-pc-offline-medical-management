@@ -59,3 +59,58 @@ def stock_after_sync(conn: sqlite3.Connection, medicine_ids: Iterable[int]) -> O
     except Exception as exc:
         log.info("offline-first: server stock not asked: %s", exc)
         return None
+
+
+def purchases_with_bill(conn: sqlite3.Connection, bill_number: str) -> Optional[list[dict]]:
+    """The server's live purchases whose supplier bill number is ``bill_number`` and that this
+    PC does not hold yet (another device's, not pulled so far). None when it cannot be asked.
+
+    A record this PC holds -- live, deleted, or edited and not sent -- is judged on this PC's
+    own copy, never on the server's older one: a purchase deleted here a moment ago is still on
+    the server until the delete goes up, and must not refuse its own re-entry."""
+    bill = str(bill_number or "").strip()
+    if not bill or not _askable(conn):
+        return None
+    try:
+        from urllib.parse import urlencode
+
+        from core import server_api as api
+        from core.offline_first import client
+
+        qs = urlencode({"q": bill, "from": "2000-01-01", "to": "2099-12-31", "limit": 200,
+                        "include_total": "0"})
+        res = api._request("GET", f"/api/store/purchases?{qs}", token=client._token(),
+                           timeout=ASK_TIMEOUT)
+        if not res.get("ok"):
+            return None
+        rows = (res.get("data") or {}).get("rows") or []
+    except Exception as exc:
+        log.info("offline-first: server purchases not asked: %s", exc)
+        return None
+    out: list[dict] = []
+    for row in rows:
+        if not isinstance(row, dict) or row.get("deleted") or row.get("is_autosave"):
+            continue
+        if str(row.get("bill_number") or "").strip().upper() != bill.upper():
+            continue
+        try:
+            rid = int(row.get("id") or row.get("local_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if rid <= 0 or conn.execute("SELECT 1 FROM purchases WHERE id=?", (rid,)).fetchone():
+            continue
+        if conn.execute(
+            "SELECT 1 FROM of_dirty WHERE collection='purchases' AND local_id=? "
+            "UNION ALL SELECT 1 FROM of_events WHERE collection='purchases' AND local_id=? "
+            "AND status='pending' LIMIT 1", (rid, rid),
+        ).fetchone():
+            continue
+        out.append(row)
+    if out:
+        try:
+            from core.offline_first import worker
+
+            worker.kick()                        # bring it down now: the screen offers to open it
+        except Exception:
+            pass
+    return out
