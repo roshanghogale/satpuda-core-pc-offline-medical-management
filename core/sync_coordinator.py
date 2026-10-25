@@ -852,8 +852,31 @@ def after_purchase_return_deleted(
         raise CloudSaveError(str(exc)) from exc
 
 
+def _offline_first_push_dropdowns(conn) -> None:
+    """Offline-first: villages / medicine types / schedules have no outbox row, so a save
+    on one PC never reached the server, the other PCs or the phone (audit, 25 Oct 2026).
+    Send them now when the internet is there; with no internet the save still stands here."""
+    try:
+        from core.sync_prefs import is_offline_first
+        if not is_offline_first():
+            return
+        from core import server_live as live
+        if conn is None:
+            from core.db_utils import open_store_db
+            c = open_store_db()
+            try:
+                live.push_dropdowns(c)
+            finally:
+                c.close()
+        else:
+            live.push_dropdowns(conn)
+    except Exception:
+        pass
+
+
 def after_villages_saved(conn) -> None:
     if not is_online_mode():
+        _offline_first_push_dropdowns(conn)
         return
     from core import server_live as live
     from core.online_guard import CloudSaveError, ensure_can_mutate
@@ -871,6 +894,7 @@ def after_villages_saved(conn) -> None:
 def after_layout_saved(conn=None) -> None:
     """Push med_types / schedules after layout settings save (Online)."""
     if not is_online_mode():
+        _offline_first_push_dropdowns(conn)
         return
     from core import server_live as live
     from core.online_guard import CloudSaveError, ensure_can_mutate
