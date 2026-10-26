@@ -20,11 +20,16 @@ from core.alert_thresholds import (
     passes_due_alert_filter,
 )
 from core.medicine_visibility import HIDDEN_FILTER_SQL
+from core.read_memo import memo
 
 _VISIBLE_MED_FILTER = f"WHERE {HIDDEN_FILTER_SQL}"
 
 
 def _stock_by_medicine_name(conn) -> Dict[str, float]:
+    return memo(conn, "alerts.stock_by_name", lambda: _stock_by_medicine_name_read(conn))
+
+
+def _stock_by_medicine_name_read(conn) -> Dict[str, float]:
     cur = conn.cursor()
     cur.execute(f"""
         SELECT name, SUM(COALESCE(stock_qty, 0))
@@ -44,6 +49,10 @@ def _pack_key(name: str, unit: str) -> Tuple[str, str]:
 
 
 def _stock_by_name_and_pack(conn) -> Dict[Tuple[str, str], float]:
+    return memo(conn, "alerts.stock_by_pack", lambda: _stock_by_name_and_pack_read(conn))
+
+
+def _stock_by_name_and_pack_read(conn) -> Dict[Tuple[str, str], float]:
     cur = conn.cursor()
     cur.execute(f"""
         SELECT name, COALESCE(unit, ''), SUM(COALESCE(stock_qty, 0))
@@ -113,6 +122,12 @@ def _real_purchases_sql(conn) -> str:
 
 
 def _purchase_trail(conn) -> Dict[str, Any]:
+    """_purchase_trail_read, kept until the store changes (core/read_memo.py): every alert
+    list asks for it, four times for one Alert & Monitoring screen."""
+    return memo(conn, "alerts.purchase_trail", lambda: _purchase_trail_read(conn))
+
+
+def _purchase_trail_read(conn) -> Dict[str, Any]:
     """Where each batch on the shelf came from.
 
     by_batch: (medicine id, batch) -> {bill, date, supplier} of the newest saved bill that
@@ -415,7 +430,11 @@ def fetch_out_of_stock_medicines(conn, detail: bool = False) -> List[Tuple[Any, 
 
 def _stocked_batches(conn) -> List[Tuple[Any, ...]]:
     """id, name, type, batch, expiry, stock, purchase rate, MRP, pack of every visible batch
-    in stock."""
+    in stock (kept until the store changes, core/read_memo.py)."""
+    return memo(conn, "alerts.stocked_batches", lambda: _stocked_batches_read(conn))
+
+
+def _stocked_batches_read(conn) -> List[Tuple[Any, ...]]:
     cur = conn.cursor()
     cur.execute(f"""
         SELECT id, name, COALESCE(type,''), COALESCE(batch_no,''),

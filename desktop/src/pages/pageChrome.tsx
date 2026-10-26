@@ -197,7 +197,8 @@ export function applyVisibleRowHeight(
   }
   const head =
     wrap.querySelector('thead tr') || wrap.querySelector('thead')
-  const row = wrap.querySelector('tbody tr')
+  // A data row, not the spacer a long DataTable puts above the rows it draws.
+  const row = wrap.querySelector('tbody tr.data-row') || wrap.querySelector('tbody tr')
   const headH = head?.getBoundingClientRect().height || 32
   const rowH = row?.getBoundingClientRect().height || 28
   const capped = Math.round(headH + visibleRows * rowH)
@@ -763,6 +764,12 @@ function StatusBadgeIcon({ style }: { style: NonNullable<RowStyle> }) {
   return null
 }
 
+/** DataTable draws every row up to this many; a longer list only the rows in view. */
+const WINDOW_MIN_ROWS = 300
+/** Rows drawn above and below the visible ones, so a scroll never shows a blank. */
+const WINDOW_OVERSCAN = 40
+const DEFAULT_ROW_H = 28
+
 export function DataTable({
   columns,
   rows,
@@ -846,6 +853,65 @@ export function DataTable({
 
   const fillContainer = Boolean(colLayout?.fillContainer)
 
+  // A long list draws only the rows in view (and some either side); spacer rows keep the
+  // scroll height. A big store's Sales History put 4,600-10,000 rows in the page at once:
+  // 6 s of drawing before the list showed (Shrihari, 26 Oct 2026). Short lists draw every
+  // row, as before.
+  const windowed = rows.length > WINDOW_MIN_ROWS
+  const [view, setView] = useState({ top: 0, height: 0 })
+  const rowHRef = useRef(DEFAULT_ROW_H)
+  useEffect(() => {
+    const el = wrapRef.current
+    if (!windowed || !el) return
+    const read = () => {
+      // Moved on in steps of half the overscan: a re-draw every 20 rows scrolled, not
+      // every pixel, and the rows drawn always cover the view.
+      const step = rowHRef.current * (WINDOW_OVERSCAN / 2)
+      const top = Math.floor(el.scrollTop / step) * step
+      setView((v) =>
+        v.top === top && v.height === el.clientHeight ? v : { top, height: el.clientHeight },
+      )
+    }
+    read()
+    el.addEventListener('scroll', read, { passive: true })
+    const ro = new ResizeObserver(read)
+    ro.observe(el)
+    return () => {
+      el.removeEventListener('scroll', read)
+      ro.disconnect()
+    }
+  }, [windowed])
+  useLayoutEffect(() => {
+    // The height of a drawn row (the average of those drawn), for the spacers.
+    const el = wrapRef.current
+    if (!windowed || !el) return
+    const drawn = el.querySelectorAll<HTMLElement>('tbody tr.data-row')
+    if (drawn.length < 2) return
+    const first = drawn[0].getBoundingClientRect()
+    const last = drawn[drawn.length - 1].getBoundingClientRect()
+    const h = (last.bottom - first.top) / drawn.length
+    if (h > 4 && Math.abs(h - rowHRef.current) > 0.5) {
+      rowHRef.current = h
+      setView((v) => ({ ...v }))
+    }
+  })
+  let winStart = 0
+  let winEnd = rows.length
+  if (windowed) {
+    const rh = rowHRef.current
+    const viewH = view.height || DEFAULT_ROW_H * 30
+    winStart = Math.max(0, Math.floor(view.top / rh) - WINDOW_OVERSCAN)
+    winEnd = Math.min(rows.length, Math.ceil((view.top + viewH) / rh) + WINDOW_OVERSCAN)
+  }
+  const spanCols = Math.max(columns.length + (rowActions ? 1 : 0), 1)
+  const spacer = (h: number, key: string) =>
+    h > 0 ? (
+      <tr key={key} className="dt-spacer" aria-hidden style={{ height: `${h}px` }}>
+        <td colSpan={spanCols} style={{ padding: 0, border: 0, height: `${h}px` }} />
+      </tr>
+    ) : null
+  const statusIdx = columns.findIndex((c) => c.toLowerCase() === 'status')
+
   const colClass = (col: string, i: number) => {
     const parts: string[] = []
     if (nums.has(i)) parts.push('num')
@@ -912,11 +978,10 @@ export function DataTable({
               </td>
             </tr>
           ) : (
-            rows.map((row, i) => {
+            [spacer(winStart * rowHRef.current, 'dt-top')].concat(
+            rows.slice(winStart, winEnd).map((row, k) => {
+              const i = winStart + k
               const style = rowStyles?.[i]
-              const statusIdx = columns.findIndex(
-                (c) => c.toLowerCase() === 'status',
-              )
               const rowCls = [
                 'data-row',
                 style?.full_row ? 'ri-full-row' : '',
@@ -1045,7 +1110,9 @@ export function DataTable({
                   ) : null}
                 </tr>
               )
-            })
+            }),
+            [spacer((rows.length - winEnd) * rowHRef.current, 'dt-bottom')],
+            )
           )}
         </tbody>
       </table>

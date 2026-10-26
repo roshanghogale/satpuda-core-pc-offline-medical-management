@@ -598,6 +598,15 @@ def collect_reorder_candidates(
 
     seen: set = set()
     items: List[Dict[str, Any]] = []
+    # suggest_order_quantity is the shop's one default quantity: read once, not once per
+    # candidate -- a 64,000-medicine store has ~50,000 out-of-stock rows and each read
+    # opened the sync-mode file and asked the settings table (9 s for Reorder by Supplier).
+    qty_memo: Dict[str, float] = {}
+
+    def _suggested(name, med_t, stock_f, pack_s) -> float:
+        if "q" not in qty_memo:
+            qty_memo["q"] = suggest_order_quantity(conn, name, med_t, stock_f, pack_s)
+        return qty_memo["q"]
 
     def _add(name, pack, med_type, stock, rate, supplier_name):
         key = (name.lower(), _as_str(pack))
@@ -615,7 +624,7 @@ def collect_reorder_candidates(
             "current_stock": stock_f,
             "unit_price": float(rate or 0),
             "supplier_name": supplier_s,
-            "suggested_qty": suggest_order_quantity(conn, name, med_t, stock_f, pack_s),
+            "suggested_qty": _suggested(name, med_t, stock_f, pack_s),
         })
 
     try:

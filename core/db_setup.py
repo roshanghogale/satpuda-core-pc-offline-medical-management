@@ -351,6 +351,15 @@ def initialise(conn: sqlite3.Connection):
     except Exception:
         pass
 
+    # Lookup indexes (core/perf_indexes.py), so a store copied or imported into this file
+    # is quick from its first open.
+    try:
+        from core.perf_indexes import ensure_perf_indexes
+
+        ensure_perf_indexes(conn)
+    except Exception as exc:
+        print(f"perf indexes: {exc}")
+
 
 # ── Migrations ────────────────────────────────────────────────────────────────
 

@@ -83,21 +83,34 @@ def count_local(conn, today: Optional[date] = None) -> dict[str, int]:
     hid = "COALESCE(is_hidden,0)" if "is_hidden" in cols else "0"
     exp = "COALESCE(expiry_date,'')" if "expiry_date" in cols else "''"
     where = "COALESCE(deleted,0)=0" if "deleted" in cols else "1=1"
-    for is_hidden, stock, expiry in conn.execute(
-        f"SELECT {hid}, COALESCE(stock_qty,0), {exp} FROM medicines WHERE {where}"
+    # Counted per (hidden flag, expiry) in SQL, each expiry judged once -- not a Python pass
+    # over every row (64,000 rows, 0.3 s of every Inventory open; 5 lakh, 2.5 s). A numeric
+    # (or empty) stock is out of stock at <= 0 in SQL exactly as float() <= 0 says; a stock
+    # stored as text is still judged by float() row by row.
+    numeric = "typeof(stock_qty) IN ('integer','real','null')"
+    for is_hidden, expiry, n, n_out in conn.execute(
+        f"SELECT {hid}, {exp}, COUNT(*), "
+        f"SUM(CASE WHEN {numeric} THEN COALESCE(stock_qty,0) <= 0 ELSE 0 END) "
+        f"FROM medicines WHERE {where} GROUP BY 1, 2"
     ):
-        out["all"] += 1
+        out["all"] += n
         if is_hidden:
-            out["hidden"] += 1
+            out["hidden"] += n
             continue
-        out["active"] += 1
+        out["active"] += n
+        out["out_of_stock"] += int(n_out or 0)
+        if _expired(expiry, today):
+            out["expired"] += n
+    for is_hidden, stock in conn.execute(
+        f"SELECT {hid}, stock_qty FROM medicines WHERE {where} AND NOT ({numeric})"
+    ):
+        if is_hidden:
+            continue
         try:
             if float(stock or 0) <= 0:
                 out["out_of_stock"] += 1
         except (TypeError, ValueError):
             pass
-        if _expired(expiry, today):
-            out["expired"] += 1
     return out
 
 

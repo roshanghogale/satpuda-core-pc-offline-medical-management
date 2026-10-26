@@ -262,6 +262,13 @@ def _open_conn(db_path: str) -> sqlite3.Connection:
         ensure_recent_columns(conn)
     except Exception as exc:
         print(f"[schema] recent columns: {exc}", flush=True)
+    # The lookups a big store needs (core/perf_indexes.py): made once, nothing after.
+    try:
+        from core.perf_indexes import ensure_perf_indexes
+
+        ensure_perf_indexes(conn)
+    except Exception as exc:
+        print(f"[schema] perf indexes: {exc}", flush=True)
     # Offline owns a real settings table. Mirror it, so switching to Online --
     # which runs on :memory: -- shows the same thresholds instead of defaults.
     try:

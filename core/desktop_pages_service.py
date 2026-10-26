@@ -833,6 +833,20 @@ def _inventory_row_status(
     return None
 
 
+def _indicator_styler():
+    """_indicator_style for one list: worked out once per status, not once per row. Every row
+    read the theme file and looked for the status picture again (4,714 times for one Sales
+    History, 1.1 s of its 1.3 s). The answer is the same for every row of one list."""
+    seen: dict = {}
+
+    def style(status: Optional[str]) -> Optional[dict[str, Any]]:
+        if status not in seen:
+            seen[status] = _indicator_style(status)
+        return seen[status]
+
+    return style
+
+
 def _indicator_style(status: Optional[str]) -> Optional[dict[str, Any]]:
     """Row style for React lists — respects Settings → Record Indicators."""
     if not status:
@@ -1208,6 +1222,7 @@ def list_inventory(
     ``show`` picks the view (core.inventory_views): active (default, as always), hidden,
     out_of_stock, expired or all. The answer carries ``view`` and ``view_counts``.
     """
+    _style = _indicator_styler()  # one style per status for the whole list
     from core.inventory_views import (
         count_local as _view_count_local,
         count_online as _view_count_online,
@@ -1502,7 +1517,7 @@ def list_inventory(
                 )
                 if _st:
                     row_counts[_st] = row_counts.get(_st, 0) + 1
-                row_styles.append(_indicator_style(_st))
+                row_styles.append(_style(_st))
             out_columns = list(columns) + ["Status"]
             rows = [
                 list(r) + [_status_cell(st)]
@@ -1775,7 +1790,7 @@ def list_inventory(
         if show_location:
             row.append(loc)
         rows_out.append(row)
-        row_styles.append(_indicator_style(status))
+        row_styles.append(_style(status))
         row_ids.append(int(mid or 0))
 
     # Always append Status column with icon + text for desktop lists.
@@ -1865,6 +1880,7 @@ def _list_sales_history_range(
     ``limit`` None lists every bill in the range up to SALES_HISTORY_ROW_CEILING; a range
     holding more says so in ``rows_note``.
     """
+    _style = _indicator_styler()  # one style per status for the whole list
     from datetime import date as _date
     from core.history_prefs import (
         current_fy_label,
@@ -2112,7 +2128,7 @@ def _list_sales_history_range(
                     # not, it is not a completed sale, and the shop has to be
                     # able to see that here.
                     status = "unfinished"
-                style = _indicator_style(status)
+                style = _style(status)
                 bno = display_sales_bill_no(str(r.get("bill_no") or ""))
                 total_amt = _safe_float(r.get("total_amount"))
                 disc_amt = _safe_float(r.get("discount"))
@@ -2387,7 +2403,7 @@ def _list_sales_history_range(
             status = "cleared"
         if sid in unfinished_ids:
             status = "unfinished"
-        style = _indicator_style(status)
+        style = _style(status)
         from core.fy_serial import display_sales_bill_no
 
         shown = list(r[1:])
@@ -2595,6 +2611,7 @@ def _list_purchase_history_range(
     _scope_all: bool = False,
 ) -> dict[str, Any]:
     """Purchase history — Tk filters + optional medicine/batch search."""
+    _style = _indicator_styler()  # one style per status for the whole list
     from core.history_prefs import (
         current_fy_label,
         load_history_scope,
@@ -2790,7 +2807,7 @@ def _list_purchase_history_range(
                     status = "partial" if entry_paid > 0.01 or _via > 0.01 else "due"
                 else:
                     status = "cleared"
-                style = _indicator_style(status)
+                style = _style(status)
                 pno = display_purchase_no(str(r.get("purchase_no") or ""))
                 fifo_due_total += due_amt
                 fifo_paid_total += entry_paid
@@ -3041,7 +3058,7 @@ def _list_purchase_history_range(
             ri = "partial"
         else:
             ri = "due"
-        style = _indicator_style(ri)
+        style = _style(ri)
         from core.fy_serial import display_purchase_no
 
         rows.append(

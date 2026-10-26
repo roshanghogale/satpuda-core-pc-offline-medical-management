@@ -10,10 +10,27 @@ from datetime import date, datetime
 from typing import Any, Dict, Tuple
 
 
+_MISS = object()
+# text -> parsed date: a shop has a few thousand distinct expiries, and the alert lists parse
+# one per batch row (28,000 strptime calls, a third of a second, on a 64,000-medicine store).
+_PARSED: Dict[str, Any] = {}
+_PARSED_MAX = 50000
+
+
 def parse_expiry(raw: Any):
     text = (raw or "").strip()
     if not text:
         return None
+    hit = _PARSED.get(text, _MISS)
+    if hit is not _MISS:
+        return hit
+    out = _parse_expiry_text(text)
+    if len(_PARSED) < _PARSED_MAX:
+        _PARSED[text] = out
+    return out
+
+
+def _parse_expiry_text(text: str):
     for fmt in ("%Y-%m-%d", "%m/%y", "%m/%Y", "%d-%m-%Y"):
         try:
             parsed = datetime.strptime(text, fmt).date()

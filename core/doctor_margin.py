@@ -50,6 +50,11 @@ _MONEY_KEYS = ("sale_rate", "avg_sale_rate", "purchase_rate", "amount", "cost", 
 
 def _num(v: Any) -> float:
     """Number(v): numbers, numeric text, None (-> 0), anything else NaN."""
+    t = type(v)
+    if t is float:  # the common cases first (a big report calls this millions of times)
+        return v
+    if t is int:
+        return float(v)
     if isinstance(v, bool):
         return 1.0 if v else 0.0
     if v is None:
@@ -73,6 +78,8 @@ def _n0(v: Any) -> float:
 
 def _js_str(v: Any) -> str:
     """String(v)."""
+    if type(v) is str:
+        return v
     if v is None:
         return "null"
     if isinstance(v, bool):
@@ -277,11 +284,12 @@ def doctor_margin(sales: Any, purchases: Any, opts: dict[str, Any] | None = None
                 "flags": flags,
             })
 
-    def row_cmp(a: dict[str, Any], b: dict[str, Any]) -> int:
-        return (_cmp_str(a["doctor"], b["doctor"]) or _cmp_str(a["date"], b["date"])
-                or _cmp_str(a["bill_no"], b["bill_no"]))
-
-    rows.sort(key=cmp_to_key(row_cmp))
+    # Doctor, then date, then bill number, each by UTF-16 code units (JavaScript's sort), as a
+    # key worked out once per row: a comparison function encoding six strings for every
+    # comparison was most of a year's report on a big store (5 lakh lines: 17 s of 26). The
+    # same comparisons in the same stable sort give the same order.
+    rows.sort(key=lambda r: (_u16(_js_str(r["doctor"])), _u16(_js_str(r["date"])),
+                             _u16(_js_str(r["bill_no"]))))
 
     groups: dict[tuple, dict[str, Any]] = {}
     for r in rows:
@@ -317,7 +325,13 @@ def doctor_margin(sales: Any, purchases: Any, opts: dict[str, Any] | None = None
         d = _num(a["medicine_id"]) - _num(b["medicine_id"])
         return -1 if d < 0 else 1 if d > 0 else 0  # NaN counts as equal, as in sort()
 
-    summary.sort(key=cmp_to_key(sum_cmp))
+    if all(math.isfinite(_num(s["medicine_id"])) for s in summary):
+        # sum_cmp as a key (see rows above). Only when every id is a finite number: a NaN
+        # "equals" everything in sum_cmp, which no key can say.
+        summary.sort(key=lambda s: (_u16(_js_str(s["doctor"])), _u16(_js_str(s["name"])),
+                                    _u16(_js_str(s["batch"])), _num(s["medicine_id"])))
+    else:
+        summary.sort(key=cmp_to_key(sum_cmp))
 
     names = sorted({r["doctor"] for r in rows}, key=_u16)
     doctors = [{"doctor": d, **_total([r for r in rows if r["doctor"] == d])} for d in names]
