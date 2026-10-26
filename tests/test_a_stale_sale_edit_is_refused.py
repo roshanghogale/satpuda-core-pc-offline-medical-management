@@ -17,7 +17,8 @@ from unittest import mock
 
 from core import db_setup
 
-DAY = "2026-10-25"
+# Today: a medicine added today cannot be sold on an earlier bill date.
+DAY = __import__("datetime").date.today().isoformat()
 
 
 class StaleEdit(unittest.TestCase):
