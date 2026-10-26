@@ -2870,7 +2870,9 @@ def _edi_htf_line_amounts(
         rate = _to_float(_cell_at(row, 10))
         mrp = _to_float(_cell_at(row, 12))
         qty = _to_float(_cell_at(row, 15))
-        free_qty = 0.0
+        # T[16] is the free quantity (Ratnadeep Pharma, 18 Oct 2026: BECLOMIN 5 + 1, HIFEN 100
+        # 4.5 + 0.5). It used to be read as none, so every free item of these bills was lost.
+        free_qty = max(0.0, _to_float(_cell_at(row, 16)))
         amount = _to_float(_cell_at(row, 21)) or round(rate * qty, 2)
         if not amount and rate and qty:
             amount = round(rate * qty, 2)
