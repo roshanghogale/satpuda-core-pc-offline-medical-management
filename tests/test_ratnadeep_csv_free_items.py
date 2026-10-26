@@ -33,6 +33,11 @@ class RatnadeepFreeItems(unittest.TestCase):
         # The amount is still qty x rate: the free goods are not billed.
         self.assertAlmostEqual(by["BECLOMIN OINT"].amount, 201.90, places=2)
 
+    def test_the_cgst_column_is_not_taken_as_a_discount(self):
+        # T[22] = 2.50 is CGST %; T[21] = rate x qty, so no line has a discount.
+        inv = pi.parse_purchase_excel(self.path)
+        self.assertEqual([i.discount_pct for i in inv.items], [0.0, 0.0, 0.0])
+
 
 if __name__ == "__main__":
     unittest.main()

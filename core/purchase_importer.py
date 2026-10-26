@@ -3139,6 +3139,16 @@ def _enrich_item_metadata_from_db(conn: Any, item: ImportedPurchaseItem) -> None
     _apply_import_fallback_schedule(item, conn)
 
 
+def _edi_line_discount_shown(pct: float, rate: float, qty: float, amount: float) -> float:
+    """A line discount % from an EDI row, kept only when the row's own amount agrees with it."""
+    if pct <= 0 or pct >= 100 or rate <= 0 or qty <= 0 or amount <= 0:
+        return 0.0
+    gross = rate * qty
+    if abs(gross - amount) <= 0.02:
+        return 0.0
+    return pct if abs(gross * (1 - pct / 100.0) - amount) <= 1.0 else 0.0
+
+
 def _parse_h_t_f_invoice(path: str, rows: Sequence[Sequence[Any]], ext: str) -> Optional[PurchaseInvoice]:
     """Parse EDI export rows: H=header, T=item, F=footer (Seema/Micropro or MARG ERP)."""
     t_rows = [row for row in rows if _clean_cell(_cell_at(row, 0)).upper() == "T"]
@@ -3180,7 +3190,11 @@ def _parse_h_t_f_invoice(path: str, rows: Sequence[Sequence[Any]], ext: str) -> 
             line_cd_pct = _to_float(_cell_at(row, 20))
             line_pd_pct = _to_float(_cell_at(row, 21))
         elif edi_fmt == "seema_legacy":
-            line_cd_pct = _to_float(_cell_at(row, 22))
+            # T[22] is called the line "CD%", but on Ratnadeep's files it is the CGST % (2.50
+            # on a 5% line) while T[21] is plain rate x qty: read as a discount it took 2.5% off
+            # every line's rate and taxable value. Only a discount the amount shows counts
+            # (the phone's lineDiscount does the same).
+            line_cd_pct = _edi_line_discount_shown(_to_float(_cell_at(row, 22)), rate, qty, amount)
             line_pd_pct = 0.0
         else:
             line_cd_pct = 0.0
