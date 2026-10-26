@@ -5376,7 +5376,9 @@ def get_shelf_full(conn: sqlite3.Connection) -> dict[str, Any]:
     assigned = conn.execute(
         """
         SELECT id, name, COALESCE(batch_no,''), COALESCE(location,'')
-        FROM medicines
+        FROM medicines NOT INDEXED
+        -- NOT INDEXED: the whole list is read; sorting it beats walking a name index
+        -- (core/perf_indexes.py) row by row, and the rows come in the order they always did
         WHERE location IS NOT NULL AND TRIM(location) != ''
         ORDER BY name COLLATE NOCASE LIMIT 2000
         """
@@ -5384,7 +5386,9 @@ def get_shelf_full(conn: sqlite3.Connection) -> dict[str, Any]:
     unassigned = conn.execute(
         """
         SELECT id, name, COALESCE(batch_no,''), COALESCE(stock_qty,0)
-        FROM medicines
+        FROM medicines NOT INDEXED
+        -- NOT INDEXED: the whole list is read; sorting it beats walking a name index
+        -- (core/perf_indexes.py) row by row, and the rows come in the order they always did
         WHERE location IS NULL OR TRIM(location) = ''
         ORDER BY name COLLATE NOCASE LIMIT 500
         """

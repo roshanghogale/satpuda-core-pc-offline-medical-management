@@ -197,17 +197,43 @@ def set_stock_from_server(conn: sqlite3.Connection, server_stock: list) -> int:
     """Local stock = server's figure + this PC's own unsent movements. Call inside the
     worker's write transaction with capture paused. server_stock: [[id, qty, hidden], ...]."""
     pending = pending_stock_by_medicine(conn)
-    n = 0
+    rows: list[tuple[int, int, int]] = []
     for row in server_stock or []:
         try:
-            mid, qty, hidden = int(row[0]), int(row[1]), int(row[2] or 0)
+            rows.append((int(row[0]), int(row[1]), int(row[2] or 0)))
         except (TypeError, ValueError, IndexError):
             continue
-        local = qty + pending.get(mid, 0)
-        cur = conn.execute(
-            "UPDATE medicines SET stock_qty=?, is_hidden=? WHERE id=? AND "
-            "(COALESCE(stock_qty,0) <> ? OR COALESCE(is_hidden,0) <> ?)",
-            (local, hidden, mid, local, hidden),
-        )
-        n += cur.rowcount or 0
+    n = 0
+    # The figures are read first, a chunk at a time, and only a batch whose figure differs is
+    # written. The UPDATE below changes nothing when they are equal, so the result is the same;
+    # but one UPDATE per batch of the whole store held the write lock for 0.7 s on 64,000
+    # batches and 11 s on 5 lakh (the till's Save waited behind it every 30 minutes).
+    for at in range(0, len(rows), _STOCK_CHUNK):
+        chunk = rows[at:at + _STOCK_CHUNK]
+        ids = sorted({mid for mid, _q, _h in chunk})
+        have = {
+            int(r[0]): (r[1], r[2])
+            for r in conn.execute(
+                "SELECT id, COALESCE(stock_qty,0), COALESCE(is_hidden,0) FROM medicines "
+                f"WHERE id IN ({','.join('?' * len(ids))})",
+                ids,
+            )
+        }
+        for mid, qty, hidden in chunk:
+            now = have.get(mid)
+            if now is None:
+                continue                      # not in this copy: the UPDATE matches nothing
+            local = qty + pending.get(mid, 0)
+            if now[0] == local and now[1] == hidden:
+                continue                      # already the figure: the UPDATE changes nothing
+            cur = conn.execute(
+                "UPDATE medicines SET stock_qty=?, is_hidden=? WHERE id=? AND "
+                "(COALESCE(stock_qty,0) <> ? OR COALESCE(is_hidden,0) <> ?)",
+                (local, hidden, mid, local, hidden),
+            )
+            n += cur.rowcount or 0
+            have[mid] = (local, hidden)
     return n
+
+
+_STOCK_CHUNK = 500

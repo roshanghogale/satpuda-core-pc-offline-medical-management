@@ -138,10 +138,22 @@ if ($Silent) {
 
 # ------------------------------------------------------------- the request --
 
+# TLS 1.2 by number (3072), not by name: the name throws on a .NET without it,
+# the number still works wherever the OS has TLS 1.2. Same as satpuda_fetch.ps1.
 try {
-    [Net.ServicePointManager]::SecurityProtocol =
-        [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls11 -bor [Net.SecurityProtocolType]::Tls
-    try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 12288 } catch { }
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType](3072 -bor 768 -bor 192)
+} catch {
+    try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]3072 } catch { }
+}
+# TLS 1.3 only where Windows has a TLS 1.3 client (build 20348+); on Windows 10
+# the flag gains nothing and can break the handshake.
+if ([Environment]::OSVersion.Version.Build -ge 20348) {
+    try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]12288 } catch { }
+}
+# An office proxy that wants the Windows login (HTTP 407).
+try {
+    $px = [Net.WebRequest]::DefaultWebProxy
+    if ($px) { $px.Credentials = [Net.CredentialCache]::DefaultNetworkCredentials }
 } catch { }
 
 $latestTag = ''; $releaseUrl = ''; $assets = @()

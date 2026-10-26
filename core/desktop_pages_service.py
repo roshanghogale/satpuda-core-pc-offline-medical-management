@@ -1005,9 +1005,13 @@ def _distinct_item_medicine_names(conn, items_table: str) -> list[str]:
     names: list[str] = []
     try:
         if _table_exists(conn, "medicines") and "medicine_id" in icols:
+            # NOT INDEXED + CROSS JOIN: the lines read first, from the table in their own order,
+            # as always. These are the first 800 names met; with an index on the lines'
+            # medicine_id SQLite would read that index (smaller) or the medicines first instead
+            # -- another 800 (big stores, 26 Oct 2026).
             rows = conn.execute(
-                f"SELECT DISTINCT TRIM(m.name) FROM {items_table} i "
-                "JOIN medicines m ON m.id=i.medicine_id "
+                f"SELECT DISTINCT TRIM(m.name) FROM {items_table} i NOT INDEXED "
+                "CROSS JOIN medicines m ON m.id=i.medicine_id "
                 "WHERE TRIM(COALESCE(m.name,''))!='' "
                 "LIMIT 800"
             ).fetchall()
@@ -1074,8 +1078,10 @@ def history_filter_choices(conn, page: str) -> dict[str, list[str]]:
                     customers.extend(r[0] for r in rows if r and r[0])
                 if _table_exists(conn, "customers") and "customer_id" in scols:
                     rows = conn.execute(
-                        "SELECT DISTINCT TRIM(c.name) FROM sales s "
-                        "JOIN customers c ON c.id=s.customer_id "
+                        # NOT INDEXED + CROSS JOIN: the bills read first, as always (see
+                        # _distinct_item_medicine_names).
+                        "SELECT DISTINCT TRIM(c.name) FROM sales s NOT INDEXED "
+                        "CROSS JOIN customers c ON c.id=s.customer_id "
                         "WHERE TRIM(COALESCE(c.name,''))!='' LIMIT 800"
                     ).fetchall()
                     customers.extend(r[0] for r in rows if r and r[0])

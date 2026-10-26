@@ -335,7 +335,9 @@ def fetch_low_stock_alerts(conn, detail: bool = False) -> List[Tuple[Any, ...]]:
     cur.execute(f"""
         SELECT name, COALESCE(type,''), COALESCE(unit,''),
                COALESCE(stock_qty,0), id
-        FROM medicines
+        FROM medicines NOT INDEXED
+        -- NOT INDEXED: the whole list is read; sorting it beats walking a name index
+        -- (core/perf_indexes.py) row by row, and the rows come in the order they always did
         WHERE {HIDDEN_FILTER_SQL} AND COALESCE(stock_qty,0) > 0
         ORDER BY name COLLATE NOCASE, id
     """)
@@ -399,7 +401,9 @@ def fetch_out_of_stock_medicines(conn, detail: bool = False) -> List[Tuple[Any, 
     cur.execute(f"""
         SELECT name, COALESCE(unit, ''), COALESCE(type, ''),
                COALESCE(mrp, 0), COALESCE(rate, 0), id
-        FROM medicines
+        FROM medicines NOT INDEXED
+        -- NOT INDEXED: the whole list is read; sorting it beats walking a name index
+        -- (core/perf_indexes.py) row by row, and the rows come in the order they always did
         WHERE {HIDDEN_FILTER_SQL}
         ORDER BY name COLLATE NOCASE, unit COLLATE NOCASE, id DESC
     """)
@@ -440,7 +444,9 @@ def _stocked_batches_read(conn) -> List[Tuple[Any, ...]]:
         SELECT id, name, COALESCE(type,''), COALESCE(batch_no,''),
                COALESCE(expiry_date,''), COALESCE(stock_qty,0),
                COALESCE(rate,0), COALESCE(mrp,0), COALESCE(unit,'')
-        FROM medicines
+        FROM medicines NOT INDEXED
+        -- NOT INDEXED: the whole list is read; sorting it beats walking a name index
+        -- (core/perf_indexes.py) row by row, and the rows come in the order they always did
         WHERE {HIDDEN_FILTER_SQL} AND COALESCE(stock_qty,0) > 0
         ORDER BY name COLLATE NOCASE, batch_no
     """)

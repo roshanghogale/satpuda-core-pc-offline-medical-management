@@ -49,9 +49,13 @@ def tearDownModule():
 
 
 def _strip_perf_indexes(path: str) -> None:
+    from core.perf_indexes import BILLING_INDEXES, LOOKUP_INDEXES
+
+    ours = {n for n, *_ in BILLING_INDEXES} | {n for n, *_ in LOOKUP_INDEXES}
     c = sqlite3.connect(path)
-    for (n,) in c.execute(
-            "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'ix_perf_%'").fetchall():
+    for (n,) in c.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall():
+        if n not in ours:
+            continue
         c.execute(f"DROP INDEX {n}")
     c.execute("DROP TABLE IF EXISTS sqlite_stat1")
     c.commit()
@@ -168,31 +172,41 @@ class EveryPageAnswersTheSame(_ShopCase):
 
 class TheLookupIndexes(_ShopCase):
     def test_made_once_with_statistics_that_keep_every_other_plan(self):
-        from core.perf_indexes import PERF_INDEXES, STAT, ensure_perf_indexes
+        from core.perf_indexes import BILLING_INDEXES, LOOKUP_INDEXES, STAT, ensure_perf_indexes
 
         c = sqlite3.connect(self.without_db)
         try:
             made = ensure_perf_indexes(c)
-            self.assertEqual(sorted(made), sorted(n for n, _t, _c in PERF_INDEXES))
+            lookup = {n for n, _t, _c in LOOKUP_INDEXES}
+            self.assertEqual(set(made), lookup | {n for n, *_ in BILLING_INDEXES})
             self.assertEqual(ensure_perf_indexes(c), [])
             stats = dict(c.execute("SELECT idx, stat FROM sqlite_stat1").fetchall())
             for n in made:
-                self.assertEqual(stats[n], STAT)
+                # the pages' lookups are "unordered"; the billing indexes keep no statistics
+                self.assertEqual(stats.get(n), STAT if n in lookup else None, n)
 
             def plan(sql, *p):
                 return " ".join(r[-1] for r in c.execute("EXPLAIN QUERY PLAN " + sql, p).fetchall())
 
-            # a lookup by name uses the index ...
+            # a lookup by name / by bill uses an index ...
             self.assertIn("ix_perf_medicines_name", plan("SELECT * FROM medicines WHERE name=?", "X"))
-            self.assertIn("ix_perf_sales_items_sale", plan("SELECT * FROM sales_items WHERE sale_id=?", 1))
-            # ... a whole list in name order is read and sorted as before (not walked through it)
+            self.assertIn("idx_sales_items_sale", plan("SELECT * FROM sales_items WHERE sale_id=?", 1))
+            # ... the billing search still reads its name index in order (not stopped by the
+            # "unordered" statistics of the lookups) ...
+            self.assertIn("idx_medicines_instock_name", plan(
+                "SELECT name FROM medicines WHERE stock_qty > 0 ORDER BY name COLLATE NOCASE LIMIT 50"))
+            # ... and a whole list in name order is read and sorted as before
             self.assertNotIn("ix_perf", plan(
                 "SELECT name, SUM(stock_qty) FROM medicines GROUP BY name"))
-            self.assertNotIn("ix_perf", plan(
-                "SELECT * FROM medicines ORDER BY name COLLATE NOCASE, id"))
-            self.assertNotIn("ix_perf", plan(
-                "SELECT DISTINCT TRIM(m.name) FROM sales_items i JOIN medicines m ON m.id=i.medicine_id "
-                "WHERE TRIM(COALESCE(m.name,''))!='' LIMIT 800"))
+            from core import alert_monitoring_service as am
+
+            self.assertTrue(all("idx_" not in plan(sql) and "ix_perf" not in plan(sql) for sql in (
+                "SELECT id, name FROM medicines NOT INDEXED WHERE COALESCE(is_hidden,0)=0 "
+                "ORDER BY name COLLATE NOCASE, batch_no",
+                "SELECT DISTINCT TRIM(m.name) FROM sales_items i NOT INDEXED CROSS JOIN medicines m "
+                "ON m.id=i.medicine_id WHERE TRIM(COALESCE(m.name,''))!='' LIMIT 800",
+            )))
+            self.assertTrue(callable(am.fetch_low_stock_alerts))
         finally:
             c.close()
 
@@ -204,7 +218,8 @@ class TheLookupIndexes(_ShopCase):
         try:
             c.execute("CREATE TABLE medicines (id INTEGER PRIMARY KEY, name TEXT)")
             c.execute("CREATE TABLE sales_items (id INTEGER PRIMARY KEY, qty REAL)")  # no sale_id
-            self.assertEqual(ensure_perf_indexes(c), ["ix_perf_medicines_name"])
+            self.assertEqual(set(ensure_perf_indexes(c)), {
+                "idx_medicines_name_nocase", "idx_medicines_name_upper", "ix_perf_medicines_name"})
             self.assertEqual(ensure_perf_indexes(c), [])
         finally:
             c.close()
@@ -216,8 +231,9 @@ class TheLookupIndexes(_ShopCase):
             conn = desktop_api._open_conn(self.without_db)
         try:
             names = {r[0] for r in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'ix_perf_%'")}
-            self.assertIn("ix_perf_sales_items_sale", names)
+                "SELECT name FROM sqlite_master WHERE type='index'")}
+            self.assertIn("idx_sales_items_sale", names)
+            self.assertIn("ix_perf_medicines_name", names)
         finally:
             conn.close()
 

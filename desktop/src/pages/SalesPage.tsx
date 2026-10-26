@@ -681,6 +681,31 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
     [focusNavOrder],
   )
 
+  // The pickers' lists, built once per list instead of on every render. Built inline, each
+  // keystroke anywhere on the bill (a medicine search letter, a quantity) made a new
+  // 8,500-row customer array, and the combo then re-keyed and re-filtered all of it.
+  const customerItems = useMemo(
+    () =>
+      customers.map((c, i) => ({
+        id: c.id != null ? String(c.id) : `name:${c.name}:${i}`,
+        label: c.name,
+        meta: c.phone || undefined,
+      })),
+    [customers],
+  )
+  const villageItems = useMemo(
+    () => (defaults?.villages || []).map((v) => ({ id: v, label: v })),
+    [defaults?.villages],
+  )
+  const doctorItems = useMemo(
+    () =>
+      (defaults?.doctors || []).map((d) => {
+        const n = doctorNumbers[d.trim().toUpperCase()]
+        return { id: d, label: d, meta: n ? shortcutBadge(n) : undefined }
+      }),
+    [defaults?.doctors, doctorNumbers],
+  )
+
   const reserved = useMemo(() => {
     const map: Record<string, number> = {}
     for (const it of tab?.items || []) {
@@ -2037,11 +2062,12 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
       patchTab({ autosaveSaleId: null, autosaveToken: null })
       await clearForm({ hint: nextHint })
       requestCustomerNameFocus()
-      try {
-        await reloadMeta()
-      } catch {
+      // The customer list and settings are fetched again in the background. Awaited here,
+      // the save stayed "in progress" until they came back (the whole customer list, about
+      // 1 MB on 8,500 customers), so F5 / F7 on the next bill did nothing until then.
+      void reloadMeta().catch(() => {
         /* ignore */
-      }
+      })
       return true
     } catch (e) {
       showAlert({
@@ -2083,6 +2109,9 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
         save_first: needsSave,
         mode: 'slot', // same as Tk F7/F8 → print_bill_with_slot (dot-matrix via Settings)
         confirm_discount_loss: confirmLoss,
+        // The engine answers once the bill is SAVED (when no print dialog can come up) and
+        // this page prints it with a second call below, while the next bill is started.
+        defer_print: needsSave,
       })
       if (res.need_confirm) {
         showAlert({
@@ -2153,7 +2182,37 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
       const multiSheet = /_p\d+\.pdf$/i.test(res.pdf_path || '')
       const printedTo = res.dot_matrix
         ? ''
-        : (multiSheet ? res.pdf_dir : res.pdf_path) || res.pdf_dir || ''
+        : res.deferred
+          ? res.pdf_dir || ''
+          : (multiSheet ? res.pdf_dir : res.pdf_path) || res.pdf_dir || ''
+      if (res.deferred && res.sale_id) {
+        // Saved; the print runs now, on its own. A failure is said plainly -- the bill is
+        // saved, so billing it again would sell it twice.
+        const savedNo = res.bill_no || ''
+        const printFailed = (why: string) =>
+          showAlert({
+            title: savedNo ? `Bill ${savedNo} saved — print from History` : 'Bill saved — print from History',
+            message:
+              (savedNo
+                ? `Bill ${savedNo} was saved successfully, but it could not be printed.`
+                : 'The bill was saved, but it could not be printed.') +
+              '\n\nDo NOT bill it again. Open Sales History and print it from there.' +
+              (why ? `\n\nReason: ${why}` : ''),
+            kind: 'warning',
+          })
+        void printSalesBill({
+          sale_id: res.sale_id,
+          bill_no: savedNo,
+          slot,
+          mode: 'slot',
+          save_first: false,
+          just_saved: true,
+        })
+          .then((pr) => {
+            if (!pr.ok) printFailed(pr.error || '')
+          })
+          .catch((e) => printFailed(e instanceof Error ? e.message : String(e)))
+      }
       showAlert({
         title: 'Bill Saved',
         message:
@@ -2175,11 +2234,10 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
       patchTab({ autosaveSaleId: null, autosaveToken: null })
       await clearForm({ hint: nextHint })
       requestCustomerNameFocus()
-      try {
-        await reloadMeta()
-      } catch {
+      // In the background, as after Save: the next bill must not wait for the customer list.
+      void reloadMeta().catch(() => {
         /* ignore */
-      }
+      })
     } catch (e) {
       showAlert({
         title: 'Print Bill',
@@ -3563,11 +3621,7 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
               minChars={0}
               filterLocal
               listLabel="Customers"
-              items={customers.map((c, i) => ({
-                id: c.id != null ? String(c.id) : `name:${c.name}:${i}`,
-                label: c.name,
-                meta: c.phone || undefined,
-              }))}
+              items={customerItems}
               onChange={(v) =>
                 patchTab({ customer: v, customerId: null })
               }
@@ -3609,10 +3663,7 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
               minChars={0}
               filterLocal
               listLabel="Villages"
-              items={(defaults?.villages || []).map((v) => ({
-                id: v,
-                label: v,
-              }))}
+              items={villageItems}
               onChange={(v) => {
                 contactDirtyRef.current.address = true
                 patchTab({ address: v })
@@ -3681,10 +3732,7 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
               minChars={0}
               filterLocal
               listLabel="Doctors"
-              items={(defaults?.doctors || []).map((d) => {
-                const n = doctorNumbers[d.trim().toUpperCase()]
-                return { id: d, label: d, meta: n ? shortcutBadge(n) : undefined }
-              })}
+              items={doctorItems}
               onChange={(v) => {
                 // A name typed out in full is as good as picked: its number comes too.
                 const known = defaults?.doctor_phones?.[v.trim().toUpperCase()]

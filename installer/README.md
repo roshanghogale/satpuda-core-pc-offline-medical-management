@@ -11,6 +11,53 @@ That means: **to ship a new version you publish a new zip, not a new installer.*
 
 ---
 
+## This round: other people's PCs (Oct 2026)
+
+The installer worked on the owner's PC and failed, or installed badly, on some
+shops'. What changed, each with the error code the worker now gives (the
+sentence the shop reads is in `FriendlyError` in the .iss):
+
+| Problem on a shop PC | Before | Now |
+|---|---|---|
+| Antivirus (Net Protector) deletes `SatpudaCore_Desktop.exe` right after unpacking | "did not contain Satpuda Core where it was expected" (LAYOUT) | Every unpacked file is counted right away and again after 5 s; missing ones are unpacked once more; if they go again: **AVBLOCK**, naming the antivirus (Windows Security Center) and the exact folder to exclude, with a **Retry** button. A zip that vanishes from the cache is **AVZIP**. LAYOUT now only means the zip itself lacks the program (checked before unpacking). |
+| Group Policy execution policy AllSigned / Restricted | `-File` refused before the first line; the shop saw "could not be completed" | The worker, the version check, the Start Menu "Check for updates" and the logon VBS all start PowerShell with `-Command` and **dot-source** the script text; execution policy does not govern that. |
+| AppLocker / Device Guard Constrained Language Mode | a heap of type errors, exit 1 | **CLM**, said plainly (only whoever manages the PC can lift it). |
+| .NET without TLS 1.2 by default | worked only by name | TLS 1.2 set by number (3072), plus 1.3 where present; office proxies get the Windows login (407). Same in `satpuda_update.ps1`. |
+| PC clock years off (flat CMOS battery) | every HTTPS check fails, "could not be downloaded" after a minute of retries | A certificate failure is not retried; the PC's clock is compared with a plain-HTTP `Date` header: **CLOCK** with both dates, else **TLS** (HTTPS interception). DNS / proxy failures say so in the NET details. |
+| Disk nearly full, or `%LOCALAPPDATA%` on another drive | a write error half way, or a short download | Free space checked before downloading (cache drive: zip x2), before copying a chosen zip, and before unpacking (install drive): **DISK**. The wizard also checks the cache drive when it differs. |
+| Install folder too deep (> 260 characters) | unpacked fine through `\\?\`, then the program could not load its modules | **LONGPATH** before unpacking (unless LongPathsEnabled=1); the folder page refuses such a folder first. |
+| User names with spaces, apostrophes, Marathi/Hindi letters | non-ASCII bytes on the worker's pipe | Paths are PowerShell single-quoted literals; the pipe is forced to ASCII (`?`), the install log keeps the real text (UTF-8). Tested with `NEW USER D'Souza <Devanagari>`. |
+| WebView2 Runtime missing or broken (registered, folder gone) | the program's window never opened | After the files land, the installer downloads Microsoft's Evergreen Bootstrapper (go.microsoft.com fwlink 2124703), checks its Microsoft signature, and runs `/silent /install` (per user, no password). If that fails, the last page says so, with the link. |
+| No Visual C++ redistributable | the engine starts (it carries vcruntime140), but `win32ui` - dot-matrix / V4 / PDF printing - needs `mfc140u.dll`, which builds up to 1.0.11 did not carry | `SatpudaEngine_Folder.spec` now bundles `mfc140u.dll` next to `win32ui.pyd` (verified: that copy is the one Windows loads). Until a build with it is published, the installer offers Microsoft's `vc_redist.x64.exe` (aka.ms link, signature checked; needs an administrator). |
+| Port 8765 taken by another program, or inside a Hyper-V/WSL/Docker reserved range | the engine could not start; nothing said why | Checked at install; the last page names the program or the reserved range (**PORT\|**). |
+| Old app still running | "close it, Retry" | **Yes - close it for me**: closes it as its X does (it saves and takes its closing backup), then carries on. |
+| Mark of the Web on unpacked programs | - | The worker never adds one; any `Zone.Identifier` on .exe/.dll/.pyd is removed anyway. |
+| Anything unexpected in the worker | exit 1, nothing on the pipe | **INTERNAL** with the message and script line. |
+| Uninstall | deleted all of `%LOCALAPPDATA%\SatpudaCore`, including the voice pack | Deletes only the installer's cache and logs there; the rest goes only with "delete all your data". |
+| Windows 7 / 8.1, 32-bit Windows | Inno's "requires version 10.0" / "architectures: x64" | Plain sentences saying why (WebView2 and Python 3.13 need Windows 10+, the program is 64-bit). |
+
+**The compatibility check.** Every run of the worker now opens
+`%LOCALAPPDATA%\SatpudaCore\install.log` with a block of `compat:` lines:
+Windows version/build/edition, OS and PowerShell bitness, PowerShell version,
+language mode and execution policies, .NET release, TLS in use and the TLS
+registry switches, local/UTC time and time zone, user profile (spaces /
+non-ASCII), install and cache folders, LongPathsEnabled, free space on both
+drives, WebView2 Runtime version (or broken), VC++ runtime and MFC, antivirus
+products and Controlled Folder Access, proxy (WinINet, .NET and WinHTTP),
+whether Satpuda is running, and port 8765. Setup appends `[setup]` lines for
+WebView2 / VC++ / port. **One file to ask a shop for.**
+
+Tests: `tests/test_installer_fetch_republish.py` runs every worker test through
+the same `-Command` launch the installer builds, and adds: policy
+AllSigned/Restricted, CLM, a Devanagari + apostrophe + space user folder, low
+disk (download and chosen zip), too-deep folder, an unexpected error, Mark of
+the Web, a port in use, antivirus deleting the exe once (put right) and always
+(AVBLOCK, previous install kept, zip kept), a zip without the program (LAYOUT
+before unpacking), and HTTPS with an untrusted certificate with the clock two
+years off (CLOCK) and right (TLS).
+
+---
+
 ## This round: the VPS moved
 
 The server changed address. `srv1892850.hstgr.cloud` is the old box and it dies
@@ -897,7 +944,9 @@ dialog is gone. Do not add `dialog` back.
 Settings → Apps → **Satpuda Core** → Uninstall, or the entry in Programs and
 Features. It removes the program folder, the shortcuts (at the real paths they
 were created at, which matters when the desktop was redirected), the download
-cache, and its registry key.
+cache and install logs, and its registry key. The rest of
+`%LOCALAPPDATA%\SatpudaCore` (the voice pack) stays unless the shop asks for
+its data to be deleted.
 
 It shows a checkbox, **unticked**, offering to delete the shop's data as well.
 Leave it unticked and the bills, stock and settings survive for a reinstall.
@@ -1106,7 +1155,7 @@ Three logs, all plain text, all on the shop's PC:
 | Log | Where | What it tells you |
 |---|---|---|
 | Installer log | `%TEMP%\Setup Log *.txt` | Every line the worker printed, prefixed `[fetch]`, plus which desktop folders were tried and why each failed |
-| Worker log | `%LOCALAPPDATA%\SatpudaCore\install.log` | The same, kept even if the installer window is gone |
+| Worker log | `%LOCALAPPDATA%\SatpudaCore\install.log` | **Ask for this one first.** Each run opens with the `compat:` block (Windows, PowerShell, .NET, TLS, clock, free space, WebView2, VC++, antivirus, proxy, port 8765), then everything the worker did, then Setup's own `[setup]` lines (WebView2 / VC++ / port) |
 | Update-check log | `%LOCALAPPDATA%\SatpudaCore\update-check.log` | Version compared, and which of the three failure branches was hit |
 
 The desktop-icon lines are the useful ones for failure 1 — they name each

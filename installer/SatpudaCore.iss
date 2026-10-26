@@ -123,6 +123,15 @@ CloseApplications=no
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
+; Said plainly to a shop on an older or a 32-bit Windows, instead of Inno's
+; "requires Windows version 10.0" / "processor architectures: x64". Windows 7
+; and 8.1 cannot be supported: the program's window is Microsoft Edge WebView2
+; (no longer updated for them since early 2023) and its engine is Python 3.13
+; (Windows 10 and newer). 32-bit Windows cannot run a 64-bit program at all.
+[Messages]
+WinVersionTooLowError=Satpuda Core needs Windows 10 or Windows 11 (64-bit).%n%nThis computer has an older Windows (Windows 7 or 8.1), which the program cannot run on. It needs Windows 10 or 11.
+OnlyOnTheseArchitectures=Satpuda Core needs 64-bit Windows 10 or Windows 11.%n%nThis computer runs 32-bit Windows, which cannot run Satpuda Core. A computer with 64-bit Windows is needed (most computers bought after 2012 can run it).
+
 ; NO [LangOptions] font block here, and that is a decision rather than an
 ; omission. Default.isl leaves DialogFontName empty, which means "the system's
 ; own UI font" - Segoe UI 9 on Windows 10 and 11, which is the only place this
@@ -255,6 +264,32 @@ const
   API_MIG_DONE    = 1;
   API_MIG_FAILED  = 2;
 
+  { ---- What the program needs from Windows ------------------------------
+    SatpudaCore_Desktop.exe is a Tauri window: it draws with the Microsoft
+    Edge WebView2 Runtime and does not start without it (Windows 11 has it;
+    a Windows 10 that never got the new Edge does not, and some have a broken
+    one - registered but its files gone). The client id below is Microsoft's
+    documented id for the Evergreen Runtime; the link is Microsoft's own
+    fwlink for the Evergreen Bootstrapper (about 2 MB, which then fetches the
+    runtime). The bootstrapper installs for this user when it is not run as
+    an administrator, so no password is needed.
+
+    The data engine (Python 3.13, PyInstaller) carries its own vcruntime140 and
+    needs nothing else to start. Its printing module (pywin32's win32ui, used for
+    dot-matrix slips, HP "V4" drivers and PDF printing) needs MFC, mfc140u.dll,
+    which only the Microsoft Visual C++ Redistributable puts on a PC - builds
+    up to 1.0.11 did not carry it. From the next build the engine carries it
+    too (SatpudaEngine_Folder.spec); until then the installer offers the
+    redistributable from Microsoft's own link. It needs an administrator. }
+  WEBVIEW2_CLIENT = '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
+  WEBVIEW2_URL    = 'https://go.microsoft.com/fwlink/p/?LinkId=2124703';
+  WEBVIEW2_PAGE   = 'https://developer.microsoft.com/microsoft-edge/webview2/';
+  VCREDIST_URL    = 'https://aka.ms/vs/17/release/vc_redist.x64.exe';
+  { The payload's longest file path below <app>\app\ is 117 characters
+    (engine\_internal\google\genai\...\__init__.py, build 1.1.0-beta.10).
+    Kept with some room, for the folder page's own check. }
+  PAYLOAD_DEEPEST = 130;
+
 var
   GProgressPage   : TOutputProgressWizardPage;
   GStatusText     : String;    { current step caption, mirrored so we never read it back }
@@ -277,6 +312,11 @@ var
   GOlderBuild     : Boolean;   { OLDERBUILD| line: the chosen zip is an earlier build of this version }
   GLastErrText    : String;    { the last failure sentence, without the log line }
   GZipFound       : String;    { a matching zip seen in Downloads, '' when none }
+
+  { Other PCs (Oct 2026). }
+  GAvNames        : String;    { AV| line: antivirus products Windows knows of }
+  GPortNotes      : String;    { PORT| lines: the app's local port is taken or reserved }
+  GPrereqProblem  : String;    { WebView2 / VC++ runtime could not be put right; said on the last page }
 
   GDesktopLnk     : String;    { where the desktop shortcut actually landed, '' if none }
   GStartMenuLnk   : String;
@@ -396,6 +436,68 @@ begin
   { Quote a path for a PowerShell -File argument. A trailing backslash would
     escape the closing quote, so it is stripped first. }
   Result := '"' + RemoveBackslashUnlessRoot(S) + '"';
+end;
+
+{ A PowerShell single-quoted literal: nothing inside is expanded ($, backtick),
+  and a quote is doubled. PowerShell also takes the curly quotes as quotes, so
+  they are doubled too - a user folder like C:\Users\D'Souza must not end the
+  string early. }
+function PSQuote(const S: String): String;
+var
+  I: Integer;
+  C: Char;
+begin
+  Result := '';
+  for I := 1 to Length(S) do
+  begin
+    C := S[I];
+    if (C = '''') or (C = #$2018) or (C = #$2019) or (C = #$201A) or (C = #$201B) then
+      Result := Result + C + C
+    else
+      Result := Result + C;
+  end;
+  Result := '''' + Result + '''';
+end;
+
+{ A path value for PSArgs: as PSQuote, without the trailing backslash Q drops. }
+function PSPath(const S: String): String;
+begin
+  Result := PSQuote(RemoveBackslashUnlessRoot(S));
+end;
+
+{ The powershell.exe command line that runs one of our scripts.
+
+  NOT "-ExecutionPolicy Bypass -File script.ps1". A Group Policy execution
+  policy (AllSigned or Restricted, set by an office IT department or by some
+  "PC optimiser" tools) outranks -ExecutionPolicy on the command line, and then
+  an unsigned -File script is refused before its first line ("is not digitally
+  signed" / "running scripts is disabled") - the install could not even report
+  why. Execution policy governs script FILES, not a -Command; so the command
+  reads the script's text and dot-sources it as a script block. Dot-sourced,
+  not "&": the script's top-level variables and its $script: variables must be
+  one scope, as they are under -File (with "&" they are two, and the worker
+  reads stale values).
+
+  AppLocker / Device Guard can also lock PowerShell into Constrained Language
+  Mode, where the worker cannot run at all ([IO.File], Add-Type and web
+  requests are all refused). The first thing the command does is check for
+  that and say so as an E|CLM| line, instead of a screenful of type errors.
+
+  Everything is inside one double-quoted -Command argument with no double
+  quote inside it; paths are PowerShell single-quoted literals (PSQuote), so a
+  space, a $, a non-English letter or an apostrophe in a user name is safe.
+  Inno starts the process with CreateProcessW, so the Unicode reaches
+  PowerShell intact. tests/test_installer_fetch_republish.py builds exactly
+  this (BOOTSTRAP there) and runs every worker test through it. }
+function PSCommandLine(const Script, Args: String): String;
+begin
+  Result :=
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' +
+    '$ErrorActionPreference=''Stop''; ' +
+    'if ($ExecutionContext.SessionState.LanguageMode -ne ''FullLanguage'') { ' +
+      '''E|CLM|PowerShell on this computer is locked to '' + $ExecutionContext.SessionState.LanguageMode + ' +
+      ''' (an AppLocker or Device Guard policy)''; exit 2 }; ' +
+    '. ([scriptblock]::Create([IO.File]::ReadAllText(' + PSPath(Script) + '))) ' + Args + '"';
 end;
 
 function CacheDir: String;
@@ -2021,11 +2123,74 @@ end;
 {  Turning a worker failure into a sentence the shopkeeper can act on       }
 { ======================================================================== }
 
+{ "Net Protector" / "Quick Heal AntiVirus Pro, Windows Defender" - or the
+  plain word when Windows reported nothing. }
+function AntivirusName: String;
+begin
+  if GAvNames <> '' then
+    Result := 'your antivirus (' + GAvNames + ')'
+  else
+    Result := 'your antivirus';
+end;
+
 function FriendlyError(const Code, Raw: String): String;
 begin
   { A zip chosen in the browser (GLocalZip) gets its own wording: nothing was
     downloaded, and the cure is a fresh browser download, not a retry. }
-  if Code = 'LOCALWRONG' then
+  if Code = 'AVBLOCK' then
+    { Net Protector, Oct 2026: the program was unpacked and then deleted a
+      moment later. The worker unpacked the missing files a second time
+      before giving up, so this is not a fluke. The folder named is the real
+      install folder, from here rather than from the worker's ASCII-only pipe. }
+    Result :=
+      'Satpuda Core was unpacked, but ' + AntivirusName + ' deleted its program files straight away ' +
+      '(it did it twice). Nothing else on this computer was changed.' + #13#10#13#10 +
+      'Open the antivirus, and add this folder to its exclusions (also called "exceptions" or "allowed list"):' + #13#10#13#10 +
+      '    ' + ExpandConstant('{app}') + #13#10#13#10 +
+      'If the antivirus shows a quarantine list, restore SatpudaCore_Desktop.exe / SatpudaEngine.exe from it. ' +
+      'Then run this installer again - the download is kept, so it only takes a minute.' + #13#10#13#10 +
+      'Details: ' + Raw
+  else if Code = 'AVZIP' then
+    Result :=
+      'The Satpuda Core download was deleted right after it was saved, most likely by ' + AntivirusName + '.' + #13#10#13#10 +
+      'Add this folder to the antivirus exclusions, then run this installer again:' + #13#10#13#10 +
+      '    ' + CacheDir + #13#10#13#10 + 'Details: ' + Raw
+  else if Code = 'DISK' then
+    Result :=
+      'There is not enough free space on this computer to install Satpuda Core.' + #13#10#13#10 + Raw + #13#10#13#10 +
+      'Delete some files (or empty the Recycle Bin) and run this installer again. Nothing already downloaded is lost.'
+  else if Code = 'LONGPATH' then
+    Result :=
+      'The chosen install folder is too deep inside other folders for Windows.' + #13#10#13#10 + Raw + #13#10#13#10 +
+      'Run this installer again and choose a short folder, such as C:\Satpuda Core.'
+  else if Code = 'CLOCK' then
+    Result :=
+      'Satpuda Core could not be downloaded because the date or time on this computer is wrong.' + #13#10#13#10 + Raw + #13#10#13#10 +
+      'Secure websites check the date, so with a wrong clock every download is refused. Right-click the clock ' +
+      'at the bottom right of the screen > Adjust date and time, turn on "Set time automatically" (or set the right ' +
+      'date and time), then run this installer again.'
+  else if Code = 'TLS' then
+    Result :=
+      'Satpuda Core could not be downloaded: this computer did not trust the secure connection to GitHub.' + #13#10#13#10 +
+      'This is usually antivirus or a firewall that checks secure (HTTPS) websites, or a wrong date and time. ' +
+      'Check the date and time; if they are right, turn off HTTPS / web scanning in ' + AntivirusName +
+      ' for a moment, or use the zip downloaded in the browser.' + #13#10#13#10 + 'Details: ' + Raw
+  else if Code = 'CLM' then
+    Result :=
+      'Windows PowerShell on this computer is locked down (Constrained Language Mode, set by an AppLocker or ' +
+      'Device Guard policy), so the installer cannot download or unpack Satpuda Core.' + #13#10#13#10 +
+      'This is set by whoever manages this computer. Ask them to allow scripts for this installer, or to ' +
+      'install Satpuda Core for you as an administrator.' + #13#10#13#10 + 'Details: ' + Raw
+  else if Code = 'DOTNET' then
+    Result :=
+      'A part of Windows that the installer needs (Microsoft .NET Framework 4.5 or newer) is missing or damaged.' + #13#10#13#10 +
+      'Run Windows Update, restart the computer and run this installer again.' + #13#10#13#10 + 'Details: ' + Raw
+  else if Code = 'INTERNAL' then
+    Result :=
+      'The installer ran into something it did not expect, so Satpuda Core was not installed. ' +
+      'Nothing on this computer was changed.' + #13#10#13#10 +
+      'Please send the install log below to Roshan.' + #13#10#13#10 + 'Details: ' + Raw
+  else if Code = 'LOCALWRONG' then
     Result :=
       'The chosen zip is not the published Satpuda Core ' + TargetTag + ', so nothing was installed.' + #13#10#13#10 +
       'Its checksum does not match the one on the release page. An older copy, or a browser download ' +
@@ -2043,7 +2208,8 @@ begin
     Result :=
       'Satpuda Core could not be downloaded.' + #13#10#13#10 +
       'Check that this computer is connected to the internet, then run this installer again. ' +
-      'It will carry on from where it stopped, so nothing already downloaded is wasted.'
+      'It will carry on from where it stopped, so nothing already downloaded is wasted.' + #13#10#13#10 +
+      'Details: ' + Raw
   else if (Code = 'SIZE') or (Code = 'HASH') or (Code = 'ZIP') then
     Result :=
       'The download arrived damaged and was thrown away.' + #13#10#13#10 +
@@ -2051,8 +2217,9 @@ begin
   else if Code = 'EXTRACT' then
     Result :=
       'Satpuda Core downloaded correctly but could not be unpacked.' + #13#10#13#10 +
-      'The two usual reasons are the disk being full, or antivirus holding on to the files. ' +
-      'Free up about 2 GB on this drive, and if the problem repeats, allow this installer in your antivirus and try again.' + #13#10#13#10 +
+      'The two usual reasons are the disk being full, or ' + AntivirusName + ' holding on to the files. ' +
+      'Free up about 2 GB on this drive, and if the problem repeats, add this folder to the antivirus exclusions and try again:' + #13#10#13#10 +
+      '    ' + ExpandConstant('{app}') + #13#10#13#10 +
       'Details: ' + Raw
   else if Code = 'LOCKED' then
     Result :=
@@ -2066,6 +2233,9 @@ begin
       'Restart the computer and run this installer again.' + #13#10#13#10 + 'Details: ' + Raw
   else if Code = 'LAYOUT' then
     Result :=
+      { Only when the ZIP itself lacks the program now: the worker reads the
+        zip's list before unpacking. A program deleted after unpacking is
+        AVBLOCK, above. }
       'The downloaded package did not contain Satpuda Core where it was expected.' + #13#10#13#10 +
       'The published zip has probably changed shape. Nothing on this computer was altered. ' +
       'Please tell Roshan, and mention version ' + TargetTag + '.'
@@ -2162,6 +2332,13 @@ begin
     end
     else
       GErrMsg := Rest;
+  end
+  else if Copy(S, 1, 3) = 'AV|' then
+    GAvNames := Trim(Copy(S, 4, Length(S)))
+  else if Copy(S, 1, 5) = 'PORT|' then
+  begin
+    if GPortNotes <> '' then GPortNotes := GPortNotes + #13#10#13#10;
+    GPortNotes := GPortNotes + Copy(S, 6, Length(S));
   end
   else if Copy(S, 1, 11) = 'UNVERIFIED|' then
     GUnverified := True
@@ -2511,10 +2688,12 @@ begin
     { "Check for updates" next to it. Best effort - never a reason to fail.
       Result assigned to a throwaway rather than discarded, so the script does
       not depend on the compiler tolerating an ignored function result. }
+    { -Command, not -File: see PSCommandLine (a Group Policy execution policy
+      would refuse the script file). }
     Ignored := TryShortcutIn(ExtractFileDir(GStartMenuLnk), 'Check for {#MyAppName} updates',
       PSExePath,
-      '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ' +
-        Q(ExpandConstant('{app}\satpuda_update.ps1')) + ' -AppRoot ' + Q(ExpandConstant('{app}')),
+      '-WindowStyle Hidden ' +
+        PSCommandLine(ExpandConstant('{app}\satpuda_update.ps1'), '-AppRoot ' + PSPath(ExpandConstant('{app}'))),
       ExpandConstant('{app}'), ExpandConstant('{app}\satpuda.ico'));
   end;
 end;
@@ -2533,12 +2712,16 @@ begin
     baked in. That keeps this file pure ASCII, so it cannot be corrupted by
     SaveStringToFile's encoding when the Windows user name contains non-English
     characters - which is exactly the kind of PC this has to work on. }
+  { -Command and a dot-sourced script block rather than -File, for the reason
+    given above PSCommandLine. The folder goes in as a PowerShell single-quoted
+    literal, its own quotes doubled (q), so C:\Users\D'Souza still works. }
   Cmd :=
     'Set fso = CreateObject("Scripting.FileSystemObject")' + #13#10 +
     'base = fso.GetParentFolderName(WScript.ScriptFullName)' + #13#10 +
+    'q = "''" & Replace(base, "''", "''''") & "''"' + #13#10 +
     'Set sh = CreateObject("WScript.Shell")' + #13#10 +
-    'sh.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File """ ' +
-      '& base & "\satpuda_update.ps1"" -Silent -AppRoot """ & base & """", 0, False' + #13#10;
+    'sh.Run "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -Command """ & ' +
+      '". ([scriptblock]::Create([IO.File]::ReadAllText(" & Left(q, Len(q) - 1) & "\satpuda_update.ps1''))) -Silent -AppRoot " & q & """", 0, False' + #13#10;
 
   if not SaveStringToFile(VbsPath, Cmd, False) then
   begin
@@ -2626,6 +2809,34 @@ end;
   the closing backup, and a crashed window leaves it behind for good -- the
   installer offers to end it instead of asking for a Retry that a shopkeeper
   with no window to close can only answer by guessing (5 Oct 2026). }
+{ Close Satpuda Core the way its own X does: taskkill WITHOUT /F posts the
+  window a close message, and the app quits normally - it saves, and the
+  engine takes its closing backup and stops by itself. Waits up to ~15 s for
+  the window and ~60 s for the engine; whatever is still running after that is
+  left to the caller's loop (the engine question). Files that stay locked by a
+  running program are what made an update fail with "folder in use". }
+procedure CloseAppGently;
+var
+  RC, I: Integer;
+begin
+  Log('asking Satpuda Core to close, as its X does');
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM {#MyAppExeName}', '', SW_HIDE_, ewWaitUntilTerminated, RC);
+  for I := 1 to 30 do
+  begin
+    if not ProcessIsRunning('{#MyAppExeName}') then Break;
+    if GProgressPage <> nil then
+      GProgressPage.SetText('Closing Satpuda Core...', 'Waiting for its window to close');
+    Sleep(400);
+  end;
+  for I := 1 to 60 do
+  begin
+    if not ProcessIsRunning('{#MyEngineExeName}') then Exit;
+    if GProgressPage <> nil then
+      GProgressPage.SetText('Closing Satpuda Core...', 'It is taking its closing backup (up to a minute)');
+    Sleep(800);
+  end;
+end;
+
 function WaitForAppClosed(const OpenMsg, EngineMsg: String): Boolean;
 var
   Answer: Integer;
@@ -2635,10 +2846,21 @@ begin
   begin
     if ProcessIsRunning('{#MyAppExeName}') then
     begin
-      if MsgBox(OpenMsg, mbError, MB_RETRYCANCEL) = IDCANCEL then
+      { Yes = close it for me, No = I will close it myself (check again). }
+      Answer := MsgBox(OpenMsg, mbConfirmation, MB_YESNOCANCEL);
+      if Answer = IDCANCEL then
       begin
         Result := False;
         Exit;
+      end;
+      if Answer = IDYES then
+      begin
+        if GProgressPage <> nil then GProgressPage.Show;
+        try
+          CloseAppGently;
+        finally
+          if GProgressPage <> nil then GProgressPage.Hide;
+        end;
       end;
     end
     else
@@ -2762,15 +2984,13 @@ begin
   OutFile := ExpandConstant('{tmp}\latest.txt');
   DeleteFile(OutFile);
 
-  Params :=
-    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' +
-      Q(ExpandConstant('{tmp}\satpuda_fetch.ps1')) +
-    ' -CheckOnly' +
-    ' -AppRoot '    + Q(ExpandConstant('{tmp}')) +
-    ' -CacheDir '   + Q(ExpandConstant('{tmp}')) +
-    ' -CancelFile ' + Q(ExpandConstant('{tmp}\never.flag')) +
-    ' -Repo '       + Q('{#MyRepo}') +
-    ' -OutFile '    + Q(OutFile);
+  Params := PSCommandLine(ExpandConstant('{tmp}\satpuda_fetch.ps1'),
+    '-CheckOnly' +
+    ' -AppRoot '    + PSPath(ExpandConstant('{tmp}')) +
+    ' -CacheDir '   + PSPath(ExpandConstant('{tmp}')) +
+    ' -CancelFile ' + PSPath(ExpandConstant('{tmp}\never.flag')) +
+    ' -Repo '       + PSQuote('{#MyRepo}') +
+    ' -OutFile '    + PSPath(OutFile));
 
   if not Exec(PSExePath, Params, ExpandConstant('{tmp}'), SW_HIDE_, ewWaitUntilTerminated, RC) then
   begin
@@ -3330,35 +3550,38 @@ begin
   GLocalZip   := Zip;
   GUnverified := False;
   GOlderBuild := False;
+  GAvNames    := '';
+  GPortNotes  := '';
 
   if Zip = '' then
     GStatusText := 'Getting Satpuda Core ready...'
   else
     GStatusText := 'Installing from the chosen zip...';
 
+  { The worker's own arguments, as PowerShell literals (see PSCommandLine). }
   Params :=
-    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' +
-      Q(ExpandConstant('{tmp}\satpuda_fetch.ps1')) +
-    ' -AppRoot '    + Q(ExpandConstant('{app}')) +
-    ' -CacheDir '   + Q(CacheDir) +
-    ' -CancelFile ' + Q(GCancelFile) +
-    ' -Repo '       + Q('{#MyRepo}') +
-    ' -Tag '        + Q(TargetTag) +
-    ' -AssetName '  + Q('{#MyAssetName}') +
-    ' -DirectUrl '  + Q(TargetDirectUrl) +
-    ' -SentinelExe ' + Q('{#MyAppExeName}') +
+    '-AppRoot '     + PSPath(ExpandConstant('{app}')) +
+    ' -CacheDir '   + PSPath(CacheDir) +
+    ' -CancelFile ' + PSPath(GCancelFile) +
+    ' -Repo '       + PSQuote('{#MyRepo}') +
+    ' -Tag '        + PSQuote(TargetTag) +
+    ' -AssetName '  + PSQuote('{#MyAssetName}') +
+    ' -DirectUrl '  + PSQuote(TargetDirectUrl) +
+    ' -SentinelExe ' + PSQuote('{#MyAppExeName}') +
     { 16 connections instead of 1. Measured on the owner's own line against the
       real 121.9 MB asset: 0.19 MB/s on one connection, 1.94 MB/s on sixteen.
       /Segments=4 on the command line for a shop whose router cannot cope. }
     ' -Segments '   + IntToStr(SegmentCount) +
-    ' -LogFile '    + Q(ExpandConstant('{localappdata}\SatpudaCore\install.log'));
+    ' -LogFile '    + PSPath(InstallLogPath);
 
   { A repair exists because something on this PC is damaged, so the worker is
     told not to trust a cached zip it cannot prove is good. }
   if GMaintAction = 'repair' then
     Params := Params + ' -Repair';
   if Zip <> '' then
-    Params := Params + ' -LocalZip ' + Q(Zip);
+    Params := Params + ' -LocalZip ' + PSPath(Zip);
+
+  Params := PSCommandLine(ExpandConstant('{tmp}\satpuda_fetch.ps1'), Params);
 
   GWorkerRunning := True;
   GProgressPage.SetText(GStatusText, '');
@@ -3468,11 +3691,37 @@ begin
 end;
 
 { The failures a zip downloaded in the browser can get round: the download
-  itself did not work, or arrived damaged. }
+  itself did not work, or arrived damaged - or HTTPS from this worker was not
+  trusted (antivirus web scanning), which the browser often gets past. }
 function IsDownloadFailure(const Code: String): Boolean;
 begin
   Result := (Code = 'NET') or (Code = 'SIZE') or (Code = 'HASH') or (Code = 'ZIP') or
-            (Code = 'GONE') or (Code = 'CHANGED');
+            (Code = 'GONE') or (Code = 'CHANGED') or (Code = 'TLS');
+end;
+
+{ Failures the shopkeeper can put right on the spot - an antivirus exclusion,
+  the clock, some free space, closing the program - after which the same run
+  simply works. The download is kept, so a retry costs a minute. }
+function IsFixableHere(const Code: String): Boolean;
+begin
+  Result := (Code = 'AVBLOCK') or (Code = 'AVZIP') or (Code = 'DISK') or (Code = 'CLOCK') or
+            (Code = 'LOCKED') or (Code = 'TLS');
+end;
+
+{ RunAndJudge, and for a fixable failure: say what to do, and Retry. }
+function RunWithRetry(const Zip: String): String;
+begin
+  while True do
+  begin
+    Result := RunAndJudge(Zip);
+    if (Result = '') or GCancelRequested or WizardSilent or (not IsFixableHere(GErrCode)) then
+      Exit;
+    Log('offering Retry after ' + GErrCode);
+    if MsgBox(GLastErrText + #13#10#13#10 +
+              'Put this right, then click Retry. Cancel stops here.',
+              mbError, MB_RETRYCANCEL) <> IDRETRY then
+      Exit;
+  end;
 end;
 
 { The shopkeeper's Downloads folder (it can be moved, so the shell's own record
@@ -3734,7 +3983,7 @@ begin
   begin
     Zip := ShowZipDialog(Shown);
     if Zip = '' then Exit;
-    Result := RunAndJudge(Zip);
+    Result := RunWithRetry(Zip);
     if Result = '' then Exit;
     { Stopped, or PowerShell would not start: nothing more to offer. }
     if GCancelRequested or (GLastErrText = '') then Exit;
@@ -3760,11 +4009,11 @@ begin
   if CmdZip <> '' then
   begin
     Log('/ZIP given: installing from ' + CmdZip);
-    Result := RunAndJudge(CmdZip);
+    Result := RunWithRetry(CmdZip);
     Exit;
   end;
 
-  Result := RunAndJudge('');
+  Result := RunWithRetry('');
   if (Result <> '') and (not GCancelRequested) and IsDownloadFailure(GErrCode) then
   begin
     if WizardSilent then
@@ -3777,12 +4026,313 @@ begin
   end;
 end;
 
+{ ======================================================================== }
+{  What the program needs from Windows: WebView2 Runtime, VC++ runtime      }
+{  (see the note at WEBVIEW2_CLIENT). Never a reason to fail the install:   }
+{  what cannot be put right is said on the last page, with the link.       }
+{ ======================================================================== }
+
+{ One line into install.log (the worker's log), so the shop's one file says
+  what Setup itself found too. }
+procedure InstallLogAdd(const S: String);
+var
+  Lines: TArrayOfString;
+begin
+  Log(S);
+  SetArrayLength(Lines, 1);
+  Lines[0] := GetDateTimeString('hh:nn:ss', #0, #0) + '  [setup] ' + S;
+  try
+    SaveStringsToUTF8FileWithoutBOM(InstallLogPath, Lines, True);
+  except
+  end;
+end;
+
+function WebView2Pv(RootKey: Integer; const Sub: String): String;
+begin
+  Result := '';
+  if RegQueryStringValue(RootKey, Sub, 'pv', Result) then
+  begin
+    Result := Trim(Result);
+    if Result = '0.0.0.0' then
+      Result := '';
+  end
+  else
+    Result := '';
+end;
+
+{ The WebView2 Runtime version that is really there: registered AND its
+  msedgewebview2.exe on the disk. '' when there is none or it is broken; Info
+  says what was found either way, for the log. }
+function WebView2Version(var Info: String): String;
+var
+  Sub, V: String;
+begin
+  Result := '';
+  Info := '';
+  Sub := 'SOFTWARE\Microsoft\EdgeUpdate\Clients\' + WEBVIEW2_CLIENT;
+
+  { Per machine: written by the 32-bit Edge updater, so the 32-bit view. }
+  V := WebView2Pv(HKLM32, Sub);
+  if (V = '') and IsWin64 then
+    V := WebView2Pv(HKLM64, Sub);
+  if V <> '' then
+  begin
+    if DirExists(ExpandConstant('{commonpf32}\Microsoft\EdgeWebView\Application\') + V) or
+       DirExists(ExpandConstant('{commonpf64}\Microsoft\EdgeWebView\Application\') + V) then
+    begin
+      Result := V;
+      Info := V + ' (for all users)';
+      Exit;
+    end;
+    Info := V + ' registered for all users, but its folder is missing (broken)';
+  end;
+
+  { Per user. }
+  V := WebView2Pv(HKCU, Sub);
+  if (V = '') and IsWin64 then
+    V := WebView2Pv(HKCU32, Sub);
+  if V <> '' then
+  begin
+    if DirExists(ExpandConstant('{localappdata}\Microsoft\EdgeWebView\Application\') + V) then
+    begin
+      Result := V;
+      Info := V + ' (for this user)';
+      Exit;
+    end;
+    if Info <> '' then Info := Info + '; ';
+    Info := Info + V + ' registered for this user, but its folder is missing (broken)';
+  end;
+  if Info = '' then
+    Info := 'not installed';
+end;
+
+{ mfc140u.dll new enough for the engine's printing module: the engine's own
+  copy (newer builds), or the system's from the VC++ 2015-2022 runtime 14.30+
+  (the toolset pywin32 is built with; an older 14.0x MFC can lack entry points). }
+function VcRuntimeOK(var Info: String): Boolean;
+var
+  MS, LS: Cardinal;
+  F: String;
+begin
+  Result := False;
+  F := ExpandConstant('{app}\app\engine\_internal\pythonwin\mfc140u.dll');
+  if FileExists(F) then
+  begin
+    Result := True;
+    Info := 'mfc140u.dll carried by the engine';
+    Exit;
+  end;
+  F := ExpandConstant('{sys}\mfc140u.dll');
+  if not FileExists(F) then
+  begin
+    Info := 'mfc140u.dll not on this computer (no Visual C++ 2015-2022 x64 runtime)';
+    Exit;
+  end;
+  if GetVersionNumbers(F, MS, LS) then
+  begin
+    Info := 'mfc140u.dll ' + IntToStr(MS shr 16) + '.' + IntToStr(MS and $FFFF) + '.' +
+            IntToStr(LS shr 16) + '.' + IntToStr(LS and $FFFF) + ' in System32';
+    Result := ((MS shr 16) > 14) or (((MS shr 16) = 14) and ((MS and $FFFF) >= 30));
+    if not Result then
+      Info := Info + ' (older than 14.30)';
+  end
+  else
+  begin
+    Info := 'mfc140u.dll in System32 (version unreadable)';
+    Result := True;
+  end;
+end;
+
+{ 0 = signed by Microsoft, 1 = NOT (unsigned, altered, or someone else's),
+  2 = cannot tell (no PowerShell, an old root store). Get-AuthenticodeSignature
+  is a cmdlet, so this works under Constrained Language Mode as well. }
+function MicrosoftSigned(const F: String): Integer;
+var
+  RC: Integer;
+begin
+  Result := 2;
+  if Exec(PSExePath,
+          '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' +
+          '$s = Get-AuthenticodeSignature -LiteralPath ' + PSPath(F) + '; ' +
+          'if ((''Valid'' -eq $s.Status) -and ($s.SignerCertificate.Subject -like ''*O=Microsoft Corporation*'')) { exit 0 } ' +
+          'elseif ((''NotSigned'', ''HashMismatch'', ''Valid'') -contains [string]$s.Status) { exit 1 } else { exit 2 }"',
+          '', SW_HIDE_, ewWaitUntilTerminated, RC) then
+    if (RC = 0) or (RC = 1) then
+      Result := RC;
+end;
+
+function PrereqDownloadProgress(const Url, FileName: String; const Progress, ProgressMax: Int64): Boolean;
+begin
+  if (GProgressPage <> nil) and (ProgressMax > 0) then
+    GProgressPage.SetProgress(Progress div 1024, ProgressMax div 1024);
+  Result := True;
+end;
+
+{ Download one of Microsoft's installers into Setup's temporary folder and
+  check its signature. '' on success, otherwise why not. }
+function FetchMicrosoftInstaller(const Url, BaseName, What: String): String;
+var
+  F: String;
+  Sig: Integer;
+begin
+  Result := '';
+  F := ExpandConstant('{tmp}\') + BaseName;
+  GProgressPage.SetText('Downloading ' + What + ' from Microsoft...', Url);
+  GProgressPage.SetProgress(0, 100);
+  try
+    DownloadTemporaryFile(Url, BaseName, '', @PrereqDownloadProgress);
+  except
+    Result := 'it could not be downloaded (' + GetExceptionMessage + ')';
+    Exit;
+  end;
+  if not FileExists(F) then
+  begin
+    Result := 'the download left no file (antivirus?)';
+    Exit;
+  end;
+  Sig := MicrosoftSigned(F);
+  InstallLogAdd(What + ' installer downloaded; Microsoft signature check = ' + IntToStr(Sig) + ' (0 ok, 1 refused, 2 unknown)');
+  if Sig = 1 then
+  begin
+    DeleteFile(F);
+    Result := 'the downloaded file is not signed by Microsoft, so it was not run';
+  end;
+end;
+
+procedure AddPrereqProblem(const S: String);
+begin
+  if GPrereqProblem <> '' then
+    GPrereqProblem := GPrereqProblem + #13#10#13#10;
+  GPrereqProblem := GPrereqProblem + S;
+end;
+
+procedure EnsureWebView2;
+var
+  V, Info, Why: String;
+  RC: Integer;
+begin
+  V := WebView2Version(Info);
+  InstallLogAdd('WebView2 Runtime: ' + Info);
+  if V <> '' then Exit;
+
+  { No /ALLUSERS needed and no UAC: the bootstrapper installs per user when
+    Setup is not elevated. Silent installs get it too - the program cannot
+    open without it. }
+  GProgressPage.Show;
+  try
+    Why := FetchMicrosoftInstaller(WEBVIEW2_URL, 'MicrosoftEdgeWebview2Setup.exe', 'Microsoft Edge WebView2 Runtime');
+    if Why = '' then
+    begin
+      GProgressPage.SetText('Installing Microsoft Edge WebView2 Runtime (Satpuda Core''s window needs it)...',
+                            'This downloads about 150 MB from Microsoft and can take a few minutes.');
+      GProgressPage.ProgressBar.Style := npbstMarquee;
+      if not Exec(ExpandConstant('{tmp}\MicrosoftEdgeWebview2Setup.exe'), '/silent /install', '',
+                  SW_HIDE_, ewWaitUntilTerminated, RC) then
+        Why := 'its installer could not be started (' + SysErrorMessage(RC) + ')'
+      else
+      begin
+        InstallLogAdd('WebView2 bootstrapper exit code ' + IntToStr(RC));
+        V := WebView2Version(Info);
+        InstallLogAdd('WebView2 Runtime after installing: ' + Info);
+        if V = '' then
+          Why := 'its installer finished (code ' + IntToStr(RC) + ') but the runtime is still not there';
+      end;
+    end;
+  finally
+    GProgressPage.ProgressBar.Style := npbstNormal;
+    GProgressPage.Hide;
+  end;
+
+  if Why <> '' then
+  begin
+    InstallLogAdd('WebView2 Runtime NOT installed: ' + Why);
+    AddPrereqProblem(
+      'Satpuda Core is installed, but its window needs the Microsoft Edge WebView2 Runtime, and it could' + #13#10 +
+      'not be installed (' + Why + ').' + #13#10#13#10 +
+      'Install it from Microsoft: open ' + WEBVIEW2_PAGE + ',' + #13#10 +
+      'choose "Evergreen Bootstrapper", run it, then start Satpuda Core.');
+  end;
+end;
+
+procedure EnsureVcRuntime;
+var
+  Info, Why, F: String;
+  RC: Integer;
+begin
+  if VcRuntimeOK(Info) then
+  begin
+    InstallLogAdd('VC++ runtime for printing: ' + Info);
+    Exit;
+  end;
+  InstallLogAdd('VC++ runtime for printing: ' + Info);
+
+  { It needs an administrator. Silent: only when Setup already is one (no
+    prompt can appear); otherwise ask - the program works without it, only
+    some printing does not. }
+  if WizardSilent then
+  begin
+    if not IsAdmin then
+    begin
+      InstallLogAdd('VC++ runtime not installed: silent install without administrator rights');
+      Exit;
+    end;
+  end
+  else if MsgBox('Printing from Satpuda Core (dot-matrix slips, and some laser printers) needs a free part of Windows ' +
+                 'that is not on this computer: the Microsoft Visual C++ Redistributable (x64).' + #13#10#13#10 +
+                 'Install it now? It comes from Microsoft (about 25 MB). Windows will ask for permission, and an ' +
+                 'administrator password may be needed.' + #13#10#13#10 +
+                 'Satpuda Core itself works without it; you can also install it later.',
+                 mbConfirmation, MB_YESNO) <> IDYES then
+  begin
+    InstallLogAdd('VC++ runtime: the shopkeeper chose not to install it now');
+    AddPrereqProblem(
+      'Printing to dot-matrix and some other printers needs the Microsoft Visual C++ Redistributable' + #13#10 +
+      '(x64). Install it when convenient from ' + VCREDIST_URL);
+    Exit;
+  end;
+
+  GProgressPage.Show;
+  try
+    Why := FetchMicrosoftInstaller(VCREDIST_URL, 'vc_redist.x64.exe', 'Microsoft Visual C++ Redistributable');
+    if Why = '' then
+    begin
+      GProgressPage.SetText('Installing Microsoft Visual C++ Redistributable...', 'Windows may ask for permission.');
+      GProgressPage.ProgressBar.Style := npbstMarquee;
+      F := ExpandConstant('{tmp}\vc_redist.x64.exe');
+      { ShellExec, not Exec: the redistributable asks to run as administrator,
+        and only ShellExecute shows the Windows permission prompt for that
+        (CreateProcess just fails with "requires elevation"). }
+      if not ShellExec('', F, '/install /quiet /norestart', '', SW_SHOWNORMAL, ewWaitUntilTerminated, RC) then
+        Why := 'it was not allowed to run (' + SysErrorMessage(RC) + ')'
+      else
+      begin
+        InstallLogAdd('VC++ redistributable finished, code ' + IntToStr(RC));
+        if not VcRuntimeOK(Info) then
+          Why := 'its installer finished but the runtime is still not there';
+      end;
+    end;
+  finally
+    GProgressPage.ProgressBar.Style := npbstNormal;
+    GProgressPage.Hide;
+  end;
+  if Why <> '' then
+  begin
+    InstallLogAdd('VC++ runtime NOT installed: ' + Why);
+    AddPrereqProblem(
+      'Printing to dot-matrix and some other printers needs the Microsoft Visual C++ Redistributable' + #13#10 +
+      '(x64), and it could not be installed (' + Why + ').' + #13#10 +
+      'An administrator can install it from ' + VCREDIST_URL);
+  end
+  else
+    InstallLogAdd('VC++ runtime installed');
+end;
+
 { Everything that can stop the install happens here: Inno's contract is that a
   non-empty result aborts cleanly and shows the text, with nothing installed. }
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   FreeMB, TotalMB: Cardinal;
-  Drive: String;
+  Drive, CacheDrive: String;
 begin
   Result := '';
 
@@ -3804,6 +4354,22 @@ begin
         Exit;
       end;
 
+  { The download is kept in %LOCALAPPDATA%, which on some office PCs is on
+    another drive than the program folder. It needs room for the zip twice
+    over (its pieces and the joined file) for a moment. The worker checks
+    both drives exactly; this is the early, friendly check. }
+  CacheDrive := ExtractFileDrive(CacheDir);
+  if (CacheDrive <> '') and (CompareText(CacheDrive, Drive) <> 0) then
+    if GetSpaceOnDisk(AddBackslash(CacheDrive), True, FreeMB, TotalMB) then
+      if FreeMB < 400 then
+      begin
+        Result := 'There is not enough free space on drive ' + CacheDrive + ', where Windows keeps this ' +
+                  'user''s program data (' + CacheDir + ').' + #13#10#13#10 +
+                  'The download needs about 400 MB free there for a moment. Only ' + IntToStr(FreeMB) +
+                  ' MB is free. Please delete some files and try again.';
+        Exit;
+      end;
+
   { A running copy keeps its own folder locked. The swap survives that on its
     own (it renames the folder rather than writing into it), so this is only a
     courtesy - it stops the program being replaced under the shopkeeper's hands.
@@ -3811,8 +4377,10 @@ begin
     loop would hang an unattended install forever. }
   if not WizardSilent then
     if not WaitForAppClosed(
-             'Satpuda Core is currently open.' + #13#10#13#10 +
-             'Please close it, then click Retry.',
+             'Satpuda Core is open, and it has to be closed to be updated.' + #13#10#13#10 +
+             'Yes - close it for me (it saves and takes its closing backup, as when you click its X)' + #13#10 +
+             'No - I will close it myself; check again' + #13#10 +
+             'Cancel - stop the installation',
              'The Satpuda Core window is closed, but its data engine is still running' + #13#10 +
                 '(it takes the closing backup for a few seconds after the window goes).' + #13#10#13#10 +
                 'Yes - stop the engine now and carry on' + #13#10 +
@@ -3824,6 +4392,25 @@ begin
     end;
 
   Result := DoFetch;
+
+  { The program is on the disk; now what it needs from Windows to start (and
+    to print). Never a reason to fail: the last page says what is missing. }
+  if Result = '' then
+  begin
+    GPrereqProblem := '';
+    try
+      EnsureWebView2;
+    except
+      InstallLogAdd('WebView2 check failed: ' + GetExceptionMessage);
+    end;
+    try
+      EnsureVcRuntime;
+    except
+      InstallLogAdd('VC++ runtime check failed: ' + GetExceptionMessage);
+    end;
+    if GPortNotes <> '' then
+      InstallLogAdd('port problem: ' + GPortNotes);
+  end;
 end;
 
 { ======================================================================== }
@@ -4175,12 +4762,39 @@ begin
     Result := GHaveInstall;
 end;
 
+{ Windows' 260-character path limit, for a folder chosen on the folder page.
+  The program's deepest file sits PAYLOAD_DEEPEST characters below <app>\app\,
+  and Python cannot load a module from a longer path unless LongPathsEnabled
+  is on. The worker checks the real package too (LONGPATH); this says it
+  before the download. }
+function DirTooDeep(const Dir: String): Boolean;
+var
+  Enabled: Cardinal;
+begin
+  Result := False;
+  if RegQueryDWordValue(HKLM, 'SYSTEM\CurrentControlSet\Control\FileSystem', 'LongPathsEnabled', Enabled) and
+     (Enabled = 1) then
+    Exit;
+  Result := Length(AddBackslash(RemoveBackslashUnlessRoot(Dir)) + 'app\') + PAYLOAD_DEEPEST > 259;
+end;
+
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
   Problem, Uninst: String;
   RC: Integer;
 begin
   Result := True;
+
+  if (CurPageID = wpSelectDir) and DirTooDeep(WizardDirValue) then
+  begin
+    MsgBox('This folder is too deep inside other folders for Windows:' + #13#10#13#10 +
+           WizardDirValue + #13#10#13#10 +
+           'Some of Satpuda Core''s files would get a path longer than the 260 characters Windows allows, ' +
+           'and the program would not start. Choose a shorter folder, for example C:\Satpuda Core.',
+           mbError, MB_OK);
+    Result := False;
+    Exit;
+  end;
 
   if (GMaintPage <> nil) and (CurPageID = GMaintPage.ID) then
   begin
@@ -4516,6 +5130,22 @@ begin
         WizardForm.FinishedLabel.Caption + #13#10#13#10 + GApiBaseProblem;
       GApiBaseProblem := '';
     end;
+
+    { What the program needs from Windows and could not be given it
+      (WebView2 Runtime, VC++ runtime), and the app's local port being taken
+      or reserved. Same treatment: the install worked, this is said, once. }
+    if GPrereqProblem <> '' then
+    begin
+      WizardForm.FinishedLabel.Caption :=
+        WizardForm.FinishedLabel.Caption + #13#10#13#10 + GPrereqProblem;
+      GPrereqProblem := '';
+    end;
+    if GPortNotes <> '' then
+    begin
+      WizardForm.FinishedLabel.Caption :=
+        WizardForm.FinishedLabel.Caption + #13#10#13#10 + GPortNotes;
+      GPortNotes := '';
+    end;
   end;
 end;
 
@@ -4534,8 +5164,10 @@ begin
   Result := True;
   if UninstallSilent then Exit;
   if not WaitForAppClosed(
-           'Satpuda Core is still open.' + #13#10#13#10 +
-           'Close it completely, then click Retry to carry on removing it.',
+           'Satpuda Core is still open, and it has to be closed to be removed.' + #13#10#13#10 +
+           'Yes - close it for me (it saves and takes its closing backup, as when you click its X)' + #13#10 +
+           'No - I will close it myself; check again' + #13#10 +
+           'Cancel - leave Satpuda Core installed',
            'The Satpuda Core window is closed, but its data engine is still running' + #13#10 +
                 '(it takes the closing backup for a few seconds after the window goes).' + #13#10#13#10 +
                 'Yes - stop the engine now and carry on' + #13#10 +
@@ -4607,11 +5239,20 @@ begin
     FindClose(FR);
   end;
 
-  { The installer's own state folder: the download cache, the install log and
-    the update-check stamp. None of this is shop data, so it always goes. The
-    shop's actual books live in %LOCALAPPDATA%\VeterinaryApp and are only
-    touched below, if the user asked for it. }
-  DelTree(ExpandConstant('{localappdata}\SatpudaCore'), True, True, True);
+  { The installer's own state in %LOCALAPPDATA%\SatpudaCore: the download
+    cache, the install log and the update-check stamp and log. None of this is
+    shop data, so it always goes. The folder itself is NOT deleted wholesale
+    any more: the app keeps things of its own there too (the voice pack,
+    SatpudaCore\voice, a download of several hundred MB the shop chose to
+    make), and an uninstall that keeps the shop's data keeps those as well. It
+    goes only with "delete all your data" below. The shop's actual books live in
+    %LOCALAPPDATA%\VeterinaryApp and are only touched below, if asked. }
+  S := ExpandConstant('{localappdata}\SatpudaCore');
+  DelTree(S + '\cache', True, True, True);
+  DeleteFile(S + '\install.log');
+  DeleteFile(S + '\update-check.log');
+  DeleteFile(S + '\last-update-check.txt');
+  RemoveDir(S);   { only when nothing else is in it }
 
   { The all-users copy of the two answers, if this was an /ALLUSERS install.
     It is only a shop name and a mode, but leaving it behind would hand the
@@ -4631,6 +5272,7 @@ begin
   begin
     Log('user asked to remove shop data at ' + DataDir);
     DelTree(DataDir, True, True, True);
+    DelTree(ExpandConstant('{localappdata}\SatpudaCore'), True, True, True);
   end
   else
     Log('shop data kept at ' + DataDir);

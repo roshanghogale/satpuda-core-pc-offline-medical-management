@@ -162,6 +162,15 @@ def _forget_store_scoped_caches():
 
 
 def load_registry(*, _allow_reconcile: bool = True) -> dict:
+    if _allow_reconcile:
+        # Read once per Sales request (core/request_memo.py); a copy each time.
+        from core.request_memo import memo
+
+        return memo(("store_registry", _registry_path()), _load_registry_from_disk)
+    return _load_registry_from_disk(_allow_reconcile=False)
+
+
+def _load_registry_from_disk(*, _allow_reconcile: bool = True) -> dict:
     path = _registry_path()
     if not os.path.exists(path):
         return {}
@@ -220,6 +229,9 @@ def save_registry(data: dict):
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp_path, path)
+    from core.request_memo import forget
+
+    forget()
 
 
 def _store_evidence_rank(root: str, store_key: str) -> tuple:
