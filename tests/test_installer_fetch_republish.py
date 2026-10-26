@@ -70,6 +70,7 @@ class FakeGitHub:
         self.fail_once = set()      # range starts that answer 404 the first time
         self.plain_gets = 0         # GETs of the zip without a Range header
         self.dl_requests = 0        # every request for the zip itself
+        self.history = None         # sha256 list of every build of the tag (<zip>.sha256s), None = 404
 
     def release_json(self, base):
         r = self.release
@@ -113,6 +114,10 @@ def make_handler(gh: FakeGitHub):
                         gh.on_api(gh.api_calls)
                     body = json.dumps(gh.release_json(base)).encode()
                 return self._send(200, body, {"Content-Type": "application/json"})
+            if p == f"/download/{TAG}/{ZIP}.sha256s":
+                if gh.history is None:
+                    return self._send(404, b"Not Found")
+                return self._send(200, chr(10).join(gh.history).encode())
             if p.startswith("/sha/"):
                 h = p[len("/sha/"):]
                 return self._send(200, (h + "  " + ZIP).encode())
@@ -470,6 +475,31 @@ class FetchWorkerRepublish(unittest.TestCase):
         self.assertFalse(os.path.isdir(os.path.join(self.tmp, "Satpuda Core", "app.staging")))
         self.assertTrue(os.path.isfile(path))
         self._no_copy_left()
+
+    def test_local_zip_of_an_earlier_build_of_the_tag_is_installed_and_said(self):
+        """The same version was re-published since the shop downloaded the zip in the browser
+        (v1.0.11, 25-26 Oct 2026): the zip is genuine, only older - installed, and said so."""
+        self._steady(34)
+        older = make_zip(35)
+        self.gh.history = [hashlib.sha256(older).hexdigest(), hashlib.sha256(make_zip(36)).hexdigest()]
+        path = self._browser_zip(older)
+        rc, out, rec = self.run_worker(extra=("-LocalZip", path))
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("E|", out)
+        self.assertIn("OLDERBUILD|", out)
+        self.assertEqual(rec["sha256"], hashlib.sha256(older).hexdigest())
+        self.assertTrue(rec["sha256Verified"])
+        self.assertTrue(os.path.isfile(os.path.join(self.tmp, "Satpuda Core", "app", "SatpudaCore_Desktop.exe")))
+        self._no_copy_left()
+
+    def test_local_zip_not_in_the_list_of_builds_is_still_refused(self):
+        self._steady(37)
+        self.gh.history = [hashlib.sha256(make_zip(38)).hexdigest()]
+        path = self._browser_zip(make_zip(39))
+        rc, out, rec = self.run_worker(extra=("-LocalZip", path))
+        self.assertEqual(rc, 2, out)
+        self.assertIn("E|LOCALWRONG|", out)
+        self.assertIsNone(rec)
 
     def test_local_zip_without_a_sidecar_is_installed_with_a_warning(self):
         """The release lists no .sha256: checked by its contents only, said

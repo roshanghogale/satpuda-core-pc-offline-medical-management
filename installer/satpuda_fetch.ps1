@@ -1556,6 +1556,18 @@ function Copy-LocalZip([string]$src, [string]$dst, [int64]$total) {
     } finally { try { $in.Dispose() } catch { } }
 }
 
+# Every build ever published under this tag, one sha256 per line (<asset>.sha256s on the
+# release). True when the chosen zip is one of them. Never throws.
+function Test-EarlierBuild([string]$hash) {
+    $u = 'https://github.com/' + $Repo + '/releases/download/' + $Tag + '/' + $AssetName + '.sha256s'
+    if ($ApiBase -ne 'https://api.github.com') { $u = $ApiBase + '/download/' + $Tag + '/' + $AssetName + '.sha256s' }
+    try { $txt = Invoke-Api $u } catch { Dbg ('list of earlier builds could not be read: ' + $_.Exception.Message); return $false }
+    foreach ($m in [regex]::Matches([string]$txt, '[0-9a-fA-F]{64}')) {
+        if ($m.Value.ToLower() -eq $hash.ToLower()) { return $true }
+    }
+    return $false
+}
+
 function Use-LocalZip {
     Step 'Checking the chosen zip'
     Progress 0 'Checking the chosen zip'
@@ -1590,6 +1602,18 @@ function Use-LocalZip {
     if ($r.Hash) {
         if ($h -ne $r.Hash) {
             Dbg ('chosen zip sha256 ' + $h + ' is not the published ' + $r.Hash)
+            # The same version is re-published with new files now and then, so a zip downloaded
+            # in the browser yesterday is often an EARLIER build of this very tag. The release
+            # lists every build it ever had (<asset>.sha256s); one of those is the real thing,
+            # just not the newest - install it and say so, instead of installing nothing.
+            if (Test-EarlierBuild $h) {
+                Dbg 'chosen zip is an earlier published build of this version'
+                Warn ('This zip is an earlier build of ' + $Tag + '. It is installed; download the zip again later to get the newest build.')
+                Emit 'OLDERBUILD|'
+                $script:HashVerified = $true
+                $script:Used         = $r
+                return
+            }
             Fail 'LOCALWRONG' ('The chosen zip is not the published build of ' + $Tag + ' (checksum did not match).')
         }
         Dbg 'chosen zip matches the published checksum'

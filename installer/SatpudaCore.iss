@@ -274,6 +274,7 @@ var
     worker's downloads while the browser works (Net Protector, 25 Oct 2026). }
   GLocalZip       : String;    { the zip the current worker run installs, '' = download }
   GUnverified     : Boolean;   { UNVERIFIED| line: no published checksum could be read }
+  GOlderBuild     : Boolean;   { OLDERBUILD| line: the chosen zip is an earlier build of this version }
   GLastErrText    : String;    { the last failure sentence, without the log line }
   GZipFound       : String;    { a matching zip seen in Downloads, '' when none }
 
@@ -2164,6 +2165,8 @@ begin
   end
   else if Copy(S, 1, 11) = 'UNVERIFIED|' then
     GUnverified := True
+  else if Copy(S, 1, 11) = 'OLDERBUILD|' then
+    GOlderBuild := True
   else if Copy(S, 1, 3) = 'OK|' then
     GWorkerOK := True;
 end;
@@ -3326,6 +3329,7 @@ begin
   GPayloadTag := '';
   GLocalZip   := Zip;
   GUnverified := False;
+  GOlderBuild := False;
 
   if Zip = '' then
     GStatusText := 'Getting Satpuda Core ready...'
@@ -3439,6 +3443,17 @@ begin
   if GWarnings <> '' then
     Log('[fetch warnings] ' + GWarnings);
 
+  if (Zip <> '') and GOlderBuild then
+  begin
+    Log('installed from a chosen zip that is an EARLIER published build of this version');
+    if not WizardSilent then
+      MsgBox('Satpuda Core was installed from the chosen zip.' + #13#10#13#10 +
+             'That zip is a genuine but EARLIER build of version {#MyAppVersion}; a newer build has been ' +
+             'published since it was downloaded.' + #13#10#13#10 +
+             'To get the newest build: download the zip again in the browser (Open download link) and ' +
+             'run this installer again, or use Check for updates in the app.',
+             mbInformation, MB_OK);
+  end;
   if (Zip <> '') and GUnverified then
   begin
     Log('installed from a chosen zip WITHOUT a published checksum (checked by its contents only)');
