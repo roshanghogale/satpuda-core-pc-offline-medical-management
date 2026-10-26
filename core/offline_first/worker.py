@@ -25,6 +25,7 @@ INTERVAL_BUSY = 1.0
 FULL_STOCK_EVERY = 30 * 60
 NUMBER_CHECK_EVERY = 5 * 60   # are the numbers left in the blocks still free on the server?
 PULL_PAGE = 200
+STOCK_WRITE_CHUNK = 5000      # batches per write transaction of the full stock refresh
 PLAIN_BACKFILL_KEY = "plain_backfill_v1"   # reorders / write-offs / general products fetched once
 
 
@@ -275,8 +276,12 @@ class SyncCycle:
         if self.refresh or time.time() - self.last_full_stock > FULL_STOCK_EVERY:
             snap = client.stock(sorted(self.refresh) if self.refresh and
                                 time.time() - self.last_full_stock <= FULL_STOCK_EVERY else None)
-            with write_batch(conn, capture_paused=True):
-                pull.set_stock_from_server(conn, snap.get("stock") or [])
+            # The whole store's figures, a few thousand batches per write: the till's Save
+            # waits at most for one of them, not for the whole store (5 lakh batches).
+            figures = snap.get("stock") or []
+            for at in range(0, max(len(figures), 1), STOCK_WRITE_CHUNK):
+                with write_batch(conn, capture_paused=True):
+                    pull.set_stock_from_server(conn, figures[at:at + STOCK_WRITE_CHUNK])
             if not self.refresh:
                 self.last_full_stock = time.time()
             self.refresh.clear()

@@ -116,6 +116,9 @@ def _write_sqlite(conn: sqlite3.Connection, data: dict[str, Any]) -> None:
         conn.commit()
     except Exception:
         pass
+    from core.request_memo import forget
+
+    forget()
 
 
 def _read_legacy_file() -> Optional[dict[str, Any]]:
@@ -334,6 +337,70 @@ def load_billing_layout_prefs(
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict[str, Any]:
     """Load prefs; migrate from legacy sources into SQLite on first use."""
+    if conn is None:
+        # Each call opened the store database: adding one bill line opened it twice.
+        # Once per Sales request now (core/request_memo.py).
+        from core.request_memo import memo
+
+        try:
+            from core.store_manager import get_active_db_path
+
+            key = ("billing_layout_prefs", get_active_db_path() or "")
+        except Exception:
+            key = ("billing_layout_prefs", "")
+        return memo(key, _load_billing_layout_prefs)
+    return _load_billing_layout_prefs(conn)
+
+
+def _engine_conn() -> Optional[sqlite3.Connection]:
+    """The engine's own open connection to the active store, when this runs in the engine.
+
+    Reading the settings row through it costs no file open (an open of a big store file
+    parses its whole schema, and an antivirus may check the file on every open)."""
+    import sys
+
+    api = sys.modules.get("core.desktop_api")
+    db = getattr(api, "_db", None) if api is not None else None
+    if not isinstance(db, dict) or db.get("server_only"):
+        return None
+    conn, path = db.get("conn"), str(db.get("path") or "")
+    if conn is None or not path:
+        return None
+    try:
+        from core.store_manager import get_active_db_path
+
+        active = get_active_db_path() or ""
+    except Exception:
+        return None
+    norm = lambda p: os.path.normcase(os.path.abspath(p))  # noqa: E731
+    return conn if active and norm(active) == norm(path) else None
+
+
+def _read_without_writing(conn: sqlite3.Connection) -> Optional[dict[str, Any]]:
+    """The prefs exactly as the full load returns them, when that load would write nothing
+    (the row is there and already migrated); None otherwise."""
+    try:
+        row = conn.execute(
+            "SELECT value FROM settings WHERE name=?", (SETTINGS_KEY,)
+        ).fetchone()
+        raw = json.loads(row[0]) if row and row[0] is not None else None
+    except Exception:
+        return None
+    if not isinstance(raw, dict):
+        return None
+    data = _normalize(raw)
+    return data if data.get("sales_margin_ui_v2") else None
+
+
+def _load_billing_layout_prefs(
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict[str, Any]:
+    if conn is None:
+        shared = _engine_conn()
+        if shared is not None:
+            quick = _read_without_writing(shared)
+            if quick is not None:
+                return quick
     owned = conn is None
     db = _get_db_conn(conn)
     try:

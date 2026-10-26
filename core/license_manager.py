@@ -64,16 +64,25 @@ def _device_key_path():
     return os.path.join(_appdata_dir(), 'device.key')
 
 # ── Fernet helpers ─────────────────────────────────────────────────────────────
+_FERNET = []
+
+
 def _get_fernet():
+    # One per process: the key never changes, and building it (with the import) cost ~3 ms
+    # on every registry read -- several per Sales request.
+    if _FERNET:
+        return _FERNET[0]
     try:
         from cryptography.fernet import Fernet
         import base64
         # Pad/derive a valid 32-byte url-safe base64 key
         raw = hashlib.sha256(_SECRET).digest()
         key = base64.urlsafe_b64encode(raw)
-        return Fernet(key)
+        f = Fernet(key)
     except ImportError:
         return None
+    _FERNET.append(f)
+    return f
 
 def _encrypt(data: dict) -> bytes:
     f = _get_fernet()
@@ -134,6 +143,13 @@ def _hw_cache_path() -> str:
 
 
 def _read_hw_cache() -> str:
+    # Read once per Sales request (core/request_memo.py): a save asked 14 times.
+    from core.request_memo import memo
+
+    return memo(("hw_cache", _hw_cache_path()), _read_hw_cache_from_disk)
+
+
+def _read_hw_cache_from_disk() -> str:
     path = _hw_cache_path()
     if not os.path.isfile(path):
         return ''
@@ -155,6 +171,9 @@ def _write_hw_cache(hw_hash: str) -> None:
             json.dump({'hw': hw_hash, 'ts': time.time()}, f)
     except Exception:
         pass
+    from core.request_memo import forget
+
+    forget()
 
 
 _HW_NOISE = ('', 'serialnumber', 'processorid', 'node', 'to be filled by o.e.m.',

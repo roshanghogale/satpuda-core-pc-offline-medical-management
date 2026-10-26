@@ -114,3 +114,31 @@ def order_by_sql(column: str, query: str) -> tuple[str, list[str]]:
         "  ELSE 2 "
         f"END, {column} COLLATE NOCASE"
     ), [f"{esc}%"] + [f"%{b}{esc}%" for b in breaks]
+
+
+def prefix_range_sql(column: str, query: str):
+    """The "starts with" group of order_by_sql on its own, readable through an index on
+    ``column COLLATE NOCASE`` in name order (a big store reads only those names).
+
+    Returns (where_sql, params, not_where_sql, not_params): rows with the first are exactly
+    order_by_sql's group 0, rows with the second every other row. None when the query cannot
+    be bounded (empty, or a character at the very top of the range).
+    """
+    q = (query or "").strip()
+    if not q:
+        return None
+    # NOCASE folds A-Z only, and so does LIKE: the bounds are folded the same way, so the
+    # range holds every name LIKE 'q%' and the LIKE below keeps exactly those.
+    low = "".join(c.lower() if "A" <= c <= "Z" else c for c in q)
+    last = ord(low[-1])
+    if last >= 0xD7FF:
+        return None
+    high = low[:-1] + chr(last + 1)
+    esc = q.replace("%", r"\%").replace("_", r"\_")
+    like = f"{column} LIKE ? ESCAPE '\\' COLLATE NOCASE"
+    return (
+        f"{column} >= ? COLLATE NOCASE AND {column} < ? COLLATE NOCASE AND {like}",
+        [low, high, f"{esc}%"],
+        f"NOT ({like})",
+        [f"{esc}%"],
+    )
