@@ -1,10 +1,13 @@
 """Desktop API wrappers for Sales — reuses classic billing/calc logic (no duplicate math)."""
 from __future__ import annotations
 
+import contextlib
 import os
 import threading
 from datetime import date, datetime
 from typing import Any, Optional
+
+from core.request_memo import per_request
 
 # The engine serves requests on a ThreadingHTTPServer, so an autosave tick can
 # arrive while F7/F8 is saving or printing the same bill. Autosave now writes a
@@ -23,6 +26,23 @@ _FORM_SEQ_LOCK = threading.Lock()
 _FORM_SEQ = 0
 _FORMS_CLEARED: dict[str, int] = {}
 _FORMS_CLEARED_KEEP = 256
+
+
+@contextlib.contextmanager
+def _sale_writing(conn):
+    """The sale write lock, and on an error the bill's half-done writes rolled back BEFORE the
+    lock is let go. The engine has one connection for every request: rolled back after the
+    lock, another request's commit (a print, the next tick) could make the half bill permanent
+    first."""
+    with _SALE_WRITE_LOCK:
+        try:
+            yield
+        except BaseException:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
 
 
 def _next_form_seq() -> int:
@@ -197,6 +217,7 @@ def _medicine_row(conn, medicine_id: int) -> Optional[dict[str, Any]]:
     return out
 
 
+@per_request
 def list_medicine_names(
     conn,
     q: str = "",
@@ -249,16 +270,21 @@ def list_medicine_names(
         r[1]
         for r in conn.execute("PRAGMA table_info(medicines)").fetchall()
     }
-    where = ["1=1"]
+    # A batch with nothing on the shelf is never listed (avail = stock - reserved <= 0 below),
+    # so it is left out here, before the order and the limit. Shrihari Medical: 3,214 of
+    # 64,032 batches had stock; the 320 best-ordered rows were mostly empty ones, so "pan"
+    # listed 2 medicines of the dozens in stock, and a name could show part of its stock.
+    where = ["stock_qty > 0"]
     params: list[Any] = []
     if "is_hidden" in cols:
         where.append("COALESCE(is_hidden,0)=0")
-    if "created_at" in cols:
-        where.append(medicine_existed_sql())
-        params.append(as_of.isoformat())
     if q:
         where.append("name LIKE ?")
         params.append(f"%{q}%")
+    if "created_at" in cols:
+        # Last: a sub-query per batch (its first purchase), so it runs on the fewest rows.
+        where.append(medicine_existed_sql())
+        params.append(as_of.isoformat())
 
     select = [
         "id",
@@ -278,62 +304,85 @@ def list_medicine_names(
     # Names that START with what was typed first, then a word starting with it,
     # then the rest -- alphabetical inside each group. Plain alphabetical put
     # AMOXY and BECOSULES above MECOVET when the shop typed "m".
-    from core.name_search_rank import order_by_sql
+    from core.name_search_rank import order_by_sql, prefix_range_sql
 
     _order_sql, _order_params = order_by_sql("name", q)
-    sql = (
-        f"SELECT {', '.join(select)} FROM medicines "
-        f"WHERE {' AND '.join(where)} "
-        f"ORDER BY {_order_sql}, id ASC LIMIT ?"
-    )
-    params.extend(_order_params)
-    params.append(limit * 8)  # fetch more rows then aggregate
-    try:
-        rows = conn.execute(sql, params).fetchall()
-    except Exception:
-        return {"names": []}
+    base_sql = f"SELECT {', '.join(select)} FROM medicines WHERE {' AND '.join(where)}"
+    # The rows are read best match first, every batch of one name together, and reading stops
+    # once ``limit`` names are complete: an empty search reads a few dozen rows of the name
+    # index, never the whole table. Each listed name has all its batches added up (the old
+    # fixed row limit could cut a name's batches part way). Names that start with what was
+    # typed come first and are read on their own through the name index (5 lakh batches:
+    # "p" 318 ms -> a few ms); the other matches are read only when they are not enough.
+    # Together the two reads give exactly the rows, in exactly the order, of the one query.
+    reads: list[tuple[str, list[Any]]] = []
+    prefix = prefix_range_sql("name", q) if q else None
+    if prefix:
+        p_sql, p_params, not_p_sql, not_p_params = prefix
+        reads.append((f"{base_sql} AND {p_sql} ORDER BY name COLLATE NOCASE, id ASC",
+                      params + p_params))
+        reads.append((f"{base_sql} AND {not_p_sql} ORDER BY {_order_sql}, id ASC",
+                      params + not_p_params + _order_params))
+    else:
+        reads.append((f"{base_sql} ORDER BY {_order_sql}, id ASC", params + _order_params))
 
     by_name: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        d = {keys[i]: row[i] for i in range(len(keys))}
-        name = (d.get("name") or "").strip()
-        if not name:
-            continue
-        exp = str(d.get("expiry") or "")
+    for sql, sql_params in reads:
+        if len(by_name) >= limit:
+            break
         try:
-            if exp and is_expired_as_of(exp, as_of):
-                continue
+            found = conn.execute(sql, sql_params)
         except Exception:
-            pass
-        mid = int(d["id"])
-        stock = _safe_float(d.get("stock"))
-        avail = max(0.0, stock - _reserved_for(mid))
-        if avail <= 0:
-            continue
-        cur = by_name.get(name)
-        if not cur:
-            by_name[name] = {
-                "name": name,
-                "stock": avail,
-                "mrp": _safe_float(d.get("mrp")),
-                "unit": d.get("unit") or "1",
-                "type": d.get("type") or "",
-                "schedule": str(d.get("schedule") or ""),
-                "batch_count": 1,
-            }
-        else:
-            cur["stock"] = _safe_float(cur["stock"]) + avail
-            cur["batch_count"] = int(cur.get("batch_count") or 0) + 1
-            if _safe_float(d.get("mrp")) > 0 and not cur.get("mrp"):
-                cur["mrp"] = _safe_float(d.get("mrp"))
+            return {"names": []}
+        try:
+            for row in found:
+                d = {keys[i]: row[i] for i in range(len(keys))}
+                name = (d.get("name") or "").strip()
+                if not name:
+                    continue
+                if len(by_name) >= limit and name not in by_name:
+                    break
+                exp = str(d.get("expiry") or "")
+                try:
+                    if exp and is_expired_as_of(exp, as_of):
+                        continue
+                except Exception:
+                    pass
+                mid = int(d["id"])
+                stock = _safe_float(d.get("stock"))
+                avail = max(0.0, stock - _reserved_for(mid))
+                if avail <= 0:
+                    continue
+                cur = by_name.get(name)
+                if not cur:
+                    by_name[name] = {
+                        "name": name,
+                        "stock": avail,
+                        "mrp": _safe_float(d.get("mrp")),
+                        "unit": d.get("unit") or "1",
+                        "type": d.get("type") or "",
+                        "schedule": str(d.get("schedule") or ""),
+                        "batch_count": 1,
+                    }
+                else:
+                    cur["stock"] = _safe_float(cur["stock"]) + avail
+                    cur["batch_count"] = int(cur.get("batch_count") or 0) + 1
+                    if _safe_float(d.get("mrp")) > 0 and not cur.get("mrp"):
+                        cur["mrp"] = _safe_float(d.get("mrp"))
+        finally:
+            # Stopped early: let the read go now, not when the cursor is collected.
+            found.close()
 
     names = list(by_name.values())
     if not show_zero:
         names = [n for n in names if _safe_float(n.get("stock")) > 0]
-    names.sort(key=lambda n: str(n.get("name") or "").upper())
+    # Best match first, as read. The list used to be sorted A-Z again here, which put
+    # "ABD PAD" above every PA... medicine when the shop typed "pa" -- the very order
+    # core/name_search_rank.py exists to stop.
     return {"names": names[:limit]}
 
 
+@per_request
 def list_batches_for_name(
     conn,
     name: str,
@@ -485,6 +534,7 @@ def list_batches_for_name(
     return {"name": name, "batches": batches, "as_of": as_of.isoformat()}
 
 
+@per_request
 def build_line(conn, body: dict[str, Any]) -> dict[str, Any]:
     """
     Build one sales line using classic rate/stock/expiry rules.
@@ -644,6 +694,7 @@ def build_line(conn, body: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "line": line, "warnings": warnings, "available": available}
 
 
+@per_request
 def calc_sale(conn, body: dict[str, Any]) -> dict[str, Any]:
     """Preview bill + payment totals using calc_engine."""
     from core.calc_engine import calc_bill_summary, calc_payment_result
@@ -988,6 +1039,7 @@ def _remember_doctor_online(name: str, phone: str) -> None:
     threading.Thread(target=_work, name="sale-doctor", daemon=True).start()
 
 
+@per_request
 def save_sale(conn, body: dict[str, Any]) -> dict[str, Any]:
     """
     Persist a sale using classic billing_service (counter merge + stock).
@@ -1160,7 +1212,7 @@ def save_sale(conn, body: dict[str, Any]) -> dict[str, Any]:
         warnings = []
 
     try:
-        with _SALE_WRITE_LOCK:
+        with _sale_writing(conn):
             customer_id = get_or_create_customer(conn, customer_name, phone, address)
             editing_id = _safe_int(body.get("editing_sale_id"))
             autosave_id = _safe_int(body.get("autosave_sale_id"))
@@ -1580,6 +1632,7 @@ def edit_stamp(conn, sale_id: int) -> str:
     return hashlib.sha1("\n".join(parts).encode("utf-8")).hexdigest()[:16]
 
 
+@per_request
 def load_sale(conn, sale_id: int) -> dict[str, Any]:
     """JSON form of load_sale_into_billing_page for Tauri edit/F10/F11."""
     from core.billing_service import load_sale_medicines
@@ -1791,6 +1844,7 @@ def _load_sale_online_json(conn, sale_id: int) -> dict[str, Any]:
     }
 
 
+@per_request
 def sales_runtime_prefs(conn=None) -> dict[str, Any]:
     """Autosave + print button labels/keys from Settings (same files as Tk)."""
     from core.autosave_prefs import (
@@ -1911,6 +1965,7 @@ def _medicine_types() -> list[str]:
     return ["Tablet", "Capsule", "Syrup", "Injection", "Powder", "Others"]
 
 
+@per_request
 def build_quick_sale_line(body: dict[str, Any]) -> dict[str, Any]:
     from core.quick_sale_medicine import (
         build_quick_sale_row,
@@ -1969,6 +2024,7 @@ def build_quick_sale_line(body: dict[str, Any]) -> dict[str, Any]:
         return {"ok": False, "error": str(exc)}
 
 
+@per_request
 def autosave_sale(conn, body: dict[str, Any]) -> dict[str, Any]:
     """Autosave a REAL bill and keep updating that same one.
 
@@ -2027,7 +2083,7 @@ def autosave_sale(conn, body: dict[str, Any]) -> dict[str, Any]:
         date_problems = []
 
     try:
-        with _SALE_WRITE_LOCK:
+        with _sale_writing(conn):
             if _form_cleared_since(token, started):
                 # The form was cleared (Clear, or its tab closed) while this tick waited on the
                 # date check. Its bill and its record went on purpose: write nothing, and hand
@@ -2170,6 +2226,7 @@ def discard_autosave(conn, body: dict[str, Any]) -> dict[str, Any]:
         return {"ok": False, "error": str(exc)}
 
 
+@per_request
 def print_sale(conn, body: dict[str, Any], *, db_path: str | None = None) -> dict[str, Any]:
     """
     Print using the same Python path as Tk BillingPage:
@@ -2177,11 +2234,7 @@ def print_sale(conn, body: dict[str, Any], *, db_path: str | None = None) -> dic
       F9    → print_bill_silent_with_slot
     UPI QR and slot paper/copies/printers come from bill_print + printer settings.
     """
-    from core.bill_output import (
-        _is_dot_matrix_printer_mode,
-        print_bill_silent_with_slot,
-        print_bill_with_slot,
-    )
+    from core.bill_output import _is_dot_matrix_printer_mode
     from core.store_manager import get_active_db_path
 
     slot = _safe_int(body.get("slot") or 1)
@@ -2213,6 +2266,30 @@ def print_sale(conn, body: dict[str, Any], *, db_path: str | None = None) -> dic
         bill_no = str(saved.get("bill_no") or bill_no)
         warnings = list(saved.get("warnings") or [])
         saved_now = True
+        if body.get("defer_print") and sale_id > 0 and _prints_without_dialog(mode):
+            # The counter gets the saved bill back now and prints it with a second call
+            # (sale_id, just_saved): making the PDF and the spooler took 3-10 s, all of it
+            # before the next bill could start. Only when no print dialog can come up -- a
+            # dialog is the counter's to answer, so that print still happens here.
+            return {
+                "ok": True,
+                "deferred": True,
+                "sale_id": sale_id,
+                "bill_no": bill_no,
+                "slot": slot,
+                "mode": mode,
+                "dot_matrix": bool(_is_dot_matrix_printer_mode()),
+                "pdf_dir": saved.get("pdf_dir") or "",
+                "next_bill_hint": saved.get("next_bill_hint") or "",
+                "merged_counter": bool(saved.get("merged_counter")),
+                "customer_due": saved.get("customer_due"),
+                "customer_credit": saved.get("customer_credit"),
+                "warnings": warnings,
+            }
+    elif body.get("just_saved"):
+        # The second call of a deferred Save & Print: this bill was saved a moment ago and its
+        # PDF record is made here, as when the save and the print were one call.
+        saved_now = True
 
     if sale_id <= 0:
         return {"ok": False, "error": "No sale to print.", "code": "no_sale"}
@@ -2228,14 +2305,18 @@ def print_sale(conn, body: dict[str, Any], *, db_path: str | None = None) -> dic
     except Exception:
         path = db_path or get_active_db_path()
     try:
-        try:
-            conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
-        except Exception:
-            pass
-        try:
-            conn.commit()
-        except Exception:
-            pass
+        # Under the sale write lock: the engine's one connection is shared by every request,
+        # and a deferred print runs while the counter may already be saving the next bill --
+        # a commit here in the middle of that save would make half of it permanent.
+        with _SALE_WRITE_LOCK:
+            try:
+                conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+            except Exception:
+                pass
+            try:
+                conn.commit()
+            except Exception:
+                pass
         row = conn.execute(
             "SELECT id FROM sales WHERE id=?", (int(sale_id),)
         ).fetchone()
@@ -2258,16 +2339,13 @@ def print_sale(conn, body: dict[str, Any], *, db_path: str | None = None) -> dic
                 }
 
         used_dot_matrix = bool(_is_dot_matrix_printer_mode())
-        if mode == "silent":
-            # Classic F9 — still routes to dot-matrix when Settings say so
-            html_path, pdf_path = print_bill_silent_with_slot(
-                conn, sale_id, slot, db_path=path
-            )
-        else:
-            # Classic F7/F8 — PrinterManager + bill_print_settings decide everything
-            html_path, pdf_path = print_bill_with_slot(
-                conn, sale_id, slot, hwnd_owner=0, db_path=path
-            )
+        # One bill at a time to the printer: two deferred prints of bills saved back to back
+        # come out in the order they were saved, not interleaved.
+        _PRINT_LOCK.acquire()
+        try:
+            html_path, pdf_path = _print_now(conn, sale_id, slot, mode, path)
+        finally:
+            _PRINT_LOCK.release()
 
         if saved_now and not pdf_path:
             # A dot-matrix slip leaves no file. The bill's PDF record (the one a plain save
@@ -2310,6 +2388,34 @@ def print_sale(conn, body: dict[str, Any], *, db_path: str | None = None) -> dic
             "bill_no": bill_no,
             "code": "print_failed",
         }
+
+
+_PRINT_LOCK = threading.Lock()
+
+
+def _print_now(conn, sale_id: int, slot: int, mode: str, path):
+    from core.bill_output import print_bill_silent_with_slot, print_bill_with_slot
+
+    if mode == "silent":
+        # Classic F9 — still routes to dot-matrix when Settings say so
+        return print_bill_silent_with_slot(conn, sale_id, slot, db_path=path)
+    # Classic F7/F8 — PrinterManager + bill_print_settings decide everything
+    return print_bill_with_slot(conn, sale_id, slot, hwnd_owner=0, db_path=path)
+
+
+def _prints_without_dialog(mode: str) -> bool:
+    """True when printing this bill cannot open a print dialog (dot-matrix, F9 silent, or
+    silent printing switched on), so it can run after the counter has its answer."""
+    try:
+        from core.bill_output import _is_dot_matrix_printer_mode
+
+        if mode == "silent" or _is_dot_matrix_printer_mode():
+            return True
+        from core.printer_manager import PrinterManager
+
+        return bool(PrinterManager.load_settings().get("silent_print_enabled", True))
+    except Exception:
+        return False
 
 
 def _forget_autosave_session_for(sale_id: int) -> None:

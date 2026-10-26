@@ -687,6 +687,7 @@ def save_layout(data):
     payload = json.dumps(_stamp_banner_owner(data))
     with open(path, 'w') as f:
         f.write(payload)
+    _READ_ONCE.cached = None     # a read_once() block in progress reads the new file
 
 # ── Module-level constants — read ONCE at startup, correct after restart ──
 # All runtime code should call load_layout() directly instead of these.

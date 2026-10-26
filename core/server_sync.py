@@ -429,10 +429,25 @@ def _build_sales_docs(conn, ids=None) -> list[dict]:
     if not sales:
         return []
 
-    cur.execute("SELECT id, name, phone, address FROM customers")
-    customers = {
-        int(r[0]): {"name": r[1], "phone": r[2], "address": r[3]} for r in cur.fetchall()
-    }
+    # Only the bills' own customers: the offline-first outbox builds one bill at a time, and
+    # reading all 8,500 customers for each took 10 ms of the worker's write lock per bill.
+    cust_ids = set()
+    for s in sales:
+        try:
+            cust_ids.add(int(s.get("customer_id") or 0))
+        except (TypeError, ValueError):
+            pass
+    cust_ids = sorted(cust_ids)
+    customers = {}
+    for i in range(0, len(cust_ids), 800):
+        chunk = cust_ids[i : i + 800]
+        cur.execute(
+            f"SELECT id, name, phone, address FROM customers WHERE id IN ({','.join('?' * len(chunk))})",
+            chunk,
+        )
+        customers.update(
+            {int(r[0]): {"name": r[1], "phone": r[2], "address": r[3]} for r in cur.fetchall()}
+        )
 
     sale_ids = [int(s["id"]) for s in sales]
     items_by_sale: dict[int, list] = {sid: [] for sid in sale_ids}

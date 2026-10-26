@@ -262,6 +262,16 @@ def _open_conn(db_path: str) -> sqlite3.Connection:
         ensure_recent_columns(conn)
     except Exception as exc:
         print(f"[schema] recent columns: {exc}", flush=True)
+    # The indexes a big store needs (core/perf_indexes.py): built once, in a second or two on
+    # 5 lakh batches; without them opening the Sales medicine list read the whole store.
+    try:
+        from core.perf_indexes import ensure_perf_indexes
+
+        made = ensure_perf_indexes(conn)
+        if made:
+            print(f"[perf] indexes made: {', '.join(made)}", flush=True)
+    except Exception as exc:
+        print(f"[perf] indexes: {exc}", flush=True)
     # Offline owns a real settings table. Mirror it, so switching to Online --
     # which runs on :memory: -- shows the same thresholds instead of defaults.
     try:

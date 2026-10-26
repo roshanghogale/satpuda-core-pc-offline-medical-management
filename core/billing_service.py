@@ -66,17 +66,21 @@ def _allocate_bill_number(
     """Next bill number — SCB restarts each FY (1 Apr); ASV drafts stay global."""
     from core.fy_serial import allocate_bill_number
 
-    local_no = allocate_bill_number(
-        conn,
-        prefix,
-        bill_date=bill_date,
-        exclude_sale_id=exclude_sale_id,
-    )
+    def _local() -> str:
+        # Reads and parses every bill number of the year (13,000 bills: tens of ms).
+        return allocate_bill_number(
+            conn,
+            prefix,
+            bill_date=bill_date,
+            exclude_sale_id=exclude_sale_id,
+        )
+
     if prefix != "SCB":
-        return local_no
+        return _local()
 
     # Offline-first: the number comes from a block this PC reserved on the server, so no
-    # other device can print it (core/offline_first/numbers.py).
+    # other device can print it (core/offline_first/numbers.py). The year's highest local
+    # number is only needed when the blocks have run out.
     try:
         from core.offline_first.runtime import is_active as _of_active
 
@@ -88,9 +92,10 @@ def _allocate_bill_number(
             serial = take_serial(conn, "sales", fy)
             if serial is not None:
                 return encode_sales_bill_no(serial, fy)
-            return local_no
+            return _local()
     except Exception as exc:
         print(f"[billing] offline-first number: {exc}")
+    local_no = _local()
 
     try:
         from core.sync_prefs import is_online_mode

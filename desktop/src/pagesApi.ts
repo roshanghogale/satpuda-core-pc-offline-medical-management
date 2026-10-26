@@ -1280,6 +1280,8 @@ export function printSalesBill(body: Record<string, unknown>) {
       pdf_path?: string
       pdf_dir?: string
       cleared?: boolean
+      /** Saved only: print it with a second call (sale_id, just_saved: true). */
+      deferred?: boolean
     }
   >('/api/sales/print', body, true)
 }
