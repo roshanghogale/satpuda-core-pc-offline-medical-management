@@ -19,7 +19,9 @@ import socket
 import subprocess
 import sys
 import tempfile
+import ssl
 import threading
+import time
 import unittest
 import zipfile
 from datetime import datetime, timedelta, timezone
@@ -52,6 +54,44 @@ def iso(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def ps_quote(s: str) -> str:
+    """A PowerShell single-quoted literal - PSQuote in SatpudaCore.iss."""
+    quotes = "'" + chr(0x2018) + chr(0x2019) + chr(0x201A) + chr(0x201B)
+    out = []
+    for ch in s:
+        out.append(ch * 2 if ch in quotes else ch)
+    return "'" + "".join(out) + "'"
+
+
+# What WorkerParams in SatpudaCore.iss builds: no -File (a Group Policy
+# execution policy of AllSigned or Restricted blocks an unsigned -File script
+# whatever -ExecutionPolicy says), but a -Command that refuses Constrained
+# Language Mode up front and then DOT-SOURCES the script text, so its top-level
+# variables and $script: are one scope exactly as with -File.
+BOOTSTRAP = ("$ErrorActionPreference='Stop'; "
+             "if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {{ "
+             "'E|CLM|PowerShell on this computer is locked to ' + $ExecutionContext.SessionState.LanguageMode + "
+             "' (an AppLocker or Device Guard policy)'; exit 2 }}; "
+             ". ([scriptblock]::Create([IO.File]::ReadAllText({script}))) {args}")
+
+
+def worker_command(args, policy="Bypass", prelude="", powershell=None):
+    """powershell.exe argv that runs the worker as the installer does."""
+    parts = []
+    for a in args:
+        if a.startswith("-") and a[1:].isalpha():
+            parts.append(a)
+        else:
+            parts.append(ps_quote(a))
+    cmd = prelude + BOOTSTRAP.format(script=ps_quote(WORKER), args=" ".join(parts))
+    return [powershell or POWERSHELL, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", policy, "-Command", cmd]
+
+
+# The 32-bit PowerShell on 64-bit Windows (a 32-bit host can start the worker).
+POWERSHELL32 = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
+                            "SysWOW64", "WindowsPowerShell", "v1.0", "powershell.exe")
+
+
 class FakeGitHub:
     """State the handler reads. `script(n)` decides what the release looks like
     on the n-th API call: a dict {zip: bytes|None, sha: str|None, id, updated}."""
@@ -71,6 +111,7 @@ class FakeGitHub:
         self.plain_gets = 0         # GETs of the zip without a Range header
         self.dl_requests = 0        # every request for the zip itself
         self.history = None         # sha256 list of every build of the tag (<zip>.sha256s), None = 404
+        self.clock_skew = 0         # seconds added to every Date header this server sends
 
     def release_json(self, base):
         r = self.release
@@ -94,6 +135,16 @@ def make_handler(gh: FakeGitHub):
 
         def log_message(self, *a):
             pass
+
+        def date_time_string(self, timestamp=None):
+            # A PC whose clock is off is the same as an internet whose clock is off the other way.
+            return super().date_time_string(time.time() + gh.clock_skew)
+
+        def do_HEAD(self):
+            # -ClockUrl: only the Date header is read.
+            self.send_response(200)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
 
         def _send(self, code, body=b"", headers=None):
             self.send_response(code)
@@ -184,24 +235,37 @@ class FetchWorkerRepublish(unittest.TestCase):
         self.addCleanup(self.srv.server_close)
         self.addCleanup(self.srv.shutdown)
 
-    def run_worker(self, wait_secs=20, extra=(), api_base=None):
-        app_root = os.path.join(self.tmp, "Satpuda Core")
-        args = [POWERSHELL, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-                "-File", WORKER,
-                "-AppRoot", app_root,
+    def run_worker(self, wait_secs=20, extra=(), api_base=None, app_root=None, launch="command",
+                   policy="Bypass", prelude="", settle="1", timeout=180, powershell=None):
+        app_root = app_root or os.path.join(self.tmp, "Satpuda Core")
+        self.app_root = app_root
+        args = ["-AppRoot", app_root,
                 "-CacheDir", os.path.join(self.tmp, "cache"),
                 "-CancelFile", os.path.join(self.tmp, "cancel.flag"),
                 "-Repo", REPO, "-Tag", TAG, "-AssetName", ZIP,
                 "-ApiBase", api_base or f"http://127.0.0.1:{self.port}",
                 "-UpdatePollSecs", "1", "-UpdateWaitSecs", str(wait_secs),
+                "-AvSettleSecs", settle,
+                "-ClockUrl", f"http://127.0.0.1:{self.port}/clock",
+                "-LogFile", os.path.join(self.tmp, "install.log"),
                 "-Segments", "4", *extra]
-        p = subprocess.run(args, capture_output=True, text=True, timeout=180)
+        if launch == "file":
+            argv = [POWERSHELL, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", policy, "-File", WORKER, *args]
+        else:
+            argv = worker_command(args, policy=policy, prelude=prelude, powershell=powershell)
+        # The pipe is ASCII by contract; decode it strictly so a stray byte fails the test.
+        p = subprocess.run(argv, capture_output=True, timeout=timeout)
+        out = p.stdout.decode("ascii") + p.stderr.decode("utf-8", "replace")
         marker = os.path.join(app_root, "app", ".satpuda-install.json")
         rec = None
         if os.path.isfile(marker):
             with open(marker, encoding="utf-8-sig") as fh:
                 rec = json.load(fh)
-        return p.returncode, p.stdout, rec
+        return p.returncode, out, rec
+
+    def install_log(self):
+        with open(os.path.join(self.tmp, "install.log"), encoding="utf-8") as fh:
+            return fh.read()
 
     def test_zip_appears_after_two_polls(self):
         new = make_zip(2)
@@ -612,6 +676,276 @@ class FetchWorkerRepublish(unittest.TestCase):
             text = fh.read()
         self.assertIn("LATEST|v9.9.9", text)
         self.assertIn("SHA|" + sha, text)
+
+    # ---- other PCs (Oct 2026): policy, paths, disk, antivirus, clock -------
+
+    def test_compat_report_opens_the_install_log(self):
+        """One file to send: the first block of install.log says what the PC is."""
+        data, sha = self._steady(51)
+        rc, out, rec = self.run_worker()
+        self._assert_installed(rc, out, rec, sha)
+        log = self.install_log()
+        for key in ("compat: ===== compatibility check", "compat: windows: ", "compat: arch: OS 64-bit=",
+                    "compat: powershell 5.", "language FullLanguage", "compat: .NET 4.", "compat: tls: in use=",
+                    "compat: clock: local ", "compat: user profile ", "compat: free space: ",
+                    "compat: WebView2 Runtime ", "compat: VC++ 2015-2022 x64 runtime ", "compat: proxy: ",
+                    "compat: ===== end of compatibility check"):
+            self.assertIn(key, log)
+        self.assertLess(log.index("compat: ===== end"), log.index("Looking up the download"))
+        self.assertIn("Tls12", log)
+
+    def test_group_policy_allsigned_does_not_block_the_worker(self):
+        """Group Policy AllSigned/Restricted wins over -ExecutionPolicy Bypass. An effective
+        policy of AllSigned (set here for the process, the same refusal) stops -File cold,
+        and the installer's -Command launch still installs."""
+        data, sha = self._steady(52)
+        rc, out, rec = self.run_worker(launch="file", policy="AllSigned")
+        self.assertNotEqual(rc, 0)
+        self.assertIn("is not digitally signed", out)
+        self.assertIsNone(rec)
+        rc, out, rec = self.run_worker(policy="AllSigned")
+        self._assert_installed(rc, out, rec, sha)
+        rc2, out2, rec2 = self.run_worker(policy="Restricted")
+        self.assertEqual(rc2, 0, out2)
+
+    def test_file_launch_still_works(self):
+        data, sha = self._steady(53)
+        rc, out, rec = self.run_worker(launch="file")
+        self._assert_installed(rc, out, rec, sha)
+
+    @unittest.skipUnless(os.path.isfile(POWERSHELL32), "no 32-bit PowerShell on this Windows")
+    def test_32bit_powershell_host(self):
+        """A 32-bit PowerShell on 64-bit Windows: installs, and the report reads the real
+        64-bit registry (Registry64 view) rather than the WOW64 copy."""
+        data, sha = self._steady(68)
+        rc, out, rec = self.run_worker(powershell=POWERSHELL32)
+        self._assert_installed(rc, out, rec, sha)
+        self.assertIn("PowerShell 64-bit=False", out)
+        self.assertIn("compat: windows: Windows", out)
+
+    def test_both_scripts_parse(self):
+        for script in (WORKER, os.path.join(ROOT, "installer", "satpuda_update.ps1")):
+            p = subprocess.run([POWERSHELL, "-NoProfile", "-NonInteractive", "-Command",
+                                "$e=$null; [void][System.Management.Automation.Language.Parser]::ParseFile("
+                                + ps_quote(script) + ", [ref]$null, [ref]$e); if ($e) { $e | % { $_.Message }; exit 1 }"],
+                               capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, script + ": " + p.stdout + p.stderr)
+            with open(script, "rb") as fh:
+                self.assertTrue(all(b < 128 for b in fh.read()), script + " must stay pure ASCII")
+
+    def test_constrained_language_mode_is_named(self):
+        """AppLocker / WDAC put PowerShell in Constrained Language Mode, where the worker
+        cannot run at all. Said up front, not as a heap of type errors."""
+        self._steady(54)
+        rc, out, rec = self.run_worker(prelude="$ExecutionContext.SessionState.LanguageMode='ConstrainedLanguage'; ")
+        self.assertEqual(rc, 2, out)
+        self.assertIn("E|CLM|PowerShell on this computer is locked to ConstrainedLanguage", out)
+        self.assertEqual(self.gh.api_calls, 0)
+
+    def test_user_name_with_space_apostrophe_and_marathi(self):
+        """C:\\Users\\NEW USER, C:\\Users\\D'Souza and a Devanagari user name, for the install
+        folder AND the zip chosen in the browser. Installs; the pipe stays pure ASCII."""
+        data, sha = self._steady(55)
+        home = os.path.join(self.tmp, "Users", "NEW USER D'Souza \u0930\u094b\u0936\u0928")
+        app_root = os.path.join(home, "AppData", "Local", "Programs", "Satpuda Core")
+        os.makedirs(os.path.join(home, "Downloads"))
+        path = os.path.join(home, "Downloads", ZIP)
+        with open(path, "wb") as fh:
+            fh.write(data)
+        rc, out, rec = self.run_worker(app_root=app_root, extra=("-LocalZip", path))
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("E|", out)
+        self.assertEqual(rec["sha256"], sha)
+        self.assertTrue(os.path.isfile(os.path.join(app_root, "app", "SatpudaCore_Desktop.exe")))
+        self.assertIn("?", out)                                   # the Devanagari, made ASCII on the pipe
+        self.assertIn("\u0930\u094b\u0936\u0928", self.install_log())  # ...and kept in the log
+
+    def test_not_enough_space_stops_before_downloading(self):
+        self._steady(56)
+        rc, out, rec = self.run_worker(extra=("-AssumeFreeMB", "40"))
+        self.assertEqual(rc, 2, out)
+        self.assertIn("E|DISK|Not enough free space on drive", out)
+        self.assertIn("to download Satpuda Core", out)
+        self.assertEqual(self.gh.dl_requests, 0)
+        self.assertIsNone(rec)
+
+    def test_not_enough_space_for_the_chosen_zip(self):
+        data, sha = self._steady(57)
+        path = self._browser_zip(data)
+        rc, out, rec = self.run_worker(extra=("-LocalZip", path, "-AssumeFreeMB", "10"))
+        self.assertEqual(rc, 2, out)
+        self.assertIn("E|DISK|", out)
+        self.assertIsNone(rec)
+        self.assertTrue(os.path.isfile(path))
+        self._no_copy_left()
+
+    def test_too_deep_install_folder_is_refused_before_unpacking(self):
+        lpe = subprocess.run([POWERSHELL, "-NoProfile", "-Command",
+                              "(Get-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\FileSystem').LongPathsEnabled"],
+                             capture_output=True, text=True).stdout.strip()
+        if lpe == "1":
+            self.skipTest("LongPathsEnabled is on here; nothing to refuse")
+        data, sha = self._steady(58)
+        deep = os.path.join(self.tmp, "d" * 120, "e" * 80, "Satpuda Core")
+        rc, out, rec = self.run_worker(app_root=deep)
+        self.assertEqual(rc, 2, out)
+        self.assertIn("E|LONGPATH|", out)
+        self.assertIsNone(rec)
+        self.assertFalse(os.path.isdir(os.path.join(deep, "app.staging")))
+
+    def test_unexpected_error_is_reported_not_swallowed(self):
+        """Something nobody planned for (here: the cache folder is a FILE) used to end the
+        worker with exit 1 and nothing on the pipe."""
+        self._steady(59)
+        with open(os.path.join(self.tmp, "cache"), "w") as fh:
+            fh.write("not a folder")
+        rc, out, rec = self.run_worker()
+        self.assertEqual(rc, 2, out)
+        self.assertIn("E|INTERNAL|", out)
+        self.assertRegex(out, r"E\|INTERNAL\|.*\(line \d+\)")
+
+    def test_mark_of_the_web_on_the_browser_zip_does_not_reach_the_program(self):
+        data, sha = self._steady(60)
+        path = self._browser_zip(data)
+        with open(path + ":Zone.Identifier", "w") as fh:
+            fh.write("[ZoneTransfer]\nZoneId=3\n")
+        rc, out, rec = self.run_worker(extra=("-LocalZip", path))
+        self.assertEqual(rc, 0, out)
+        exe = os.path.join(self.tmp, "Satpuda Core", "app", "SatpudaCore_Desktop.exe")
+        self.assertTrue(os.path.isfile(exe))
+        self.assertFalse(os.path.exists(exe + ":Zone.Identifier"))
+
+    def test_port_in_use_is_reported(self):
+        data, sha = self._steady(61)
+        holder = socket.socket()
+        holder.bind(("127.0.0.1", 0))
+        holder.listen(1)
+        port = holder.getsockname()[1]
+        try:
+            rc, out, rec = self.run_worker(extra=("-EnginePort", str(port)))
+        finally:
+            holder.close()
+        self._assert_installed(rc, out, rec, sha)
+        self.assertRegex(out, r"PORT\|Port %d, which Satpuda Core uses inside this computer, is already in use by python" % port)
+
+    # -- antivirus that deletes what was just unpacked (Net Protector) --
+
+    def _antivirus(self, names, mode):
+        """A thread that deletes files the way Net Protector did: each named file under
+        app.staging (and app) as soon as it is there, closed and whole. mode 'once' deletes
+        the first one only; 'always' keeps at it."""
+        stop = threading.Event()
+        hits = []
+
+        def run():
+            while not stop.is_set():
+                for d in ("app.staging", "app"):
+                    for n in names:
+                        p = os.path.join(self.tmp, "Satpuda Core", d, n)
+                        if d == "app" and mode != "always-app":
+                            continue
+                        try:
+                            if os.path.isfile(p) and os.path.getsize(p) > 0:
+                                os.remove(p)
+                                hits.append(p)
+                                if mode == "once":
+                                    return
+                        except OSError:
+                            pass
+                time.sleep(0.005)
+
+        t = threading.Thread(target=run, daemon=True)
+        t.start()
+        self.addCleanup(stop.set)
+        return stop, hits
+
+    def test_antivirus_deleting_the_exe_once_is_put_right(self):
+        data, sha = self._steady(62)
+        stop, hits = self._antivirus(["SatpudaCore_Desktop.exe"], "once")
+        rc, out, rec = self.run_worker(settle="2")
+        stop.set()
+        self.assertEqual(len(hits), 1)
+        self._assert_installed(rc, out, rec, sha)
+        self.assertIn("disappeared right after they were unpacked", out)
+        self.assertIn("the files unpacked again stayed in place", out)
+        self.assertTrue(os.path.isfile(os.path.join(self.tmp, "Satpuda Core", "app", "SatpudaCore_Desktop.exe")))
+
+    def test_antivirus_that_keeps_deleting_is_named_and_the_old_install_stays(self):
+        old, old_sha = self._steady(63)
+        rc, out, rec = self.run_worker()
+        self._assert_installed(rc, out, rec, old_sha)
+        new = make_zip(64)
+        new_sha = hashlib.sha256(new).hexdigest()
+        self.gh.release = {"zip": new, "sha": new_sha, "id": 164,
+                           "updated": iso(datetime.now(timezone.utc) - timedelta(days=1))}
+        stop, hits = self._antivirus(["SatpudaCore_Desktop.exe"], "always")
+        rc, out, rec = self.run_worker(settle="2")
+        stop.set()
+        self.assertGreaterEqual(len(hits), 2)
+        self.assertEqual(rc, 2, out)
+        self.assertIn("E|AVBLOCK|Antivirus", out)
+        self.assertIn("Add this folder to its exclusions: ", out)
+        self.assertIn("SatpudaCore_Desktop.exe", out)
+        # The shop still has the program it had.
+        self.assertEqual(rec["sha256"], old_sha)
+        self.assertTrue(os.path.isfile(os.path.join(self.tmp, "Satpuda Core", "app", "SatpudaCore_Desktop.exe")))
+        self.assertFalse(os.path.isdir(os.path.join(self.tmp, "Satpuda Core", "app.staging")))
+        # The zip is kept for the next try (after the exclusion is set).
+        self.assertTrue(os.path.isfile(os.path.join(self.tmp, "cache", ZIP)))
+
+    def test_zip_without_the_program_is_still_layout_not_antivirus(self):
+        self.gh.release = {"zip": None, "sha": None, "id": 65}
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:
+            z.writestr("SatpudaCore_Desktop_Win10/other.exe", os.urandom(2 * 1024 * 1024))
+        path = self._browser_zip(buf.getvalue())
+        rc, out, rec = self.run_worker(extra=("-LocalZip", path), wait_secs=2)
+        self.assertEqual(rc, 2, out)
+        self.assertIn("E|LAYOUT|", out)
+        self.assertNotIn("Installing files", out)                # judged before anything was written
+
+    # -- a PC clock far off, and HTTPS that is not trusted --
+
+    def _https_github(self):
+        """The same fake GitHub behind a self-signed certificate: every HTTPS request fails
+        its certificate check, exactly as on a PC whose clock is years off."""
+        openssl = shutil.which("openssl") or r"C:\Program Files\Git\usr\bin\openssl.exe"
+        if not os.path.isfile(openssl) and not shutil.which("openssl"):
+            self.skipTest("openssl not available to make a test certificate")
+        cert, key = os.path.join(self.tmp, "c.pem"), os.path.join(self.tmp, "k.pem")
+        r = subprocess.run([openssl, "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", key,
+                            "-out", cert, "-subj", "/CN=127.0.0.1", "-days", "2"], capture_output=True)
+        if r.returncode != 0:
+            self.skipTest("openssl could not make a certificate: " + r.stderr.decode(errors="replace"))
+        srv = QuietServer(("127.0.0.1", 0), make_handler(self.gh))
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(cert, key)
+        srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        return f"https://127.0.0.1:{srv.server_address[1]}"
+
+    def test_clock_years_off_is_named(self):
+        self._steady(66)
+        base = self._https_github()
+        self.gh.clock_skew = -2 * 365 * 86400        # the internet says 2 years earlier = the PC is 2 years ahead
+        t0 = time.time()
+        rc, out, rec = self.run_worker(api_base=base, wait_secs=2,
+                                       extra=("-DirectUrl", f"{base}/dl/{20 + 66}/{ZIP}"))
+        self.assertEqual(rc, 2, out)
+        self.assertIn("E|CLOCK|The date and time on this computer are wrong", out)
+        self.assertLess(time.time() - t0, 60)          # no minute of pointless retries
+        self.assertIn("network failure kind: TrustFailure", out)
+
+    def test_untrusted_https_with_a_right_clock_is_tls(self):
+        self._steady(67)
+        base = self._https_github()
+        rc, out, rec = self.run_worker(api_base=base, wait_secs=2,
+                                       extra=("-DirectUrl", f"{base}/dl/{20 + 67}/{ZIP}"))
+        self.assertEqual(rc, 2, out)
+        self.assertIn("E|TLS|", out)
+        self.assertNotIn("E|CLOCK|", out)
 
 
 if __name__ == "__main__":

@@ -266,6 +266,27 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 a.binaries = filter_system_dlls(a.binaries)
 
+# win32ui.pyd (pywin32's pythonwin) is the GDI printing path: dot-matrix slips,
+# HP "V4" drivers and PDF printing in core/printer_manager.py. It links MFC,
+# mfc140u.dll, and PyInstaller leaves that out because it finds it in System32
+# and takes it for part of Windows. It is not: only the Microsoft Visual C++
+# Redistributable puts it there. So on a shop PC without the redistributable
+# "import win32ui" failed and those printers could not print (seen in the
+# shipped 1.1.0-beta.10 engine: every other DLL it needs is either bundled or
+# part of Windows 10). mfc140u.dll is redistributable app-locally (Visual
+# Studio's redist list). It goes NEXT TO win32ui.pyd, the directory Python
+# searches first for an extension module's own DLLs; vcruntime140.dll, which
+# MFC needs, is already loaded by python313.dll from _internal.
+_mfc = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "mfc140u.dll")
+if any(os.path.basename(str(b[0])).lower() == "win32ui.pyd" for b in a.binaries):
+    if os.path.isfile(_mfc):
+        a.binaries = list(a.binaries) + [(os.path.join("pythonwin", "mfc140u.dll"), _mfc, "BINARY")]
+        print("[spec] bundling " + _mfc + " next to win32ui.pyd")
+    else:
+        print("[spec] WARNING: win32ui.pyd is bundled but mfc140u.dll was not found in System32; "
+              "install the Visual C++ 2015-2022 x64 redistributable on the build PC, or GDI printing "
+              "needs it on every shop PC")
+
 # Drive is the only Google API this app builds a service for. Keep its
 # discovery document, drop the other 598.
 a.datas = prune_discovery_documents(a.datas)

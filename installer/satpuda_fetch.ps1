@@ -14,7 +14,21 @@
      D|<text>           debug, goes to the install log only
      UNVERIFIED|        -LocalZip only: no published checksum could be read, so
                         the chosen zip was checked by its contents alone
+     AV|<names>         the antivirus products Windows knows of (for AVBLOCK)
+     PORT|<text>        the app's local port 8765 is taken or reserved; the
+                        installer says so on its last page
      OK|                finished
+
+  Codes added for other PCs (Oct 2026): DISK (not enough free space), LONGPATH
+  (install folder too deep for Windows' 260-character limit), AVBLOCK / AVZIP
+  (antivirus removed files right after they were written), CLOCK (the PC's date
+  is far off, so HTTPS certificates fail), TLS (HTTPS trust failed although the
+  clock is right), DOTNET (System.IO.Compression missing), INTERNAL (anything
+  unexpected - the message and line number, instead of a silent exit 1). The
+  installer starts this worker with -Command and dot-sources it, so a Group
+  Policy execution policy (AllSigned / Restricted) cannot block it; see
+  WorkerParams in SatpudaCore.iss. Under Constrained Language Mode the
+  installer's own bootstrap answers E|CLM| before this file is read.
 
   Exit codes: 0 = success, 2 = failed, 3 = cancelled by the user.
 
@@ -70,7 +84,17 @@ param(
     # Checked against the release's published .sha256 when it can be read, then
     # installed by exactly the same extract / swap / record steps as a download.
     [string] $LocalZip  = '',
-    [string] $ApiBase   = 'https://api.github.com'         # only ever changed by the tests (a local fake GitHub)
+    [string] $ApiBase   = 'https://api.github.com',        # only ever changed by the tests (a local fake GitHub)
+    # Antivirus that deletes a file it dislikes does it a moment AFTER the file
+    # is written (Net Protector, Oct 2026). The unpacked files are counted again
+    # after this many seconds, before anything is swapped in.
+    [int]    $AvSettleSecs = 5,
+    # A plain-HTTP address whose Date header says what time it really is, read
+    # only after an HTTPS failure (a PC whose clock is years off fails every
+    # certificate check). Changed only by the tests.
+    [string] $ClockUrl  = 'http://github.com/',
+    [int]    $EnginePort = 8765,                           # the app's own local port, checked and reported
+    [int64]  $AssumeFreeMB = -1                            # tests only: pretend every drive has this much free
 )
 
 $ErrorActionPreference = 'Stop'
@@ -81,7 +105,41 @@ if ($Segments -gt 32) { $Segments = 32 }
 if ($UpdateWaitSecs -lt 0)   { $UpdateWaitSecs = 0 }
 if ($UpdateWaitSecs -gt 900) { $UpdateWaitSecs = 900 }
 if ($UpdatePollSecs -lt 1)   { $UpdatePollSecs = 1 }
+if ($AvSettleSecs -lt 0)     { $AvSettleSecs = 0 }
+if ($AvSettleSecs -gt 60)    { $AvSettleSecs = 60 }
 $ApiBase = $ApiBase.TrimEnd('/')
+
+# GitHub is TLS 1.2+ only. PowerShell 5.1 inherits the .NET default, which on
+# an un-updated Windows 10 (no SchUseStrongCrypto) is still SSL3/TLS 1.0, so
+# every call dies before it starts. Set by NUMBER, not by name: on a .NET whose
+# enum has no Tls12 member the name throws, while 3072 still switches TLS 1.2 on
+# wherever the OS has it. TLS 1.3 (12288) is added where the OS knows it.
+# Returns '' or why it could not be done.
+function Set-StrongTls {
+    $why = ''
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType](3072 -bor 768 -bor 192)
+    } catch {
+        $why = $_.Exception.Message
+        try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]3072; $why = '' } catch { }
+    }
+    # TLS 1.3 only where Windows' own SChannel has a TLS 1.3 client (Windows 11
+    # / Server 2022, build 20348+). Asking for it on Windows 10 gains nothing
+    # (GitHub speaks 1.2) and can make the handshake itself fail there - the
+    # owner's PC is Windows 11, so it would never show up on it.
+    $build = 0
+    try { $build = [Environment]::OSVersion.Version.Build } catch { }
+    if ($build -ge 20348) {
+        try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]12288 } catch { }
+    }
+    # A shop behind an office proxy that wants the Windows login (HTTP 407):
+    # .NET does not send it unless asked to. Harmless when there is no proxy.
+    try {
+        $px = [Net.WebRequest]::DefaultWebProxy
+        if ($px) { $px.Credentials = [Net.CredentialCache]::DefaultNetworkCredentials }
+    } catch { }
+    return $why
+}
 
 # --------------------------------------------------------------- CheckOnly --
 #
@@ -91,11 +149,7 @@ $ApiBase = $ApiBase.TrimEnd('/')
 # failure - an offline shop still gets a working maintenance page.
 if ($CheckOnly) {
     $tag = ''
-    try {
-        [Net.ServicePointManager]::SecurityProtocol =
-            [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls11 -bor [Net.SecurityProtocolType]::Tls
-        try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 12288 } catch { }
-    } catch { }
+    [void](Set-StrongTls)
     $latestRel = $null
     try {
         $r = [System.Net.HttpWebRequest]::Create("$ApiBase/repos/$Repo/releases/latest")
@@ -205,12 +259,31 @@ if ($CheckOnly) {
 function Emit([string]$line) {
     # [Console]::Out + explicit Flush: Write-Output buffers, and a buffered
     # progress line is a progress bar that does not move.
-    [Console]::Out.WriteLine($line)
+    #
+    # ASCII only on the pipe, enforced here rather than hoped for: a path on a
+    # PC whose Windows user name is in Marathi or Hindi (C:\Users\<Devanagari>)
+    # reaches the installer in the console code page as garbage, and a stray
+    # byte there can split one message into two. The install log below gets
+    # the real text (UTF-8).
+    $ascii = [regex]::Replace([string]$line, '[^\x20-\x7E]', '?')
+    [Console]::Out.WriteLine($ascii)
     [Console]::Out.Flush()
     if ($script:LogWriter) {
         try { $script:LogWriter.WriteLine(('{0:HH:mm:ss}  {1}' -f (Get-Date), $line)); $script:LogWriter.Flush() } catch { }
     }
 }
+# Anything this script did not expect. Before this, an unexpected error ended
+# PowerShell with exit code 1 and nothing on the pipe, and the installer could
+# only say "The installation could not be completed" - with no clue in the log.
+# Now it is a failure like any other, with the message and the line it came
+# from. (A trap covers the whole scope it is in, wherever it is written.)
+trap {
+    $m = ''
+    try { $m = [string]$_.Exception.Message + ' (line ' + $_.InvocationInfo.ScriptLineNumber + ')' } catch { $m = 'unexpected error' }
+    try { Emit ('E|INTERNAL|' + ($m -replace '[\r\n|]+', ' ')) } catch { [Console]::Out.WriteLine('E|INTERNAL|unexpected error') }
+    try { Exit-Clean 2 } catch { exit 2 }
+}
+
 function Step([string]$t)            { Write-ConnectNotes; Emit ("S|" + $t) }
 function Warn([string]$t)            { Emit ("W|" + $t) }
 function Dbg ([string]$t)            { Emit ("D|" + $t) }
@@ -278,6 +351,10 @@ function Wait-Cancellable([int]$milliseconds) {
 }
 
 function Exit-Clean([int]$code) {
+    # A failure found while the package is still open (it is judged before it
+    # is unpacked): let go of it first, or our copy of a chosen zip cannot be
+    # deleted below.
+    try { if ($script:zip) { $script:zip.Dispose(); $script:zip = $null } } catch { }
     if ($code -ne 0) {
         # A staging folder is never a valid install. Leaving one behind is what
         # makes a broken install look finished, so it always goes.
@@ -336,6 +413,273 @@ public static extern bool MoveFileEx(string lpExistingFileName, string lpNewFile
     } catch { Dbg ("MoveFileEx failed: " + $_.Exception.Message) }
 }
 
+# ----------------------------------------------------- compatibility check --
+#
+# The first block of every run in install.log: what this PC is, in one place,
+# so a shop can send ONE file and the cause is in it. Every probe is on its own
+# and silent on failure - this report must never be why an install fails - and
+# none of it changes anything on the PC.
+
+# A registry value from a given view (Registry64 reads the real 64-bit keys
+# even from a 32-bit PowerShell). $null when it is not there.
+function Get-RegValue([string]$hive, [string]$view, [string]$sub, [string]$name) {
+    try {
+        $v = [Microsoft.Win32.RegistryView]::$view
+        if (($view -eq 'Registry64') -and -not [Environment]::Is64BitOperatingSystem) { $v = [Microsoft.Win32.RegistryView]::Default }
+        $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::$hive, $v)
+        try {
+            $k = $base.OpenSubKey($sub)
+            if ($k) { try { return $k.GetValue($name) } finally { $k.Close() } }
+        } finally { $base.Close() }
+    } catch { }
+    return $null
+}
+
+# The real System32, also from a 32-bit PowerShell on 64-bit Windows (where
+# "System32" is quietly SysWOW64).
+function Get-NativeSystem32 {
+    $win = $env:windir
+    if (-not $win) { $win = 'C:\Windows' }
+    if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) { return (Join-Path $win 'Sysnative') }
+    return (Join-Path $win 'System32')
+}
+
+# Free megabytes on the drive that holds $path; -1 when that cannot be told
+# (a network path, a drive that is not there yet).
+function Get-FreeMB([string]$path) {
+    if ($AssumeFreeMB -ge 0) { return [int64]$AssumeFreeMB }
+    try {
+        $full = [System.IO.Path]::GetFullPath($path)
+        $root = [System.IO.Path]::GetPathRoot($full)
+        if ((-not $root) -or $root.StartsWith('\\')) { return [int64]-1 }
+        return [int64][Math]::Floor((New-Object System.IO.DriveInfo($root)).AvailableFreeSpace / 1MB)
+    } catch { return [int64]-1 }
+}
+
+function Get-DriveLabel([string]$path) {
+    try { return ([System.IO.Path]::GetPathRoot([System.IO.Path]::GetFullPath($path))).TrimEnd('\') } catch { return $path }
+}
+
+# Fails with DISK, before the work starts, when the drive of $path cannot hold
+# $needBytes more. Before this a full disk showed up half way through as a
+# write error ("could not be unpacked") or a short download.
+function Assert-FreeSpace([string]$path, [int64]$needBytes, [string]$what) {
+    $free = Get-FreeMB $path
+    $need = [int64][Math]::Ceiling($needBytes / 1MB)
+    $drive = Get-DriveLabel $path
+    Dbg ('free space on ' + $drive + ' for ' + $what + ': ' + $free + ' MB, needs about ' + $need + ' MB')
+    if (($free -ge 0) -and ($free -lt $need)) {
+        Fail 'DISK' ('Not enough free space on drive ' + $drive + ' to ' + $what + ': about ' + $need +
+                     ' MB is needed and only ' + $free + ' MB is free.')
+    }
+}
+
+# The antivirus products Windows Security Center knows of, as objects with a
+# Name and a State. Read once; an empty list on Windows Server (no Security
+# Center) or when WMI is broken.
+$script:AvList = $null
+function Get-AvList {
+    if ($null -ne $script:AvList) { return $script:AvList }
+    $list = @()
+    try {
+        $items = $null
+        try {
+            $items = Get-CimInstance -Namespace 'root/SecurityCenter2' -ClassName 'AntiVirusProduct' -OperationTimeoutSec 10 -ErrorAction Stop
+        } catch {
+            $items = Get-WmiObject -Namespace 'root\SecurityCenter2' -Class 'AntiVirusProduct' -ErrorAction Stop
+        }
+        foreach ($i in @($items)) {
+            if (-not $i) { continue }
+            $n = [string]$i.displayName
+            if (-not $n) { continue }
+            $st = 0
+            try { $st = [int]$i.productState } catch { }
+            $list += [pscustomobject]@{ Name = $n; State = $st }
+        }
+    } catch { Dbg ('compat: antivirus list could not be read: ' + $_.Exception.Message) }
+    $script:AvList = $list
+    return $list
+}
+
+# Product names for a sentence: other products before Windows' own, which is
+# switched to passive mode as soon as another antivirus is installed.
+function Get-AvNamesText {
+    $own = @(); $other = @()
+    foreach ($a in @(Get-AvList)) {
+        if ($a.Name -match 'Windows Defender|Microsoft Defender') { $own += $a.Name } else { $other += $a.Name }
+    }
+    $all = @($other) + @($own)
+    return (($all | Select-Object -Unique) -join ', ')
+}
+
+# Who holds the app's own local port, and whether Windows has reserved it.
+# Returns sentences for PORT| lines; none when all is well. The app's own
+# engine on that port is not a problem (it is just running).
+function Get-PortProblems {
+    $out = @()
+    $pids = @()
+    $asked = $false
+    try {
+        if (Get-Command -Name 'Get-NetTCPConnection' -ErrorAction SilentlyContinue) {
+            $asked = $true
+            foreach ($c in @(Get-NetTCPConnection -LocalPort $EnginePort -State Listen -ErrorAction SilentlyContinue)) {
+                if ($c -and $c.OwningProcess) { $pids += [int]$c.OwningProcess }
+            }
+        }
+    } catch { $asked = $false }
+    if (-not $asked) {
+        # netstat's state column is translated on some Windows languages, so a
+        # listener is told by its remote address instead (0.0.0.0:0 / [::]:0).
+        try {
+            foreach ($l in @(& netstat.exe -ano 2>$null)) {
+                $parts = ([string]$l).Trim() -split '\s+'
+                if (($parts.Count -ge 5) -and ($parts[0] -eq 'TCP') -and ($parts[1] -match (':' + $EnginePort + '$')) -and
+                    ($parts[2] -match ':0$') -and ($parts[-1] -match '^\d+$')) { $pids += [int]$parts[-1] }
+            }
+        } catch { }
+    }
+    foreach ($p in ($pids | Select-Object -Unique)) {
+        $name = '?'
+        try { $name = (Get-Process -Id $p -ErrorAction Stop).ProcessName } catch { }
+        Dbg ('compat: port ' + $EnginePort + ' is listened on by ' + $name + ' (pid ' + $p + ')')
+        if ($name -notmatch '^(SatpudaEngine|SatpudaCore_Desktop)$') {
+            $out += ('Port ' + $EnginePort + ', which Satpuda Core uses inside this computer, is already in use by ' +
+                     $name + '.exe (process ' + $p + '). Satpuda Core may not start, or may close that program when it starts.')
+        }
+    }
+    try {
+        foreach ($l in @(& netsh.exe interface ipv4 show excludedportrange protocol=tcp 2>$null)) {
+            if ([string]$l -match '^\s*(\d+)\s+(\d+)') {
+                $a = [int]$Matches[1]; $b = [int]$Matches[2]
+                if (($EnginePort -ge $a) -and ($EnginePort -le $b)) {
+                    Dbg ('compat: port ' + $EnginePort + ' is inside the reserved range ' + $a + '-' + $b)
+                    $out += ('Windows has reserved ports ' + $a + '-' + $b + ' (usually for Hyper-V, WSL or Docker), and Satpuda Core needs port ' +
+                             $EnginePort + ' in that range. Restart the computer; if it stays, an administrator can run "net stop winnat" and "net start winnat".')
+                }
+            }
+        }
+    } catch { }
+    return $out
+}
+
+function Get-DotNetText {
+    $rel = Get-RegValue 'LocalMachine' 'Registry64' 'SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full' 'Release'
+    if ($null -eq $rel) { return 'no .NET 4.5+ found' }
+    $r = [int]$rel
+    $name = if ($r -ge 533320) { '4.8.1' } elseif ($r -ge 528040) { '4.8' } elseif ($r -ge 461808) { '4.7.2' } elseif ($r -ge 461308) { '4.7.1' } elseif ($r -ge 460798) { '4.7' } elseif ($r -ge 394802) { '4.6.2' } elseif ($r -ge 394254) { '4.6.1' } elseif ($r -ge 393295) { '4.6' } elseif ($r -ge 379893) { '4.5.2' } else { '4.5.x' }
+    return ($name + ' (release ' + $r + ')')
+}
+
+# WebView2 Runtime, where the Evergreen installer records it: per machine in
+# the 32-bit view, per user in HKCU. '' when absent. A version whose
+# msedgewebview2.exe is not on the disk is reported as broken.
+function Get-WebView2Text {
+    $g = '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+    $found = @()
+    foreach ($s in @(@('LocalMachine', 'Registry32', 'machine'), @('LocalMachine', 'Registry64', 'machine'),
+                     @('CurrentUser', 'Registry64', 'user'), @('CurrentUser', 'Registry32', 'user'))) {
+        $pv = Get-RegValue $s[0] $s[1] ('SOFTWARE\Microsoft\EdgeUpdate\Clients\' + $g) 'pv'
+        if ($pv -and ([string]$pv -ne '0.0.0.0')) {
+            $root = if ($s[2] -eq 'user') { $env:LOCALAPPDATA } else { ${env:ProgramFiles(x86)} }
+            if (-not $root) { $root = $env:ProgramFiles }
+            $exe = Join-Path $root ('Microsoft\EdgeWebView\Application\' + $pv + '\msedgewebview2.exe')
+            $ok = Test-Path -LiteralPath $exe
+            $found += ([string]$pv + ' (' + $s[2] + $(if ($ok) { '' } else { ', BROKEN: msedgewebview2.exe missing' }) + ')')
+        }
+    }
+    if (-not $found) { return 'NOT INSTALLED' }
+    return (($found | Select-Object -Unique) -join '; ')
+}
+
+function Write-CompatReport {
+    Dbg ('compat: ===== compatibility check, worker started ' + (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') + ' =====')
+    $nt = 'SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+    try {
+        $build = [string](Get-RegValue 'LocalMachine' 'Registry64' $nt 'CurrentBuildNumber')
+        $ubr   = [string](Get-RegValue 'LocalMachine' 'Registry64' $nt 'UBR')
+        $prod  = [string](Get-RegValue 'LocalMachine' 'Registry64' $nt 'ProductName')
+        $disp  = [string](Get-RegValue 'LocalMachine' 'Registry64' $nt 'DisplayVersion')
+        if (-not $disp) { $disp = [string](Get-RegValue 'LocalMachine' 'Registry64' $nt 'ReleaseId') }
+        $ed    = [string](Get-RegValue 'LocalMachine' 'Registry64' $nt 'EditionID')
+        # ProductName still says "Windows 10" on Windows 11.
+        if (($build -as [int]) -ge 22000) { $prod = $prod -replace 'Windows 10', 'Windows 11' }
+        Dbg ('compat: windows: ' + $prod + ' ' + $disp + ', build ' + $build + '.' + $ubr + ', edition ' + $ed + ' (' + [Environment]::OSVersion.VersionString + ')')
+    } catch { }
+    try {
+        Dbg ('compat: arch: OS 64-bit=' + [Environment]::Is64BitOperatingSystem + ', PowerShell 64-bit=' + [Environment]::Is64BitProcess +
+             ', PROCESSOR_ARCHITECTURE=' + $env:PROCESSOR_ARCHITECTURE + $(if ($env:PROCESSOR_ARCHITEW6432) { ', ARCHITEW6432=' + $env:PROCESSOR_ARCHITEW6432 } else { '' }))
+    } catch { }
+    try {
+        $pol = (Get-ExecutionPolicy -List | ForEach-Object { [string]$_.Scope + '=' + [string]$_.ExecutionPolicy }) -join ' '
+        Dbg ('compat: powershell ' + $PSVersionTable.PSVersion + ', CLR ' + $PSVersionTable.CLRVersion + ', language ' +
+             $ExecutionContext.SessionState.LanguageMode + ', policy ' + $pol)
+    } catch { }
+    try { Dbg ('compat: .NET ' + (Get-DotNetText)) } catch { }
+    try {
+        $k = 'SOFTWARE\Microsoft\.NETFramework\v4.0.30319'
+        $sc = 'SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols\TLS 1.2\Client'
+        Dbg ('compat: tls: in use=' + [Net.ServicePointManager]::SecurityProtocol +
+             ', SchUseStrongCrypto=' + (Get-RegValue 'LocalMachine' 'Registry64' $k 'SchUseStrongCrypto') +
+             '/' + (Get-RegValue 'LocalMachine' 'Registry32' $k 'SchUseStrongCrypto') +
+             ', SystemDefaultTlsVersions=' + (Get-RegValue 'LocalMachine' 'Registry64' $k 'SystemDefaultTlsVersions') +
+             ', SCHANNEL TLS1.2 client Enabled=' + (Get-RegValue 'LocalMachine' 'Registry64' $sc 'Enabled') +
+             ' DisabledByDefault=' + (Get-RegValue 'LocalMachine' 'Registry64' $sc 'DisabledByDefault'))
+    } catch { }
+    try {
+        $now = Get-Date
+        Dbg ('compat: clock: local ' + $now.ToString('yyyy-MM-dd HH:mm:ss') + ', UTC ' + $now.ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ss') +
+             ', zone ' + [TimeZoneInfo]::Local.Id)
+    } catch { }
+    try {
+        $prof = [string]$env:USERPROFILE
+        Dbg ('compat: user profile ' + $prof + ' (space=' + ($prof -match ' ') + ', non-ASCII=' + ($prof -match '[^\x00-\x7F]') + ')' +
+             ', LOCALAPPDATA=' + $env:LOCALAPPDATA + ', TEMP=' + $env:TEMP + $(if ($env:OneDrive) { ', OneDrive=' + $env:OneDrive } else { '' }))
+        $desk = Get-RegValue 'CurrentUser' 'Registry64' 'Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders' 'Desktop'
+        Dbg ('compat: desktop folder ' + $desk)
+        Dbg ('compat: install folder ' + $AppRoot + ' (' + $AppRoot.Length + ' chars), cache ' + $CacheDir +
+             ', LongPathsEnabled=' + (Get-RegValue 'LocalMachine' 'Registry64' 'SYSTEM\CurrentControlSet\Control\FileSystem' 'LongPathsEnabled'))
+    } catch { }
+    try {
+        Dbg ('compat: free space: ' + (Get-DriveLabel $AppRoot) + ' ' + (Get-FreeMB $AppRoot) + ' MB (install), ' +
+             (Get-DriveLabel $CacheDir) + ' ' + (Get-FreeMB $CacheDir) + ' MB (download cache)')
+    } catch { }
+    try { Dbg ('compat: WebView2 Runtime ' + (Get-WebView2Text)) } catch { }
+    try {
+        $vc = Get-RegValue 'LocalMachine' 'Registry64' 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64' 'Version'
+        $mfc = Test-Path -LiteralPath (Join-Path (Get-NativeSystem32) 'mfc140u.dll')
+        Dbg ('compat: VC++ 2015-2022 x64 runtime ' + $(if ($vc) { $vc } else { 'not registered' }) + ', mfc140u.dll in System32=' + $mfc)
+    } catch { }
+    try {
+        $av = @(Get-AvList)
+        if ($av.Count -eq 0) { Dbg 'compat: antivirus: none reported by Windows Security Center' }
+        foreach ($a in $av) { Dbg ('compat: antivirus: ' + $a.Name + ' (state 0x' + ('{0:X6}' -f $a.State) + ')') }
+        $cfa = Get-RegValue 'LocalMachine' 'Registry64' 'SOFTWARE\Microsoft\Windows Defender\Windows Defender Exploit Guard\Controlled Folder Access' 'EnableControlledFolderAccess'
+        if ($null -ne $cfa) { Dbg ('compat: Controlled Folder Access=' + $cfa) }
+        $names = Get-AvNamesText
+        if ($names) { Emit ('AV|' + $names) }
+    } catch { }
+    try {
+        $is = 'Software\Microsoft\Windows\CurrentVersion\Internet Settings'
+        $pe = Get-RegValue 'CurrentUser' 'Registry64' $is 'ProxyEnable'
+        $ps = Get-RegValue 'CurrentUser' 'Registry64' $is 'ProxyServer'
+        $pac = Get-RegValue 'CurrentUser' 'Registry64' $is 'AutoConfigURL'
+        $via = 'direct'
+        try {
+            $px = [Net.WebRequest]::DefaultWebProxy
+            if ($px) { $u = $px.GetProxy([Uri]'https://api.github.com/'); if ($u -and ($u.Host -ne 'api.github.com')) { $via = [string]$u } }
+        } catch { }
+        $wh = ''
+        try { $wh = ((@(& netsh.exe winhttp show proxy 2>$null) | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ }) -join ' / ') } catch { }
+        Dbg ('compat: proxy: ProxyEnable=' + $pe + ' ProxyServer=' + $ps + ' AutoConfigURL=' + $pac + ', .NET uses ' + $via + ', WinHTTP: ' + $wh)
+    } catch { }
+    try {
+        $running = @(Get-Process -Name 'SatpudaCore_Desktop', 'SatpudaEngine' -ErrorAction SilentlyContinue | ForEach-Object { $_.ProcessName + '(' + $_.Id + ')' })
+        if ($running) { Dbg ('compat: running now: ' + ($running -join ', ')) }
+    } catch { }
+    try { foreach ($p in @(Get-PortProblems)) { Emit ('PORT|' + $p) } } catch { }
+    Dbg 'compat: ===== end of compatibility check ====='
+}
+
 # ------------------------------------------------------------------- setup --
 
 if ($LogFile) {
@@ -350,14 +694,9 @@ if ($LogFile) {
 # leaving a 122 MB download running behind a closed wizard.
 Emit ("PID|" + $PID)
 
-# GitHub is TLS 1.2+ only. PowerShell 5.1 inherits the .NET default, which on
-# an un-updated Windows 10 can still be TLS 1.0 -> every download dies before it
-# starts.
-try {
-    [Net.ServicePointManager]::SecurityProtocol =
-        [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls11 -bor [Net.SecurityProtocolType]::Tls
-    try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 12288 } catch { }  # TLS 1.3 when present
-} catch { Warn "Could not raise the TLS level; download may fail on this PC." }
+# GitHub is TLS 1.2+ only; see Set-StrongTls at the top.
+$tlsWhy = Set-StrongTls
+if ($tlsWhy) { Warn ("Could not raise the TLS level; download may fail on this PC: " + $tlsWhy) }
 [Net.ServicePointManager]::Expect100Continue = $false
 # .NET queues connections to the same host above this limit, so a 16-way
 # segmented download with the old value of 8 would have run 8 at a time.
@@ -625,7 +964,17 @@ function Use-FastConnect([string]$u) {
     try { [SatpudaNet.FastConnect]::Hook($u) } catch { }
 }
 
-Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
+Write-CompatReport
+
+# The zip reader is part of .NET 4.5 and newer, which every Windows 10 has. A
+# PC whose .NET is damaged gets a sentence that says so - not a bare exit 1.
+try {
+    Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop | Out-Null
+    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop | Out-Null
+} catch {
+    Fail 'DOTNET' ('The .NET zip reader (System.IO.Compression, .NET 4.5 or newer) could not be loaded: ' + $_.Exception.Message)
+}
+
 Enable-FastConnect
 
 $script:Staging = Join-Path $AppRoot 'app.staging'
@@ -687,7 +1036,16 @@ function Invoke-Api([string]$u) {
     $r.ReadWriteTimeout = 30000
     $resp = $r.GetResponse()
     try {
-        try { $d = $resp.Headers['Date']; if ($d) { $script:ApiNow = ConvertFrom-HttpDate $d } } catch { }
+        try {
+            $d = $resp.Headers['Date']
+            if ($d) {
+                $script:ApiNow = ConvertFrom-HttpDate $d
+                if (-not $script:SkewLogged) {
+                    $script:SkewLogged = $true
+                    Dbg ('clock: this PC is ' + [int]([DateTime]::UtcNow - $script:ApiNow).TotalSeconds + ' s off GitHub''s clock (+ = ahead)')
+                }
+            }
+        } catch { }
         $sr = New-Object System.IO.StreamReader($resp.GetResponseStream())
         try { return $sr.ReadToEnd() } finally { $sr.Dispose() }
     } finally { $resp.Close() }
@@ -708,6 +1066,86 @@ function Get-HttpStatus($ex) {
     return 0
 }
 
+# What kind of failure the last network error was (a WebExceptionStatus such as
+# TrustFailure, NameResolutionFailure, ConnectFailure) and its innermost message.
+$script:NetStatus = ''
+$script:NetDetail = ''
+$script:SkewLogged = $false
+function Save-NetError($ex) {
+    $e = $ex
+    for ($i = 0; ($i -lt 6) -and $e; $i++) {
+        $we = $e -as [System.Net.WebException]
+        if ($we) {
+            if ($we.Response) { return }           # an HTTP answer: the line itself works
+            $script:NetStatus = [string]$we.Status
+            $inner = $we
+            while ($inner.InnerException) { $inner = $inner.InnerException }
+            $script:NetDetail = ([string]$inner.Message) -replace '[\r\n|]+', ' '
+            return
+        }
+        $e = $e.InnerException
+    }
+}
+
+# Seconds this PC's clock is ahead (+) or behind (-) the internet's, from the
+# Date header of a PLAIN-HTTP answer - no certificate in the way, so it works
+# exactly when HTTPS does not. $null when nothing answered.
+function Get-ClockSkew {
+    foreach ($u in @($ClockUrl, 'http://www.msftconnecttest.com/connecttest.txt')) {
+        if (-not $u) { continue }
+        $resp = $null
+        try {
+            $r = [System.Net.HttpWebRequest]::Create($u)
+            $r.Method            = 'HEAD'
+            $r.AllowAutoRedirect = $false
+            $r.Timeout           = 8000
+            $r.ReadWriteTimeout  = 8000
+            $r.UserAgent         = $UserAgent
+            try { $resp = $r.GetResponse() }
+            catch {
+                $we = $_.Exception -as [System.Net.WebException]
+                if (-not $we -and $_.Exception.InnerException) { $we = $_.Exception.InnerException -as [System.Net.WebException] }
+                if ($we) { $resp = $we.Response }
+            }
+            if ($resp) {
+                $d = $resp.Headers['Date']
+                if ($d) { return ([DateTime]::UtcNow - (ConvertFrom-HttpDate $d)).TotalSeconds }
+            }
+        } catch { }
+        finally { if ($resp) { try { $resp.Close() } catch { } } }
+    }
+    return $null
+}
+
+# Every "could not be downloaded" ends here. A PC whose clock is years off (a
+# flat CMOS battery) fails EVERY certificate check, and one whose HTTPS is being
+# intercepted fails them too; both used to be told to check the internet. Now
+# CLOCK and TLS say what is really wrong; anything else is NET with its kind.
+function Fail-Net([string]$t) {
+    Write-ConnectNotes
+    $st    = $script:NetStatus
+    $trust = ($st -eq 'TrustFailure') -or ($st -eq 'SecureChannelFailure')
+    Dbg ('network failure kind: ' + $(if ($st) { $st } else { 'none recorded' }) + $(if ($script:NetDetail) { ' (' + $script:NetDetail + ')' } else { '' }))
+    $skew = Get-ClockSkew
+    if ($null -ne $skew) {
+        Dbg ('clock: this PC is ' + [int64]$skew + ' s off the internet''s clock (+ = ahead)')
+        $abs = [Math]::Abs($skew)
+        if (($trust -and ($abs -gt 6 * 3600)) -or ($abs -gt 30 * 86400)) {
+            $inv  = [Globalization.CultureInfo]::InvariantCulture
+            $pc   = (Get-Date).ToString('dd MMM yyyy, HH:mm', $inv)
+            $real = [DateTime]::UtcNow.AddSeconds(-$skew).ToLocalTime().ToString('dd MMM yyyy, HH:mm', $inv)
+            Fail 'CLOCK' ('The date and time on this computer are wrong: it says ' + $pc + ', the internet says ' + $real + '.')
+        }
+    } else { Dbg 'clock: could not be compared (no plain-HTTP answer either)' }
+    if ($trust) {
+        Fail 'TLS' ('The secure (HTTPS) connection to GitHub was not trusted on this computer (' + $st + ': ' + $script:NetDetail + ').')
+    }
+    if ($st -eq 'NameResolutionFailure')          { $t += ' github.com could not be found: no internet, or DNS is not working.' }
+    elseif ($st -eq 'ProxyNameResolutionFailure') { $t += ' The proxy server set in Windows could not be found.' }
+    elseif ($st)                                  { $t += ' (' + $st + $(if ($script:NetDetail) { ': ' + $script:NetDetail } else { '' }) + ')' }
+    Fail 'NET' $t
+}
+
 # One look at the release. Never throws.
 function Read-Release {
     $info = @{ ApiOk = $false; Url = ''; Size = [int64]0; Id = ''; Updated = ''; ShaListed = $false; Hash = '' }
@@ -716,6 +1154,7 @@ function Read-Release {
         $rel = (Invoke-Api ("$ApiBase/repos/$Repo/releases/tags/$Tag")) | ConvertFrom-Json
         $info.ApiOk = $true
     } catch {
+        Save-NetError $_.Exception
         Dbg ("release API failed: " + $_.Exception.Message)
         return $info
     }
@@ -908,6 +1347,7 @@ function Get-RangeSupport([string]$u) {
         }
     } catch {
         $info.Status = Get-HttpStatus $_.Exception
+        Save-NetError $_.Exception
         Dbg ('range probe failed: ' + $_.Exception.Message)
     }
     finally {
@@ -1386,7 +1826,7 @@ function Invoke-SingleDownload([string]$u, [switch]$NoRange) {
                 }
                 if ($gained -eq 0) { $noProgressRuns++ } else { $noProgressRuns = 0 }
                 if ($noProgressRuns -ge 3) {
-                    Fail 'NET' 'The download is not moving forward at all. The internet connection looks down.'
+                    Fail-Net 'The download is not moving forward at all. The internet connection looks down.'
                 }
                 $wait = $backoff[$attempt - 1]
                 Step ('Connection dropped - retrying in ' + $wait + 's (try ' + ($attempt + 1) + ' of ' + $maxAttempts + ')')
@@ -1407,6 +1847,14 @@ function Invoke-SingleDownload([string]$u, [switch]$NoRange) {
             $we = $_.Exception -as [System.Net.WebException]
             if (-not $we -and $_.Exception.InnerException) {
                 $we = $_.Exception.InnerException -as [System.Net.WebException]
+            }
+
+            # A certificate that is not trusted stays untrusted however often
+            # it is asked again (a wrong clock, HTTPS interception): say so now
+            # instead of after a minute of retries.
+            Save-NetError $_.Exception
+            if ($we -and (-not $we.Response) -and ([string]$we.Status -eq 'TrustFailure')) {
+                Fail-Net ('Download failed: ' + $msg)
             }
 
             if ($we -and $we.Response) {
@@ -1436,11 +1884,11 @@ function Invoke-SingleDownload([string]$u, [switch]$NoRange) {
 
             if ($attempt -ge $maxAttempts) {
                 if ($last404) { Fail 'GONE' 'The download link no longer exists on GitHub.' }
-                Fail 'NET' ('Download failed after ' + $maxAttempts + ' tries: ' + $msg)
+                Fail-Net ('Download failed after ' + $maxAttempts + ' tries: ' + $msg)
             }
             if ($gained -eq 0) { $noProgressRuns++ } else { $noProgressRuns = 0 }
             if ($noProgressRuns -ge 3) {
-                Fail 'NET' 'The download is not moving forward at all. The internet connection looks down.'
+                Fail-Net 'The download is not moving forward at all. The internet connection looks down.'
             }
             $wait = $backoff[$attempt - 1]
             Step ('Connection problem - retrying in ' + $wait + 's (try ' + ($attempt + 1) + ' of ' + $maxAttempts + ')')
@@ -1590,6 +2038,7 @@ function Use-LocalZip {
     $script:LocalCopy = Join-Path $CacheDir ($AssetName + '.chosen')
     $script:DoneFile  = $script:LocalCopy
     Step 'Copying the chosen zip'
+    Assert-FreeSpace $CacheDir ($len + 64MB) 'copy the chosen zip'
     try { Copy-LocalZip $src $script:LocalCopy $len }
     catch { Fail 'LOCALZIP' ('The chosen file could not be read: ' + $_.Exception.Message) }
 
@@ -1687,6 +2136,16 @@ for ($round = 1; $round -le $MaxRounds; $round++) {
 
     if ($haveDone) { break }
 
+    # The 2 MB chunks and the joined file are on the disk together for a
+    # moment, so the cache drive needs the zip twice over, less what an
+    # earlier run already left there for this very build.
+    $zipBytes = if ($script:ExpectedSize -gt 0) { [int64]$script:ExpectedSize } else { [int64]150MB }
+    $cached = [int64]0
+    Get-ChildItem -LiteralPath $CacheDir -Force -ErrorAction SilentlyContinue |
+        Where-Object { (-not $_.PSIsContainer) -and (($_.Name -like ($AssetName + '.*.seg*')) -or ($_.Name -eq ($AssetName + '.part'))) } |
+        ForEach-Object { $cached += $_.Length }
+    Assert-FreeSpace $CacheDir ([Math]::Max([int64]0, 2 * $zipBytes - $cached) + 64MB) 'download Satpuda Core'
+
     Step 'Downloading Satpuda Core'
 
     $plain = $false     # one plain GET, no Range header (see Resolve-RangeTrouble)
@@ -1747,7 +2206,7 @@ for ($round = 1; $round -le $MaxRounds; $round++) {
                 if ($script:Gone) { Fail 'GONE' 'The download link no longer exists on GitHub.' }
                 Fail 'CHANGED' ('The file on release ' + $Tag + ' kept changing while it was being downloaded.')
             }
-            Fail 'NET' 'The download could not be completed.'
+            Fail-Net 'The download could not be completed.'
         }
     }
 
@@ -1827,11 +2286,83 @@ Assert-NotCancelled
 Step 'Opening the package'
 Progress 65 'Opening the package'
 
+# The zip was there a moment ago. Antivirus that quarantines a downloaded file
+# does it in exactly this gap - that is not a damaged download, and saying
+# "damaged, run it again" would only send the shop round the same loop.
+if (-not [System.IO.File]::Exists((Get-LongPath $DoneFile))) {
+    Fail 'AVZIP' ('The downloaded package was removed from ' + [System.IO.Path]::GetDirectoryName($DoneFile) +
+                  ' right after it was saved, most likely by antivirus (' + $(if (Get-AvNamesText) { Get-AvNamesText } else { 'none reported' }) + ').')
+}
+
 $zip = $null
 try { $zip = [System.IO.Compression.ZipFile]::OpenRead((Get-LongPath $DoneFile)) }
 catch {
     Remove-Item -LiteralPath $DoneFile -Force -ErrorAction SilentlyContinue
     Fail 'ZIP' 'The downloaded package is damaged and could not be opened.'
+}
+
+# One entry out of the zip onto the disk. Per-file retry: antivirus and
+# indexers grab freshly written files and hold them for a moment, and one
+# sharing violation should not kill a 122 MB install. -Quiet: report failure
+# by returning $false (the antivirus re-check below) instead of failing.
+$script:CopyBuf = New-Object byte[] 262144
+function Write-ZipEntry($e, [string]$path, [string]$rel, [switch]$Quiet) {
+    for ($try = 1; $try -le 3; $try++) {
+        $cancelledMidFile = $false
+        try {
+            $src = $e.Open()
+            try {
+                $dst = [System.IO.File]::Open((Get-LongPath $path), [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+                try {
+                    # Hand-rolled instead of Stream.CopyTo: CopyTo does not
+                    # come back until the whole file is written, and on a big
+                    # entry that is a Stop click that appears to do nothing.
+                    while (($n = $src.Read($script:CopyBuf, 0, $script:CopyBuf.Length)) -gt 0) {
+                        $dst.Write($script:CopyBuf, 0, $n)
+                        if (Test-Cancel) { $cancelledMidFile = $true; break }
+                    }
+                } finally { $dst.Dispose() }
+            } finally { $src.Dispose() }
+            if ($cancelledMidFile) {
+                # The half-written file is inside staging, and staging is
+                # deleted on the way out, so nothing survives this.
+                Exit-Clean 3
+            }
+            return $true
+        } catch {
+            if (Test-Cancel) { Exit-Clean 3 }
+            if ($try -eq 3) {
+                if ($Quiet) { Dbg ('could not write ' + $rel + ' again: ' + $_.Exception.Message); return $false }
+                Fail 'EXTRACT' ('Could not write ' + $rel + ': ' + $_.Exception.Message)
+            }
+            Start-Sleep -Milliseconds 350
+        }
+    }
+    return $false
+}
+
+# The files of the package that are not on the disk at their full size.
+function Get-MissingFiles($files) {
+    $miss = New-Object System.Collections.Generic.List[object]
+    foreach ($f in $files) {
+        $ok = $false
+        try {
+            $fi = New-Object System.IO.FileInfo((Get-LongPath $f.Path))
+            $ok = $fi.Exists -and ($fi.Length -eq $f.Len)
+        } catch { $ok = $false }
+        if (-not $ok) { $miss.Add($f) }
+    }
+    return ,$miss
+}
+
+function Write-MissingList($miss, [string]$when) {
+    Dbg ([string]$miss.Count + ' file(s) missing ' + $when + ':')
+    $i = 0
+    foreach ($f in $miss) {
+        if ($i -ge 20) { Dbg ('  ... and ' + ($miss.Count - 20) + ' more'); break }
+        Dbg ('  ' + $f.Rel)
+        $i++
+    }
 }
 
 try {
@@ -1853,29 +2384,24 @@ try {
         Dbg ("stripping top-level folder: " + $strip)
     }
 
-    $totalBytes = 0
-    foreach ($e in $entries) { $totalBytes += $e.Length }
-    if ($totalBytes -le 0) { $totalBytes = 1 }
-    Dbg ("entries=" + $entries.Count + " uncompressed=" + $totalBytes)
+    # ------------------------------------------- 5. extract to staging --
+    #
+    # First the whole list - where every file goes and how big it is - so the
+    # package can be judged BEFORE anything is written: a zip without the
+    # program, a folder too deep for Windows, a drive too full.
 
-    # ------------------------------------------------ 5. extract to staging --
-
-    Step 'Installing files'
-    New-Dir $script:Staging
     $stagingFull = [System.IO.Path]::GetFullPath($script:Staging)
     # Compared against with the separator attached, so an entry that resolves to
     # a SIBLING whose name merely starts with "app.staging" cannot slip through
     # a bare StartsWith test.
     $stagingPrefix = $stagingFull.TrimEnd('\') + '\'
+    $liveFull      = [System.IO.Path]::GetFullPath($LiveDir).TrimEnd('\')
 
-    $done  = 0
-    $copyBuf = New-Object byte[] 262144
+    $files = New-Object System.Collections.Generic.List[object]
+    $dirs  = New-Object System.Collections.Generic.List[string]
+    $totalBytes = [int64]0
+    $longest = ''
     foreach ($e in $entries) {
-        # Every entry, not every 25th: a single .pyd in this payload is tens of
-        # megabytes, and one of them is the whole gap between a Stop click and
-        # anything happening.
-        if (Test-Cancel) { Exit-Clean 3 }
-
         $rel = $e.FullName -replace '\\', '/'
         if ($strip -and $rel.StartsWith($strip)) { $rel = $rel.Substring($strip.Length) }
         if ([string]::IsNullOrEmpty($rel)) { continue }
@@ -1890,47 +2416,103 @@ try {
             Fail 'ZIP' ('The package contains an unsafe path: ' + $e.FullName)
         }
 
-        if ($e.Name -eq '' -or $rel.EndsWith('\')) { New-Dir $normalized; continue }   # directory entry
+        if ($e.Name -eq '' -or $rel.EndsWith('\')) { $dirs.Add($normalized); continue }   # directory entry
 
-        New-Dir ([System.IO.Path]::GetDirectoryName($normalized))
+        $files.Add([pscustomobject]@{ Entry = $e; Rel = $rel.TrimStart('\'); Path = $normalized; Len = [int64]$e.Length })
+        $totalBytes += [int64]$e.Length
+        if ($rel.Length -gt $longest.Length) { $longest = $rel.TrimStart('\') }
+    }
+    if ($totalBytes -le 0) { $totalBytes = 1 }
+    Dbg ("entries=" + $entries.Count + " files=" + $files.Count + " uncompressed=" + $totalBytes)
 
-        # Per-file retry: antivirus and indexers grab freshly written files and
-        # hold them for a moment. One sharing violation should not kill a
-        # 122 MB install.
-        $written = $false
-        for ($try = 1; $try -le 3; $try++) {
-            $cancelledMidFile = $false
-            try {
-                $src = $e.Open()
-                try {
-                    $dst = [System.IO.File]::Open((Get-LongPath $normalized), [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
-                    try {
-                        # Hand-rolled instead of Stream.CopyTo: CopyTo does not
-                        # come back until the whole file is written, and on a big
-                        # entry that is a Stop click that appears to do nothing.
-                        while (($n = $src.Read($copyBuf, 0, $copyBuf.Length)) -gt 0) {
-                            $dst.Write($copyBuf, 0, $n)
-                            if (Test-Cancel) { $cancelledMidFile = $true; break }
-                        }
-                    } finally { $dst.Dispose() }
-                } finally { $src.Dispose() }
-                if ($cancelledMidFile) {
-                    # The half-written file is inside staging, and staging is
-                    # deleted on the way out, so nothing survives this.
-                    Exit-Clean 3
-                }
-                $written = $true
-                break
-            } catch {
-                if (Test-Cancel) { Exit-Clean 3 }
-                if ($try -eq 3) { Fail 'EXTRACT' ('Could not write ' + $rel + ': ' + $_.Exception.Message) }
-                Start-Sleep -Milliseconds 350
-            }
+    # The program must be IN the package. Checked here, before ~900 MB is
+    # written, rather than by looking for it afterwards - which is also what
+    # tells "the zip has another shape" (LAYOUT) apart from "antivirus took
+    # it off the disk" (AVBLOCK, below).
+    $inZip = @{}
+    foreach ($f in $files) { $inZip[$f.Rel.ToLowerInvariant()] = $true }
+    if (-not $inZip.ContainsKey($SentinelExe.ToLowerInvariant())) {
+        Fail 'LAYOUT' ($SentinelExe + ' was not found in the package. The published zip may have a different layout.')
+    }
+    $engineRel = 'engine\SatpudaEngine.exe'
+    if (-not $inZip.ContainsKey($engineRel.ToLowerInvariant())) { Warn 'The data engine was not found in the package.' }
+
+    # Windows' 260-character limit. The worker itself writes through \\?\ and
+    # could unpack anything, but the program could not run from there: Python
+    # cannot load a module from a path that long unless LongPathsEnabled is on
+    # (it is off on most PCs, the build machine included).
+    $longestLive = $liveFull.Length + 1 + $longest.Length
+    $lpe = Get-RegValue 'LocalMachine' 'Registry64' 'SYSTEM\CurrentControlSet\Control\FileSystem' 'LongPathsEnabled'
+    Dbg ('longest path once installed: ' + $longestLive + ' characters (' + $longest + '), LongPathsEnabled=' + $lpe)
+    if (($longestLive -gt 259) -and ([int]$lpe -ne 1)) {
+        Fail 'LONGPATH' ('The install folder is too deep for Windows: one of its files would have a path ' + $longestLive +
+                         ' characters long, and Windows allows 260. Install into a shorter folder, for example C:\Satpuda Core.')
+    }
+
+    Assert-FreeSpace $AppRoot ($totalBytes + 64MB) 'unpack Satpuda Core'
+
+    Step 'Installing files'
+    New-Dir $script:Staging
+    foreach ($d in $dirs) { New-Dir $d }
+
+    $done = [int64]0
+    foreach ($f in $files) {
+        # Every entry, not every 25th: a single .pyd in this payload is tens of
+        # megabytes, and one of them is the whole gap between a Stop click and
+        # anything happening.
+        if (Test-Cancel) { Exit-Clean 3 }
+        New-Dir ([System.IO.Path]::GetDirectoryName($f.Path))
+        [void](Write-ZipEntry $f.Entry $f.Path $f.Rel)
+        $done += $f.Len
+        Progress (65 + [int](($done / $totalBytes) * 29)) ('Installing files (' + [math]::Round($done / 1MB) + ' of ' + [math]::Round($totalBytes / 1MB) + ' MB)')
+    }
+
+    # ----------------------------------- 5b. did antivirus leave them? --
+    #
+    # Net Protector (Oct 2026) let SatpudaCore_Desktop.exe be written and then
+    # deleted it, and the old check could only say "the package did not contain
+    # Satpuda Core where it was expected" - wrong, and no help. Now every file
+    # is counted right after unpacking AND again a few seconds later (that is
+    # when antivirus strikes). Anything missing is unpacked once more; if it
+    # goes again, the shop is told which antivirus to set an exclusion in, and
+    # for which folder.
+    Progress 94 'Checking that the files stayed in place'
+    $miss = Get-MissingFiles $files
+    if (($miss.Count -eq 0) -and ($AvSettleSecs -gt 0)) {
+        Progress 95 'Checking that antivirus left the files in place'
+        if (Wait-Cancellable ($AvSettleSecs * 1000)) { Exit-Clean 3 }
+        $miss = Get-MissingFiles $files
+    }
+    if ($miss.Count -gt 0) {
+        Write-MissingList $miss 'after unpacking (removed by antivirus?)'
+        Warn ([string]$miss.Count + ' file(s) disappeared right after they were unpacked (antivirus?); unpacking them once more.')
+        Step 'Unpacking removed files again'
+        if (Wait-Cancellable 1500) { Exit-Clean 3 }
+        foreach ($f in $miss) {
+            if (Test-Cancel) { Exit-Clean 3 }
+            try { New-Dir ([System.IO.Path]::GetDirectoryName($f.Path)) } catch { }
+            [void](Write-ZipEntry $f.Entry $f.Path $f.Rel -Quiet)
         }
-        if (-not $written) { Fail 'EXTRACT' ('Could not write ' + $rel) }
+        if (Wait-Cancellable ([Math]::Max(2, $AvSettleSecs) * 1000)) { Exit-Clean 3 }
+        $miss = Get-MissingFiles $files
+        if ($miss.Count -gt 0) {
+            Write-MissingList $miss 'after unpacking them again'
+            $names = @($miss | Select-Object -First 3 | ForEach-Object { $_.Rel }) -join ', '
+            $av = Get-AvNamesText
+            Fail 'AVBLOCK' ('Antivirus' + $(if ($av) { ' (' + $av + ')' } else { '' }) + ' removed ' + $miss.Count +
+                            ' file(s) right after they were unpacked, twice, including ' + $names +
+                            '. Add this folder to its exclusions: ' + $AppRoot)
+        }
+        Dbg 'the files unpacked again stayed in place'
+    }
 
-        $done += $e.Length
-        Progress (65 + [int](($done / $totalBytes) * 30)) ('Installing files (' + [math]::Round($done / 1MB) + ' of ' + [math]::Round($totalBytes / 1MB) + ' MB)')
+    # Mark of the Web. Files this worker writes never carry one, but anything
+    # that did ("downloaded from the internet") makes SmartScreen stop the
+    # program on first start, so the programs are unblocked here regardless.
+    foreach ($f in $files) {
+        if ($f.Rel -match '\.(exe|dll|pyd|ps1|vbs|cmd|bat)$') {
+            try { [System.IO.File]::Delete((Get-LongPath $f.Path) + ':Zone.Identifier') } catch { }
+        }
     }
 }
 finally { if ($zip) { $zip.Dispose() } }
@@ -1941,11 +2523,9 @@ Assert-NotCancelled
 
 Progress 95 'Checking the installed files'
 $sentinel = Join-Path $script:Staging $SentinelExe
-if (-not (Test-Path -LiteralPath $sentinel)) {
-    Fail 'LAYOUT' ($SentinelExe + ' was not found in the package. The published zip may have a different layout.')
+if (-not [System.IO.File]::Exists((Get-LongPath $sentinel))) {
+    Fail 'AVBLOCK' ('Antivirus removed ' + $SentinelExe + ' right after it was unpacked. Add this folder to its exclusions: ' + $AppRoot)
 }
-$engine = Join-Path $script:Staging 'engine\SatpudaEngine.exe'
-if (-not (Test-Path -LiteralPath $engine)) { Warn 'The data engine was not found in the package.' }
 
 # Written last, inside staging: its presence is the only proof the extraction
 # ran to the end. The installer and the update check both read the version out
@@ -2020,6 +2600,23 @@ catch {
     # Put the old install back rather than leaving the shop with nothing.
     if (Test-Path -LiteralPath $old) { try { [System.IO.Directory]::Move((Get-LongPath $old), (Get-LongPath $LiveDir)) } catch { } }
     Fail 'SWAP' ('Could not put the new files in place: ' + $_.Exception.Message)
+}
+
+# Once more, after the rename: an antivirus that scans on rename takes the
+# program here, and an install without its program must not be called
+# finished. The previous version, when there was one, goes back in its place.
+$liveExe = Join-Path $LiveDir $SentinelExe
+if (-not [System.IO.File]::Exists((Get-LongPath $liveExe))) {
+    Dbg ($SentinelExe + ' is gone from the installed folder right after the swap')
+    $broken = Join-Path $AppRoot ('app.broken-' + [DateTime]::UtcNow.Ticks)
+    try { [System.IO.Directory]::Move((Get-LongPath $LiveDir), (Get-LongPath $broken)) } catch { $broken = $LiveDir }
+    if ((Test-Path -LiteralPath $old) -and -not (Test-Path -LiteralPath $LiveDir)) {
+        try { [System.IO.Directory]::Move((Get-LongPath $old), (Get-LongPath $LiveDir)); Dbg 'the previous version was put back' } catch { }
+    }
+    [void](Remove-Tree $broken)
+    $av = Get-AvNamesText
+    Fail 'AVBLOCK' ('Antivirus' + $(if ($av) { ' (' + $av + ')' } else { '' }) + ' removed ' + $SentinelExe +
+                    ' as soon as it was put in place. Add this folder to its exclusions: ' + $AppRoot)
 }
 
 # Old copy is now dead weight. If a still-running exe holds it, let the reboot
