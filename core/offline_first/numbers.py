@@ -117,12 +117,43 @@ def check_with_server(conn: sqlite3.Connection, fy_start_year: int, ask) -> list
     return drop_taken(conn, fy_start_year, ask(int(fy_start_year), left))
 
 
+# Where each running number is kept, so a new one never repeats one already in the store.
+_DOC_NUMBER_COLUMNS = {
+    "PAY": ("supplier_payments", "payment_no"),
+    "SR": ("sales_returns", "return_no"),
+    "PR": ("purchase_returns", "return_no"),
+    "RO": ("pending_orders", "order_no"),
+    "SD": ("stock_disposals", "disposal_no"),
+}
+
+
+def _highest_doc_number_used(conn: sqlite3.Connection, prefix: str, dev) -> int:
+    """The highest n of '<prefix><dev>-n' already in the store. A data import (Shrihari, store
+    154, Oct 2026) numbered the old supplier payments PAY1-1..PAY1-265 as if the shop's PC 1 had
+    made them; PC 1's own counter then started at 1 and its first payment was refused with
+    "UNIQUE constraint failed: supplier_payments.payment_no"."""
+    where = _DOC_NUMBER_COLUMNS.get(prefix)
+    if not where or not dev:
+        return 0
+    table, col = where
+    head = f"{prefix}{dev}-"
+    try:
+        row = conn.execute(
+            f"SELECT MAX(CAST(SUBSTR({col}, ?) AS INTEGER)) FROM {table} WHERE {col} LIKE ?",
+            (len(head) + 1, head + "%"),
+        ).fetchone()
+    except sqlite3.Error:
+        return 0
+    return int(row[0] or 0) if row else 0
+
+
 def doc_number(conn: sqlite3.Connection, prefix: str) -> str:
     """'SR3-17': the device's own running number for returns (SR/PR), supplier payments (SP),
     write-offs (SD) and reorders (PO), unique because the device number is in it."""
     dev = meta_get(conn, "device_no")
     row = conn.execute("SELECT next_no FROM of_doc_counters WHERE prefix=?", (prefix,)).fetchone()
     n = int(row[0]) if row else 1
+    n = max(n, _highest_doc_number_used(conn, prefix, dev) + 1)
     conn.execute(
         "INSERT INTO of_doc_counters (prefix, next_no) VALUES (?, ?) "
         "ON CONFLICT(prefix) DO UPDATE SET next_no=excluded.next_no",
