@@ -1010,9 +1010,16 @@ export function PharmacyPanel(props: Props) {
             <select
               className="settings-input"
               value={String(bill.template || 'classic')}
-              onChange={(e) =>
-                setBill((b) => ({ ...b, template: e.target.value }))
-              }
+              onChange={(e) => {
+                const template = e.target.value
+                // The Micropro style is a Bill of Supply: the heading follows it, so the
+                // shop's phone and web print a Bill of Supply too.
+                setBill((b) =>
+                  template === 'bill_of_supply'
+                    ? { ...b, template, bill_heading: 'bill_of_supply' }
+                    : { ...b, template },
+                )
+              }}
             >
               {opts.templates.map((o) => (
                 <option key={o.value} value={o.value}>
@@ -1023,7 +1030,10 @@ export function PharmacyPanel(props: Props) {
           </Field>
           <Note>
             GST Vertical Rotated (Classic) matches the standard pharmacy GST
-            receipt.
+            receipt. Bill of Supply (Micropro style): the dot matrix slip prints like
+            the old Micropro program — no boxes, no GST, E &amp; O E and the drug
+            licence at the bottom; the normal printer keeps its bill, headed BILL OF
+            SUPPLY with no GST.
           </Note>
         </Frame>
         <Frame title="Bill heading">
@@ -1031,9 +1041,15 @@ export function PharmacyPanel(props: Props) {
             <select
               className="settings-input"
               value={String(bill.bill_heading || 'tax_invoice')}
-              onChange={(e) =>
-                setBill((b) => ({ ...b, bill_heading: e.target.value }))
-              }
+              onChange={(e) => {
+                const heading = e.target.value
+                // A Tax Invoice cannot be the Micropro Bill of Supply slip: back to GST Invoice.
+                setBill((b) =>
+                  heading !== 'bill_of_supply' && b.template === 'bill_of_supply'
+                    ? { ...b, bill_heading: heading, template: 'classic' }
+                    : { ...b, bill_heading: heading },
+                )
+              }}
             >
               <option value="tax_invoice">Tax Invoice (normal GST bill)</option>
               <option value="bill_of_supply">Bill of Supply (no GST on the bill)</option>

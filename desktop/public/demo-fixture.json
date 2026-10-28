@@ -427,6 +427,10 @@
     {
      "value": "legacy",
      "label": "Tax Invoice"
+    },
+    {
+     "value": "bill_of_supply",
+     "label": "Bill of Supply (Micropro style)"
     }
    ],
    "paper_sizes": [

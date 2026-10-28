@@ -260,8 +260,15 @@ def _is_compact(settings: dict) -> bool:
     return _style(settings) == COMPACT_STYLE
 
 
+def _is_micropro(settings: dict, ctx=None) -> bool:
+    """The "Bill of Supply (Micropro style)" bill template (core/micropro_bill.py)."""
+    from core.micropro_bill import is_micropro
+
+    return is_micropro(settings, ctx)
+
+
 def _vertical_borders(settings: dict) -> bool:
-    if _is_compact(settings):
+    if _is_compact(settings) or _is_micropro(settings):
         return False        # the shop chose the slip without the | rules
     return bool(settings.get("dot_matrix_vertical_borders", True))
 
@@ -851,7 +858,9 @@ def _layout_a6_for_ctx(ctx, settings: dict) -> DmLayout:
     # Measured, not guessed. It was a constant 10, so adding a header line --
     # the store e-mail -- silently pushed a full slip one line over and the last
     # item fell off the paper.
-    if page_index > 0:
+    if _is_micropro(settings, ctx):
+        header_est = len(_micropro_lines(ctx, {**settings, _DM_SETTINGS_KEY: base}, slip=0))
+    elif page_index > 0:
         header_est = 4
     else:
         try:
@@ -864,6 +873,8 @@ def _layout_a6_for_ctx(ctx, settings: dict) -> DmLayout:
     footer_est = 3 if bool(getattr(ctx, "is_continued", False)) else 7
     table_est = 3 + n_items + 1
     need = header_est + table_est + footer_est
+    if _is_micropro(settings, ctx):
+        need = header_est            # counted whole: header, medicines and footer
     if need <= base.slip_lines:
         return base
     paper = _a6_paper(settings)
@@ -1055,9 +1066,132 @@ def _a6_slip_line_count(dm: DmLayout) -> int:
     return max(24, min(36, int(round(100.0 / line_mm))))
 
 
+def _micropro_lines(ctx, settings: dict, *, slip: int = 0) -> list[str]:
+    """Bill of Supply, Micropro style (core/micropro_bill.py): no boxes, no GST, the
+    shop's details at the top, E & O E and the drug licence under the Net Amount. On a
+    fixed slip the medicines get the spare lines, so the footer sits at the bottom."""
+    from core import micropro_bill as mp
+
+    w = _dm(settings).line_width
+    head = mp.header(ctx, settings)
+    foot = mp.footer(ctx, settings)
+
+    date_s = f"Date : {head['date']}" if head["date"] else ""
+    bill_s = f"Bill No.: {head['bill_no']}" if head["bill_no"] else ""
+    addr_s = f"Addr : {head['addr']}" if head["addr"] else ""
+    rw = min(max((len(v) for v in (date_s, bill_s, addr_s, head["page"]) if v), default=0), w // 2)
+    lw = max(1, w - rw - 1)
+
+    def hrow(left: str, right: str) -> str:
+        left, right = _ascii_safe(left), _ascii_safe(right)[:rw]
+        return (left[:lw].ljust(lw) + " " + right) if right else left[:w]
+
+    def pair(left: str, right: str) -> list[str]:
+        left, right = _ascii_safe(left), _ascii_safe(right)
+        if not right:
+            return [left[:w]] if left else []
+        if left and len(left) + 1 + len(right) <= w:
+            return [left + " " * (w - len(left) - len(right)) + right]
+        return ([left[:w]] if left else []) + [right[:w].rjust(w)]
+
+    out: list[str] = []
+    if head["first_page"]:
+        out.append(_bold(_center(head["title"], w)))
+        if head["store"]:
+            out.append(_bold(head["store"][:w]))
+        addr_lines: list[str] = []
+        for part in head["address"] + head["contact"]:
+            addr_lines.extend(line for line in _wrap_text(_ascii_safe(part), lw) if line)
+        if addr_lines or date_s:
+            out.append(hrow(addr_lines[0] if addr_lines else "", date_s))
+            out.extend(addr_lines[1:])
+        if head["name"] or bill_s:
+            out.append(hrow(f"Name : {head['name']}" if head["name"] else "", bill_s))
+        if head["doctor"] or addr_s:
+            # "Addr : SHRI HARI HOSPITAL" and the rest under it, not cut off at the edge.
+            parts = [p for p in _wrap_text(_ascii_safe(head["addr"]), max(4, rw - 7)) if p]
+            first = f"Addr : {parts[0]}" if parts else ""
+            out.append(hrow(f"Doct : {head['doctor']}" if head["doctor"] else "", first))
+            out.extend(hrow("", "       " + p) for p in parts[1:])
+        if head["page"]:
+            out.append(hrow("", head["page"]))
+    else:
+        out.append(hrow(head["store"], bill_s))
+        if head["page"]:
+            out.append(hrow("", head["page"]))
+
+    # Qty | Description | Com | Batch | Exp | Amount -- the name takes what is left.
+    cols = [["qty", "Qty", 8, "l"], ["desc", "Description", 0, "l"], ["com", "Com", 5, "l"],
+            ["batch", "Batch", 10, "l"], ["exp", "Exp", 5, "l"], ["amount", "Amount", 9, "r"]]
+    if w - sum(c[2] for c in cols) - (len(cols) - 1) < 12:
+        cols = [c for c in cols if c[0] != "com"]       # a narrow slip keeps the name instead
+    cols[1][2] = max(6, w - sum(c[2] for c in cols) - (len(cols) - 1))
+
+    def trow(cells: dict) -> str:
+        return " ".join(_cell(cells.get(key, ""), width, align) for key, _h, width, align in cols)[:w]
+
+    rows: list[str] = []
+    for cells in mp.item_rows(ctx):
+        desc = _wrap_text(_ascii_safe(cells["desc"]), cols[1][2]) or [""]
+        rows.append(trow({**cells, "desc": desc[0]}))
+        rows.extend(trow({"desc": more}) for more in desc[1:] if more)
+    if _resolve_paper(settings) != "A6":
+        n = len(ctx.items or []) + len(getattr(ctx, "returns", None) or [])
+        while len(rows) < _table_pad_rows(settings, n):
+            rows.append("")
+
+    dues = _setting(settings, "show_customer_due", False) or _setting(settings, "dot_matrix_due_lines", True)
+    count = _item_count_line(ctx, settings) if _setting(settings, "dot_matrix_item_count", True) else ""
+    money: list[str] = []
+    for i, (label, amount, strong) in enumerate(mp.totals(ctx, settings, dues=dues)):
+        right = f"{label:>12} : {amount:>10.2f}"
+        left = count if i == 0 else ""
+        line = (left[: max(0, w - len(right) - 1)].ljust(max(0, w - len(right))) + right)[-w:]
+        if strong and _setting(settings, "dot_matrix_bold_total", True):
+            line = _bold(line)
+        money.append(line)
+
+    tail: list[str] = []
+    if foot:
+        tail.extend(pair(foot["eoe"], foot["for_shop"]))
+        for key in ("dl", "fssai"):
+            tail.extend(line for line in _wrap_text(_ascii_safe(foot[key]), w) if line)
+        left, nice, sign = (_ascii_safe(foot[k]) for k in ("gstin", "nice", "sign"))
+        at = (w - len(nice)) // 2
+        if nice and len(left) < at and len(sign) < w - at - len(nice):
+            row = left.ljust(at) + nice
+            tail.append(row + sign.rjust(w - len(row)) if sign else row)
+        else:
+            tail.extend(line for line in pair(left, sign))
+            if nice:
+                tail.append(_center(nice, w).rstrip())
+        if foot["wish"]:
+            tail.append(_center(foot["wish"], w).rstrip())
+        for line in _wrap_text(_ascii_safe(foot["declaration"]), w):
+            if line:
+                tail.append(_bold(line))
+
+    def assemble() -> list[str]:
+        return (out + ["-" * w, trow({c[0]: c[1] for c in cols}), "-" * w] + rows
+                + ["-" * w] + money + ["=" * w] + tail)
+
+    lines = assemble()
+    if slip and len(lines) < slip:
+        rows.extend([""] * (slip - len(lines)))
+        lines = assemble()
+    return lines
+
+
 def format_bill_text(ctx, settings: dict | None = None) -> str:
     """Plain-text bill — 2-col header, table, footer pinned to bottom on A6."""
     merged = _settings_for_ctx(settings, ctx)
+    if _is_micropro(merged, ctx):
+        slip = _a6_slip_line_count(_dm(merged)) if _resolve_paper(merged) == "A6" else 0
+        lines = _micropro_lines(ctx, merged, slip=slip)
+        text = "\n".join(lines)
+        if _setting(merged, "dot_matrix_bold_all", False):
+            text = bold_whole_bill(text)
+        return text
     header = _build_header(ctx, merged)
     table = _build_table(ctx, merged)
     footer = _build_footer(ctx, merged)

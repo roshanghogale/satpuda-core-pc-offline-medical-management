@@ -239,6 +239,8 @@ BILL_PRINT_FIELD_OPTIONS = [
 AVAILABLE_TEMPLATES = {
     "classic": "GST Invoice",
     "legacy": "Tax Invoice",
+    # Owner, 28 Oct 2026: the plain slip the shops' old program printed (core/micropro_bill.py).
+    "bill_of_supply": "Bill of Supply (Micropro style)",
 }
 
 
@@ -253,6 +255,10 @@ class BillItem:
     amount: float = 0.0
     gst_percent: float = 0.0
     manufacturer: str = ""
+    # The medicine's type and pack ("Tablet" / "10", "Cream" / "30 GM"): the Micropro
+    # style prints its Qty as "14xTAB", "1x30 GM" (core/micropro_bill.py).
+    type: str = ""
+    unit: str = ""
 
 
 @dataclass

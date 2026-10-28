@@ -116,6 +116,8 @@ def _build_bill_context(profile, bill_info, items, pay_mode, cursor):
             amount=amt,
             gst_percent=gst_pct,
             manufacturer=it[3] or "",
+            type=str(it[10] or "") if len(it) > 11 else "",
+            unit=str(it[11] or "") if len(it) > 11 else "",
         ))
 
     sub_total = round(sub_total, 2)

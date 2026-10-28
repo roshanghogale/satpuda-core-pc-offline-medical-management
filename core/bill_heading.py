@@ -180,6 +180,12 @@ def of(ctx: Any = None, settings: Optional[dict] = None) -> dict[str, Any]:
     if not heading:
         heading = s.get(SETTINGS_HEADING, "")
         reason = s.get(SETTINGS_REASON, "")
+    # The "Bill of Supply (Micropro style)" bill template is a Bill of Supply whatever the
+    # store's heading says (core/micropro_bill.py) -- a sale bill, not a supplier document.
+    if _word(s.get("template")) == BILL_OF_SUPPLY and not (
+            str(getattr(ctx, "document_title", "") or "").strip()
+            or str(s.get("document_title") or "").strip()):
+        heading = BILL_OF_SUPPLY
     return heading_info(heading, reason)
 
 
