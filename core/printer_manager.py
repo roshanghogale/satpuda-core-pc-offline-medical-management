@@ -1646,7 +1646,16 @@ class PrinterManager:
 
             text = format_test_page(printer)
             if cls.should_use_dot_matrix_gdi(printer):
-                cls.print_text_gdi(text, printer, copies=1)
+                # Placed where a bill goes (Left offset, top-left), not centred: a centred
+                # test page showed a 2.5 cm gap no bill has and misled the alignment.
+                try:
+                    from core.bill_config import load_bill_print_settings
+                    from core.dot_matrix_print import gdi_placement_for
+
+                    placement = gdi_placement_for(load_bill_print_settings(), "A5")
+                except Exception:
+                    placement = None
+                cls.print_text_gdi(text, printer, copies=1, placement=placement)
             else:
                 payload = render_escp_document(text)
                 cls.print_raw_escp(payload, printer, copies=1)

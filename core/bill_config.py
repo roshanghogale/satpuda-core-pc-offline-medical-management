@@ -354,6 +354,15 @@ def load_bill_print_settings() -> Dict[str, Any]:
                 stored = json.load(fh)
             if isinstance(stored, dict):
                 settings.update(stored)
+                # A file from before the Left offset existed: its old horizontal position
+                # becomes the offset once, instead of the 0.8 cm default hiding it.
+                if "dot_matrix_left_offset_cm" not in stored:
+                    try:
+                        hpos = int(stored.get("dot_matrix_hpos_60ths") or 0)
+                    except (TypeError, ValueError):
+                        hpos = 0
+                    if hpos > 0:
+                        settings["dot_matrix_left_offset_cm"] = round(min(5.0, hpos / 60 * 2.54), 2)
     except Exception:
         pass
     # Merge slot defaults deeply and accept older key names from previous builds.

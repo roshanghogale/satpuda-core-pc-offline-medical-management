@@ -754,15 +754,17 @@ def _dot_matrix_slip_units(settings: dict) -> int:
 def _dot_matrix_left_offset_cm(settings: dict) -> float:
     """How far right of the printer's first column the bill starts (cm).
 
-    Carries the old ``dot_matrix_hpos_60ths`` over when the new setting was
-    never saved: that one was sent as ESC $, which moves only the line it is on,
-    so it shifted the first line of a bill and nothing else.
+    Carries the old ``dot_matrix_hpos_60ths`` over only when the new setting is
+    not there at all (that one was sent as ESC $, which moves only the line it
+    is on). A Left offset of 0 the shop typed is 0: it used to bring the hidden
+    old value back, and shops with one saved got a 2-3 cm gap on the left that
+    no setting on screen could remove (owner, 28 Oct 2026).
     """
     try:
         cm = float(settings.get("dot_matrix_left_offset_cm", 0) or 0)
     except (TypeError, ValueError):
         cm = 0.0
-    if cm <= 0:
+    if "dot_matrix_left_offset_cm" not in settings:
         try:
             hpos = int(settings.get("dot_matrix_hpos_60ths") or 0)
         except (TypeError, ValueError):
@@ -1613,11 +1615,14 @@ def gdi_placement_for(settings: dict | None, paper: str) -> dict | None:
     Top-left of the printable area, moved right by the Left offset, fitted to
     the A6 print width (64 columns at 12 CPI = 13.6 cm) and to the slip; with a
     slip height the driver page is that long, so each bill ejects one slip.
-    Other papers keep the old centred layout (None).
+    Other papers start top-left too, at the Left offset, on the driver's whole page: the
+    old centred layout put an A5 bill 1-2.5 cm in from the left whatever the offset said
+    (owner, 28 Oct 2026).
     """
-    if (paper or "").upper() != "A6":
-        return None
     merged = dict(settings or {})
+    if (paper or "").upper() != "A6":
+        return {"left_cm": _dot_matrix_left_offset_cm(merged), "top_cm": 0.0,
+                "width_cm": 0.0, "height_cm": 0.0, "slip_cm": 0.0}
     slip_cm = 0.0
     if _dot_matrix_slip_units(merged):
         slip_cm = max(5.0, min(30.0, float(merged.get("dot_matrix_slip_height_cm") or 0)))

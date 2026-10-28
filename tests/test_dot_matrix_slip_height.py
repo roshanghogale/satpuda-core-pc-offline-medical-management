@@ -223,6 +223,33 @@ class StartOfEveryBill(unittest.TestCase):
         dm = _a6_base_layout({"dot_matrix_hpos_60ths": 30})   # half an inch
         self.assertEqual(dm.escp_left_cols, 6)
 
+    def test_a_file_without_the_offset_takes_its_old_position_once(self):
+        import json, os, tempfile
+        from unittest import mock
+        from core import bill_config
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "bill_print_settings.json")
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump({"dot_matrix_hpos_60ths": 30}, fh)
+            # Patched both ways: the loader's one-time migrations save, and must never touch
+            # the real settings file.
+            with mock.patch.object(bill_config, "SETTINGS_PATH", path), \
+                    mock.patch.object(bill_config, "_bill_settings_path", lambda: path):
+                self.assertEqual(bill_config.load_bill_print_settings()["dot_matrix_left_offset_cm"], 1.27)
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump({"dot_matrix_hpos_60ths": 30, "dot_matrix_left_offset_cm": 0}, fh)
+            with mock.patch.object(bill_config, "SETTINGS_PATH", path), \
+                    mock.patch.object(bill_config, "_bill_settings_path", lambda: path):
+                self.assertEqual(bill_config.load_bill_print_settings()["dot_matrix_left_offset_cm"], 0)
+
+    def test_a_typed_zero_is_zero_even_with_the_old_setting_saved(self):
+        # A saved hpos came back whenever the shop typed 0: a 2-3 cm gap on the left.
+        dm = _a6_base_layout({"dot_matrix_left_offset_cm": 0, "dot_matrix_hpos_60ths": 60})
+        self.assertEqual(dm.escp_left_cols, 0)
+        from core.dot_matrix_print import gdi_placement_for
+        p = gdi_placement_for({"dot_matrix_left_offset_cm": 0, "dot_matrix_hpos_60ths": 60}, "A6")
+        self.assertEqual(p["left_cm"], 0.0)
+
 
 class WindowsDriverPlacement(unittest.TestCase):
 
@@ -246,7 +273,9 @@ class WindowsDriverPlacement(unittest.TestCase):
         a6 = gdi_placement_for({"dot_matrix_slip_height_cm": 12}, "A6")
         self.assertEqual(a6["slip_cm"], 12.0)
         self.assertEqual(a6["height_cm"], 12.0)
-        self.assertIsNone(gdi_placement_for({}, "A5"))
+        # Other papers are not centred either: top-left at the Left offset, no slip.
+        a5 = gdi_placement_for({"dot_matrix_left_offset_cm": 0}, "A5")
+        self.assertEqual((a5["left_cm"], a5["slip_cm"], a5["width_cm"]), (0.0, 0.0, 0.0))
 
 
 class PrinterReadiness(unittest.TestCase):
