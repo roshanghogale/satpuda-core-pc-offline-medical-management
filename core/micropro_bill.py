@@ -4,10 +4,10 @@ The shop's old program (Micropro) printed its Bill of Supply as a plain dot matr
 and the owner asked for the same look:
 
                            BILL OF SUPPLY
-    SHRIHARI MEDICAL & GENERAL STORES
-    JUNA SONI HOSPITAL ... JALNA          Date : 22-10-2026
-    Name : SUNIL PREMDAS WANARSE          Bill No.: CA/3892
-    Doct : DR.SHARAD BAJAJ                Addr : SHRI HARI HOSPITAL
+    SHREE MEDICAL & GENERAL STORES
+    STATION ROAD ... JALNA          Date : 22-10-2026
+    Name : RAMESH KUMAR PATIL          Bill No.: CA/1001
+    Doct : DR.A. SHARMA                Addr : CITY HOSPITAL
     ------------------------------------------------------------
     Qty      Description         Com   Batch      Exp     Amount
     ------------------------------------------------------------
@@ -15,8 +15,8 @@ and the owner asked for the same look:
     ------------------------------------------------------------
                                           Net Amount :   1158.82
     ============================================================
-    E & O E, Subject to JALNA jurisdiction    For SHRIHARI MEDICAL
-    Drug Lic. No. MH-JLN-439868, MH-JLN-439867
+    E & O E, Subject to JALNA jurisdiction    For SHREE MEDICAL
+    Drug Lic. No. MH-JLN-000001, MH-JLN-000002
     GSTIN :           Get well soon..                  Pharmacist
     Composition taxable person, not eligible to collect tax ...
 

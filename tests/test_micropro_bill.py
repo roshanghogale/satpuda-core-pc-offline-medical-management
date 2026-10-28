@@ -2,7 +2,7 @@
 
 Settings > Pharmacy Profile > Bill Template had GST Invoice and Tax Invoice; the owner
 asked for a third, Bill of Supply, printed like the plain slip of the shops' old Micropro
-program (Shrihari Medical, Jalna: BILL OF SUPPLY on top, Qty "14xTAB", Com, Batch, Exp,
+program (a shop's photo: BILL OF SUPPLY on top, Qty "14xTAB", Com, Batch, Exp,
 Amount, Net Amount, E & O E, drug licence, Pharmacist, the composition line). The dot
 matrix slip and the normal printed bill both follow it (core/micropro_bill.py).
 
@@ -28,11 +28,11 @@ def _ctx(**kw):
                       rate=a / q, gst_percent=5, type=t, unit=u) for n, m, b, e, q, a, t, u in LINES]
     total = round(sum(i.amount for i in items), 2)
     base = dict(
-        store_name="SHRIHARI MEDICAL & GENERAL STORES",
-        address="JUNA SONI HOSPITAL AJAD MAIDAN, KARVA NAGAR, JALNA 431203",
-        dl_no="MH-JLN-439868, MH-JLN-439867", bill_no="CA/3892", bill_date="22/10/26",
-        bill_date_landscape="22-10-2026", cust_name="Sunil Premdas Wanarse",
-        cust_addr="SHRI HARI HOSPITAL JALNA", doctor_name="DR.SHARAD BAJAJ", items=items,
+        store_name="SHREE MEDICAL & GENERAL STORES",
+        address="STATION ROAD, MAIN MARKET, JALNA 431203",
+        dl_no="MH-JLN-000001, MH-JLN-000002", bill_no="CA/1001", bill_date="22/10/26",
+        bill_date_landscape="22-10-2026", cust_name="Ramesh Kumar Patil",
+        cust_addr="CITY HOSPITAL JALNA", doctor_name="DR.A. SHARMA", items=items,
         sub_total=total, grand_total=total, amount_paid=total, gst_amount=30.0, gst_enabled=True,
         bill_heading="tax_invoice", bill_supply_reason="composition",
     )
@@ -76,13 +76,13 @@ class DotMatrixSlip(unittest.TestCase):
         text = self._text(paper_size="A6")
         lines = text.splitlines()
         self.assertEqual(lines[0].strip(), "BILL OF SUPPLY")
-        self.assertEqual(lines[1].strip(), "SHRIHARI MEDICAL & GENERAL STORES")
-        for want in ("Date : 22-10-2026", "Bill No.: CA/3892", "Name : SUNIL PREMDAS WANARSE",
-                     "Doct : DR.SHARAD BAJAJ", "Addr : SHRI HARI HOSPITAL", "14xTAB",
+        self.assertEqual(lines[1].strip(), "SHREE MEDICAL & GENERAL STORES")
+        for want in ("Date : 22-10-2026", "Bill No.: CA/1001", "Name : RAMESH KUMAR PATIL",
+                     "Doct : DR.A. SHARMA", "Addr : CITY HOSPITAL", "14xTAB",
                      "MOXIKIND CV 625", "MANKI", "B6AEZ191", "10-27", "257.80",
                      "Net Amount :", "866.91", "E & O E, Subject to JALNA jurisdiction",
-                     "For SHRIHARI MEDICAL & GENERAL STORES",
-                     "Drug Lic. No. MH-JLN-439868, MH-JLN-439867", "Pharmacist", "Get well soon.."):
+                     "For SHREE MEDICAL & GENERAL STORES",
+                     "Drug Lic. No. MH-JLN-000001, MH-JLN-000002", "Pharmacist", "Get well soon.."):
             self.assertIn(want, text)
         self.assertIn("Composition taxable person", text)
         header = next(line for line in lines if line.startswith("Qty"))
