@@ -1176,6 +1176,9 @@ def get_sales_billing() -> dict[str, Any]:
         "billing_margin_display_mode": str(
             prefs.get("billing_margin_display_mode") or "rupees"
         ),
+        "billing_margin_cost_with_gst": bool(
+            prefs.get("billing_margin_cost_with_gst", False)
+        ),
         "require_doctor_for_other_schedules": bool(
             prefs.get("require_doctor_for_other_schedules", True)
         ),
@@ -1222,6 +1225,7 @@ def save_sales_billing(data: dict[str, Any]) -> dict[str, Any]:
         "billing_show_total_margin",
         "billing_margin_loss_warning",
         "billing_margin_display_mode",
+        "billing_margin_cost_with_gst",
         "require_doctor_for_other_schedules",
         "default_doctor",
     )
@@ -1231,11 +1235,13 @@ def save_sales_billing(data: dict[str, Any]) -> dict[str, Any]:
     # _normalize() puts this key through bool() (billing_layout_prefs.py), and
     # bool("false") is True -- so a JSON string would persist as "always require
     # a doctor" while the Settings screen showed the box unchecked.
-    if "require_doctor_for_other_schedules" in layout_updates:
-        raw_doc = layout_updates["require_doctor_for_other_schedules"]
+    for bool_key in ("require_doctor_for_other_schedules", "billing_margin_cost_with_gst"):
+        if bool_key not in layout_updates:
+            continue
+        raw_doc = layout_updates[bool_key]
         if isinstance(raw_doc, str):
             raw_doc = raw_doc.strip().lower() not in ("", "0", "false", "no", "off")
-        layout_updates["require_doctor_for_other_schedules"] = bool(raw_doc)
+        layout_updates[bool_key] = bool(raw_doc)
     if layout_updates:
         save_billing_layout_prefs(layout_updates)
     if "batch_sort_order" in data:

@@ -52,6 +52,7 @@ import {
   discountLossPrompt,
   itemDiscountLoss,
   lineMargin,
+  setMarginCostWithGst,
   type MarginLine, pyRound2 } from '../salesMargin'
 import {
   AlertDialog,
@@ -733,6 +734,7 @@ const SALE_PAYMENT_MODES = ['Cash', 'Due']
     }
     const nextDefaults = { ...d, next_bill_hint: hint }
     setDefaults(nextDefaults)
+    setMarginCostWithGst(p?.billing_margin_cost_with_gst === true)
     setPrefs(p)
     setCustomers(d.customer_details || [])
     const startDoctor = defaultDoctorOf(d)

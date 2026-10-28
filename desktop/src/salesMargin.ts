@@ -16,8 +16,11 @@
  *   bill margin (Rs)      = round2(max(0, sum G - sum item_discount - overall_discount))
  *   bill margin %         = round2(bill margin / round2(sum V) * 100)
  *
- * GST is not taken out anywhere: MRP includes GST and so does the purchase rate
- * used here (the inventory rate). The overall discount is NOT spread over lines;
+ * GST is not taken out anywhere. MRP includes GST; the purchase rate is the
+ * inventory rate as entered, which is usually BEFORE GST. Settings > Sales &
+ * Billing > "Margin cost" can add the line's GST to it (the landing cost, as
+ * Medivision shows margin): setMarginCostWithGst, mirrored by
+ * core.margin_utils.margin_cost_rate. The overall discount is NOT spread over lines;
  * it comes off the bill total once, in rupees (the % field is first turned into
  * rupees of the subtotal). Rounding never touches the margin.
  */
@@ -27,6 +30,7 @@ export type MarginLine = {
   list_mrp?: number | string | null
   mrp?: number | string | null
   purchase_rate?: number | string | null
+  gst_percent?: number | string | null
   medicine_discount?: number | string | null
   type?: string | null
   unit?: string | null
@@ -74,6 +78,22 @@ export function hasCost(med: MarginLine): boolean {
   return p !== null && p !== undefined && p !== '' && Number.isFinite(num(p, NaN))
 }
 
+/** Settings > Sales & Billing > Margin cost "including GST" (billing_margin_cost_with_gst).
+ *  The Sales page sets it from its prefs before it works out any margin. */
+let costWithGst = false
+
+export function setMarginCostWithGst(on: boolean): void {
+  costWithGst = on === true
+}
+
+/** core.margin_utils.margin_cost_rate: purchase rate, plus the line's GST when the setting is on. */
+function costRate(med: MarginLine): number {
+  const rate = num(med.purchase_rate)
+  if (!costWithGst) return rate
+  const gst = num(med.gst_percent)
+  return gst > 0 ? rate * (1 + gst / 100) : rate
+}
+
 export function marginDivisor(
   med: MarginLine,
   fallback?: (med: MarginLine) => number,
@@ -97,12 +117,12 @@ export function lineMrpValue(med: MarginLine, fallback?: (m: MarginLine) => numb
   return round2(perUnit * qty)
 }
 
-/** core.margin_utils.line_gross_margin: (MRP - purchase rate) x qty, before any discount. */
+/** core.margin_utils.line_gross_margin: (MRP - cost rate) x qty, before any discount. */
 export function lineGrossMargin(med: MarginLine, fallback?: (m: MarginLine) => number): number {
   const qty = num(med.qty)
   if (qty <= 0) return 0
   const d = marginDivisor(med, fallback)
-  const spread = listMrp(med) - num(med.purchase_rate)
+  const spread = listMrp(med) - costRate(med)
   const value = d > 1 ? (spread / d) * qty : spread * qty
   return round2(Math.max(0, value))
 }

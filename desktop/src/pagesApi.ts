@@ -954,6 +954,8 @@ export type SalesRuntimePrefs = {
   billing_show_total_margin?: boolean
   billing_margin_loss_warning?: boolean
   billing_margin_display_mode?: 'rupees' | 'percent' | string
+  /** Margin cost = purchase rate + GST (landing cost) instead of the rate alone. */
+  billing_margin_cost_with_gst?: boolean
   show_location?: boolean
   column_visibility?: Record<string, boolean>
   upi_qr_enabled: boolean

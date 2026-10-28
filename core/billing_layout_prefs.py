@@ -36,6 +36,9 @@ _DEFAULTS: dict[str, Any] = {
     "sales_margin_ui_v2": False,
     "billing_margin_loss_warning": True,
     "billing_margin_display_mode": MARGIN_DISPLAY_RUPEES,
+    # Margin cost: False = purchase rate as entered (excluding GST, the old way);
+    # True = purchase rate + its GST, the landing cost (Medivision's margin).
+    "billing_margin_cost_with_gst": False,
     # When False, doctor name is required only for H1 and X (not other schedules).
     "require_doctor_for_other_schedules": True,
     # Doctor a new Sales bill starts with (name as in the doctors list); "" = none.
@@ -231,6 +234,7 @@ def _normalize(data: dict[str, Any] | None) -> dict[str, Any]:
         "billing_show_margin_column",
         "billing_show_total_margin",
         "billing_margin_loss_warning",
+        "billing_margin_cost_with_gst",
         "require_doctor_for_other_schedules",
         "sales_margin_ui_v2",
     ):
@@ -571,6 +575,11 @@ def load_margin_display_mode(conn: Optional[sqlite3.Connection] = None) -> str:
 
 def margin_display_is_percent(conn: Optional[sqlite3.Connection] = None) -> bool:
     return load_margin_display_mode(conn) == MARGIN_DISPLAY_PERCENT
+
+
+def margin_cost_with_gst(conn: Optional[sqlite3.Connection] = None) -> bool:
+    """Settings > Sales & Billing > Margin cost: True adds the GST to the purchase rate."""
+    return bool(load_billing_layout_prefs(conn).get("billing_margin_cost_with_gst", False))
 
 
 def margin_display_mode_label(mode: str | None = None) -> str:

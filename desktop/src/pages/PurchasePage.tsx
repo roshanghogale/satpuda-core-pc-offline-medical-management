@@ -2544,6 +2544,16 @@ export function PurchasePage({
   const paid =
     Number(summary.amount_paid) ||
     (Number(tab.cash) || 0) + (Number(tab.online) || 0)
+  // Typing in Cash or Online takes the other box down so the two never pay more
+  // than Need to Pay between them. A shop (28 Oct 2026) opened a purchase saved
+  // as Cash 904, typed Online 904 to say it went online, and saved Paid 1,808
+  // (Credit 904): Purchase History showed the bill in both columns.
+  const balancedOther = (other: string, typed: string): string => {
+    const o = Number(other) || 0
+    const t = Number(typed) || 0
+    if (needToPay <= 0 || o <= 0 || o + t <= needToPay + 0.005) return other
+    return String(Math.max(0, Math.round((needToPay - t) * 100) / 100))
+  }
   // Purchase returns ticked in the popup: what they settle inside this purchase.
   const retIds = tabReturnIds(tab)
   const savedReturns = tab.editingPurchaseId ? tab.billReturns || [] : []
@@ -3639,7 +3649,9 @@ export function PurchasePage({
                   value={tab.cash}
                   data-nav-order={31}
                   data-nav-chain={NAV}
-                  onChange={(e) => patchTab({ cash: e.target.value })}
+                  onChange={(e) =>
+                    patchTab({ cash: e.target.value, online: balancedOther(tab.online, e.target.value) })
+                  }
                 />
               </div>
               <div className="sfield">
@@ -3650,7 +3662,9 @@ export function PurchasePage({
                   data-nav-order={32}
                   data-nav-chain={NAV}
                   data-nav-enter="save"
-                  onChange={(e) => patchTab({ online: e.target.value })}
+                  onChange={(e) =>
+                    patchTab({ online: e.target.value, cash: balancedOther(tab.cash, e.target.value) })
+                  }
                 />
               </div>
             </div>

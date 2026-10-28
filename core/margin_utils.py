@@ -48,6 +48,15 @@ def margin_column_heading() -> str:
     return "Margin %" if margin_display_is_percent() else "Margin ₹"
 
 
+def margin_cost_with_gst() -> bool:
+    try:
+        from core.billing_layout_prefs import margin_cost_with_gst as _with_gst
+
+        return bool(_with_gst())
+    except Exception:
+        return False
+
+
 def _safe_float(val, default: float = 0.0) -> float:
     if val is None or val == "":
         return default
@@ -92,14 +101,29 @@ def line_mrp_value(med: dict) -> float:
     return round(display_mrp_per_unit(med) * qty, 2)
 
 
+def margin_cost_rate(med: dict, with_gst: bool | None = None) -> float:
+    """Cost per pack the margin subtracts: the inventory purchase rate, plus the
+    line's GST when Settings > Sales & Billing > Margin cost says "including GST"
+    (MRP already holds GST, so the landing cost is the like-for-like cost)."""
+    rate = _safe_float(med.get("purchase_rate"))
+    if with_gst is None:
+        with_gst = margin_cost_with_gst()
+    if with_gst:
+        gst = _safe_float(med.get("gst_percent"), _safe_float(med.get("gst")))
+        if gst > 0:
+            rate = rate * (1.0 + gst / 100.0)
+    return rate
+
+
 def line_gross_margin(med: dict) -> float:
     """
-    Gross margin before any item discount: (MRP - purchase rate) × qty.
-    Uses list MRP and inventory purchase rate (not selling rate used for amount).
+    Gross margin before any item discount: (MRP - cost rate) × qty.
+    Uses list MRP and inventory purchase rate (not selling rate used for amount);
+    see margin_cost_rate for the GST setting.
     """
     qty = _safe_float(med.get("qty"))
     list_mrp = _safe_float(med.get("list_mrp"), _safe_float(med.get("mrp")))
-    purchase_rate = _safe_float(med.get("purchase_rate"))
+    purchase_rate = margin_cost_rate(med)
     med_type = med.get("type") or ""
     unit = med.get("unit") or "1"
 

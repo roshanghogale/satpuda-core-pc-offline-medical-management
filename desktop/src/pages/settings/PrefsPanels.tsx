@@ -51,6 +51,7 @@ const SALES_PARTIAL_KEYS: Record<string, string[]> = {
     'billing_show_total_margin',
     'billing_margin_loss_warning',
     'billing_margin_display_mode',
+    'billing_margin_cost_with_gst',
     'require_doctor_for_other_schedules',
     'default_doctor',
   ],
@@ -1186,6 +1187,26 @@ export function SalesBillingPanel({
               }))
             }
           />
+          <Field label="Margin cost (profit)">
+            <select
+              className="settings-input"
+              value={salesBilling.billing_margin_cost_with_gst === true ? 'with_gst' : 'without_gst'}
+              onChange={(e) =>
+                setSalesBilling((s) => ({
+                  ...s,
+                  billing_margin_cost_with_gst: e.target.value === 'with_gst',
+                }))
+              }
+            >
+              <option value="without_gst">Purchase rate excluding GST</option>
+              <option value="with_gst">Purchase rate including GST (landing cost)</option>
+            </select>
+          </Field>
+          <Note>
+            MRP already includes GST. "Including GST" adds each medicine's GST to its
+            purchase rate before taking the margin, so the margin is lower and matches
+            Medivision-style software.
+          </Note>
           <Field label="Margin display">
             <select
               className="settings-input"

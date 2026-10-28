@@ -1895,6 +1895,9 @@ def sales_runtime_prefs(conn=None) -> dict[str, Any]:
         "billing_margin_display_mode": str(
             billing_prefs.get("billing_margin_display_mode") or "rupees"
         ),
+        "billing_margin_cost_with_gst": bool(
+            billing_prefs.get("billing_margin_cost_with_gst", False)
+        ),
         "show_location": show_location,
         "column_visibility": {},
         "upi_qr_enabled": load_upi_qr_enabled(),
