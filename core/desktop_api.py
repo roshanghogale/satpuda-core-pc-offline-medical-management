@@ -557,6 +557,7 @@ def _home_quick_actions_payload() -> list[dict[str, Any]]:
         "gst_reports": "success",
         "general_products": "indigo",
         "cash_register": "warning",
+        "accounts": "info",
     }
     vis = get_quick_access_settings()
     out: list[dict[str, Any]] = []
@@ -832,6 +833,16 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 from core import cash_register
 
                 hit = cash_register.handle_get(path, parse_qs(urlparse(self.path).query), _db.get("conn"))
+                if hit is not None:
+                    _json_response(self, hit[0], hit[1])
+                    return
+            if path.startswith("/api/accounts/"):
+                # Accounts: trial balance, P&L, balance sheet from the books (core/accounts_report.py).
+                from urllib.parse import parse_qs
+
+                from core import accounts_report
+
+                hit = accounts_report.handle_get(path, parse_qs(urlparse(self.path).query), _db.get("conn"))
                 if hit is not None:
                     _json_response(self, hit[0], hit[1])
                     return
@@ -2302,6 +2313,13 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 from core import cash_register
 
                 hit = cash_register.handle_post(path, _read_json_body(self), _db.get("conn"))
+                if hit is not None:
+                    _json_response(self, hit[0], hit[1])
+                    return
+            if path.startswith("/api/accounts/"):
+                from core import accounts_report
+
+                hit = accounts_report.handle_post(path, _read_json_body(self), _db.get("conn"))
                 if hit is not None:
                     _json_response(self, hit[0], hit[1])
                     return

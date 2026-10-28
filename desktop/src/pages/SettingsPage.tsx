@@ -44,6 +44,7 @@ import { VoiceCommandsPanel } from '../voice/VoiceCommandsPanel'
 import { useVoiceEnabled } from '../voice/voiceEnabled'
 import { GstReportsPage } from './GstReportsPage'
 import { CashRegisterPage } from './CashRegisterPage'
+import { AccountsPage } from './AccountsPage'
 import { registerVoicePage, sendToPage, setVoicePlace, type VoiceHandler } from '../voice/voiceBus'
 import {
   RestartAppDialog,
@@ -153,6 +154,7 @@ export function SettingsPage({
       const t = (e as CustomEvent).detail?.tab
       if (t === 'gst_reports') setTabId('gst_reports')
       if (t === 'cash_register') setTabId('cash_register')
+      if (t === 'accounts') setTabId('accounts')
     }
     window.addEventListener('satpuda:settings-tab', onTab)
     return () => window.removeEventListener('satpuda:settings-tab', onTab)
@@ -1015,6 +1017,10 @@ export function SettingsPage({
 
     if (tabId === 'cash_register') {
       return <CashRegisterPage active={active && tabId === 'cash_register'} refreshNonce={syncRefreshNonce} />
+    }
+
+    if (tabId === 'accounts') {
+      return <AccountsPage active={active && tabId === 'accounts'} refreshNonce={syncRefreshNonce} />
     }
 
     if (tabId === 'ledger') {

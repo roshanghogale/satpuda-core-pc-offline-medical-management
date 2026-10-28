@@ -116,6 +116,14 @@ export function QuickActionIcon({
           <path d="M4.5 6.5v3M11.5 6.5v3" {...stroke} />
         </IconBase>
       )
+    case 'accounts':
+      // A balance: the two sides that tie.
+      return (
+        <IconBase size={size}>
+          <path d="M8 3v10M5 13h6M3.5 5.5h9" {...stroke} />
+          <path d="M3.5 5.5 2 9h3zM12.5 5.5 11 9h3z" {...stroke} />
+        </IconBase>
+      )
     case 'general_products':
       return (
         <IconBase size={size}>

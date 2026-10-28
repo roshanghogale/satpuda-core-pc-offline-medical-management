@@ -1,0 +1,64 @@
+/* Settings > Accounts, 28 Oct 2026 (pages/AccountsPage.tsx). Built on cash-register.css (.cr-page,
+ * .cr-top, .cr-card, .cr-table, .cb-table rows); only what those do not have is here. Theme
+ * variables only. */
+
+/* The page scrolls as one column: summary, the view, the checks. */
+.ac-body {
+  flex: 1;
+  min-height: 0;
+}
+.ac-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 18px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  font-size: 13px;
+}
+.ac-summary b {
+  font-size: 15px;
+}
+
+/* P&L and the Balance Sheet: headings, indented lines. */
+.ac-narrow {
+  max-width: 760px;
+}
+.ac-head td {
+  font-weight: 700;
+  background: var(--surface-alt);
+}
+td.ac-indent {
+  padding-left: 22px;
+}
+.ac-note {
+  font-weight: 400;
+  font-size: 12px;
+}
+
+/* The trial balance's closing-stock line under the totals: shown, not added. */
+.cr-table tfoot th.ac-memo {
+  font-weight: 400;
+  font-style: italic;
+  background: var(--surface);
+}
+
+/* Balance Sheet: Liabilities and Assets side by side (flex: 1 each from .cr-left). */
+.ac-sides {
+  flex: 0 0 auto;
+  align-items: flex-start;
+}
+.ac-sides .cr-left {
+  overflow: visible;
+}
+
+.ac-checks {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+.ac-checks li {
+  margin: 2px 0;
+}

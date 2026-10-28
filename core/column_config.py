@@ -256,6 +256,7 @@ QUICK_ACCESS_BUTTONS = [
     ('alerts', '🔔 Alerts'),
     ('gst_reports', '🧾 GST Reports'),
     ('cash_register', '💰 Cash & Expenses'),
+    ('accounts', '📒 Accounts'),
     ('general_products', '🏷 General Products'),
 ]
 

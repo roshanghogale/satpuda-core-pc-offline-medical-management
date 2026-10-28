@@ -15,6 +15,7 @@ export type SettingsTabId =
   | 'reorder'
   | 'gst_reports'
   | 'cash_register'
+  | 'accounts'
   | 'shortcuts'
 
 export type SectionDef = {
@@ -209,6 +210,15 @@ export const SETTINGS_TABS: TabDef[] = [
     // expenses typed, counted cash at close (pages/CashRegisterPage.tsx). Full width.
     id: 'cash_register',
     label: 'Cash & Expenses',
+    ctrlDigit: null,
+    layout: 'scroll',
+  },
+  {
+    // Owner, 28 Oct 2026: "balance sheet and trial balance for proper account management" --
+    // Trial Balance / Profit & Loss / Balance Sheet from the books (pages/AccountsPage.tsx,
+    // core/accounts_report.py). Full width.
+    id: 'accounts',
+    label: 'Accounts',
     ctrlDigit: null,
     layout: 'scroll',
   },

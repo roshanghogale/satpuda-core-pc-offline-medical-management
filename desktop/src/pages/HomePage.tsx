@@ -55,6 +55,7 @@ const FALLBACK_QUICK_ACTIONS: HomeQuickAction[] = [
   { key: 'alerts', label: 'Alerts', style: 'warning' },
   { key: 'gst_reports', label: 'GST Reports', style: 'success' },
   { key: 'cash_register', label: 'Cash & Expenses', style: 'warning' },
+  { key: 'accounts', label: 'Accounts', style: 'info' },
   { key: 'general_products', label: 'General Products', style: 'indigo' },
 ]
 
@@ -126,6 +127,10 @@ function handleQuickAction(key: string, onNavigate: AppNavigate) {
     case 'cash_register':
       // The day's cash register (Settings > Cash & Expenses, pages/CashRegisterPage.tsx).
       onNavigate('settings', { settingsTab: 'cash_register' })
+      break
+    case 'accounts':
+      // Trial Balance / Profit & Loss / Balance Sheet (Settings > Accounts, pages/AccountsPage.tsx).
+      onNavigate('settings', { settingsTab: 'accounts' })
       break
     case 'export_all':
       onNavigate('settings', {
