@@ -55,17 +55,27 @@ export async function saveFileAndShow(
   mime: string,
   contentBase64: string,
 ): Promise<SavedFile | null> {
+  let res: Response | null = null
   try {
-    const saved = await post<SavedFile & { ok?: boolean }>('/api/files/save', {
-      filename,
-      content_base64: contentBase64,
+    res = await fetch(`${getApiBase()}/api/files/save`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename, content_base64: contentBase64 }),
     })
-    if (saved?.path) {
+  } catch {
+    res = null
+  }
+  // Only an engine without /api/files/save gets the old download. An engine that answered
+  // with an error (folder missing, disk full, no permission) used to fall through to it too,
+  // and a download link clicked inside the app's window does nothing: Excel / PDF looked dead
+  // with no word why (owner, 28 Oct 2026). Say why instead.
+  if (res && res.status !== 404) {
+    const saved = (await res.json().catch(() => ({}))) as SavedFile & { ok?: boolean; error?: string }
+    if (res.ok && saved?.path) {
       showSavedFile(saved)
       return saved
     }
-  } catch {
-    /* an engine without /api/files/save: fall back to the download below */
+    throw new Error(saved?.error || `Could not save ${filename} (HTTP ${res.status}).`)
   }
   browserDownload(filename, mime, contentBase64)
   return null

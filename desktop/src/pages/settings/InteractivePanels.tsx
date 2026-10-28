@@ -114,7 +114,9 @@ function downloadCsv(filename: string, headers: string[], rows: unknown[][]) {
     ...rows.map((r) => r.map(esc).join(',')),
   ]
   // Into the reports folder with Open / Show in folder, not a silent download.
-  void saveTextAndShow(filename, 'text/csv;charset=utf-8', '﻿' + lines.join('\r\n'))
+  saveTextAndShow(filename, 'text/csv;charset=utf-8', '﻿' + lines.join('\r\n')).catch((e) =>
+    window.alert(e instanceof Error ? e.message : String(e)),
+  )
 }
 
 function filterText(q: string, parts: unknown[]) {

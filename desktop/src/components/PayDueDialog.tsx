@@ -40,7 +40,9 @@ export function PayDueDialog({
   const [info, setInfo] = useState<DueInfo | null>(null)
   const [error, setError] = useState('')
   const [amount, setAmount] = useState('')
-  const [mode, setMode] = useState<'Cash' | 'Online'>('Cash')
+  // No mode until one is picked (owner, 28 Oct 2026): the box used to start on Cash, so a
+  // supplier paid online and saved with Enter landed in the drawer's cash out on Cash & Expenses.
+  const [mode, setMode] = useState<'' | 'Cash' | 'Online'>('')
   const [date, setDate] = useState(() => todayLocal())
   const [receiptNo, setReceiptNo] = useState('')
   const [saving, setSaving] = useState(false)
@@ -52,7 +54,7 @@ export function PayDueDialog({
     setInfo(null)
     setError('')
     setSaving(false)
-    setMode('Cash')
+    setMode('')
     setDate(todayLocal())
     setReceiptNo('')
     fetch(`${getApiBase()}/api/history/bill-due?kind=${kind}&id=${billId}`)
@@ -81,6 +83,10 @@ export function PayDueDialog({
     const amt = Number(amount)
     if (!(amt > 0)) {
       setError('Enter the amount.')
+      return
+    }
+    if (!mode) {
+      setError('Choose Cash or Online.')
       return
     }
     setSaving(true)
@@ -171,8 +177,9 @@ export function PayDueDialog({
                   <select
                     className="settings-input"
                     value={mode}
-                    onChange={(e) => setMode(e.target.value === 'Online' ? 'Online' : 'Cash')}
+                    onChange={(e) => setMode(e.target.value === 'Online' ? 'Online' : e.target.value === 'Cash' ? 'Cash' : '')}
                   >
+                    <option value="">Choose…</option>
                     <option value="Cash">Cash</option>
                     <option value="Online">Online</option>
                   </select>
