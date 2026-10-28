@@ -64,6 +64,9 @@ class _Store(unittest.TestCase):
         p.start()
         self.addCleanup(p.stop)
         c = self.conn
+        # The schema setup copies this PC's own shop profile in when it has one (a dev PC's
+        # "Roshan Agencies", GST on): the test's shop must be the only one.
+        c.execute("DELETE FROM pharmacy_profile")
         c.execute("INSERT INTO pharmacy_profile (name, gstin, gst_enabled) VALUES (?,?,?)",
                   ("TEST MEDICAL", SHOP_GSTIN if self.gst else "", 1 if self.gst else 0))
         self.ram = c.execute("INSERT INTO customers (name) VALUES ('RAM')").lastrowid
