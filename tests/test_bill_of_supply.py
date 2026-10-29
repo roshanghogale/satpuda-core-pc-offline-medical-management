@@ -26,7 +26,9 @@ def _offline():
 
 
 def _settings(**extra) -> dict:
-    return {**DEFAULT_BILL_PRINT_SETTINGS, **extra}
+    # the composition line is off unless the shop ticks it (owner, 29 Oct 2026); these
+    # tests are about where it prints, so it is ticked -- TheLineIsOffByDefault checks the rest
+    return {**DEFAULT_BILL_PRINT_SETTINGS, "show_composition_line": True, **extra}
 
 
 def _ctx(heading: str = "", reason: str = ""):
@@ -184,6 +186,10 @@ class TheWholesaleInvoice(unittest.TestCase):
         for p in wt._offline():
             p.start()
             self.addCleanup(p.stop)
+        ticked = mock.patch("core.bill_config.load_bill_print_settings",
+                            return_value=_settings())
+        ticked.start()
+        self.addCleanup(ticked.stop)
         self.conn = wt._store()
         self.addCleanup(self.conn.close)
         from core.desktop_sales_service import save_sale
@@ -248,6 +254,42 @@ class TheWholesaleInvoice(unittest.TestCase):
         inv = self._inv()
         plain = {k: v for k, v in inv.items() if k not in ("bill_of_supply", "supply_declaration")}
         self.assertEqual(self._html(inv), self._html(plain))
+
+
+class TheLineIsOffByDefault(unittest.TestCase):
+    """Owner, 29 Oct 2026: "the line is of no use" -- a Bill of Supply prints without the
+    composition line until the shop ticks it in Settings; the shop is still a composition
+    dealer for the GST screens."""
+
+    def test_the_setting_is_off(self):
+        self.assertFalse(DEFAULT_BILL_PRINT_SETTINGS["show_composition_line"])
+        self.assertEqual(bill_heading.supply_declaration(_ctx("bill_of_supply", "composition"),
+                                                         dict(DEFAULT_BILL_PRINT_SETTINGS)), "")
+
+    def test_no_bill_prints_it(self):
+        from core.bill_config import render_bill_html
+        from core.dot_matrix_print import format_bill_text, printed_text
+
+        ctx = _ctx("bill_of_supply", "composition")
+        plain = dict(DEFAULT_BILL_PRINT_SETTINGS)
+        with isolated_bill_settings():
+            html = render_bill_html(ctx, plain)
+            slips = [printed_text(format_bill_text(ctx, {**plain, "paper_size": "A5", "dot_matrix_style": s}))
+                     for s in ("classic", "compact")]
+            slips.append(printed_text(format_bill_text(ctx, {**plain, "paper_size": "A6", "template": "bill_of_supply"})))
+        self.assertIn("BILL OF SUPPLY", html)
+        for text in [html] + slips:
+            self.assertNotIn("Composition", text)
+
+    def test_still_a_composition_dealer_for_gst(self):
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE TABLE settings (name TEXT PRIMARY KEY, value TEXT)")
+        conn.execute("INSERT INTO settings (name, value) VALUES ('profile_bill_heading', 'bill_of_supply')")
+        from core.gst_screen import is_composition
+
+        with _offline():
+            self.assertTrue(is_composition(conn))
+        conn.close()
 
 
 if __name__ == "__main__":

@@ -1287,8 +1287,15 @@ def _bill_heading(conn) -> dict[str, Any]:
         info = load_bill_heading(conn)
     except Exception:
         return {"bill_of_supply": False, "supply_declaration": ""}
+    try:
+        from core.bill_config import load_bill_print_settings
+
+        line_on = bool(load_bill_print_settings().get("show_composition_line", False))
+    except Exception:
+        line_on = False
+    # the composition line only when the shop ticks it (core/bill_heading.supply_declaration)
     return {"bill_of_supply": bool(info["bill_of_supply"]),
-            "supply_declaration": str(info["supply_declaration"] or "")}
+            "supply_declaration": str(info["supply_declaration"] or "") if line_on else ""}
 
 
 DEFAULT_DECLARATION = (

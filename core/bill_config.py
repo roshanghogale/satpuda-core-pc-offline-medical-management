@@ -68,6 +68,10 @@ DEFAULT_BILL_PRINT_SETTINGS = {
     # style ... removing I WISH FOR YOUR SPEEDY RECOVERY should be in the standard too").
     # The "Recovery wish line" box under Show on Printed Bill brings it back.
     "show_recovery_wish": False,
+    # A composition dealer's "Composition taxable person, not eligible to collect tax on
+    # supplies" on a Bill of Supply: off (owner, 29 Oct 2026, "the line is of no use");
+    # the law asks a composition dealer for it, so a shop can tick it back on.
+    "show_composition_line": False,
     "show_customer_due": False,
     "copies": 1,
     "pdf_save_layout": "two_copies",
@@ -231,6 +235,7 @@ BILL_PRINT_FIELD_OPTIONS = [
         ("show_gst", "GST amount row"),
         ("show_total", "Total row"),
         ("show_recovery_wish", "Recovery wish line"),
+        ("show_composition_line", "Composition line (Bill of Supply)"),
         ("show_signature", "Signature block"),
         ("print_signature_image", "Signature picture (when uploaded)"),
     ]),
@@ -241,6 +246,9 @@ AVAILABLE_TEMPLATES = {
     "legacy": "Tax Invoice",
     # Owner, 28 Oct 2026: the plain slip the shops' old program printed (core/micropro_bill.py).
     "bill_of_supply": "Bill of Supply (Micropro style)",
+    # Owner, 29 Oct 2026: the owner's A6 sample on the dot matrix slip; the normal printer
+    # keeps the GST Invoice (core/micropro_bill.A6_TEMPLATE_ID).
+    "dot_matrix_a6": "Dot matrix A6 (Total Items, CGST / SGST line)",
 }
 
 

@@ -431,6 +431,10 @@
     {
      "value": "bill_of_supply",
      "label": "Bill of Supply (Micropro style)"
+    },
+    {
+     "value": "dot_matrix_a6",
+     "label": "Dot matrix A6 (Total Items, CGST / SGST line)"
     }
    ],
    "paper_sizes": [
@@ -596,6 +600,10 @@
      "label": "Recovery wish line"
     },
     {
+     "key": "show_composition_line",
+     "label": "Composition line (Bill of Supply)"
+    },
+    {
      "key": "show_signature",
      "label": "Signature block"
     }
@@ -732,6 +740,10 @@
        "label": "Recovery wish line"
       },
       {
+       "key": "show_composition_line",
+       "label": "Composition line (Bill of Supply)"
+      },
+      {
        "key": "show_signature",
        "label": "Signature block"
       }
@@ -767,6 +779,7 @@
     "show_gst": true,
     "show_total": true,
     "show_recovery_wish": true,
+    "show_composition_line": false,
     "show_signature": true
    },
    "quick_access": [

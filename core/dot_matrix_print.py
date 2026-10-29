@@ -48,6 +48,7 @@ class DmLayout:
     escp_tear_feed_216: int = 0       # ESC J forward feed after print (total n/216 inch)
     escp_slip_216: int = 0            # exact slip pitch n/216 inch; >0 = advance exactly one slip per bill
     escp_left_cols: int = 0           # ESC l n left margin in columns of the current pitch (whole bill moves right)
+    escp_cpi: int = 12                # A6 pitch: 12 (ESC M) or 15 (ESC g, the "Dot matrix A6" template)
     escp_tear_gap_216: int = 0        # print head -> tear edge, n/216 inch; pulled back before printing, given back after
     escp_tear_mode: str = "software"  # "software": the app ejects to the tear edge and pulls the same back
     escp_top_forward_216: int = 0     # ESC J n — top margin fed FORWARD from the perforation before the first line
@@ -611,6 +612,14 @@ def slip_units_from_cm(cm: float) -> int:
     return _units(cm)
 
 
+def _a6_cpi(settings: dict) -> int:
+    """Characters an inch on the A6 slip: 15 for the "Dot matrix A6" template, whose sample
+    carries some 76 characters across the 12.9 cm print width; 12 for every other bill."""
+    from core.micropro_bill import is_a6_style
+
+    return 15 if is_a6_style(settings) else 12
+
+
 def _a6_paper(settings: dict) -> dict:
     """The shop's slip, in numbers: height, margins and printable width.
 
@@ -623,7 +632,7 @@ def _a6_paper(settings: dict) -> dict:
         "top": _units(_cm_setting(settings, "dot_matrix_top_offset_cm", 1.0, 0.0, 5.0)),
         "bottom": _units(_cm_setting(settings, "dot_matrix_bottom_margin_cm", 1.0, 0.0, 5.0)),
         "width_cols": max(40, min(80, int(
-            _cm_setting(settings, "dot_matrix_print_width_cm", 12.9, 5.0, 20.0) / 2.54 * 12
+            _cm_setting(settings, "dot_matrix_print_width_cm", 12.9, 5.0, 20.0) / 2.54 * _a6_cpi(settings)
         ))),
     }
 
@@ -845,7 +854,8 @@ def _a6_base_layout(settings: dict) -> DmLayout:
         escp_top_reverse=top_rev,
         escp_tear_feed_216=tear,
         escp_slip_216=_dot_matrix_slip_units(settings),
-        escp_left_cols=int(round(_dot_matrix_left_offset_cm(settings) / 2.54 * 12)),
+        escp_left_cols=int(round(_dot_matrix_left_offset_cm(settings) / 2.54 * _a6_cpi(settings))),
+        escp_cpi=_a6_cpi(settings),
         preserve_leading_spaces=not _vertical_borders(settings),
     )
 
@@ -1072,6 +1082,8 @@ def _micropro_lines(ctx, settings: dict, *, slip: int = 0) -> list[str]:
     fixed slip the medicines get the spare lines, so the footer sits at the bottom."""
     from core import micropro_bill as mp
 
+    if mp.is_a6_style(settings, ctx):
+        return _a6_style_lines(ctx, settings, slip=slip)
     w = _dm(settings).line_width
     head = mp.header(ctx, settings)
     foot = mp.footer(ctx, settings)
@@ -1174,6 +1186,179 @@ def _micropro_lines(ctx, settings: dict, *, slip: int = 0) -> list[str]:
     def assemble() -> list[str]:
         return (out + ["-" * w, trow({c[0]: c[1] for c in cols}), "-" * w] + rows
                 + ["-" * w] + money + ["=" * w] + tail)
+
+    lines = assemble()
+    if slip and len(lines) < slip:
+        rows.extend([""] * (slip - len(lines)))
+        lines = assemble()
+    return lines
+
+
+def _a6_style_lines(ctx, settings: dict, *, slip: int = 0) -> list[str]:
+    """The owner's A6 slip (core/micropro_bill.A6_TEMPLATE_ID): Date / Bill No. beside the
+    shop, Name (mobile) / Doctor beside the patient's address, Total Items with Total
+    Amount and Discount, then Amount, CGST, SGST | Net Amount between double lines."""
+    from core import micropro_bill as mp
+
+    w = _dm(settings).line_width
+    head = mp.header(ctx, settings)
+    foot = mp.footer(ctx, settings)
+    S = _ascii_safe
+
+    date_s = f"Date  : {head['date']}" if head["date"] else ""
+    bill_s = f"Bill No.: {head['bill_no']}" if head["bill_no"] else ""
+    rw = min(max((len(v) for v in (date_s, bill_s, head["page"]) if v), default=0), w // 2)
+
+    def hrow(left: str, right: str, right_w: int = rw) -> str:
+        left, right = S(left), S(right)[:right_w]
+        if not right:
+            return left[:w]
+        lw = max(1, w - right_w - 1)
+        return left[:lw].ljust(lw) + " " + right
+
+    def pair(left: str, right: str) -> list[str]:
+        left, right = S(left), S(right)
+        if not right:
+            return [left[:w]] if left else []
+        if left and len(left) + 1 + len(right) <= w:
+            return [left + " " * (w - len(left) - len(right)) + right]
+        return ([left[:w]] if left else []) + [right[:w].rjust(w)]
+
+    out: list[str] = []
+    if head["first_page"]:
+        out.append(_bold(_center(head["title"], w)))
+        lw = max(1, w - rw - 3)          # two spaces between the address and Bill No.
+        addr_lines: list[str] = []
+        for part in head["address"] + head["contact"]:
+            addr_lines.extend(line for line in _wrap_text(S(part), lw) if line)
+        top = [head["store"]] + addr_lines
+        right = [date_s, bill_s]
+        for i in range(max(len(top), len(right))):
+            line = hrow(top[i] if i < len(top) else "", right[i] if i < len(right) else "")
+            out.append(_bold(line) if i == 0 and head["store"] else line)
+        if head["page"]:
+            out.append(hrow("", head["page"]))
+        # Name (number) and Doctor on the left; the patient's address on the right.
+        aw = max(16, min(w * 3 // 8, 34)) if head["addr"] else 0     # the sample: 5/8 name, 3/8 address
+        lw = max(12, w - aw - 2)
+
+        def labelled(label: str, value: str) -> list[str]:
+            parts = [p for p in _wrap_text(S(value), lw - len(label)) if p] or [""]
+            return [label + parts[0]] + [" " * len(label) + p for p in parts[1:]]
+
+        left = labelled("Name   : ", head["name"]) if head["name"] else []
+        if head["cust_no"]:
+            # only the number in brackets (owner): the room goes to the customer's name
+            cust = f"({head['cust_no']})"
+            if left and len(left[-1]) + 1 + len(cust) <= lw:
+                left[-1] += " " + cust          # on the name line, as in the sample
+            else:
+                left.append(" " * 9 + cust)     # under it when the slip is narrow
+        left += labelled("Doctor : ", head["doctor"]) if head["doctor"] else []
+        addr = [p for p in _wrap_text(S(head["addr"]), aw - 7) if p] if head["addr"] else []
+        rightp = ([f"Addr : {addr[0]}"] + ["       " + p for p in addr[1:]]) if addr else []
+        if left or rightp:
+            out.append("")
+            for i in range(max(len(left), len(rightp))):
+                out.append(hrow(left[i] if i < len(left) else "", rightp[i] if i < len(rightp) else "", aw))
+    else:
+        out.append(hrow(head["store"], bill_s))
+        if head["page"]:
+            out.append(hrow("", head["page"]))
+
+    # Qty | Description | Com | Batch | Exp | Amount -- the name takes what is left.
+    # A wide slip has room for the whole company word and long batches; the usual A6 slip
+    # at 12 characters an inch (60-66) gives that room to the medicine's name.
+    wide = w >= 76
+    cols = [["qty", "Qty", 5, "l"], ["desc", "Description", 0, "l"], ["com", "Com", 9 if w >= 64 else 6, "l"],
+            ["batch", "Batch", 10 if wide else 9, "l"], ["exp", "Exp", 5, "l"], ["amount", "Amount", 9 if wide else 8, "r"]]
+    if w - sum(c[2] for c in cols) - (len(cols) - 1) < 12:
+        cols[2][2] = 5
+    if w - sum(c[2] for c in cols) - (len(cols) - 1) < 12:
+        cols = [c for c in cols if c[0] != "com"]       # a narrow slip keeps the name instead
+    cols[1][2] = max(6, w - sum(c[2] for c in cols) - (len(cols) - 1))
+
+    def trow(cells: dict) -> str:
+        return " ".join(_cell(cells.get(key, ""), width, align) for key, _h, width, align in cols)[:w]
+
+    rows: list[str] = []
+    makers = [mp.company_word(getattr(i, "manufacturer", "")) for i in (ctx.items or [])]
+    counts = [mp.qty_number(i) for i in (ctx.items or [])]
+    for n, cells in enumerate(mp.item_rows(ctx)):
+        if n < len(makers):
+            # the owner: Com = the company's word; Qty = the number only, no TAB / TUBE / SYRUP
+            cells = {**cells, "com": makers[n], "qty": counts[n]}
+        desc = _wrap_text(S(cells["desc"]), cols[1][2]) or [""]
+        rows.append(trow({**cells, "desc": desc[0]}))
+        rows.extend(trow({"desc": more}) for more in desc[1:] if more)
+    if _resolve_paper(settings) != "A6":
+        n = len(ctx.items or []) + len(getattr(ctx, "returns", None) or [])
+        while len(rows) < _table_pad_rows(settings, n):
+            rows.append("")
+
+    dues = _setting(settings, "show_customer_due", False) or _setting(settings, "dot_matrix_due_lines", True)
+    money_in = mp.a6_totals(ctx, settings, dues=dues)
+    count = ""
+    if _setting(settings, "dot_matrix_item_count", True) and not getattr(ctx, "is_continued", False):
+        items = list(ctx.items or [])
+        nag = sum(float(getattr(i, "qty", 0) or 0) for i in items)
+        count = f"Total Items : {len(items)} ({int(nag) if float(nag).is_integer() else f'{nag:g}'})" if items else ""
+    lab_w = max([len(label) for label, _ in money_in["rows"] + money_in["after"]] + [12])
+
+    def right_row(label: str, amount: float, left: str = "") -> str:
+        right = f"{label:<{lab_w}} : {amount:>10.2f}"
+        room = max(0, w - len(right))
+        return (S(left)[: max(0, room - 1)].ljust(room) + right)[-w:]
+
+    money = [right_row(label, amount, count if i == 0 else "") for i, (label, amount) in enumerate(money_in["rows"])]
+    net_lines: list[str] = []
+    if money_in["net"] is not None:
+        net = f"Net Amount : {money_in['net']:.2f}"
+        parts = [f"{label} : {amount:.2f}" for label, amount in money_in["tax"]]
+        tax = "   ".join(parts)
+        for sep in ("   ", "  ", " "):        # one line, as in the sample, while it fits
+            if parts and len(sep.join(parts)) + 3 + len(net) <= w:
+                tax = sep.join(parts)
+                break
+        if tax and len(tax) + 3 + len(net) <= w:
+            net_lines = [tax + " " * (w - len(tax) - len(net) - 2) + "| " + net]
+        elif tax:
+            net_lines = [tax[:w], net.rjust(w)]
+        else:
+            net_lines = [net.rjust(w)]
+        if _setting(settings, "dot_matrix_bold_total", True):
+            net_lines = [_bold(line) for line in net_lines]
+    after = [right_row(label, amount) for label, amount in money_in["after"]]
+
+    tail: list[str] = []
+    if foot:
+        eoe = foot["eoe"].replace("E & O E,", "E & O E.")
+        tail.extend(pair(eoe, foot["for_shop"]))
+        dl = foot["dl"].replace("Drug Lic. No. ", "Drug Lic. No.: ")
+        dl_lines = [line for line in _wrap_text(S(dl), w) if line] if dl else []
+        sign = S(foot["sign"])
+        if dl_lines and sign and len(dl_lines[-1]) + 2 + len(sign) <= w:
+            dl_lines[-1] = dl_lines[-1] + sign.rjust(w - len(dl_lines[-1]))
+            sign = ""
+        tail.extend(dl_lines)
+        for key in ("fssai", "gstin"):
+            tail.extend(line for line in _wrap_text(S(foot[key]), w) if line)
+        if sign:
+            tail.append(sign.rjust(w))
+        nice = S(foot["nice"])
+        if nice:
+            if nice == "Get well soon..":
+                nice = "Get well soon..."
+            tail.append(_center(nice, w).rstrip())
+        if foot["wish"]:
+            tail.append(_center(S(foot["wish"]), w).rstrip())
+        for line in _wrap_text(S(foot["declaration"]), w):
+            if line:
+                tail.append(_bold(line))
+
+    def assemble() -> list[str]:
+        return (out + ["-" * w, trow({c[0]: c[1] for c in cols}), "-" * w] + rows + ["-" * w]
+                + money + ["=" * w] + net_lines + after + ["=" * w] + tail)
 
     lines = assemble()
     if slip and len(lines) < slip:
@@ -1601,7 +1786,10 @@ def render_escp_document(
             out += b"\x1bx\x01"   # LQ for wide paper
     if a6:
         out += b"\x1bO"   # cancel skip-over-perforation: a printer default of ON adds its own blank lines at every perforation
-        out += b"\x1bM"   # 12 CPI — landscape slip, 64 chars across 14 cm print width
+        if int(getattr(dm, "escp_cpi", 12) or 12) == 15:
+            out += b"\x1bg"   # 15 CPI — the "Dot matrix A6" template (core/micropro_bill.py)
+        else:
+            out += b"\x1bM"   # 12 CPI — landscape slip, 64 chars across 14 cm print width
         out += b"\x1ba\x00"  # left align
         out += b"\x1bU\x00"  # unidirectional
         # ESC l n — left margin in 12 CPI columns, set AFTER ESC M because it is

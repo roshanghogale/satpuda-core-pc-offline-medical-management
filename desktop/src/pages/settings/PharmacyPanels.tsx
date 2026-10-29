@@ -1033,7 +1033,10 @@ export function PharmacyPanel(props: Props) {
             receipt. Bill of Supply (Micropro style): the dot matrix slip prints like
             the old Micropro program — no boxes, no GST, E &amp; O E and the drug
             licence at the bottom; the normal printer keeps its bill, headed BILL OF
-            SUPPLY with no GST.
+            SUPPLY with no GST. Dot matrix A6: only the dot matrix slip changes — Total
+            Items, Total Amount, Discount, then Amount, CGST, SGST and Net Amount on one
+            line; its heading is the Bill heading below (a Bill of Supply prints no GST);
+            the normal printer keeps its own bill.
           </Note>
         </Frame>
         <Frame title="Bill heading">

@@ -194,4 +194,9 @@ def is_bill_of_supply(ctx: Any = None, settings: Optional[dict] = None) -> bool:
 
 
 def supply_declaration(ctx: Any = None, settings: Optional[dict] = None) -> str:
+    """The composition line a bill prints: only when the shop ticks it in Settings
+    (show_composition_line, off by default -- owner, 29 Oct 2026). Whether the shop IS a
+    composition dealer (GST screens) is load_bill_heading's, and does not change."""
+    if not (settings or {}).get("show_composition_line", False):
+        return ""
     return str(of(ctx, settings)["supply_declaration"])

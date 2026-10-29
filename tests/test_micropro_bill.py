@@ -41,12 +41,15 @@ def _ctx(**kw):
 
 
 def _settings(**kw):
-    return dict(DEFAULT_BILL_PRINT_SETTINGS, template="bill_of_supply", **kw)
+    # the composition line ticked on (it is off by default since 29 Oct 2026)
+    base = dict(template="bill_of_supply", show_composition_line=True)
+    base.update(kw)
+    return dict(DEFAULT_BILL_PRINT_SETTINGS, **base)
 
 
 class TheTemplate(unittest.TestCase):
     def test_it_is_the_third_choice(self):
-        self.assertEqual(list(AVAILABLE_TEMPLATES), ["classic", "legacy", "bill_of_supply"])
+        self.assertEqual(list(AVAILABLE_TEMPLATES)[:3], ["classic", "legacy", "bill_of_supply"])
         self.assertEqual(AVAILABLE_TEMPLATES["bill_of_supply"], "Bill of Supply (Micropro style)")
 
     def test_it_is_a_bill_of_supply_whatever_the_store_heading(self):
