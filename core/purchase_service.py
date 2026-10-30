@@ -3528,6 +3528,15 @@ def pulled_line_stock_units(item: dict):
             tps = 0
         if tps <= 0 and item.get("unit"):
             tps = parse_tablets_per_stripe(str(item.get("unit")))
+        elif tps == 1 and item.get("unit"):
+            # 1 beside a unit naming a strip ("20'", "15'S"): older clients sent 1 there and
+            # the line read as one tablet a strip; a loose line has unit "1" too (server
+            # syncService.purchaseItemPack keeps the same rule).
+            from core.bill_import_normalize import pack_is_volume_or_weight
+
+            unit = str(item.get("unit"))
+            if not pack_is_volume_or_weight(unit):
+                tps = max(1, int(parse_tablets_per_stripe(unit) or 1))
         if tps <= 0:
             return None
         line = {"type": med_type, "qty": item.get("qty"), "free_qty": item.get("free_qty"),
