@@ -13,6 +13,7 @@ import {
   type TablePayload,
 } from '../pagesApi'
 import { ExportDialog } from './ExportDialog'
+import { MasterCheckDialog } from './MasterCheckDialog'
 import { ExpiredReturnDialog, isExpiredReturnKey } from './ExpiredReturnDialog'
 import {
   MedicineEditDialog,
@@ -226,6 +227,8 @@ export function InventoryPage({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [exportOpen, setExportOpen] = useState(false)
+  // Check with master (core/master_check.py): differences from the master list, and Fix
+  const [masterOpen, setMasterOpen] = useState(false)
   const [expiredReturnOpen, setExpiredReturnOpen] = useState(false)
   const expiredReturnOpenRef = useRef(false)
   expiredReturnOpenRef.current = expiredReturnOpen
@@ -631,6 +634,12 @@ export function InventoryPage({
               disabled={loading}
             />
             <ActionBtn
+              label="Check with master"
+              variant="secondary"
+              onClick={() => setMasterOpen(true)}
+              disabled={loading}
+            />
+            <ActionBtn
               label="Refresh"
               variant="neutral"
               onClick={() => {
@@ -768,6 +777,7 @@ export function InventoryPage({
           onNavigate?.('returns', { returnsTab: 'purchase', returnsEditReturnId: id })
         }}
       />
+      <MasterCheckDialog open={masterOpen} onClose={() => setMasterOpen(false)} onFixed={() => void load()} />
       <ExportDialog
         page="inventory"
         open={exportOpen}

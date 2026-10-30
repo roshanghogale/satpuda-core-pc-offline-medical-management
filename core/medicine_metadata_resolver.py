@@ -314,6 +314,64 @@ def _schedule_from_store_db(name: str, conn: Any) -> str:
         return ""
 
 
+def _shop_own_schedule(name: str, conn: Any) -> str:
+    """The schedule of this shop's own medicine row of that name (the newest), never the master's
+    (lookup_medicine_details falls back to the master when the shop has none)."""
+    try:
+        from core.sync_prefs import is_online_mode
+
+        if is_online_mode():
+            from core.name_utils import normalize_medicine_name
+            from core.online_catalog import medicines_for_name
+
+            for d in medicines_for_name(normalize_medicine_name(name)) or []:
+                return _valid_schedule(str(d.get("schedule") or ""))
+            return ""
+    except Exception:
+        pass
+    if not conn:
+        return ""
+    try:
+        row = conn.execute(
+            "SELECT schedule FROM medicines WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) "
+            "AND COALESCE(deleted, 0) = 0 ORDER BY id DESC LIMIT 1", (name,)).fetchone()
+    except Exception:
+        try:
+            row = conn.execute("SELECT schedule FROM medicines WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) "
+                               "ORDER BY id DESC LIMIT 1", (name,)).fetchone()
+        except Exception:
+            row = None
+    return _valid_schedule(str(row[0] or "")) if row else ""
+
+
+def verified_import_schedule(conn: Any, name: str, bill_schedule: str = "") -> tuple[str, str]:
+    """(schedule, where it came from) for an imported purchase line (owner, 30 Oct 2026): the
+    distributor's bill is not trusted for it.
+
+      1. the master's schedule when the master list check confirmed it ("" = no schedule)
+      2. this shop's own inventory row of the medicine
+      3. the master's schedule, not confirmed
+      4. what the bill printed
+    """
+    name = (name or "").strip()
+    if not name:
+        return _valid_schedule(bill_schedule), "bill"
+    try:
+        from core.master_medicine_service import lookup_master_details
+
+        master = lookup_master_details(name)
+    except Exception:
+        master = {}
+    if master and "schedule" in (master.get("checked_fields") or []):
+        return _valid_schedule(str(master.get("schedule") or "")), "master (checked)"
+    shop = _shop_own_schedule(name, conn)
+    if shop:
+        return shop, "inventory"
+    if master and _valid_schedule(str(master.get("schedule") or "")):
+        return _valid_schedule(str(master.get("schedule") or "")), "master"
+    return _valid_schedule(bill_schedule), "bill"
+
+
 def _apply_import_fallback_schedule(item: Any, conn: Any = None) -> None:
     """Last resort when Gemini did not answer — store DB, then configured fallback."""
     if (getattr(item, "schedule", "") or "").strip():

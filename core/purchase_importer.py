@@ -1183,6 +1183,14 @@ def _build_import_payload(
             item.batch.strip(),
             item.expiry,
         )
+        # The schedule is checked, not taken from the bill (owner, 30 Oct 2026): the master's
+        # confirmed one, else this shop's inventory, else the master's, else the bill's.
+        try:
+            from core.medicine_metadata_resolver import verified_import_schedule
+
+            item.schedule, _sched_from = verified_import_schedule(conn, item.name, item.schedule)
+        except Exception:
+            pass
         from core.purchase_invoice_engine import format_discount_display
         disc_label = format_discount_display(
             item.discount_pct,

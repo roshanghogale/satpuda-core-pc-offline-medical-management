@@ -100,6 +100,8 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         ("device_id", "TEXT"),
         ("deleted", "INTEGER NOT NULL DEFAULT 0"),
         ("sync_status", "TEXT NOT NULL DEFAULT 'synced'"),
+        # the fields the master list check confirmed (server checked_fields, 30 Oct 2026)
+        ("checked_fields", "TEXT NOT NULL DEFAULT ''"),
     ):
         if col not in cols:
             conn.execute(f"ALTER TABLE {MASTER_TABLE} ADD COLUMN {col} {decl}")
@@ -174,8 +176,8 @@ def apply_remote_docs(docs: List[dict], *, replace: bool = False) -> int:
                 INSERT INTO {MASTER_TABLE}
                 (name, manufacturer, mrp, content_drug, med_type, pack_size,
                  schedule, hsn_code, gst_percent, updated_at, version, device_id,
-                 deleted, sync_status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 deleted, sync_status, checked_fields)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(name) DO UPDATE SET
                     manufacturer=excluded.manufacturer,
                     mrp=excluded.mrp,
@@ -189,7 +191,8 @@ def apply_remote_docs(docs: List[dict], *, replace: bool = False) -> int:
                     version=excluded.version,
                     device_id=excluded.device_id,
                     deleted=excluded.deleted,
-                    sync_status='synced'
+                    sync_status='synced',
+                    checked_fields=excluded.checked_fields
                 """,
                 (
                     name.upper(),
@@ -206,6 +209,7 @@ def apply_remote_docs(docs: List[dict], *, replace: bool = False) -> int:
                     str(doc.get("device_id") or ""),
                     1 if doc.get("deleted") else 0,
                     "synced",
+                    str(doc.get("checked_fields") or "").strip(),
                 ),
             )
             n += 1
@@ -295,8 +299,18 @@ def ensure_master_db_ready(progress_cb: ProgressCb = None) -> Tuple[bool, int, s
             conn = _connect_master()
             try:
                 count = _count_rows(conn)
+                newest = conn.execute(f"SELECT MAX(updated_at) FROM {MASTER_TABLE}").fetchone()[0]
             finally:
                 conn.close()
+            # The copy is the server's list up to its newest row: the first pull asks only for
+            # what changed after it, not for all 4.5 lakh rows again.
+            try:
+                from core import master_medicine_cloud as mmc
+
+                if newest and not mmc._load_watermark():
+                    mmc._save_watermark(str(newest))
+            except Exception:
+                pass
             if count > 0:
                 return True, count, "bundled-copy"
         except Exception:
@@ -480,6 +494,20 @@ def get_all_master_names(limit: int = 0) -> List[str]:
         conn.close()
 
 
+CHECKED_FIELDS = ("content", "manufacturer", "schedule", "hsn", "gst", "type", "pack")
+
+
+def checked_set(raw: object) -> List[str]:
+    """'schedule,hsn' -> ['schedule', 'hsn']: the fields the master list check confirmed."""
+    return [f for f in (x.strip() for x in str(raw or "").split(",")) if f in CHECKED_FIELDS]
+
+
+def _unlocked(field: str) -> str:
+    """SQL: this master row's field was not confirmed by the master list check (a shop's own
+    value may fill it)."""
+    return (f"instr(',' || COALESCE({MASTER_TABLE}.checked_fields, '') || ',', ',{field},') = 0")
+
+
 def lookup_master_details(name: str) -> Dict[str, object]:
     medicine_name = (name or "").strip()
     if not medicine_name:
@@ -491,7 +519,7 @@ def lookup_master_details(name: str) -> Dict[str, object]:
         cur.execute(
             f"""
             SELECT med_type, manufacturer, mrp, content_drug, pack_size,
-                   schedule, hsn_code, gst_percent
+                   schedule, hsn_code, gst_percent, COALESCE(checked_fields, '')
             FROM {MASTER_TABLE}
             WHERE name = ? COLLATE NOCASE
             LIMIT 1
@@ -510,6 +538,7 @@ def lookup_master_details(name: str) -> Dict[str, object]:
             "schedule": row[5] or "",
             "hsn_code": row[6] or "",
             "gst_percent": float(row[7] or 0) if row[7] is not None else 0,
+            "checked_fields": checked_set(row[8]),
         }
     finally:
         conn.close()
@@ -552,28 +581,28 @@ def upsert_master_medicine(
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'pending')
             ON CONFLICT(name) DO UPDATE SET
                 manufacturer=CASE
-                    WHEN TRIM(COALESCE(excluded.manufacturer,''))!='' THEN excluded.manufacturer
+                    WHEN {_unlocked('manufacturer')} AND TRIM(COALESCE(excluded.manufacturer,''))!='' THEN excluded.manufacturer
                     ELSE {MASTER_TABLE}.manufacturer END,
                 mrp=CASE
                     WHEN COALESCE(excluded.mrp,0)>0 THEN excluded.mrp
                     ELSE {MASTER_TABLE}.mrp END,
                 content_drug=CASE
-                    WHEN TRIM(COALESCE(excluded.content_drug,''))!='' THEN excluded.content_drug
+                    WHEN {_unlocked('content')} AND TRIM(COALESCE(excluded.content_drug,''))!='' THEN excluded.content_drug
                     ELSE {MASTER_TABLE}.content_drug END,
                 med_type=CASE
-                    WHEN TRIM(COALESCE(excluded.med_type,''))!='' THEN excluded.med_type
+                    WHEN {_unlocked('type')} AND TRIM(COALESCE(excluded.med_type,''))!='' THEN excluded.med_type
                     ELSE {MASTER_TABLE}.med_type END,
                 pack_size=CASE
-                    WHEN TRIM(COALESCE(excluded.pack_size,''))!='' THEN excluded.pack_size
+                    WHEN {_unlocked('pack')} AND TRIM(COALESCE(excluded.pack_size,''))!='' THEN excluded.pack_size
                     ELSE {MASTER_TABLE}.pack_size END,
                 schedule=CASE
-                    WHEN TRIM(COALESCE(excluded.schedule,''))!='' THEN excluded.schedule
+                    WHEN {_unlocked('schedule')} AND TRIM(COALESCE(excluded.schedule,''))!='' THEN excluded.schedule
                     ELSE {MASTER_TABLE}.schedule END,
                 hsn_code=CASE
-                    WHEN TRIM(COALESCE(excluded.hsn_code,''))!='' THEN excluded.hsn_code
+                    WHEN {_unlocked('hsn')} AND TRIM(COALESCE(excluded.hsn_code,''))!='' THEN excluded.hsn_code
                     ELSE {MASTER_TABLE}.hsn_code END,
                 gst_percent=CASE
-                    WHEN COALESCE(excluded.gst_percent,0)>0 THEN excluded.gst_percent
+                    WHEN {_unlocked('gst')} AND COALESCE(excluded.gst_percent,0)>0 THEN excluded.gst_percent
                     ELSE {MASTER_TABLE}.gst_percent END,
                 updated_at=excluded.updated_at,
                 version=excluded.version,
@@ -693,28 +722,28 @@ def sync_master_with_inventory(inventory_conn: sqlite3.Connection) -> int:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), 1, 'stock-enrich', 0, 'pending')
             ON CONFLICT(name) DO UPDATE SET
                 manufacturer=CASE
-                    WHEN TRIM(COALESCE(excluded.manufacturer,''))!='' THEN excluded.manufacturer
+                    WHEN {_unlocked('manufacturer')} AND TRIM(COALESCE(excluded.manufacturer,''))!='' THEN excluded.manufacturer
                     ELSE {MASTER_TABLE}.manufacturer END,
                 mrp=CASE
                     WHEN COALESCE(excluded.mrp,0)>0 THEN excluded.mrp
                     ELSE {MASTER_TABLE}.mrp END,
                 content_drug=CASE
-                    WHEN TRIM(COALESCE(excluded.content_drug,''))!='' THEN excluded.content_drug
+                    WHEN {_unlocked('content')} AND TRIM(COALESCE(excluded.content_drug,''))!='' THEN excluded.content_drug
                     ELSE {MASTER_TABLE}.content_drug END,
                 med_type=CASE
-                    WHEN TRIM(COALESCE(excluded.med_type,''))!='' THEN excluded.med_type
+                    WHEN {_unlocked('type')} AND TRIM(COALESCE(excluded.med_type,''))!='' THEN excluded.med_type
                     ELSE {MASTER_TABLE}.med_type END,
                 pack_size=CASE
-                    WHEN TRIM(COALESCE(excluded.pack_size,''))!='' THEN excluded.pack_size
+                    WHEN {_unlocked('pack')} AND TRIM(COALESCE(excluded.pack_size,''))!='' THEN excluded.pack_size
                     ELSE {MASTER_TABLE}.pack_size END,
                 schedule=CASE
-                    WHEN TRIM(COALESCE(excluded.schedule,''))!='' THEN excluded.schedule
+                    WHEN {_unlocked('schedule')} AND TRIM(COALESCE(excluded.schedule,''))!='' THEN excluded.schedule
                     ELSE {MASTER_TABLE}.schedule END,
                 hsn_code=CASE
-                    WHEN TRIM(COALESCE(excluded.hsn_code,''))!='' THEN excluded.hsn_code
+                    WHEN {_unlocked('hsn')} AND TRIM(COALESCE(excluded.hsn_code,''))!='' THEN excluded.hsn_code
                     ELSE {MASTER_TABLE}.hsn_code END,
                 gst_percent=CASE
-                    WHEN COALESCE(excluded.gst_percent,0)>0 THEN excluded.gst_percent
+                    WHEN {_unlocked('gst')} AND COALESCE(excluded.gst_percent,0)>0 THEN excluded.gst_percent
                     ELSE {MASTER_TABLE}.gst_percent END,
                 updated_at=datetime('now'),
                 version=COALESCE({MASTER_TABLE}.version, 1) + 1,

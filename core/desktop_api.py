@@ -1219,6 +1219,24 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 except Exception as exc:
                     _json_response(self, 400, {"ok": False, "error": str(exc)})
                 return
+            if path == "/api/inventory/master-check":
+                # Inventory > Check with master (core/master_check.py): ?sure=1&q=&field=
+                conn = _db.get("conn")
+                if conn is None:
+                    _json_response(self, 503, {"error": "Database not open"})
+                    return
+                try:
+                    from urllib.parse import parse_qs
+
+                    from core import master_check
+
+                    qs = parse_qs(urlparse(self.path).query)
+                    one = lambda k: (qs.get(k) or [""])[0]  # noqa: E731
+                    _json_response(self, 200, master_check.differences(
+                        conn, sure_only=one("sure") == "1", q=one("q"), field=one("field")))
+                except Exception as exc:
+                    _json_response(self, 400, {"ok": False, "error": str(exc)})
+                return
             if path in ("/api/reports/wholesale", "/api/reports/wholesale/parties"):
                 # Wholesale reports (core/wholesale_reports.py): ?report=register|party|items|
                 # outstanding|price_list&from&to&party_id&as_of&tier&in_stock&search
@@ -3236,6 +3254,20 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                     from core import gst_extras
 
                     _json_response(self, 200, gst_extras.save_hsn(conn, body.get("items") or []))
+                except Exception as exc:
+                    _json_response(self, 400, {"ok": False, "error": str(exc)})
+                return
+            if path == "/api/inventory/master-check/fix":
+                # The master's values into the shop's rows (core/master_check.fix):
+                # {items: [{name, fields}]} or {all: true}
+                if conn is None:
+                    _json_response(self, 503, {"error": "Database not open"})
+                    return
+                try:
+                    from core import master_check
+
+                    out = master_check.fix(conn, body)
+                    _json_response(self, 200 if out.get("ok") or out.get("fixed") else 400, out)
                 except Exception as exc:
                     _json_response(self, 400, {"ok": False, "error": str(exc)})
                 return
