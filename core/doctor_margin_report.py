@@ -333,6 +333,10 @@ def build_report(conn, body: dict[str, Any]) -> dict[str, Any]:
         from core import doctor_margin_rules_report
 
         return doctor_margin_rules_report.build_report(conn, body)
+    if str(body.get("mode") or "").strip().lower() == "bills":
+        from core import doctor_bill_profit
+
+        return doctor_bill_profit.build_report(conn, body)
     if _is_online():
         raise ReportError(
             "The Doctor Margin Report reads this PC's own books; an Online store's bills are "
@@ -627,6 +631,10 @@ def export_report(conn, body: dict[str, Any]) -> dict[str, Any]:
         from core import doctor_margin_rules_report
 
         return doctor_margin_rules_report.export_report(conn, body)
+    if str(body.get("mode") or "").strip().lower() == "bills":
+        from core import doctor_bill_profit
+
+        return doctor_bill_profit.export_report(conn, body)
     rep = build_report(conn, body)
     style = rep["filters"]["style"]
     rows = table_rows(rep, style)
@@ -637,7 +645,16 @@ def export_report(conn, body: dict[str, Any]) -> dict[str, Any]:
     cols = columns_for(rep["mode"], style)
     tot = total_row(rep, style)
     dcols, drows = doctor_columns(rep["mode"]), doctor_rows(rep)
-    base = _file_base(rep)
+    return deliver(body, title, heads, cols, rows, tot, dcols, drows, _file_base(rep), rep["totals"],
+                   dot_matrix_heads=heads[1:7])
+
+
+def deliver(body: dict[str, Any], title: str, heads, cols, rows, tot, dcols, drows, base: str,
+            totals: dict[str, Any], *, dot_matrix_heads=None) -> dict[str, Any]:
+    """A laid-out report as a file (format xlsx | csv | pdf, base64 for the File saved box) or on
+    paper (format print: the dot matrix A4 horizontal, or the printer with a PDF copy kept)."""
+    import base64
+
     fmt = str(body.get("format") or "xlsx").strip().lower()
     if fmt == "excel":
         fmt = "xlsx"
@@ -654,7 +671,8 @@ def export_report(conn, body: dict[str, Any]) -> dict[str, Any]:
         if target == "dot_matrix":
             from core.dot_matrix_print import print_dot_matrix_report
 
-            dm_title = f"{title} | " + " | ".join(f"{k}: {v}" for k, v in heads[1:7])
+            dm_heads = heads if dot_matrix_heads is None else dot_matrix_heads
+            dm_title = f"{title} | " + " | ".join(f"{k}: {v}" for k, v in dm_heads)
             try:
                 print_dot_matrix_report(dm_title, cols, rows + [tot], paper="A4", landscape=True)
             except Exception as exc:
@@ -694,5 +712,5 @@ def export_report(conn, body: dict[str, Any]) -> dict[str, Any]:
         "format": fmt,
         "content_base64": base64.b64encode(payload).decode("ascii"),
         "row_count": len(rows),
-        "totals": rep["totals"],
+        "totals": totals,
     }

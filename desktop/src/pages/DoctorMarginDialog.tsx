@@ -15,8 +15,9 @@ import '../styles/doctor-margin.css'
 import { SummaryCustomize } from '../components/SummaryCustomize'
 import { usePageSummary } from '../pageSummaries'
 import { DoctorMarginRulesReport } from './DoctorMarginRulesReport'
+import { DoctorBillProfitReport } from './DoctorBillProfitReport'
 
-type Mode = 'rules' | 'regular' | 'injection'
+type Mode = 'rules' | 'regular' | 'injection' | 'bills'
 type Style = 'detailed' | 'summary'
 type Flag = 'estimated' | 'unavailable' | 'loss'
 
@@ -343,7 +344,7 @@ export function DoctorMarginDialog({ open, onClose, onBack, from = '', to = '' }
   const dataKey = JSON.stringify({ ...filters, style: undefined })
 
   useEffect(() => {
-    if (!open || !opts || opts.online || mode === 'rules') return
+    if (!open || !opts || opts.online || mode === 'rules' || mode === 'bills') return
     if (problem) {
       seq.current += 1 // an answer still on its way is for filters no longer on screen
       setReport(null)
@@ -437,9 +438,30 @@ export function DoctorMarginDialog({ open, onClose, onBack, from = '', to = '' }
         <button type="button" role="radio" aria-checked={inj} className={inj ? 'on' : ''} onClick={() => setMode('injection')}>
           Injection profit
         </button>
+        <button type="button" role="radio" aria-checked={mode === 'bills'} className={mode === 'bills' ? 'on' : ''} onClick={() => setMode('bills')}>
+          Bill-wise profit
+        </button>
       </div>
     </div>
   )
+  if (mode === 'bills') {
+    // Selected doctors: bill-wise profit (owner, 30 Oct 2026; core/doctor_bill_profit.py)
+    return (
+      <DoctorBillProfitReport
+        modeSwitch={modeSwitch}
+        doctors={opts?.doctors || []}
+        online={Boolean(opts?.online)}
+        from={dFrom}
+        to={dTo}
+        onDates={(f, t) => {
+          setDFrom(f)
+          setDTo(t)
+        }}
+        onClose={onClose}
+        onBack={onBack}
+      />
+    )
+  }
   if (mode === 'rules') {
     return (
       <DoctorMarginRulesReport
