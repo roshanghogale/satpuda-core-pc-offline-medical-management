@@ -1,6 +1,6 @@
 """The PC's sync id is worked out once and kept (store 131, 26-30 Oct 2026).
 
-Vaibhav's PC sent a new id when its hardware fingerprint changed; the server had never
+A shop's PC sent a new id when its hardware fingerprint changed; the server had never
 registered it and refused four days of pushes. The id is now pinned, and an offline-first store
 pins the id it registered under, which the pushes then carry. No network, no real app data.
 """

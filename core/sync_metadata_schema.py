@@ -74,7 +74,7 @@ def get_sync_device_id() -> str:
 
     Worked out once and then kept (sync_device_id_pinned.txt). It used to be the hardware
     fingerprint read again every week, and that fingerprint can change on the same machine
-    (a network adapter, a slow PowerShell): Vaibhav's PC (store 131) sent a new id on 26 Oct
+    (a network adapter, a slow PowerShell): one shop's PC (store 131) sent a new id on 26 Oct
     2026 that the server had never registered, and four days of bills stayed on the PC.
     """
     pinned = _read_pin()
