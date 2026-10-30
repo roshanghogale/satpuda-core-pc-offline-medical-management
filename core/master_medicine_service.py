@@ -496,6 +496,11 @@ def get_all_master_names(limit: int = 0) -> List[str]:
 
 CHECKED_FIELDS = ("content", "manufacturer", "schedule", "hsn", "gst", "type", "pack")
 
+# Owner, 30 Oct 2026: no PC changes the master list any more, here or on the server -- only the
+# master list check (official rules, the web, hand checks) and the admin panel do; a PC only
+# pulls it. A shop's own entries stay in its own inventory.
+PC_WRITES_MASTER = False
+
 
 def checked_set(raw: object) -> List[str]:
     """'schedule,hsn' -> ['schedule', 'hsn']: the fields the master list check confirmed."""
@@ -558,7 +563,7 @@ def upsert_master_medicine(
     push_remote: bool = True,
 ) -> None:
     medicine_name = (name or "").strip()
-    if not medicine_name:
+    if not medicine_name or not PC_WRITES_MASTER:
         return
     now = _now_iso()
     device = _device_id()
@@ -656,9 +661,9 @@ def upsert_master_medicine(
 def sync_master_with_inventory(inventory_conn: sqlite3.Connection) -> int:
     """
     Upsert medicines from local inventory DB into master DB.
-    Returns number of medicines processed.
+    Returns number of medicines processed. Off (PC_WRITES_MASTER): always 0.
     """
-    if inventory_conn is None:
+    if inventory_conn is None or not PC_WRITES_MASTER:
         return 0
     try:
         cur = inventory_conn.cursor()
@@ -761,6 +766,8 @@ def sync_master_with_inventory(inventory_conn: sqlite3.Connection) -> int:
 def enrich_master_from_store_dbs(store_db_paths: List[str]) -> Dict[str, int]:
     """Merge schedule/HSN/GST/etc from one or more store inventory DBs into master."""
     stats = {"stores": 0, "names": 0}
+    if not PC_WRITES_MASTER:
+        return stats
     for path in store_db_paths or []:
         if not path or not os.path.isfile(path):
             continue

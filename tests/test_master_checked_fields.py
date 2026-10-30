@@ -41,23 +41,40 @@ class CheckedFields(unittest.TestCase):
         self.assertEqual(mms.lookup_master_details("DEMO PLAIN TAB")["checked_fields"], [])
 
     def test_the_shops_value_does_not_overwrite_a_checked_field(self):
-        mms.upsert_master_medicine("DEMO CEF 1GM INJ", manufacturer="DEMO", content_drug="CEFOTAXIME",
-                                   schedule="H", hsn_code="3004", gst_percent=12, push_remote=False)
+        # were PC writes ever switched back on, a checked field would still stay
+        with mock.patch.object(mms, "PC_WRITES_MASTER", True):
+            mms.upsert_master_medicine("DEMO CEF 1GM INJ", manufacturer="DEMO", content_drug="CEFOTAXIME",
+                                       schedule="H", hsn_code="3004", gst_percent=12, push_remote=False)
         got = mms.lookup_master_details("DEMO CEF 1GM INJ")
         self.assertEqual((got["schedule"], got["hsn_code"], got["gst_percent"], got["content_drug"]),
                          ("H1", "30042019", 5.0, "Cefotaxime (1gm)"))
-        self.assertEqual(got["manufacturer"], "DEMO")            # not checked: the shop's fills it
+        self.assertEqual(got["manufacturer"], "DEMO")            # not checked: the shop's filled it
 
-    def test_unchecked_rows_fill_as_before(self):
-        mms.upsert_master_medicine("DEMO PLAIN TAB", schedule="H", push_remote=False)
-        self.assertEqual(mms.lookup_master_details("DEMO PLAIN TAB")["schedule"], "H")
+    def test_no_pc_writes_the_master_at_all(self):
+        # owner, 30 Oct 2026: the master changes only after a check (and from the admin panel)
+        self.assertFalse(mms.PC_WRITES_MASTER)
+        before = mms.lookup_master_details("DEMO PLAIN TAB")
+        mms.upsert_master_medicine("DEMO PLAIN TAB", schedule="X", manufacturer="SHOP CO", push_remote=False)
+        mms.upsert_master_medicine("DEMO NEW SHOP NAME", schedule="H", push_remote=False)
+        self.assertEqual(mms.lookup_master_details("DEMO PLAIN TAB"), before)
+        self.assertEqual(mms.lookup_master_details("DEMO NEW SHOP NAME"), {})
+        from core import master_medicine_cloud as mmc
+
+        with mock.patch("core.server_api._request") as req:
+            self.assertEqual(mmc.upsert_master_remote([{"name": "X"}]), {"upserted": 0, "skipped": 0})
+            ok, msg, _ = mmc.push_stock_into_master(None)
+            req.assert_not_called()
+        self.assertFalse(ok)
+        self.assertIn("Check with master", msg)
 
     def test_the_inventory_sync_too(self):
         inv = sqlite3.connect(":memory:")
         inv.execute("CREATE TABLE medicines (id INTEGER PRIMARY KEY, name TEXT, manufacturer TEXT, mrp REAL, "
                     "content_drug TEXT, type TEXT, unit TEXT, schedule TEXT, hsn_code TEXT, gst_percent REAL)")
         inv.execute("INSERT INTO medicines (name, schedule, hsn_code, gst_percent) VALUES ('DEMO CEF 1GM INJ', 'H', '3004', 12)")
-        mms.sync_master_with_inventory(inv)
+        self.assertEqual(mms.sync_master_with_inventory(inv), 0)          # off
+        with mock.patch.object(mms, "PC_WRITES_MASTER", True):
+            mms.sync_master_with_inventory(inv)
         got = mms.lookup_master_details("DEMO CEF 1GM INJ")
         self.assertEqual((got["schedule"], got["hsn_code"], got["gst_percent"]), ("H1", "30042019", 5.0))
 

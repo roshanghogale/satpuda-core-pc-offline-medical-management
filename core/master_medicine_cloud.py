@@ -51,8 +51,9 @@ def export_master_all() -> List[dict]:
 
 def upsert_master_remote(docs: List[dict], *, enrich: bool = False) -> dict:
     from core import server_api as api
+    from core.master_medicine_service import PC_WRITES_MASTER
 
-    if not docs:
+    if not docs or not PC_WRITES_MASTER:     # no PC writes the server's master (30 Oct 2026)
         return {"upserted": 0, "skipped": 0}
     body = {"docs": docs, "enrich": bool(enrich)}
     res = api._request(
@@ -187,11 +188,17 @@ def pull_master_incremental() -> Tuple[bool, str, int]:
 
 
 def push_stock_into_master(inventory_conn) -> Tuple[bool, str, dict]:
-    """Enrich global master from local inventory, then refresh local snapshot."""
+    """Enrich global master from local inventory, then refresh local snapshot. Off since
+    30 Oct 2026 (master_medicine_service.PC_WRITES_MASTER): the list changes only after a check."""
     from core.master_medicine_service import (
+        PC_WRITES_MASTER,
         list_master_docs,
         sync_master_with_inventory,
     )
+
+    if not PC_WRITES_MASTER:
+        return False, ("The master list is changed only by the master list check and the admin panel, "
+                       "never from a shop's stock. Use Inventory > Check with master instead."), {}
 
     try:
         n_local = sync_master_with_inventory(inventory_conn)
