@@ -370,18 +370,20 @@ class OfflineModeIdsStayBelowDeviceRanges(unittest.TestCase):
 
 
 class ModeChangesFromSettings(unittest.TestCase):
-    def test_plain_offline_is_only_kept_by_a_pc_already_on_it(self):
+    def test_all_three_modes_are_offered(self):
+        # Owner, 30 Oct 2026: Offline, Offline-first and Online all in Settings. Offline-first
+        # goes through the switch-over (from Online); from Offline the PC goes Online first.
         from unittest import mock
 
         from core import desktop_api, desktop_settings_service
+        from core.offline_first import AUTO_ACTIVATE
 
+        self.assertFalse(AUTO_ACTIVATE)          # no PC is moved to offline-first by itself
+        three = ["offline", "offline_first", "online"]
         want = {
-            "online": ({"offline": "offline_retired", "online": None, "offline_first": "offline_first_via_switch"},
-                       ["online"]),
-            "offline": ({"offline": None, "online": None, "offline_first": "offline_first_via_switch"},
-                        ["offline", "online"]),
-            "offline_first": ({"offline": "offline_retired", "online": None, "offline_first": None},
-                              ["offline_first", "online"]),
+            "online": ({"offline": None, "online": None, "offline_first": "offline_first_via_switch"}, three),
+            "offline": ({"offline": None, "online": None, "offline_first": "offline_first_from_offline"}, three),
+            "offline_first": ({"offline": None, "online": None, "offline_first": None}, three),
         }
         for current, (refusals, options) in want.items():
             with mock.patch("core.sync_prefs.get_sync_mode", return_value=current):

@@ -94,6 +94,20 @@ def _note_pulled(changes: list[dict]) -> None:
         pass
 
 
+def _keep_registered_id(conn) -> None:
+    """This PC sends everything under the id its store registered with (of_meta install_id).
+    The id was worked out again from the hardware on every request, and when that changed the
+    server refused every push as an unknown device (store 131, 26-30 Oct 2026)."""
+    try:
+        registered = str(meta_get(conn, "install_id") or "").strip()
+        if registered:
+            from core.sync_metadata_schema import pin_sync_device_id
+
+            pin_sync_device_id(registered)
+    except Exception as exc:
+        log.warning("offline-first: keeping the registered id: %s", exc)
+
+
 class SyncCycle:
     """One store file. ``run_once`` does one full push + pull; the Worker calls it in a loop."""
 
@@ -107,6 +121,7 @@ class SyncCycle:
     def _c(self) -> HoldConnection:
         if self.conn is None:
             self.conn = open_worker_connection(self.path)
+            _keep_registered_id(self.conn)
         return self.conn
 
     def close(self) -> None:
@@ -229,7 +244,7 @@ class SyncCycle:
             try:
                 gen = meta_get(conn, "wipe_generation")
                 # No generation recorded = never told of a wipe = 0 on the server.
-                answer = client.push(events) if gen is None else client.push(events, int(gen))
+                answer = client.push(events, None if gen is None else int(gen), install=install)
             except Exception as exc:
                 if not client.is_store_wiped(exc):
                     raise

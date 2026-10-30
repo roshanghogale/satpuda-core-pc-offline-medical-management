@@ -1514,6 +1514,17 @@ export function lookupPurchaseMedicine(name: string) {
       unit: string
       discount_pct: number
     }
+    /** The master list's own values (a hidden Purchase box is filled from these). */
+    master?: {
+      type: string
+      manufacturer: string
+      mrp: number
+      content_drug: string
+      pack_size: string
+      schedule: string
+      hsn_code: string
+      gst_percent: number
+    }
   }>('/api/purchase/lookup-medicine', { name })
 }
 

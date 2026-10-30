@@ -87,10 +87,11 @@ def number_head(fy_start_year: int, ranges: dict) -> dict:
     return _call("GET", "/api/sync/v2/number-head?" + "&".join(q), timeout=30.0)
 
 
-def push(events: list[dict], wipe_generation: Optional[int] = None) -> dict:
+def push(events: list[dict], wipe_generation: Optional[int] = None, install: Optional[str] = None) -> dict:
     """wipe_generation: the store's "Delete all data" this copy is on; the server refuses the
     push ("store_wiped") while the store is on a later one (core/store_wipe.py)."""
-    body = {"install_id": install_id(), "events": events}
+    # install: the id the store registered under (of_meta), which the worker passes.
+    body = {"install_id": str(install or install_id()), "events": events}
     if wipe_generation is not None:
         body["wipe_generation"] = int(wipe_generation)
     return _call("POST", "/api/sync/v2/push", body, timeout=180.0)

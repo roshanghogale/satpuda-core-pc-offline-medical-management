@@ -15,7 +15,8 @@ the background:
   * worker   -- the background loop that pushes and pulls.
 """
 
-# This build moves an Online PC onto offline-first by itself on its first start (the screen
-# shows the copy being made). Offline-mode PCs switch from Settings (their own data goes up
-# first through the usual Offline -> Online push).
-AUTO_ACTIVATE = True
+# v1.0.11 (22 Oct 2026) moved every Online PC onto offline-first by itself on its first start.
+# Owner, 30 Oct 2026: the shop chooses -- Offline, Offline-first and Online are all in Settings
+# (desktop_settings_service._sync_mode_options); Online -> Offline-first runs the same switch-over
+# (the copy, then registration) when it is chosen. A PC already on offline-first stays on it.
+AUTO_ACTIVATE = False

@@ -164,7 +164,7 @@ class FakeServer:
         return {"changes": [], "has_more": False, "to_revision": after,
                 "wipe_generation": 1, "wipe_revision": 900}
 
-    def push(self, events, wipe_generation=None):
+    def push(self, events, wipe_generation=None, install=None):
         self.pushed.append((len(events), wipe_generation))
         if int(wipe_generation or 0) < 1:
             raise RuntimeError("store_wiped: all data of this store was deleted on the server.")

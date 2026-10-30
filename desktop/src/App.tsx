@@ -152,6 +152,13 @@ export default function App() {
     return () =>
       window.removeEventListener('satpuda:sync-mode-changed', onModeChanged)
   }, [])
+  // Settings > Sync mode > Offline-first on an Online PC: the switch-over with its progress.
+  const [offlineFirstAsked, setOfflineFirstAsked] = useState(0)
+  useEffect(() => {
+    const onAsk = () => setOfflineFirstAsked((n) => n + 1)
+    window.addEventListener('satpuda:offline-first-start', onAsk)
+    return () => window.removeEventListener('satpuda:offline-first-start', onAsk)
+  }, [])
   const [apiOk, setApiOk] = useState<boolean | null>(null)
   const [prefs, setPrefs] = useState<DesktopUiPrefs>(DEFAULT_PREFS)
   const [startupAlerts, setStartupAlerts] = useState<StartupAlertTab[] | null>(
@@ -868,7 +875,10 @@ export default function App() {
       </main>
 
       <StartupSplashOverlay open={splashOpen} status={splashStatus} />
-      <OfflineFirstAutoSwitch enabled={Boolean(meta?.offline_first_auto) && !splashOpen} />
+      <OfflineFirstAutoSwitch
+        enabled={Boolean(meta?.offline_first_auto) && !splashOpen}
+        requested={splashOpen ? 0 : offlineFirstAsked}
+      />
 
       <StartupAlertsDialog
         open={Boolean(startupAlerts?.length) || Boolean(startupAlertsError)}

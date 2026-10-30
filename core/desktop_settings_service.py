@@ -33,24 +33,17 @@ def _reopen_engine_conn() -> None:
 
 
 def _sync_mode_options() -> list[dict[str, str]]:
-    """Modes the Settings screen offers. With offline-first in this build, plain Offline is
-    kept only for a PC that is on it now (it moves on by going Online): a PC that numbers its
-    own bills and ids beside offline-first devices would take numbers and ids reserved for them."""
-    from core.sync_prefs import MODE_OFFLINE, MODE_OFFLINE_FIRST, get_sync_mode
+    """The three modes the shop chooses from (owner, 30 Oct 2026). How a change is made, and
+    which ones are refused (e.g. Offline -> Offline-first without going Online first), is in
+    desktop_api._sync_mode_refusal."""
+    from core.sync_prefs import MODE_OFFLINE_FIRST
 
-    try:
-        from core.offline_first import AUTO_ACTIVATE
-    except Exception:
-        AUTO_ACTIVATE = False
-    current = get_sync_mode()
-    out = []
-    if current == MODE_OFFLINE or not AUTO_ACTIVATE:
-        out.append({"value": "offline", "label": "Offline — local SQLite + Google Drive"})
-    if current == MODE_OFFLINE_FIRST:
-        out.append({"value": MODE_OFFLINE_FIRST,
-                    "label": "Offline-first — works without internet, syncs by itself"})
-    out.append({"value": "online", "label": "Online — server-only (no local store DB)"})
-    return out
+    return [
+        {"value": "offline", "label": "Offline — this PC only, backup on Google Drive"},
+        {"value": MODE_OFFLINE_FIRST,
+         "label": "Offline-first — works without internet, keeps the server in step by itself"},
+        {"value": "online", "label": "Online — every save goes straight to the server"},
+    ]
 
 
 def _restore_refusal(result: Any) -> dict[str, Any]:
@@ -1428,6 +1421,9 @@ def get_system() -> dict[str, Any]:
         "device_role": get_device_role(),
         "is_satellite": is_satellite_device(),
         "sync_mode": mode,
+        # what the PC is on now (the screen edits sync_mode): Offline-first from Online
+        # runs the switch-over instead of a plain save
+        "sync_mode_now": mode,
         "sync_label": mode_label(mode),
         "startup_alerts_enabled": load_startup_alerts_enabled(),
         "export_format": load_default_export_format(),

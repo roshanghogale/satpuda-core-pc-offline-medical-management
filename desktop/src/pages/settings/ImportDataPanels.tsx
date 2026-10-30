@@ -3078,13 +3078,55 @@ OK = tari restore kara (he jaatil) · Cancel = thamba`)) {
                   ))}
                 </select>
               </Field>
-              <div className="iset-row">
-                <SaveBtn
-                  label="Save Sync Mode"
-                  saving={saving}
-                  onClick={onSaveSystem}
-                />
-              </div>
+              {(() => {
+                const now = String(system.sync_mode_now || '')
+                const want = String(system.sync_mode || '')
+                if (want === 'offline_first' && now === 'online') {
+                  return (
+                    <>
+                      <Note>
+                        The store is copied from the server onto this PC first (a few
+                        minutes; keep the app open). Then billing works without internet
+                        and everything reaches the server by itself.
+                      </Note>
+                      <div className="iset-row">
+                        <button
+                          type="button"
+                          className="settings-action-btn"
+                          onClick={() =>
+                            window.dispatchEvent(new Event('satpuda:offline-first-start'))
+                          }
+                        >
+                          Start Offline-first
+                        </button>
+                      </div>
+                    </>
+                  )
+                }
+                return (
+                  <>
+                    {want === 'offline_first' && now === 'offline' ? (
+                      <p className="iset-callout warn">
+                        Aadhi Online nivda: ya PC varchi bills server var jatil. Mag
+                        Offline-first nivda.
+                      </p>
+                    ) : null}
+                    {now === 'offline_first' && want !== now ? (
+                      <Note>
+                        Everything on this PC must reach the server first; the change is
+                        refused until the status shows Synced.
+                      </Note>
+                    ) : null}
+                    <div className="iset-row">
+                      <SaveBtn
+                        label="Save Sync Mode"
+                        saving={saving}
+                        onClick={onSaveSystem}
+                      />
+                    </div>
+                  </>
+                )
+              })()}
             </Frame>
             <Frame title="Server Connection">
               <div className="iset-summary">

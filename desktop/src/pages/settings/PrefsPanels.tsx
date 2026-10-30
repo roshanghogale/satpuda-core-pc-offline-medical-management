@@ -26,6 +26,7 @@ import { ModernCombo } from '../ModernCombo'
 import { FolderInput } from './FolderInput'
 import '../../styles/prefs-settings.css'
 import { PageSummariesPanel } from './PageSummariesPanel'
+import { PurchaseFieldsPanel } from './PurchaseFieldsPanel'
 
 type Opts = SettingsBundle['options']
 
@@ -620,6 +621,10 @@ export function LayoutListsPanel({
 
   if (sectionId === 'page_summaries') {
     return <PageSummariesPanel />
+  }
+
+  if (sectionId === 'purchase_fields') {
+    return <PurchaseFieldsPanel />
   }
 
   if (sectionId === 'thresholds') {

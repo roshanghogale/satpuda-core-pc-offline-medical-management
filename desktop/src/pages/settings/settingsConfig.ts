@@ -99,6 +99,7 @@ export const SETTINGS_TABS: TabDef[] = [
       { id: 'columns', label: 'Column Visibility' },
       { id: 'rows', label: 'Table Row Counts' },
       { id: 'page_summaries', label: 'Page Summaries' },
+      { id: 'purchase_fields', label: 'Purchase Form Fields' },
       { id: 'med_types', label: 'Medicine Types' },
       { id: 'units', label: 'Medicine Units' },
       { id: 'schedules', label: 'Schedules' },

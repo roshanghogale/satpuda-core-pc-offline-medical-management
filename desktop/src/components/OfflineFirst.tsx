@@ -194,7 +194,10 @@ export function switchProgress(
 /** First start of this version on an Online PC: copy the store and switch to offline-first.
  *  Blocks the screen while it runs (closing the app half way would only mean it starts
  *  again next time; the mode changes only at the end). */
-export function OfflineFirstAutoSwitch({ enabled }: { enabled: boolean }) {
+/** The Online -> offline-first switch-over with its progress. `enabled`: the build's automatic
+ *  switch (off since 30 Oct 2026); `requested`: counts the shop choosing Offline-first in
+ *  Settings > Sync mode (the 'satpuda:offline-first-start' event). */
+export function OfflineFirstAutoSwitch({ enabled, requested = 0 }: { enabled: boolean; requested?: number }) {
   const [state, setState] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
   const [steps, setSteps] = useState<string[]>([])
   const [copy, setCopy] = useState<CopyFigures | null>(null)
@@ -210,11 +213,14 @@ export function OfflineFirstAutoSwitch({ enabled }: { enabled: boolean }) {
   }, [state])
 
   useEffect(() => {
-    if (!enabled || started.current) return
-    try {
-      if (sessionStorage.getItem('of_auto_skip') === '1') return
-    } catch {
-      /* ignore */
+    const asked = requested > 0
+    if (!(enabled || asked) || started.current) return
+    if (!asked) {
+      try {
+        if (sessionStorage.getItem('of_auto_skip') === '1') return
+      } catch {
+        /* ignore */
+      }
     }
     started.current = true
     setStartedAt(Date.now())
@@ -249,7 +255,7 @@ export function OfflineFirstAutoSwitch({ enabled }: { enabled: boolean }) {
     return () => {
       alive = false
     }
-  }, [enabled])
+  }, [enabled, requested])
 
   if (state === 'idle') return null
   return (
@@ -275,7 +281,10 @@ export function OfflineFirstAutoSwitch({ enabled }: { enabled: boolean }) {
           {state === 'error' ? (
             <>
               <p>{error}</p>
-              <p className="muted">Nothing was changed: the store stays Online. It will try again next time.</p>
+              <p className="muted">
+                Nothing was changed: the store stays Online.
+                {requested > 0 ? ' Choose Offline-first in Settings to try again.' : ' It will try again next time.'}
+              </p>
             </>
           ) : null}
         </div>
@@ -290,6 +299,7 @@ export function OfflineFirstAutoSwitch({ enabled }: { enabled: boolean }) {
                 } catch {
                   /* ignore */
                 }
+                started.current = false
                 setState('idle')
               }}
             >

@@ -133,6 +133,35 @@ export const SUMMARY_PAGES: SummaryPageDef[] = [
   },
 ]
 
+/** The Purchase screen's input boxes the shop may hide (owner, 30 Oct 2026), kept in the same
+ *  shop-wide row as page "purchase_form" (only "off" is used). Supplier name, medicine name and
+ *  quantity always show. A hidden box counts as empty on a NEW line; the ones the master list
+ *  knows are filled from it when the line is added (PurchasePage.formValuesForAdd), and nothing
+ *  is asked for. A line opened again keeps its own values. */
+export const PURCHASE_FORM_PAGE = 'purchase_form'
+export const PURCHASE_FORM_FIELDS: (SummaryField & { group: 'supplier' | 'medicine'; fromMaster?: boolean })[] = [
+  { key: 'address', label: 'Address', group: 'supplier' },
+  { key: 'phone', label: 'Phone', group: 'supplier' },
+  { key: 'gstin', label: 'GSTIN', group: 'supplier' },
+  { key: 'dl', label: 'DL Numbers', group: 'supplier' },
+  { key: 'purchase_date', label: 'Purchase Date', group: 'supplier' },
+  { key: 'bill_number', label: 'Bill Number', group: 'supplier' },
+  { key: 'gst_method', label: 'GST Method', group: 'supplier' },
+  { key: 'type', label: 'Type', group: 'medicine', fromMaster: true },
+  { key: 'pack', label: 'Tabs/Strip (Pack)', group: 'medicine', fromMaster: true },
+  { key: 'free', label: 'Free', group: 'medicine' },
+  { key: 'hsn', label: 'HSN Code', group: 'medicine', fromMaster: true },
+  { key: 'gst_pct', label: 'GST %', group: 'medicine', fromMaster: true },
+  { key: 'mrp', label: 'MRP', group: 'medicine', fromMaster: true },
+  { key: 'rate', label: 'Rate', group: 'medicine' },
+  { key: 'discount', label: 'Discount %', group: 'medicine' },
+  { key: 'manufacturer', label: 'Manufacturer', group: 'medicine', fromMaster: true },
+  { key: 'batch', label: 'Batch No', group: 'medicine' },
+  { key: 'expiry', label: 'Expiry', group: 'medicine' },
+  { key: 'schedule', label: 'Schedule', group: 'medicine', fromMaster: true },
+  { key: 'content', label: 'Content / Drug', group: 'medicine', fromMaster: true },
+]
+
 export type SummaryPageKey = (typeof SUMMARY_PAGES)[number]['page']
 
 export function summaryPageDef(page: string): SummaryPageDef | undefined {

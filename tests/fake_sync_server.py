@@ -229,7 +229,7 @@ class FakeV2Server:
         def _bound():
             saved = (client.push, client.changes, client.stock, client.install_id, client.number_block,
                      client.head_revision, client.number_head)
-            client.push = lambda events: server.push(install_id, events)
+            client.push = lambda events, *_a, **_k: server.push(install_id, events)
             client.changes = lambda after, limit=200: server.changes(after, limit)
             client.stock = lambda ids=None: server.stock(ids)
             client.install_id = lambda: install_id

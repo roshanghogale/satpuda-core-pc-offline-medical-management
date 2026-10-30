@@ -64,10 +64,34 @@ import {
 import { BillScanProgressOverlay } from '../components/BillScanProgressOverlay'
 import { dispatchDataChanged } from '../syncRefresh'
 import { todayLocal } from '../localDate'
+import { PURCHASE_FORM_FIELDS, PURCHASE_FORM_PAGE, usePageSummary } from '../pageSummaries'
 import { fetchLastRates, suggestedRates, useBusinessMode } from '../wholesale/mode'
 import { fillRatesFromMargins, lineNeedsRateA, rateAMissing, rateAMissingText } from '../wholesale/rateA'
 import '../wholesale/wholesale.css'
 import './importCheck.css'
+
+/** The batch of a line whose Batch box the shop hid (Purchase Form Fields). */
+const HIDDEN_BATCH = 'NA'
+
+/** What an add reads from the form (PurchasePage.formValuesForAdd). */
+type AddValues = {
+  medType: string
+  strips: string
+  tabsPerStrip: string
+  freeStrips: string
+  hsn: string
+  gstPct: string
+  mrp: string
+  rate: string
+  discPct: string
+  manufacturer: string
+  batch: string
+  expiry: string
+  schedule: string
+  content: string
+  /** boxes hidden in Settings: not asked for */
+  hidden: Set<string>
+}
 
 type LineItem = {
   medicine: string
@@ -480,6 +504,8 @@ export function PurchasePage({
   const [discPct, setDiscPct] = useState('0')
   // Wholesale: Rate A / B / C of the line being entered (per pack, GST excluded).
   const ws = useBusinessMode()
+  // Boxes the shop hid in Settings > Layout & Lists > Purchase Form Fields (owner, 30 Oct 2026).
+  const showBox = usePageSummary(PURCHASE_FORM_PAGE).field
   const [rateA, setRateA] = useState('')
   const [rateB, setRateB] = useState('')
   const [rateC, setRateC] = useState('')
@@ -532,9 +558,19 @@ export function PurchasePage({
   )
 
   const focusNavOrder = useCallback((order: number) => {
-    const scoped = document.querySelector<HTMLElement>(
+    let scoped = document.querySelector<HTMLElement>(
       `.desktop-page[data-nav-chain="${NAV}"] [data-nav-order="${order}"]`,
     )
+    if (!scoped) {
+      // That box is hidden (Purchase Form Fields): the next one that shows.
+      const later = Array.from(
+        document.querySelectorAll<HTMLElement>(`.desktop-page[data-nav-chain="${NAV}"] [data-nav-order]`),
+      )
+        .map((el) => ({ el, n: Number(el.getAttribute('data-nav-order')) || 0 }))
+        .filter((x) => x.n > order)
+        .sort((a, b) => a.n - b.n)
+      scoped = later[0]?.el ?? null
+    }
     scoped?.focus()
     if (scoped instanceof HTMLInputElement) {
       try {
@@ -1088,7 +1124,67 @@ export function PurchasePage({
     return () => window.clearInterval(id)
   }, [prefs?.app_mode, prefs?.master_ready, medicine, refreshMedicineSuggestions])
 
-  const addItem = () => {
+  /** The form's values for an add. On a NEW line a box the shop hid counts as empty: the ones
+   *  the master list knows come from it, the rest stay empty and are never asked for. A line
+   *  opened again from the list keeps its own values (an imported batch is never wiped). */
+  const formValuesForAdd = async (): Promise<AddValues> => {
+    const own: AddValues = {
+      medType, strips, tabsPerStrip, freeStrips, hsn, gstPct, mrp, rate, discPct,
+      manufacturer, batch, expiry, schedule, content, hidden: new Set<string>(),
+    }
+    if (editingIdx !== null) return own
+    const hidden = new Set(PURCHASE_FORM_FIELDS.filter((f) => !showBox(f.key)).map((f) => f.key))
+    if (!hidden.size) return own
+    let m: NonNullable<Awaited<ReturnType<typeof lookupPurchaseMedicine>>['master']> | undefined
+    if (PURCHASE_FORM_FIELDS.some((f) => f.fromMaster && hidden.has(f.key)) && medicine.trim()) {
+      try {
+        m = (await lookupPurchaseMedicine(medicine.trim())).master
+      } catch {
+        m = undefined
+      }
+    }
+    const v: AddValues = { ...own, hidden }
+    // Type and pack decide how stock is counted: the master's, else what the pick filled.
+    if (hidden.has('type')) v.medType = m?.type || medType || 'Tablet'
+    if (hidden.has('pack')) {
+      const meta = typeMetaFor(v.medType, prefs)
+      const nums = (m?.pack_size || '').match(/\d+(\.\d+)?/g)?.map(Number) || []
+      v.tabsPerStrip = meta.strip
+        ? String(nums.length ? Math.max(...nums) : Number(tabsPerStrip) || 1)
+        : (m?.pack_size || '').trim() || tabsPerStrip || meta.measure_unit || '1'
+    }
+    if (hidden.has('free')) v.freeStrips = '0'
+    if (hidden.has('hsn')) v.hsn = m?.hsn_code || ''
+    if (hidden.has('gst_pct')) v.gstPct = String(m?.gst_percent || 0)
+    if (hidden.has('mrp')) v.mrp = String(m?.mrp || 0)
+    if (hidden.has('rate')) v.rate = '0'
+    if (hidden.has('discount')) v.discPct = '0'
+    if (hidden.has('manufacturer')) v.manufacturer = m?.manufacturer || ''
+    // A batch names the stock row, so a hidden one is "NA": every such purchase of the
+    // medicine lands on one row (the save refuses a line with no batch at all).
+    if (hidden.has('batch')) v.batch = HIDDEN_BATCH
+    if (hidden.has('expiry')) v.expiry = ''
+    if (hidden.has('schedule')) v.schedule = m?.schedule || ''
+    if (hidden.has('content')) v.content = m?.content_drug || ''
+    return v
+  }
+
+  // An add waiting for the master list (a hidden box) takes no second Enter meanwhile.
+  const addingRef = useRef(false)
+  const addItem = async () => {
+    if (justAddedRef.current || addingRef.current) return
+    addingRef.current = true
+    try {
+      addItemWith(await formValuesForAdd())
+    } finally {
+      addingRef.current = false
+    }
+  }
+
+  const addItemWith = ({
+    medType, strips, tabsPerStrip, freeStrips, hsn, gstPct, mrp, rate, discPct,
+    manufacturer, batch, expiry, schedule, content, hidden,
+  }: AddValues) => {
     // Swallowed while the form is being cleared after an add (see the guard at
     // the end of this function).
     if (justAddedRef.current) return
@@ -1110,7 +1206,7 @@ export function PurchasePage({
       })
       return
     }
-    if (!batch.trim()) {
+    if (!batch.trim() && !hidden.has('batch')) {
       showAlert({
         title: 'Missing Information',
         message: 'Please enter batch number.',
@@ -1120,7 +1216,7 @@ export function PurchasePage({
       return
     }
     const exp = expiry.trim()
-    if (!exp || !/^\d{1,2}\/\d{2}$/.test(exp)) {
+    if (!hidden.has('expiry') && (!exp || !/^\d{1,2}\/\d{2}$/.test(exp))) {
       showAlert({
         title: 'Expiry',
         message: 'Please enter expiry as MM/YY (e.g. 08/27).',
@@ -1130,10 +1226,11 @@ export function PurchasePage({
       return
     }
     const qty = Math.max(0, Number(strips) || 0)
-    if (qty <= 0) {
+    // A batch can come all free (Qty 0, Free 10): free goods are stock too (owner, 30 Oct 2026).
+    if (qty <= 0 && !(Math.max(0, Number(freeStrips) || 0) > 0)) {
       showAlert({
         title: 'Quantity',
-        message: 'Quantity must be greater than zero.',
+        message: 'Enter the quantity or the free quantity.',
         kind: 'warning',
         focusAfterClose: () => focusNavOrder(11),
       })
@@ -2760,6 +2857,7 @@ export function PurchasePage({
                 onPick={(it) => onPickSupplier(it.label)}
               />
             </Field>
+            {showBox('address') ? (
             <Field label="Address">
               <input
                 type="text"
@@ -2769,6 +2867,8 @@ export function PurchasePage({
                 onChange={(e) => patchTab({ address: e.target.value })}
               />
             </Field>
+            ) : null}
+            {showBox('phone') ? (
             <Field label="Phone">
               <input
                 type="text"
@@ -2779,6 +2879,8 @@ export function PurchasePage({
                 onChange={(e) => patchTab({ phone: e.target.value })}
               />
             </Field>
+            ) : null}
+            {showBox('gstin') ? (
             <Field label="GSTIN">
               <input
                 type="text"
@@ -2789,6 +2891,8 @@ export function PurchasePage({
                 onChange={(e) => patchTab({ gstin: e.target.value })}
               />
             </Field>
+            ) : null}
+            {showBox('dl') ? (
             <Field label="DL Numbers">
               <input
                 type="text"
@@ -2799,6 +2903,8 @@ export function PurchasePage({
                 onChange={(e) => patchTab({ dl: e.target.value })}
               />
             </Field>
+            ) : null}
+            {showBox('purchase_date') ? (
             <Field label="Purchase Date" hint="(YYYY-MM-DD)">
               <input
                 type="text"
@@ -2809,6 +2915,8 @@ export function PurchasePage({
                 onChange={(e) => patchTab({ purchaseDate: e.target.value })}
               />
             </Field>
+            ) : null}
+            {showBox('bill_number') ? (
             <Field label="Bill Number">
               <input
                 type="text"
@@ -2820,6 +2928,8 @@ export function PurchasePage({
                 onChange={(e) => patchTab({ billNumber: e.target.value })}
               />
             </Field>
+            ) : null}
+            {showBox('gst_method') ? (
             <Field label="GST Method">
               <SelectWrap>
                 <select
@@ -2855,6 +2965,7 @@ export function PurchasePage({
                 </select>
               </SelectWrap>
             </Field>
+            ) : null}
           </div>
         </Panel>
 
@@ -2916,6 +3027,7 @@ export function PurchasePage({
                 }}
               />
             </Field>
+            {showBox('type') ? (
             <Field label="Type" className="span2">
               <ModernCombo
                 value={medType}
@@ -2934,6 +3046,7 @@ export function PurchasePage({
                 onEnter={() => focusNavOrder(11)}
               />
             </Field>
+            ) : null}
             <Field label={activeTypeMeta.qty_label}>
               <input
                 type="text"
@@ -2947,6 +3060,7 @@ export function PurchasePage({
                 onFocus={(e) => e.currentTarget.select()}
               />
             </Field>
+            {showBox('pack') ? (
             <Field
               label={
                 stripMode
@@ -2967,6 +3081,7 @@ export function PurchasePage({
                 onChange={(e) => setTabsPerStrip(e.target.value)}
               />
             </Field>
+            ) : null}
             {activeTypeMeta.is_vaccine ? (
               <Field label="Vaccine unit">
                 <SelectWrap>
@@ -2981,6 +3096,7 @@ export function PurchasePage({
                 </SelectWrap>
               </Field>
             ) : null}
+            {showBox('free') ? (
             <Field label={activeTypeMeta.free_label}>
               <input
                 type="text"
@@ -2991,6 +3107,8 @@ export function PurchasePage({
                 onChange={(e) => setFreeStrips(e.target.value)}
               />
             </Field>
+            ) : null}
+            {showBox('hsn') ? (
             <Field label="HSN Code">
               <input
                 type="text"
@@ -3001,6 +3119,8 @@ export function PurchasePage({
                 onChange={(e) => setHsn(e.target.value)}
               />
             </Field>
+            ) : null}
+            {showBox('gst_pct') ? (
             <Field label="GST %">
               <input
                 type="text"
@@ -3017,10 +3137,12 @@ export function PurchasePage({
                 ))}
               </datalist>
             </Field>
+            ) : null}
             {/* Wholesale sells whole strips at Rate A / B / C: no per-tablet price (owner,
                 18 Oct 2026). The MRP is one box per strip / pack, optional, so a wrongly
                 imported MRP can be corrected (owner, 19 Oct 2026); it takes one cell, so the
                 row keeps its height. */}
+            {showBox('mrp') ? (<>
             {ws.isWholesale ? (
               <Field label="MRP" hint={stripMode ? 'per strip' : 'per pack'} className="ws-mrp">
                 <input
@@ -3090,6 +3212,8 @@ export function PurchasePage({
               )}
             </Field>
             )}
+            </>) : null}
+            {showBox('rate') ? (
             <Field
               label={ws.isWholesale ? 'Purchase rate' : 'Rate'}
               hint={ws.isWholesale ? (stripMode ? 'per strip' : 'per pack') : stripMode ? 'strip / per tab' : 'per unit'}
@@ -3132,6 +3256,7 @@ export function PurchasePage({
                 />
               )}
             </Field>
+            ) : null}
             {ws.isWholesale ? (
               <Field
                 label="Rate A / B / C"
@@ -3172,6 +3297,7 @@ export function PurchasePage({
                 </div>
               </Field>
             ) : null}
+            {showBox('discount') ? (
             <Field label="Discount %">
               <input
                 type="text"
@@ -3182,6 +3308,8 @@ export function PurchasePage({
                 onChange={(e) => setDiscPct(e.target.value)}
               />
             </Field>
+            ) : null}
+            {showBox('manufacturer') ? (
             <Field label="Manufacturer" className="span2">
               <input
                 type="text"
@@ -3191,6 +3319,8 @@ export function PurchasePage({
                 onChange={(e) => setManufacturer(e.target.value)}
               />
             </Field>
+            ) : null}
+            {showBox('batch') ? (
             <Field label="Batch No">
               <input
                 type="text"
@@ -3201,6 +3331,8 @@ export function PurchasePage({
                 onChange={(e) => setBatch(e.target.value)}
               />
             </Field>
+            ) : null}
+            {showBox('expiry') ? (
             <Field label="Expiry (MM/YY)">
               <input
                 type="text"
@@ -3238,6 +3370,8 @@ export function PurchasePage({
                 onBlur={() => setExpiry(formatExpiryMmYy(expiry))}
               />
             </Field>
+            ) : null}
+            {showBox('schedule') ? (
             <Field label="Schedule">
               <ModernCombo
                 value={schedule}
@@ -3259,6 +3393,8 @@ export function PurchasePage({
                 onEnter={() => focusNavOrder(25)}
               />
             </Field>
+            ) : null}
+            {showBox('content') ? (
             <Field label="Content / Drug" className="span3">
               <input
                 type="text"
@@ -3269,6 +3405,7 @@ export function PurchasePage({
                 onChange={(e) => setContent(e.target.value)}
               />
             </Field>
+            ) : null}
             <div className="addmed-row">
               <span className="addmed-note">
                 {tab.items.length

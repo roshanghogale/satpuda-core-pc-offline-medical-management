@@ -137,6 +137,28 @@ def lookup_medicine(conn, body: dict[str, Any]) -> dict[str, Any]:
             "unit": details.get("unit") or "1",
             "discount_pct": _safe_float(details.get("discount_pct")),
         },
+        # The master list's own values, apart from this shop's batches: a box the shop hid on
+        # the Purchase screen is filled from here (owner, 30 Oct 2026).
+        "master": _master_values(name),
+    }
+
+
+def _master_values(name: str) -> dict[str, Any]:
+    try:
+        from core.master_medicine_service import lookup_master_details
+
+        m = lookup_master_details(name) or {}
+    except Exception:
+        m = {}
+    return {
+        "type": str(m.get("type") or ""),
+        "manufacturer": str(m.get("manufacturer") or ""),
+        "mrp": _safe_float(m.get("mrp")),
+        "content_drug": str(m.get("content_drug") or ""),
+        "pack_size": str(m.get("pack_size") or ""),
+        "schedule": str(m.get("schedule") or ""),
+        "hsn_code": str(m.get("hsn_code") or ""),
+        "gst_percent": _safe_float(m.get("gst_percent")),
     }
 
 

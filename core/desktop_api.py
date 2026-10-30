@@ -582,11 +582,12 @@ def _home_quick_actions_payload() -> list[dict[str, Any]]:
 def _sync_mode_refusal(target: str) -> Optional[dict]:
     """A mode change this build does not make from Settings (None = allowed).
 
-    * offline-first is reached through the switch-over (/api/offline-first/activate), which
-      copies the store and registers the PC; writing the mode alone would skip both.
-    * plain Offline is not entered again once offline-first is in the build: an Offline PC
-      numbers its own bills and ids as "highest + 1", which beside offline-first devices lands
-      on numbers and ids reserved for them. A PC already Offline stays as it is.
+    All three modes are offered (owner, 30 Oct 2026). Offline-first is reached through the
+    switch-over (/api/offline-first/activate), which copies the store from the server and
+    registers the PC; writing the mode alone would skip both. From Online the screen runs it
+    (code offline_first_via_switch); from Offline this PC's own books must reach the server
+    first, so it goes Online and then Offline-first. Leaving offline-first waits until
+    everything on this PC has reached the server (the save handler below).
     """
     from core.sync_prefs import MODE_OFFLINE, MODE_OFFLINE_FIRST, get_sync_mode
 
@@ -594,19 +595,12 @@ def _sync_mode_refusal(target: str) -> Optional[dict]:
     if not target or target == current:
         return None
     if target == MODE_OFFLINE_FIRST:
+        if current == MODE_OFFLINE:
+            return {"ok": False, "code": "offline_first_from_offline",
+                    "error": "Aadhi Online nivda: ya PC varchi bills server var jatil. "
+                             "Mag Offline-first nivda."}
         return {"ok": False, "code": "offline_first_via_switch",
-                "error": "Choose Online; the PC then moves to offline-first by itself "
-                         "(it copies the store from the server first)."}
-    if target == MODE_OFFLINE:
-        try:
-            from core.offline_first import AUTO_ACTIVATE
-        except Exception:
-            AUTO_ACTIVATE = False
-        if AUTO_ACTIVATE:
-            return {"ok": False, "code": "offline_retired",
-                    "error": "This version works offline by itself (offline-first): bills are saved "
-                             "on this PC without internet and reach the server when it is back. "
-                             "Plain Offline mode is no longer needed."}
+                "error": "Offline-first: the store is copied from the server first."}
     return None
 
 
