@@ -1213,6 +1213,24 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                 except Exception as exc:
                     _json_response(self, 400, {"ok": False, "error": str(exc)})
                 return
+            if path == "/api/inventory/merge-candidates":
+                # Inventory > Merge medicines (core/medicine_merge.py): ?q=&split=1
+                conn = _db.get("conn")
+                if conn is None:
+                    _json_response(self, 503, {"error": "Database not open"})
+                    return
+                try:
+                    from urllib.parse import parse_qs
+
+                    from core import medicine_merge
+
+                    qs = parse_qs(urlparse(self.path).query)
+                    one = lambda k: (qs.get(k) or [""])[0]  # noqa: E731
+                    _json_response(self, 200, medicine_merge.candidates(
+                        conn, q=one("q"), only_split_stock=one("split") == "1"))
+                except Exception as exc:
+                    _json_response(self, 400, {"ok": False, "error": str(exc)})
+                return
             if path == "/api/inventory/master-check":
                 # Inventory > Check with master (core/master_check.py): ?sure=1&q=&field=
                 conn = _db.get("conn")
@@ -3248,6 +3266,19 @@ class _DesktopApiHandler(BaseHTTPRequestHandler):
                     from core import gst_extras
 
                     _json_response(self, 200, gst_extras.save_hsn(conn, body.get("items") or []))
+                except Exception as exc:
+                    _json_response(self, 400, {"ok": False, "error": str(exc)})
+                return
+            if path == "/api/inventory/merge":
+                # Rows of one medicine into the row kept (core/medicine_merge.merge):
+                # {keep_id, merge_ids: [...], stock_after?}
+                if conn is None:
+                    _json_response(self, 503, {"error": "Database not open"})
+                    return
+                try:
+                    from core import medicine_merge
+
+                    _json_response(self, 200, medicine_merge.merge(conn, body))
                 except Exception as exc:
                     _json_response(self, 400, {"ok": False, "error": str(exc)})
                 return

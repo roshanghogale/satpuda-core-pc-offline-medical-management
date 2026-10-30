@@ -14,6 +14,7 @@ import {
 } from '../pagesApi'
 import { ExportDialog } from './ExportDialog'
 import { MasterCheckDialog } from './MasterCheckDialog'
+import { MergeMedicinesDialog } from './MergeMedicinesDialog'
 import { ExpiredReturnDialog, isExpiredReturnKey } from './ExpiredReturnDialog'
 import {
   MedicineEditDialog,
@@ -229,6 +230,8 @@ export function InventoryPage({
   const [exportOpen, setExportOpen] = useState(false)
   // Check with master (core/master_check.py): differences from the master list, and Fix
   const [masterOpen, setMasterOpen] = useState(false)
+  // Merge medicines (core/medicine_merge.py): rows of one batch kept under two names
+  const [mergeOpen, setMergeOpen] = useState(false)
   const [expiredReturnOpen, setExpiredReturnOpen] = useState(false)
   const expiredReturnOpenRef = useRef(false)
   expiredReturnOpenRef.current = expiredReturnOpen
@@ -236,6 +239,11 @@ export function InventoryPage({
   // whatever screen the shop moved to.
   useEffect(() => {
     if (!active) setExpiredReturnOpen(false)
+  }, [active])
+  useEffect(() => {
+    if (active) return
+    setMasterOpen(false)
+    setMergeOpen(false)
   }, [active])
   // Alt+X opens Return expired (why this key: ExpiredReturnDialog.tsx).
   useEffect(() => {
@@ -640,6 +648,12 @@ export function InventoryPage({
               disabled={loading}
             />
             <ActionBtn
+              label="Merge medicines"
+              variant="secondary"
+              onClick={() => setMergeOpen(true)}
+              disabled={loading}
+            />
+            <ActionBtn
               label="Refresh"
               variant="neutral"
               onClick={() => {
@@ -778,6 +792,7 @@ export function InventoryPage({
         }}
       />
       <MasterCheckDialog open={masterOpen} onClose={() => setMasterOpen(false)} onFixed={() => void load()} />
+      <MergeMedicinesDialog open={mergeOpen} onClose={() => setMergeOpen(false)} onMerged={() => void load()} />
       <ExportDialog
         page="inventory"
         open={exportOpen}
